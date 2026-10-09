@@ -16,12 +16,13 @@ function buildFixture(): Uint8Array {
   words.push(0x2f);
   // bone 0 rotation: n=1, times [0, 10], coefficients [a0..a3, b0..b3, c0..c3, d0..d3]
   words.push(1, f(0), f(10));
-  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.1, 0, 0, 0, 1].forEach((x) => words.push(f(x))); // w(t) = 0.1 t + 1
+  // stored component order is (w, x, y, z): w(t) = 0.1 t + 1
+  [0, 0, 0, 0, 0, 0, 0, 0, 0.1, 0, 0, 0, 1, 0, 0, 0].forEach((x) => words.push(f(x)));
   // bone 0 translation: n=1, times [0, 10]; x(t) = 2t, y(t) = t^2, z(t) = 5
   words.push(1, f(0), f(10));
   [0, 0, 0, 0, 1, 0, 2, 0, 0, 0, 0, 5].forEach((x) => words.push(f(x)));
-  // bone 1 constant rotation
-  [0, 0.6, 0, 0.8].forEach((x) => words.push(f(x)));
+  // bone 1 constant rotation, stored (w, x, y, z) = (0.8, 0, 0.6, 0)
+  [0.8, 0, 0.6, 0].forEach((x) => words.push(f(x)));
 
   const data = new Uint8Array(words.length * 4);
   new DataView(data.buffer).setUint32(0, 0, true);
@@ -46,6 +47,7 @@ describe('.ani parser and evaluator', () => {
     const clip = parseAni(buildFixture(), 3);
     expect(clip.bones[0]?.rotation?.kind).toBe('cubic');
     expect(clip.bones[0]?.translation?.kind).toBe('cubic');
+    // returned as (x, y, z, w)
     expect(clip.bones[1]).toEqual({ rotation: { kind: 'constant', value: [0, expect.closeTo(0.6), 0, expect.closeTo(0.8)] }, translation: null });
     expect(clip.bones[2]).toBeNull();
     expect(clip.endFrame).toBe(10);

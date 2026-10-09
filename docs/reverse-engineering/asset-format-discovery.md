@@ -160,7 +160,7 @@ Known header fields: `0x04 f32 1/30` (frame duration), `0x34 u32 dataSize`. The 
 A sequence of 32-bit words processed **bone by bone, in model node order**:
 - A **flag word** packs 4-bit flags for consecutive bones (low nibble first, shifted right by 4 per bone). A new flag word is read whenever the remaining flag bits are zero at the start of a bone.
 - Nibble bits: `2` = rotation present, `1` = rotation animated (else constant); `8` = translation present, `4` = translation animated (else constant).
-- **Constant rotation:** 4 × f32 quaternion (x, y, z, w). **Constant translation:** 3 × f32.
+- **Constant rotation:** 4 × f32 quaternion stored **(w, x, y, z)** — note the different order from `.mdl`'s (x, y, z, w). Verified by comparing frame 0 of idle clips with the model's bind pose bone by bone (e.g. Neck bind `(0, 0, 0, −1)` ↔ animation `(−1, 0, 0, 0)`); reading them as (x, y, z, w) folds characters in half. Animated rotation channels use the same component order. **Constant translation:** 3 × f32.
 - **Animated channel:** `u32 n` (segments), `f32 times[n + 1]` (break times in frames), then `n` segments of coefficients. Each component is a cubic in **absolute frame time**: `v(t) = ((a·t + b)·t + c)·t + d`. Coefficients are stored per segment as `[a0..ak, b0..bk, c0..ck, d0..dk]` (k = 4 components for rotation, 16 floats per segment; 3 for translation, 12 floats). Time is clamped to `[times[0], times[n]]`; the segment is the first whose end time is ≥ t.
 - Results are written straight into the 56-byte node records of the model (quaternion at +4, translation at +20 — the same layout as `.mdl` §3.4). Quaternions are not renormalised by the evaluator.
 

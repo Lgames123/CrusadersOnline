@@ -72,6 +72,25 @@ export function parseAni(bytes: Uint8Array, boneCount: number): AniClip {
     return { kind: 'cubic', track: { times, coefficients, components } };
   };
 
+  // Rotations are stored (w, x, y, z) in .ani (unlike .mdl's (x, y, z, w)); reorder once here so
+  // every evaluated quaternion is (x, y, z, w).
+  const toXyzw = (c: Channel): Channel => {
+    if (c.kind === 'constant') {
+      const [w, x, y, z] = c.value as [number, number, number, number];
+      return { kind: 'constant', value: [x, y, z, w] };
+    }
+    const k = c.track.coefficients;
+    const out = new Float32Array(k.length);
+    for (let base = 0; base < k.length; base += 4) {
+      // each group of 4 is one coefficient (a, b, c or d) for components w, x, y, z
+      out[base] = k[base + 1]!;
+      out[base + 1] = k[base + 2]!;
+      out[base + 2] = k[base + 3]!;
+      out[base + 3] = k[base]!;
+    }
+    return { kind: 'cubic', track: { ...c.track, coefficients: out } };
+  };
+
   const bones: (BoneChannels | null)[] = [];
   let endFrame = 0;
   let flags = 0;
@@ -83,7 +102,7 @@ export function parseAni(bytes: Uint8Array, boneCount: number): AniClip {
     if (flags === 0) flags = word();
     let rotation: Channel | null = null;
     let translation: Channel | null = null;
-    if (flags & 2) rotation = flags & 1 ? cubic(4) : { kind: 'constant', value: Array.from(floats(4)) };
+    if (flags & 2) rotation = toXyzw(flags & 1 ? cubic(4) : { kind: 'constant', value: Array.from(floats(4)) });
     if (flags & 8) translation = flags & 4 ? cubic(3) : { kind: 'constant', value: Array.from(floats(3)) };
     for (const c of [rotation, translation]) {
       if (c?.kind === 'cubic') endFrame = Math.max(endFrame, c.track.times[c.track.times.length - 1]!);
