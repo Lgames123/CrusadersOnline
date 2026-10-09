@@ -20,13 +20,16 @@ export interface ServerConfig {
 }
 
 /** Repository root; relative paths (e.g. pglite:local/pgdata) resolve against it. */
+/** 8080 is commonly taken on dev machines (e.g. the GhidraMCP plugin); containers override via SERVER_PORT. */
+export const DEFAULT_PORT = 8090;
+
 export const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 const envFile = path.join(REPO_ROOT, '.env');
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 
 export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig {
   const env = (process.env['NODE_ENV'] ?? 'development') as ServerConfig['env'];
-  const port = Number(process.env['SERVER_PORT'] ?? 8080);
+  const port = Number(process.env['SERVER_PORT'] ?? DEFAULT_PORT);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error(`invalid SERVER_PORT ${process.env['SERVER_PORT']}`);
   return {
     host: process.env['SERVER_HOST'] ?? '127.0.0.1',

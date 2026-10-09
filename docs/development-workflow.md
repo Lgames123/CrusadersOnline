@@ -5,11 +5,12 @@
 ### 1.1 Database
 Nothing to start: by default the server uses embedded PostgreSQL (PGlite) in `local/pgdata/` and applies migrations at startup. Delete `local/pgdata/` to reset it.
 
-To use a real PostgreSQL 18 (Docker; on this workstation Docker runs inside the WSL distro `dml-arch`):
-```powershell
-wsl -d dml-arch --cd /mnt/c/Users/Lencina/Desktop/CrusadersOnline -- docker compose -f deployment/docker-compose.dev.yml up -d --wait
-```
-then set `DATABASE_URL=postgresql://crusaders:crusaders_dev@127.0.0.1:5432/crusaders_online` in `.env`. WSL stops its VM when no WSL process is running, which takes the container down with it; keep a terminal open with `wsl -d dml-arch -- sleep infinity` while developing against it.
+To use a real PostgreSQL 18 instead, either:
+
+- **Docker Desktop (Windows):** `docker compose -f deployment/docker-compose.dev.yml up -d --wait`, then `DATABASE_URL=postgresql://crusaders:crusaders_dev@127.0.0.1:5434/crusaders_online` in `.env`. Port 5434 avoids the native install (5433) and the WSL relay (5432).
+- **Native PostgreSQL 18 (port 5433):** run `deployment/sql/create_dev_database.sql` once as the `postgres` superuser (psql prompts for your password), then `DATABASE_URL=postgresql://crusaders:crusaders_dev@127.0.0.1:5433/crusaders_online`.
+
+Ports on this workstation: 5432 = WSL relay (only while the `dml-arch` distro runs), 5433 = native PostgreSQL 18, 5434 = Docker dev database, 8088/8443 = containerised stack (deployment.md).
 
 ### 1.2 Start Authoritative Game Server
 ```powershell
@@ -19,7 +20,7 @@ pnpm dev:server
 ```
 *Expected Output:*
 ```
-INFO: server listening on ws://127.0.0.1:8080/ws
+INFO: server listening on ws://127.0.0.1:8090/ws
 INFO: simulation ticking at 20 Hz
 ```
 
@@ -43,6 +44,6 @@ Navigate to `http://localhost:3000/`. Vite proxies `/api` and `/ws` to the game 
 ```powershell
 pnpm test              # unit + integration (starts an in-process server on a random port; PGlite)
 # Also run persistence tests against real PostgreSQL (fresh database per test group, dropped afterwards):
-$env:TEST_POSTGRES_URL = 'postgresql://crusaders:crusaders_dev@127.0.0.1:5432/crusaders_online'; pnpm test
+$env:TEST_POSTGRES_URL = 'postgresql://crusaders:crusaders_dev@127.0.0.1:5434/crusaders_online'; pnpm test
 pnpm typecheck
 ```

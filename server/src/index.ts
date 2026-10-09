@@ -103,10 +103,16 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
     port,
     log,
     async close() {
-      // Closing sockets makes every player leave (and be saved) before the worker stops.
+      // Order matters: saving must not depend on clients completing a close handshake.
+      // 1. Stop accepting connections. 2. Stop the zone, which flushes every character still in
+      // the world. 3. Close (then terminate) sockets and idle HTTP connections. 4. Await saves.
+      const httpClosed = new Promise<void>((resolve) => http.close(() => resolve()));
+      await zone.stop();
       await transport.close();
-      await new Promise<void>((resolve) => http.close(() => resolve()));
-      await shutdownBackends();
+      http.closeAllConnections();
+      await httpClosed;
+      await Promise.allSettled([...pendingSaves]);
+      await database.close();
     },
   };
 }

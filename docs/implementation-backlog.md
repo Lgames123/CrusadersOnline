@@ -98,4 +98,4 @@ Status values:
 |---|---|---|---|---|---|---|---|
 | **TST-001** | Implement Vitest suite for math, packet parsing, and movement validation | P1 | ENG-001 | Low | **IN PROGRESS** (40 tests incl. 10 integration tests) | [testing-strategy.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/testing-strategy.md) | `tests/unit/` |
 | **TST-002** | Playwright multi-client end-to-end synchronization tests | P1 | VRT-001 | Medium | **READY** | [testing-strategy.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/testing-strategy.md) | `tests/e2e/` |
-| **OPS-001** | Dockerize server, client, and PostgreSQL with single-command compose | P1 | VRT-005 | Low | **READY** | [deployment.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/deployment.md) | `deployment/` |
+| **OPS-001** | Dockerize server, client, and PostgreSQL with single-command compose | P1 | VRT-005 | Low | **VERIFIED** (local Docker Desktop; TLS/backups pending) | [deployment.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/deployment.md) | `deployment/` |

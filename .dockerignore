@@ -1,0 +1,15 @@
+# Never send original game files, converted assets or local data to the Docker build context.
+Crusaders of Might and Magic/
+local/
+**/node_modules/
+**/dist/
+.git/
+.claude/
+.env
+.env.*
+!.env.example
+**/*.log
+coverage/
+tools/
+docs/
+**/__pycache__/

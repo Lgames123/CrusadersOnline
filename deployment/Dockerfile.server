@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1
+# Authoritative game server (Node 24 runs the TypeScript sources directly via type stripping).
+# Build from the repository root:  docker build -f deployment/Dockerfile.server -t crusaders-server .
+
+FROM node:24-alpine AS deps
+WORKDIR /app
+RUN corepack enable
+# Workspace manifests only, so dependency layers are cached across source changes.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY shared/package.json shared/
+COPY server/package.json server/
+COPY client/package.json client/
+COPY converter/package.json converter/
+COPY tests/package.json tests/
+RUN pnpm install --frozen-lockfile --prod --filter "@crusaders/server..."
+
+FROM node:24-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production \
+    SERVER_HOST=0.0.0.0 \
+    SERVER_PORT=8080 \
+    LOG_LEVEL=info
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/shared/node_modules ./shared/node_modules
+COPY --from=deps /app/server/node_modules ./server/node_modules
+COPY package.json pnpm-workspace.yaml tsconfig.base.json ./
+COPY shared/ ./shared/
+COPY server/ ./server/
+USER node
+EXPOSE 8080
+HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1
+CMD ["node", "server/src/main.ts"]

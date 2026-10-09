@@ -11,7 +11,7 @@
       "name": "server",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@crusaders/server", "dev"],
-      "port": 8080
+      "port": 8090
     }
   ]
 }

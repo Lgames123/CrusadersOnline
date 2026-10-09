@@ -1,0 +1,24 @@
+# SITE_ADDRESS=":80" for local testing over plain HTTP; set it to a domain name in production
+# (e.g. "play.example.com") and Caddy obtains and renews a TLS certificate automatically.
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	@backend path /api/* /ws /healthz
+	handle @backend {
+		reverse_proxy server:8080
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		X-Frame-Options DENY
+		-Server
+	}
+	header /assets/* Cache-Control "public, max-age=31536000, immutable"
+}

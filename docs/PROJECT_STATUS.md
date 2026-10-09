@@ -56,8 +56,16 @@
   - Locomotion speeds measured from root motion (gameplay-mechanics.md).
   - 50 tests passing on PGlite, plus 7 on PostgreSQL when enabled.
 
+- [x] Session 6 (2026-10-09):
+  - Commit `20e9f44` pushed to `origin/main`.
+  - Windows toolchain: Docker Desktop 29.8.2 (Linux engine, Compose v5.5.1) verified; native PostgreSQL 18 running on port 5433 (scram-sha-256, localhost only) — app role script `deployment/sql/create_dev_database.sql` to be run by the user (needs the superuser password).
+  - **Containerisation:** `Dockerfile.server`, `Dockerfile.client` (Caddy), `Caddyfile`, `docker-compose.yml`, `.dockerignore`, `deployment/.env.example`. Full stack verified end to end through Caddy (static client, cookie auth, WebSocket upgrade, movement).
+  - **Bug found and fixed:** shutdown waited for clients to finish the WebSocket close handshake before saving; an unresponsive client meant connected characters were not saved on `docker restart`. New shutdown order flushes the zone first; covered by a new integration test (child process that stops servicing its socket). Verified on the container stack: position restored after restart.
+  - Dev database compose moved to port 5434. 58 tests passing on PGlite + PostgreSQL.
+
 ### Not Yet Done
-- Commits after `35eb63b`; push to GitHub not done.
+- Commits after `20e9f44`.
+- TLS on a real domain, backups, CI, image registry (M11).
 - World unit / physics constants (UNK-007), `.msh` levels, `.cap` collision.
 - Converter: browser Web Worker host, `.mdl`/`.ani`/`.msh` parsers, `items.ctx`/`models.ctx` parsers.
 - Client: 60 FPS and camera clipping not yet verified interactively (browser pane was hidden during the session).

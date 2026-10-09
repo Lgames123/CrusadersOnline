@@ -161,3 +161,36 @@ describe.each(backends)('persistence across server restarts on $name (M07)', (ba
     await db.dispose();
   });
 });
+
+describe.each(backends)('shutdown with an unresponsive client on $name (M07)', (backend) => {
+  it('still saves a connected character whose socket never completes the close handshake', async () => {
+    const { spawn } = await import('node:child_process');
+    const db = await backend.create();
+    let server = await startServer({ ...baseConfig, databaseUrl: db.url });
+    const api = new Api(server.port);
+    await api.call('POST', '/api/auth/register', { username: 'Frozen', password: 'password123' });
+    const { data } = await api.call('POST', '/api/ws-ticket');
+    const child = spawn(process.execPath, [new URL('./stuck_client.ts', import.meta.url).pathname.replace(/^\/(\w:)/, '$1'), String(server.port), data.ticket]);
+    try {
+      const pos = await new Promise<{ x: number; z: number }>((resolve, reject) => {
+        child.stdout.once('data', (d: Buffer) => resolve(JSON.parse(d.toString())));
+        child.once('exit', (code) => reject(new Error(`client exited ${code}`)));
+      });
+      expect(pos.x).toBeGreaterThan(5);
+      const started = Date.now();
+      await server.close();
+      expect(Date.now() - started).toBeLessThan(5000);
+
+      server = await startServer({ ...baseConfig, databaseUrl: db.url });
+      const again = new Api(server.port);
+      await again.call('POST', '/api/auth/login', { username: 'Frozen', password: 'password123' });
+      const s = await play(server.port, again);
+      expect(s.character!.position.x).toBeCloseTo(pos.x, 2);
+      s.close();
+      await server.close();
+    } finally {
+      child.kill();
+      await db.dispose();
+    }
+  });
+});

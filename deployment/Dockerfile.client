@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1
+# Static browser client served by Caddy, which also reverse-proxies /api, /ws and /healthz to the
+# game server. Only synthetic assets are bundled; the dev-only model viewer is not built.
+# Build from the repository root:  docker build -f deployment/Dockerfile.client -t crusaders-web .
+
+FROM node:24-alpine AS build
+WORKDIR /app
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY shared/package.json shared/
+COPY server/package.json server/
+COPY client/package.json client/
+COPY converter/package.json converter/
+COPY tests/package.json tests/
+RUN pnpm install --frozen-lockfile --filter "@crusaders/client..."
+COPY shared/ ./shared/
+COPY client/ ./client/
+RUN pnpm --filter @crusaders/client build
+
+FROM caddy:2-alpine
+COPY deployment/Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /app/client/dist /srv

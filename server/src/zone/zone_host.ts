@@ -47,7 +47,10 @@ export class ZoneHost {
     return this.ready;
   }
 
+  private stopping = false;
+
   private post(msg: ToZone, transfer: ArrayBuffer[] = []): void {
+    if (this.stopping) return; // late leave/input after the final flush
     this.worker.postMessage(msg, transfer);
   }
 
@@ -71,6 +74,7 @@ export class ZoneHost {
       this.worker.once('exit', () => resolve());
     });
     this.post({ t: 'stop' });
+    this.stopping = true;
     await Promise.race([stopped, new Promise((r) => setTimeout(r, 2000))]);
     await this.worker.terminate();
   }

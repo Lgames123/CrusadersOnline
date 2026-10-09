@@ -2,7 +2,9 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 
-const GAME_SERVER = process.env['GAME_SERVER_URL'] ?? 'http://127.0.0.1:8080';
+const ENV_FILE = path.resolve(import.meta.dirname, '../.env');
+if (existsSync(ENV_FILE)) process.loadEnvFile(ENV_FILE); // same SERVER_PORT as the game server
+const GAME_SERVER = process.env['GAME_SERVER_URL'] ?? `http://127.0.0.1:${process.env['SERVER_PORT'] ?? 8090}`;
 const GENERATED_DIR = path.resolve(import.meta.dirname, '../local/generated');
 const TYPES: Record<string, string> = { '.glb': 'model/gltf-binary', '.webp': 'image/webp', '.json': 'application/json' };
 

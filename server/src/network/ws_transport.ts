@@ -4,6 +4,7 @@ import { CONTROL_MAX_BYTES } from '@crusaders/shared';
 import type { ClientConnection, Transport, TransportHandlers } from './transport.ts';
 
 const HEARTBEAT_MS = 15_000;
+const CLOSE_GRACE_MS = 1000;
 
 function toBytes(data: RawData): Uint8Array {
   if (Array.isArray(data)) return new Uint8Array(Buffer.concat(data));
@@ -55,10 +56,14 @@ export function createWsTransport(server: HttpServer, path: string, handlers: Tr
     get connectionCount() {
       return wss.clients.size;
     },
-    close() {
+    async close() {
       clearInterval(heartbeat);
       for (const ws of wss.clients) ws.close(1001, 'server shutting down');
-      return new Promise((resolve) => wss.close(() => resolve()));
+      // Unresponsive peers never finish the close handshake: give them a moment, then cut them off.
+      const deadline = Date.now() + CLOSE_GRACE_MS;
+      while (wss.clients.size > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+      for (const ws of wss.clients) ws.terminate();
+      await new Promise<void>((resolve) => wss.close(() => resolve()));
     },
   };
 }

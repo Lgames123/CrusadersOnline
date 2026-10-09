@@ -1,65 +1,63 @@
 # Deployment Guide: Containerization & Production Topology
 
-## 1. Single-Host Docker Compose Deployment
+## 1. Topology
 
-```yaml
-# deployment/docker-compose.yml
-version: '3.8'
-
-services:
-  db:
-    image: postgres:18-alpine
-    restart: always
-    environment:
-      POSTGRES_DB: crusaders_online
-      POSTGRES_USER: crusaders_admin
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    networks:
-      - internal_net
-
-  server:
-    build:
-      context: ..
-      dockerfile: deployment/Dockerfile.server
-    restart: always
-    environment:
-      NODE_ENV: production
-      DATABASE_URL: postgresql://crusaders_admin:${DB_PASSWORD}@db:5432/crusaders_online
-      SERVER_PORT: 8080
-    depends_on:
-      - db
-    networks:
-      - internal_net
-
-  proxy:
-    image: caddy:2-alpine
-    restart: always
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - ../client/dist:/var/www/html
-      - caddy_data:/data
-    networks:
-      - internal_net
-
-networks:
-  internal_net:
-    driver: bridge
-
-volumes:
-  pgdata:
-  caddy_data:
+```
+            browser ──HTTP(S)/WSS──▶  web (Caddy)  ── /api/*, /ws, /healthz ──▶  server (Node 24)  ──▶  db (PostgreSQL 18)
+                                      static client                               zone worker(s)          volume pgdata
 ```
 
----
+| Service | Image / Dockerfile | Notes |
+|---|---|---|
+| `db` | `postgres:18-alpine` | Volume `pgdata`; healthcheck `pg_isready`; internal network only |
+| `server` | `deployment/Dockerfile.server` | Runs the TypeScript sources directly (Node 24 type stripping); production deps only; runs as `node`; healthcheck `GET /healthz`; migrations applied at startup |
+| `web` | `deployment/Dockerfile.client` | Vite build of the client served by Caddy; reverse-proxies `/api/*`, `/ws` (WebSocket upgrade) and `/healthz`; automatic TLS when `SITE_ADDRESS` is a domain |
 
-## 2. Production Deployment Command
-```bash
-# On Ubuntu 22.04 LTS production server
-docker compose -f deployment/docker-compose.yml up -d --build
+Only synthetic assets are shipped. `.dockerignore` excludes the original game folder, `local/` (converted assets, PGlite data), `.env` files and docs; the dev-only model viewer is not part of the client build.
+
+## 2. Configuration (`deployment/.env`, git-ignored)
+
+Copy `deployment/.env.example`:
+
+| Variable | Local test | Production |
+|---|---|---|
+| `DB_PASSWORD` | random | long random secret |
+| `SITE_ADDRESS` | `:80` | `play.example.com` (Caddy obtains the certificate) |
+| `COOKIE_SECURE` | `false` (plain HTTP) | `true` |
+| `WEB_PORT` / `WEB_TLS_PORT` | `8088` / `8443` | `80` / `443` |
+
+`NODE_ENV=production` is baked into the server image: the development guest endpoint is disabled, so players register accounts.
+
+## 3. Commands
+
+```powershell
+# Shell: PowerShell — Working Directory: CrusadersOnline/
+Copy-Item deployment/.env.example deployment/.env   # then edit DB_PASSWORD
+docker compose -f deployment/docker-compose.yml --env-file deployment/.env up -d --build --wait
+docker compose -f deployment/docker-compose.yml --env-file deployment/.env ps
+docker compose -f deployment/docker-compose.yml --env-file deployment/.env logs -f server
+docker compose -f deployment/docker-compose.yml --env-file deployment/.env down          # keeps volumes
 ```
-This single command spins up PostgreSQL, runs migrations, boots the authoritative 20Hz game server, serves client assets, and provisions automatic HTTPS certificates via Caddy.
+Local test: open `http://localhost:8088`.
+
+## 4. Shutdown and persistence
+
+`docker stop` / `restart` sends SIGTERM. The server then:
+1. stops accepting connections,
+2. stops the zone worker, which flushes every character still in the world to the database,
+3. closes WebSockets (terminating peers that do not answer within 1 s) and idle HTTP connections,
+4. waits for pending saves and closes the database pool.
+
+Saving never depends on clients completing the WebSocket close handshake (covered by the "unresponsive client" integration test).
+
+## 5. Verified (2026-10-09, Docker Desktop 29.8.2 on Windows)
+
+- All three services start healthy from a cold `up --build`; migration `001_initial_schema.sql` runs against the container database.
+- Through Caddy on :8088: static client served, guest endpoint returns 404, registration sets an `HttpOnly; SameSite=Strict` cookie, ticket → WebSocket upgrade → world entry, 20 ticks of movement with 0 corrections.
+- `docker compose restart server` with a player connected: the character's position is restored exactly after the restart (≈1.5 s).
+
+## 6. Not yet done (M11)
+
+- TLS on a real domain (`SITE_ADDRESS`), HSTS.
+- Database backups (`pg_dump` schedule, restore drill) — see backup-and-recovery.md.
+- Image publishing (registry, tags), CI build, resource limits, log shipping and metrics.

@@ -14,6 +14,6 @@ Package the production application using Docker Compose, configure automated TLS
 4. Validate HTTPS handshake, WSS WebSocket connections, and healthcheck endpoints.
 
 ## 4. Acceptance Criteria
-- [ ] Application spins up cleanly from a cold single-command start.
+- [x] Application spins up cleanly from a cold single-command start (`docker compose ... up -d --build --wait`, verified locally).
 - [ ] Reverse proxy terminates TLS cleanly and forwards WebSocket upgrades.
 - [ ] Automated database backup script completes without error.
