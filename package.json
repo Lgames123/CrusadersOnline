@@ -1,0 +1,15 @@
+{
+  "name": "crusadersonline",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.4.2",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r --parallel typecheck",
+    "test": "pnpm --filter @crusaders/tests test",
+    "test:unit": "pnpm --filter @crusaders/tests test:unit",
+    "convert": "pnpm --filter @crusaders/converter convert"
+  }
+}

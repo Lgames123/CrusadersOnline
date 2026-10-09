@@ -1,0 +1,7 @@
+packages:
+  - shared
+  - converter
+  - client
+  - tests
+minimumReleaseAgeExclude:
+  - '@types/node@26.6.5'

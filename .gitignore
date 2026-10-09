@@ -1,0 +1,65 @@
+# CrusadersOnline - Git Ignore & IP Protection Rules
+# Strictly prevents tracking, staging, or leaking proprietary assets, binaries, or user data.
+
+# Proprietary Game Files (Original GOG Installation & Installers)
+Crusaders of Might and Magic/
+crusaders of might and magic/
+original/
+installer/
+setup_*.exe
+*.exe
+*.dll
+*.asi
+*.m3d
+*.tsk
+*.bik
+*.dat
+*.msg
+*.lnk
+
+# Local User Assets & Pipeline Directories
+local/
+assets/original/
+assets/extracted/
+assets/generated/
+assets/imported/
+client/public/game-assets/
+client/dist/game-assets/
+
+# Proprietary Game File Formats (Crusaders of Might and Magic)
+*.mdl
+*.msh
+*.ctx
+*.czx
+*.ani
+*.cap
+*.stg
+*.bin
+*.ary
+*.tab
+*.tex
+*.mp3
+*.wav
+
+# Runtime and Dependency Directories
+node_modules/
+dist/
+build/
+target/
+.cache/
+coverage/
+
+# Environment and Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.cert
+
+# Operating System & IDE Artifacts
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
