@@ -1,0 +1,24 @@
+# Local development / test PostgreSQL. Bound to 127.0.0.1 only; credentials are dev-only.
+# Usage (Docker inside WSL):  wsl -d <distro> -- docker compose -f deployment/docker-compose.dev.yml up -d
+# Then: DATABASE_URL=postgresql://crusaders:crusaders_dev@127.0.0.1:5432/crusaders_online
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: crusaders-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: crusaders_online
+      POSTGRES_USER: crusaders
+      POSTGRES_PASSWORD: crusaders_dev
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata-dev:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crusaders -d crusaders_online"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pgdata-dev:

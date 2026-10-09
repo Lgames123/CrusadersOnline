@@ -120,7 +120,11 @@ corepack enable
 pnpm install
 ```
 
-### 5.6 Step 6: PostgreSQL Database Setup Options
+### 5.6 Step 6: Database
+
+No setup is required for development: the server defaults to `DATABASE_URL=pglite:local/pgdata`, an embedded PostgreSQL 18 (PGlite) stored in the git-ignored `local/pgdata/` and migrated automatically at startup. Do not run `pnpm db:migrate` while the server is running against the same PGlite directory (PGlite is single-process).
+
+A real PostgreSQL server is only needed to test production behaviour. Options:
 
 #### Option A: Docker Compose (Recommended if Docker Desktop installed)
 ```powershell

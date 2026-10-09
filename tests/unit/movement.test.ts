@@ -149,3 +149,18 @@ describe('determinism & reconciliation', () => {
     expect(client.c.position).toEqual(server.c.position);
   });
 });
+
+describe('regression: controller never sticks on flat ground', () => {
+  // Rapier 0.20/0.21 KCC stuck capsules at ~1/3 of positions on a flat cuboid; pinned to 0.19.3.
+  it('runs freely from 61 start positions across the arena', () => {
+    const mw = createMovementWorld(rapier, arena);
+    const stuck: number[] = [];
+    for (let x = -15; x <= 15; x += 0.5) {
+      if (Math.abs(Math.abs(x) - 8) < 1.3) continue; // pillar lanes
+      const c = createCharacter(mw, { x, y: 0.05, z: 3 });
+      run(mw, c, INPUT.FORWARD, 0, 40);
+      if (c.position.z > -8.5) stuck.push(x);
+    }
+    expect(stuck).toEqual([]);
+  });
+});

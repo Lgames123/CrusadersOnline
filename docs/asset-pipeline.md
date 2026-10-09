@@ -107,6 +107,18 @@ converter/
 
 ---
 
-## 5. Synthetic Asset Generation
+## 5. Implementation Status (2026-10-09)
+
+| Input | Output | Status |
+|---|---|---|
+| `Textures/textures.zip` (TGA) | `textures/*.webp` | Done — 2,044 textures |
+| `script/default.ctx` | `rules/default.json` | Done |
+| `script/models.ctx` + `Models/*.mdl` | `models/*.glb` (skinned, bind pose, external texture URI) | Done — 247 models; animations pending |
+| `Models/*.ani` | animation clips | In progress (format research) |
+| `Meshes/*.msh`, `Caps/*.cap` | level render + collision | Not started |
+
+**Dev viewer:** `http://localhost:3000/viewer.html` (Vite dev server only) lists every converted model, with skeleton, collision-sphere and wireframe toggles. The `/generated/*` route serves `local/generated/` in development only and never enters a production build.
+
+## 6. Synthetic Asset Generation
 
 Synthetic assets are generated in TypeScript (`client/src/assets/synthetic_factory.ts` at runtime, plus `pnpm gen:synthetic` to emit the greybox arena collider data shared with the server). No Python step is involved.

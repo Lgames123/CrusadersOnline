@@ -11,7 +11,7 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
-    "@dimforge/rapier3d-deterministic-compat": "^0.21.0",
+    "@dimforge/rapier3d-deterministic-compat": "0.19.3",
     "zod": "^4.6.5"
   },
   "devDependencies": {

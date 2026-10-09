@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Model Viewer</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #15171c; color: #e8e2d0; font: 13px/1.4 system-ui, sans-serif; }
+      canvas { display: block; }
+      #ui { position: fixed; top: 8px; left: 8px; display: flex; gap: 8px; align-items: center; background: rgba(0,0,0,.55); padding: 6px 8px; flex-wrap: wrap; max-width: calc(100vw - 32px); }
+      select, button { font: inherit; background: #2a2620; color: #f0e6cc; border: 1px solid #6b5a3a; padding: 4px 6px; }
+      #info { position: fixed; bottom: 8px; left: 8px; white-space: pre; font: 12px/1.4 ui-monospace, Consolas, monospace; background: rgba(0,0,0,.55); padding: 6px 8px; }
+    </style>
+  </head>
+  <body>
+    <div id="ui">
+      <select id="model"></select>
+      <select id="anim"><option value="">(bind pose)</option></select>
+      <label><input type="checkbox" id="skeleton" /> skeleton</label>
+      <label><input type="checkbox" id="spheres" /> collision spheres</label>
+      <label><input type="checkbox" id="wire" /> wireframe</label>
+    </div>
+    <div id="info"></div>
+    <script type="module" src="/src/viewer.ts"></script>
+  </body>
+</html>

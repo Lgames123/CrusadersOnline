@@ -92,3 +92,24 @@ timeEndPeriod(1);
 1. **Clean-Room Feasibility:** The decoupling of graphics (`gfx_d3d.dll`), audio (`audio.dll`), and logic (`crusaders.exe`) proves that the original developers cleanly isolated their rendering pipeline from game state.
 2. **Timing Model:** The original engine relied on delta time derived from millisecond system timers. In our browser MMORPG, we will separate rendering (which interpolates at browser `requestAnimationFrame` 60–144 Hz) from simulation (which ticks at a fixed 20 Hz on the authoritative server).
 3. **No DRM Protection:** The GOG executable contains no SafeDisc, SecuROM, or StarForce DRM wrappers, allowing clean inspection of headers and standard file formats.
+
+
+---
+
+## 6. Animation System (Ghidra, 2026-10-09)
+
+Functions identified and renamed in the Ghidra project:
+
+| Address | Name | Role |
+|---|---|---|
+| `0x004250C0` | `Model_BindAnimationSet` | Swaps a model's animation set; reference-counted cache of 12-byte entries (`DAT_0053bd6c`) |
+| `0x00425260` | `AnimCache_LoadEntry` | Opens `models\%s`, builds the animation object, resets playback fields, converts event times |
+| `0x004243C0` | `Anim_ReadFile` | Reads the 56-byte header, the keyframe stream (size at header 0x34) and the event track |
+| `0x00482DB0` | `AnimEvents_Read` | Event track reader: count, names size, times, names |
+| `0x00482F20` | `AnimEvents_TicksToFrames` | Times > 500 × (1/4800) × 30 |
+| `0x00422F30` | `Anim_EvaluateBones` | Per-bone evaluator (flag nibbles, constant/cubic channels, root X/Z lock) |
+| `0x00422CF0` | `Anim_RootMotionHorizontal` | Root XZ displacement and direction between two times |
+| `0x00422B80` | `Anim_RootMotionVertical` | Root Y displacement between two times |
+
+Constants used: `0x004DE468 = 0.0` (minimum time), `0x004DE65C = 1.0`, `0x004EC2B8 = 3.85` (root height override), `0x004EC2BC = 1.5` (root Z offset).
+Only behaviour is documented here; no decompiled code is copied into the source tree.

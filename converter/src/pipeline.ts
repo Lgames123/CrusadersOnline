@@ -1,6 +1,10 @@
 import { unzipSync } from 'fflate';
 import { decodeTga, type DecodedImage } from './formats/tga.ts';
 import { interpretDefaultCtx, parseCtxTable } from './formats/ctx.ts';
+import { parseMdl } from './formats/mdl.ts';
+import { parseAni, type AniClip } from './formats/ani.ts';
+import { parseModelsCtx } from './formats/models_ctx.ts';
+import { buildModelDocument, writeGlb } from './emit/gltf_model.ts';
 
 /** Read access to the user's original install. Paths are relative, forward-slash separated. */
 export interface SourceFS {
@@ -133,6 +137,69 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
     await sink.writeFile(out, JSON.stringify({ drake: interpretDefaultCtx(table), raw: table.rows }, null, 2));
     manifest.rules['default'] = out;
     report.converted.push(ctxPath);
+  }
+
+  // --- Models: script/models.ctx bindings -> models/<name>.glb (texture referenced, not embedded)
+  const bindingsPath = 'script/models.ctx';
+  const bindingsBytes = await source.readFile(bindingsPath);
+  if (!bindingsBytes) {
+    report.warnings.push(`${bindingsPath} not found`);
+  } else {
+    const bindings = parseModelsCtx(new TextDecoder('latin1').decode(bindingsBytes));
+    const files = new Map<string, string | undefined>(); // lower-case file -> first texture
+    const anims = new Map<string, Map<string, string>>(); // lower-case model file -> ani file -> label
+    for (const b of bindings) {
+      const key = b.file.toLowerCase();
+      if (!files.has(key) || (!files.get(key) && b.textures[0])) files.set(key, b.textures[0]);
+      let set = anims.get(key);
+      if (!set) anims.set(key, (set = new Map()));
+      for (const a of b.animations) if (!set.has(a.toLowerCase())) set.set(a.toLowerCase(), b.labels[a] ?? '');
+    }
+    log(`models: ${files.size} model files referenced by ${bindingsPath}`);
+    let converted = 0;
+    let clips = 0;
+    for (const [file, texture] of [...files].sort(([a], [b]) => a.localeCompare(b))) {
+      const bytes = await source.readFile(`Models/${file}`);
+      if (!bytes) {
+        report.warnings.push(`Models/${file}: referenced but missing`);
+        continue;
+      }
+      const base = file.replace(/\.mdl$/i, '');
+      try {
+        const model = parseMdl(bytes);
+        const tex = texture?.replace(/\.tga$/i, '').toLowerCase();
+        const textureFile = tex ? manifest.textures[tex] : undefined;
+        if (tex && !textureFile) report.warnings.push(`Models/${file}: texture "${texture}" not found`);
+        const animations: { name: string; label: string; clip: AniClip }[] = [];
+        for (const [ani, label] of anims.get(file) ?? []) {
+          const data = await source.readFile(`Models/${ani}`);
+          if (!data) {
+            report.warnings.push(`Models/${ani}: referenced by ${file} but missing`);
+            continue;
+          }
+          try {
+            animations.push({ name: ani.replace(/\.ani$/i, ''), label, clip: parseAni(data, model.nodes.length) });
+          } catch (err) {
+            report.warnings.push(`Models/${ani} on ${file}: ${(err as Error).message}`);
+          }
+        }
+        clips += animations.length;
+        const doc = buildModelDocument(model, {
+          name: base,
+          animations,
+          ...(textureFile ? { textureUri: `../${textureFile}` } : {}),
+        });
+        const out = `models/${base}.glb`;
+        await sink.writeFile(out, await writeGlb(doc));
+        manifest.models[base] = out;
+        converted++;
+      } catch (err) {
+        report.warnings.push(`Models/${file}: ${(err as Error).message}`);
+      }
+    }
+    log(`models: ${converted} converted with ${clips} animation clips`);
+    manifest.inputs[bindingsPath] = await sha256Hex(bindingsBytes);
+    report.converted.push(bindingsPath);
   }
 
   manifest.generated_at = (opts.now ?? (() => new Date()))().toISOString();

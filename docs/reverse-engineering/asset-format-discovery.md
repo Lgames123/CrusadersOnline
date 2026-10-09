@@ -65,19 +65,116 @@ DR2     1.0     1.0     1.0
 
 ---
 
-## 3. 3D Model Format (`.mdl`) Binary Structure
+## 3. 3D Model Format (`.mdl`) — Specification `[CONFIRMED]`
 
-Examination of `Aerin.mdl` (size: 58,160 bytes) and `drake.mdl`:
-- Header begins with a 4-byte little-endian header length or version (e.g., `0x1C` = 28 bytes).
-- Contains sequential data sections:
-  1. Header (bounding box, vertex count, face count, material IDs).
-  2. Vertex Array (positions `float32` x, y, z; normal vectors; UV texture coordinates `float32` u, v).
-  3. Index / Face Array (`uint16` triangle indices).
-  4. Bone hierarchy node offsets for skeletal attachment.
+Derived from the data files alone (no disassembly), with `tools/re/mdl_probe.py`. The layout below reproduces the exact file size of **265 of 267** models and the header bounding box of a skinned character to within float precision. All values are little-endian.
 
----
+### 3.1 Nature of the format
+The files are **in-memory C++ structures written to disk**. Pointer fields contain stale heap addresses from the exporting tool (e.g. `0x00801910`), and padding contains the MSVC debug-heap fill `0xCDCDCDCD` and a `0xDEAD0000` marker. Loaders must ignore every pointer field and rebuild them from the counts.
 
-## 4. Pipeline Conversion Strategy
+### 3.2 Section order
+```
+header                       0x74 bytes
+node records                 nodeCount   x 56
+vertex positions             vertexCount x 12   (f32 x, y, z — in the owning node's local space)
+faces                        faceCount   x 50
+vertex normals               vertexCount x 12   (f32 x, y, z — node-local, unit length)
+name table                   nameTableSize bytes (NUL-separated: node names, then dummy names)
+collision spheres            sphereCount x 20
+line dummies                 lineCount   x 44
+transform dummies            xfrmCount   x 32
+```
+
+### 3.3 Header (0x74 bytes)
+| Offset | Type | Meaning |
+|---|---|---|
+| 0x00 | u32 | node count |
+| 0x08 | u32 | face (triangle) count |
+| 0x10 | u32 | stale pointer — ignore |
+| 0x14 | u32 | vertex count (sum of the per-node counts) |
+| 0x18 | u32 | `0xDEAD0000` marker (0 in a few files) |
+| 0x2C | u32 | name table size in bytes |
+| 0x30 | u32 | collision sphere count |
+| 0x34 | u32 | line dummy count |
+| 0x38 | u32 | transform dummy count |
+| 0x3C | 16 B | uninitialised (`0xCD` fill) |
+| 0x4C | 3 × f32 | bounding box minimum (model space, bind pose) |
+| 0x58 | 3 × f32 | bounding box maximum |
+| 0x64 | 3 × f32 | bounding sphere centre |
+| 0x70 | f32 | bounding sphere radius |
+Other fields are zero in every file seen.
+
+### 3.4 Node record (56 bytes)
+| Offset | Type | Meaning |
+|---|---|---|
+| +0 | u16 | flags (values 0, 2, 3, 5, 7, 8 — bit meaning not yet confirmed; not needed to rebuild the hierarchy) |
+| +2 | i16 | **subtree size** including the node itself; `-1` = "extends to the end of the parent's subtree" |
+| +4 | 4 × f32 | local rotation quaternion **(x, y, z, w)** relative to the parent |
+| +20 | 3 × f32 | local translation relative to the parent |
+| +32 | u32 | number of vertices owned by this node (consecutive in the vertex array) |
+| +36 | 2 × u32 | stale pointers (begin/end of the node's vertices) — ignore |
+| +44 | 12 B | padding / `0xCD` fill |
+
+Nodes are stored in **depth-first order**. The hierarchy is rebuilt recursively: inside a parent's range, each child occupies `subtreeSize` entries (or the rest of the range when `-1`), and its own children follow it immediately. Characters use 3ds Max Character Studio bone names (`Bip01`, `Bip01 Pelvis`, `Bip01 L Thigh`, …).
+
+World (bind-pose) transform: `world = parentWorld × local`, i.e. `q_world = q_parent · q_local`, `t_world = t_parent + rotate(q_parent, t_local)`. Applying each node's world transform to its own vertices reproduces the header bounding box exactly. This is **rigid (segmented) skinning**: every vertex belongs to exactly one node, with no blend weights. Static props have a single node with an identity-like transform.
+
+### 3.5 Face record (50 bytes)
+| Offset | Type | Meaning |
+|---|---|---|
+| +0 | u32 | corner count — always 3 |
+| +4 | u32 | stale pointer |
+| +8 | 2 × u32 | zero |
+| +16 | u32 | stale pointer |
+| +20 | 3 × u16 | vertex indices (global, into the vertex array) |
+| +26 | 6 × f32 | per-corner texture coordinates (u0, v0, u1, v1, u2, v2) |
+
+UVs are per corner, not per vertex, so a converter must split vertices at UV seams. Values are mostly in 0..1 but tile up to about ±60 (repeating textures); a handful of faces carry garbage values (about −1e30) and should be clamped or treated as untextured. Textures are **not** referenced by the model: `script/models.ctx` binds a model file to a texture name (`N <id> <file>.mdl` / `T <texture>`).
+
+### 3.6 Trailing records
+- **Collision sphere** (20 B): `u32 node, f32 x, y, z, radius`, centre in the node's local space. Names `DMY SPHERE …`. Characters carry about 28 of them; this is the original hit volume set.
+- **Line dummy** (44 B): `u32 node, 4 × f32 quaternion, 3 × f32 point A, 3 × f32 point B`. Names `DMY LINE …` on weapons; it appears to be the weapon's damage segment (blade/head line).
+- **Transform dummy** (32 B): `u32 node` plus a local transform (rotation + translation; exact split pending). Names `DMY XFRM WPN LEFT/RIGHT` — the attachment points for held items.
+
+### 3.7 Conversion notes
+- **Handedness:** left-handed (Direct3D) — confirmed. The converter mirrors Z (positions, normals, translations; quaternion `(x, y, z, w) → (−x, −y, z, w)`) and reverses winding. Converted characters face **−Z**; with that facing the right hand is on +X.
+- **Units:** Drake is 6.58 units tall and the skeleton warrior 6.82, consistent with **feet** (≈2.0 m). Not yet confirmed; the converter keeps the original units.
+- **UVs:** used as stored, without flipping V; textures line up correctly in the viewer.
+
+### 3.8 Known exceptions
+`anim.mdl` and `PA06_rt.mdl` (same size) are 40 bytes shorter than the layout predicts — probably an older revision of the format; not needed for gameplay assets.
+
+## 4. Animation Format (`.ani`) — Specification `[CONFIRMED]`
+
+Derived from the game's own loader and evaluator (Ghidra, see executable-analysis.md §6) and verified against the data: walking the stream with the bone count of the model that uses each animation consumes **exactly** the declared data size for **1,499 of 1,501** model/animation pairs bound in `script/models.ctx` (the two exceptions are skeleton-warrior clips authored for a different rig). Probe: `tools/re/ani_probe.py`.
+
+### 4.1 File layout
+```
+header            56 bytes   (copied verbatim into the runtime animation object)
+keyframe stream   dataSize bytes   (dataSize = u32 at header 0x34)
+event track       u32 count, u32 namesSize, f32 time[count], names (NUL-separated, namesSize bytes)
+```
+Known header fields: `0x04 f32 1/30` (frame duration), `0x34 u32 dataSize`. The engine overwrites most other header fields with playback state after loading.
+
+### 4.2 Keyframe stream
+A sequence of 32-bit words processed **bone by bone, in model node order**:
+- A **flag word** packs 4-bit flags for consecutive bones (low nibble first, shifted right by 4 per bone). A new flag word is read whenever the remaining flag bits are zero at the start of a bone.
+- Nibble bits: `2` = rotation present, `1` = rotation animated (else constant); `8` = translation present, `4` = translation animated (else constant).
+- **Constant rotation:** 4 × f32 quaternion (x, y, z, w). **Constant translation:** 3 × f32.
+- **Animated channel:** `u32 n` (segments), `f32 times[n + 1]` (break times in frames), then `n` segments of coefficients. Each component is a cubic in **absolute frame time**: `v(t) = ((a·t + b)·t + c)·t + d`. Coefficients are stored per segment as `[a0..ak, b0..bk, c0..ck, d0..dk]` (k = 4 components for rotation, 16 floats per segment; 3 for translation, 12 floats). Time is clamped to `[times[0], times[n]]`; the segment is the first whose end time is ≥ t.
+- Results are written straight into the 56-byte node records of the model (quaternion at +4, translation at +20 — the same layout as `.mdl` §3.4). Quaternions are not renormalised by the evaluator.
+
+### 4.3 Root bone and root motion
+- For bone 0 the evaluator holds **X and Z at their frame-0 value** (animations play in place); only Y is animated. Two engine states override Y with a constant 3.85 (flag mask `0x180`) or add 1.5 to Z (mask `0xC00`).
+- Separate routines compute the root's **horizontal displacement and direction** and its **vertical displacement** between two times from the same translation track: the game moves characters by the animation's root motion.
+
+### 4.4 Event track
+`count` events with times and names. Times greater than 500 are 3ds Max ticks and are converted to frames as `ticks / 4800 × 30` (engine behaviour); smaller values are already frames.
+
+### 4.5 Conversion
+The converter samples each channel once per original frame (30 fps) into LINEAR glTF channels, applies the same Z-mirror as the models, holds the root X/Z like the engine and stores `rootMotion`, `frames`, the designer label from `models.ctx` (e.g. "run forward") and the events in each animation's `extras`. Converted characters face **−Z**, matching the client's yaw convention; left/right is confirmed (right hand on +X when facing −Z).
+
+## 5. Pipeline Conversion Strategy
 
 Because textures (`.tga`) and audio (`.wav`, `.mp3`) use standard industry formats:
 All conversion lives in the TypeScript `converter/` package (ADR-003), runnable as a CLI (`pnpm convert`) or in a browser Web Worker:

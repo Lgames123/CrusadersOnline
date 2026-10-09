@@ -41,7 +41,7 @@ Snapshots are then encoded per client as deltas against that client's last ackno
 ## 4. Movement Authority (ADR-006)
 
 The client never sends positions. Each tick, for every player:
-1. **Input selection:** Take the next queued input frame (`inputFlags`, `yaw`, `pitch`, `clientTick`). If none arrived, repeat the last input (with a decay to idle after a few ticks). At most **one** input is applied per tick; the queue is capped, excess frames are dropped.
+1. **Input selection:** Take the next queued input frame (`inputFlags`, `yaw`, `pitch`, `clientTick`). At most **one** input is applied per tick; the queue holds 4 frames and drops the oldest on overflow. If no input arrived, the character does **not** move that tick — so the authoritative state always equals "state after `lastProcessedInput`" and client replay is exact (late packets cause a brief stall for observers, never a desync).
 2. **Input sanity:** Unknown flag bits, non-monotonic `clientTick`, or malformed frames → frame discarded (and counted toward the rate limiter).
 3. **Shared movement step:** `stepCharacter(world, character, input, dt)` from `shared/src/movement/` computes desired velocity from stats (run speed, jump impulse, gravity), then Rapier's `KinematicCharacterController` resolves collisions, slopes, steps and ground snapping.
 4. **Result:** The resulting position is authoritative. It is included in the next snapshot along with `lastProcessedInput` so the client can reconcile.

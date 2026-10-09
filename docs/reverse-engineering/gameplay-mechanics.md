@@ -91,3 +91,22 @@ v
 |   RESET    | (Returns to spawn anchor, regenerates to full HP)
 +------------+
 ```
+
+
+---
+
+## Locomotion from animation root motion `[CONFIRMED data, unit pending]`
+
+The engine moves characters by animation root motion (executable-analysis.md §6). Displacement per cycle of Drake's clips, from the converted animations (original units; ≈ feet, see asset-format-discovery.md §3.7):
+
+| Clip | Label (models.ctx) | Duration | Distance | Speed (u/s) | ≈ m/s if feet |
+|---|---|---|---|---|---|
+| `PA01_ru_f` | run forward | 0.87 s | 13.62 | 15.71 | 4.79 |
+| `PB01_w_fw` | walk forward | 1.13 s | 5.68 | 5.01 | 1.53 |
+| `PA06_rt` | retreat | 1.33 s | 5.04 | 3.78 | 1.15 |
+| `PB02_sdstp_l` / `PB03_sdstp_r` | sidestep left / right | 0.67 s | 2.32 / 2.75 | 3.49 / 4.13 | 1.06 / 1.26 |
+| `PB01_w_sideleft` / `..._sideright` | sidestep while running | 0.77 s | 7.88 / 8.33 | 10.28 / 10.87 | 3.13 / 3.31 |
+| `PE03_rl_fw` | roll forward | 0.83 s | 10.96 | 13.15 | 4.01 |
+| `PC07_hp_f` | hop forward | 0.67 s | 5.65 | 8.48 | 2.58 |
+
+The vertical-slice controller currently uses 6.0 m/s run and 2.5 m/s walk (gameplay-specification.md §3.1). These values should be replaced with the root-motion speeds once the unit is confirmed (next RE target: gravity/jump constants in the movement code).

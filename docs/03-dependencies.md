@@ -27,11 +27,12 @@ Catalog all official runtimes, package dependencies, and utilities required acro
 Code that must behave identically on client and server:
 - **`typescript`** (`>=7`, native compiler): Type-checking. Sources use erasable-only syntax so Node 24 runs them directly.
 - **`zod`** (`>=4`): Validation of **control** (JSON) messages only.
-- **`@dimforge/rapier3d-deterministic-compat`** (`>=0.21`): Cross-platform deterministic Rapier build — collision world and kinematic character controller used by the shared movement step (ADR-005). The deterministic build makes client prediction and server simulation bit-identical.
+- **`@dimforge/rapier3d-deterministic-compat`** (pinned `0.19.3`): Cross-platform deterministic Rapier build — collision world and kinematic character controller used by the shared movement step (ADR-005). The deterministic build makes client prediction and server simulation bit-identical.
 - Binary codecs (`shared/src/protocol/binary/`) are hand-written over `DataView` — no dependency.
 
 ### 3.2 Authoritative Game Server (`server/`)
 - **`ws`** (`>=8`): WebSocket server, wrapped by the `Transport` interface (ADR-004).
+- **`@types/ws`** (dev).
 - **`pg`** (`>=8`): PostgreSQL driver / pool.
 - **`kysely`** (`>=0.27`): Typed SQL query builder, transactions, row locks, migrator (ADR-007).
 - **`argon2`** (`>=0.40`): argon2id password hashing (ADR-008).
@@ -63,6 +64,8 @@ Single TypeScript implementation with Node and browser hosts (ADR-003):
 Python is used only for read-only investigation scripts (`inventory.py`, `analyze_pe.py`, format probes). No Python package is required to build, run or convert assets. `Pillow` may be installed ad hoc for inspecting images.
 
 ---
+
+> **Rapier pin:** 0.20.0 and 0.21.0 (both standard and deterministic builds) have a kinematic character controller regression: capsules get stuck on flat cuboid ground at roughly a third of start positions. 0.19.3 is unaffected. A regression test (`tests/unit/movement.test.ts`) guards any upgrade.
 
 ## 4. Installation Steps
 

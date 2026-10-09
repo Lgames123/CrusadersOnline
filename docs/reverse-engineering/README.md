@@ -24,3 +24,11 @@ All analysis follows strict clean-room engineering:
 - [save-format-analysis.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/reverse-engineering/save-format-analysis.md) — Save slot files (`Gamers/`) and progression serialization.
 - [gameplay-mechanics.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/reverse-engineering/gameplay-mechanics.md) — Damage calculations, combo recovery frames, enemy aggro radii.
 - [unknowns.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/reverse-engineering/unknowns.md) — Active research items and required experiments.
+
+---
+
+## Methodology update (2026-10-09)
+
+- **Data-first.** File formats are reverse-engineered from the data files themselves with read-only probes in `tools/re/` (e.g. `mdl_probe.py`). Each hypothesis is confirmed only when it reproduces exact file sizes and redundant header values (bounding boxes) across the whole asset set.
+- **Disassembly (IDA Pro via MCP)** is used for what the data cannot answer: animation playback, physics constants and combat timings. Decompiler output stays in `local/` (git-ignored). Only findings, written in our own words, go into these docs; no disassembled code goes into the source tree (clean-room policy).
+- **Status:** `.mdl` fully specified (265/267 files) and converted to glTF; `.ani` in progress; `.msh` and `.cap` not started.

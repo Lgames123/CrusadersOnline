@@ -8,8 +8,9 @@ let ready: Promise<Rapier> | null = null;
 
 /** Loads the (deterministic, cross-platform) Rapier WASM module once per process / page. */
 export function initPhysics(): Promise<Rapier> {
-  ready ??= RAPIER.init().then(() => RAPIER);
-  return ready;
+  const p = ready ?? RAPIER.init().then(() => RAPIER);
+  ready = p;
+  return p;
 }
 
 /** Collision groups: (membership << 16) | filter. */

@@ -9,22 +9,53 @@
       #app { position: fixed; inset: 0; }
       canvas { display: block; width: 100%; height: 100%; }
       #hud { position: fixed; top: 8px; left: 10px; font: 12px/1.5 ui-monospace, Consolas, monospace; text-shadow: 0 1px 2px #000; pointer-events: none; white-space: pre; }
-      #overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(8, 9, 12, 0.6); cursor: pointer; }
-      #overlay.hidden { display: none; }
-      #overlay .panel { text-align: center; padding: 24px 32px; border: 1px solid #6b5a3a; background: rgba(20, 18, 14, 0.9); }
-      #overlay h1 { margin: 0 0 12px; font-size: 22px; letter-spacing: 0.08em; color: #d9b45a; }
-      #overlay p { margin: 4px 0; color: #bfb8a5; }
+      .overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(8, 9, 12, 0.6); }
+      .overlay.hidden { display: none; }
+      #overlay { cursor: pointer; }
+      .panel { text-align: center; padding: 24px 32px; border: 1px solid #6b5a3a; background: rgba(20, 18, 14, 0.94); min-width: 280px; max-width: calc(100vw - 32px); box-sizing: border-box; }
+      .panel h1 { margin: 0 0 12px; font-size: 22px; letter-spacing: 0.08em; color: #d9b45a; }
+      .panel p { margin: 4px 0; color: #bfb8a5; }
+      #login form { display: grid; gap: 8px; margin-top: 8px; }
+      #login input { padding: 8px 10px; border: 1px solid #6b5a3a; background: #14120e; color: #e8e2d0; font: inherit; }
+      #login input:focus { outline: 2px solid #d9b45a; outline-offset: 0; }
+      .row { display: flex; gap: 8px; }
+      .row button { flex: 1; }
+      button { padding: 8px 12px; border: 1px solid #8a7445; background: #3a2f1c; color: #f0e6cc; font: inherit; cursor: pointer; }
+      button:hover { background: #4c3d24; }
+      button.secondary { background: transparent; border-color: #4a4232; color: #bfb8a5; }
+      button:disabled { opacity: 0.5; cursor: default; }
+      #login-error { min-height: 1.4em; color: #ff8a80; font-size: 13px; }
       #error { position: fixed; bottom: 12px; left: 12px; right: 12px; color: #ff8a80; white-space: pre-wrap; }
+      a.link { color: #bfb8a5; font-size: 12px; cursor: pointer; text-decoration: underline; }
     </style>
   </head>
   <body>
     <div id="app"></div>
     <div id="hud"></div>
-    <div id="overlay">
+    <div id="login" class="overlay hidden">
+      <div class="panel">
+        <h1>CrusadersOnline</h1>
+        <form id="login-form" autocomplete="on">
+          <input id="login-username" name="username" placeholder="Username" autocomplete="username" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_]+" />
+          <input id="login-password" name="password" type="password" placeholder="Password (8+ characters)" autocomplete="current-password" required minlength="8" maxlength="128" />
+          <div class="row">
+            <button type="submit" id="btn-login">Log in</button>
+            <button type="button" id="btn-register">Create account</button>
+          </div>
+          <div class="row">
+            <button type="button" class="secondary" id="btn-guest">Play as guest</button>
+            <button type="button" class="secondary" id="btn-offline">Play offline</button>
+          </div>
+          <div id="login-error" role="alert"></div>
+        </form>
+      </div>
+    </div>
+    <div id="overlay" class="overlay hidden">
       <div class="panel">
         <h1>CrusadersOnline</h1>
         <p>Click to play</p>
         <p>WASD move &middot; Mouse look &middot; Space jump &middot; Shift walk &middot; Esc release mouse</p>
+        <p><a class="link" id="btn-logout" hidden>Log out</a></p>
       </div>
     </div>
     <div id="error"></div>

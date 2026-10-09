@@ -12,6 +12,7 @@
     "convert": "node src/hosts/node.ts"
   },
   "dependencies": {
+    "@gltf-transform/core": "^4.5.1",
     "fflate": "^0.8.3"
   },
   "optionalDependencies": {

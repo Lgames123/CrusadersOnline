@@ -2,7 +2,7 @@
 
 ## 1. Relational Topology & Constraints
 
-The database engine is PostgreSQL 18 (17 minimum), accessed through Kysely (ADR-007). The schema enforces strict referential integrity, foreign key cascading, and row-level locks for transaction safety.
+The database engine is PostgreSQL 18 (17 minimum), accessed through Kysely (ADR-007). In development and tests the same schema runs on PGlite (embedded PostgreSQL 18). The authoritative schema is `server/src/persistence/migrations/001_initial_schema.sql`; the listing below is the original design (the migration uses built-in `gen_random_uuid()`, case-insensitive unique indexes on `lower(username)` / `lower(name)`, a nullable `email`, and nullable `pos_*` for never-placed characters). The schema enforces strict referential integrity, foreign key cascading, and row-level locks for transaction safety.
 
 ```sql
 -- Migration 001_initial_schema.sql

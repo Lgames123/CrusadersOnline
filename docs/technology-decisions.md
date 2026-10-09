@@ -171,7 +171,8 @@ While Rust provides the ideal performance ceiling for massive scale, a clean-roo
 - **Decision:** **Kysely** (typed SQL query builder) on top of `pg`, with **plain `.sql` migration files** in `server/src/persistence/migrations/` applied by a small migration runner (Kysely `Migrator` with a SQL-file provider).
 - **Alternatives Considered:** Prisma (rejected: separate query engine, awkward explicit locking such as `SELECT … FOR UPDATE`), Drizzle (viable; Kysely chosen for closer-to-SQL semantics), raw `pg` only (viable but untyped).
 - **Reasons for Choice:** Explicit transactions and row locks (`.forUpdate()`), compile-time column typing, zero runtime engine, and migrations reviewable as SQL.
-- **Verification Method:** Integration tests against a real PostgreSQL container (not mocks) for inventory transactions and concurrent-dupe attempts.
+- **Embedded development database:** `DATABASE_URL=pglite:<dir>` runs **PGlite** (PostgreSQL 18 compiled to WASM, in-process) through a small custom Kysely dialect (`server/src/persistence/pglite_dialect.ts`); `pglite:memory` is used by integration tests. The same SQL migrations and queries run on PGlite and on a real server, so no Docker or native install is needed to develop. PGlite is single-process and single-connection: it is **not** a production option, and concurrency/locking behaviour must still be verified against a real PostgreSQL before launch.
+- **Verification Method:** Integration tests run against PGlite (real PostgreSQL SQL semantics, no mocks). When `TEST_POSTGRES_URL` is set, the persistence suite also runs against a real PostgreSQL 18 (docker-compose.dev.yml), including a concurrent-registration race; verified 2026-10-09. Inventory dupe tests join this suite when inventory exists.
 
 ---
 
