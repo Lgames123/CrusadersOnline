@@ -139,7 +139,7 @@ UVs are per corner, not per vertex, so a converter must split vertices at UV sea
 ### 3.7 Conversion notes
 - **Handedness:** left-handed (Direct3D) — confirmed. The converter mirrors Z (positions, normals, translations; quaternion `(x, y, z, w) → (−x, −y, z, w)`) and reverses winding. Converted characters face **−Z**; with that facing the right hand is on +X.
 - **Units:** Drake is 6.58 units tall and the skeleton warrior 6.82, consistent with **feet** (≈2.0 m). Not yet confirmed; the converter keeps the original units.
-- **UVs:** used as stored, without flipping V; textures line up correctly in the viewer.
+- **UVs:** the engine's texture origin is **bottom-left** (TGA images are stored bottom-up and uploaded as-is), glTF's is top-left, so the converter emits `v' = 1 − v` while textures are decoded top-down. Evidence: on `drake.mdl` the head faces average v = 0.85, which after the flip lands on the face region at the top of the atlas (torso and legs likewise land on armour and trousers). Only one TGA in the archive has the top-left origin flag (`ui-delete.tga`, a UI icon not used by models). An earlier conversion without the flip put the face texture on the character's back.
 
 ### 3.8 Known exceptions
 `anim.mdl` and `PA06_rt.mdl` (same size) are 40 bytes shorter than the layout predicts — probably an older revision of the format; not needed for gameplay assets.

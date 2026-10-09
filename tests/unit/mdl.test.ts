@@ -83,6 +83,10 @@ describe('.mdl parser', () => {
     expect(json.images).toEqual([{ uri: '../textures/x.webp', mimeType: 'image/webp' }]);
     // Mirroring Z keeps the child's world X but reverses winding.
     expect(json.meshes[0].primitives[0].attributes.JOINTS_0).toBeDefined();
+    // V is flipped: engine UV origin is bottom-left, glTF's is top-left.
+    // First corner of the first face is (u, v) = (0, 0) in the file -> (0, 1) in glTF.
+    const uvs = doc.getRoot().listMeshes()[0]!.listPrimitives()[0]!.getAttribute('TEXCOORD_0')!.getArray()!;
+    expect([uvs[0], uvs[1]]).toEqual([0, 1]);
   });
 });
 

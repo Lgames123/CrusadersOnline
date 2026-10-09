@@ -76,7 +76,8 @@ export function buildModelDocument(model: MdlModel, opts: ModelEmitOptions): Doc
         const nn: Vec3 = Number.isFinite(len) && len > 1e-6 && len < 1e3 ? [n[0] / len, n[1] / len, n[2] / len] : [0, 1, 0];
         pos.push(p[0] + w.translation[0], p[1] + w.translation[1], (p[2] + w.translation[2]) * mz);
         nrm.push(nn[0], nn[1], nn[2] * mz);
-        uv.push(u, t);
+        // The engine's texture origin is bottom-left (TGA rows bottom-up); glTF's is top-left.
+        uv.push(u, 1 - t);
         joints.push(owner[v]!, 0, 0, 0);
       }
       corner.push(out);
