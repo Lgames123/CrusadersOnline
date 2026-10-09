@@ -76,6 +76,8 @@ Validate the entire end-to-end architecture (Browser Client, Three.js WebGL2, We
 - **Test:** From the DevTools console, (a) multiply the local run speed by 5, and (b) send input packets at 10× the normal rate.
 - **Expected Result:** The server-side character moves at normal speed in both cases (inputs only, at most one per tick); the cheating client is pulled back by reconciliation. Other clients never see the accelerated movement.
 
+> **Status 2026-10-09:** criteria 1–13 are implemented and covered by automated tests (unit, integration on PGlite + PostgreSQL) and a browser check; criterion 14's Playwright two-tab suite is still to be written.
+
 ### Criterion 11: Representative Skeleton Enemy & Aggro
 - **Test:** Walk player avatar to within 10 meters of the central Skeleton mob.
 - **Expected Result:** Skeleton transitions from IDLE to CHASE, navigating toward the player.

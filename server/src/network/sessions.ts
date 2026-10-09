@@ -121,6 +121,9 @@ export class SessionManager implements TransportHandlers {
         void this.enterWorld(s, s.account, summary.id, summary.name);
         return;
       }
+      case CS.PLAYER_ATTACK:
+        if (s.state === 'in_world') this.zone.attack(conn.id);
+        return;
       case CS.PING:
         this.send(s, { op: SC.PONG, d: { clientTime: msg.d.clientTime, serverTick: this.zone.tick } });
         return;
@@ -138,7 +141,15 @@ export class SessionManager implements TransportHandlers {
         const saved = await this.characters.loadOwned(account.id, characterId);
         if (!saved) return this.reject(s, 'character not found');
         if (!this.sessions.has(s.conn.id)) return; // disconnected while loading
-        this.zone.join(s.conn.id, { name: saved.name, characterId: saved.id, position: saved.position, yaw: saved.yaw });
+        this.zone.join(s.conn.id, {
+          name: saved.name,
+          characterId: saved.id,
+          position: saved.position,
+          yaw: saved.yaw,
+          experience: saved.experience,
+          gold: saved.gold,
+          hp: saved.hp,
+        });
       }
       s.state = 'in_world';
       this.log.info({ conn: s.conn.id, character: name, zone: this.zone.zone, guest: account.guest }, 'entered world');

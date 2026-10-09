@@ -51,3 +51,18 @@ When an enemy entity's health reaches 0:
 2. Loot ownership is assigned to the player or party that contributed $>50\%$ of the damage for a 30-second priority window.
 3. After 30 seconds, loot becomes free-for-all for any nearby player.
 4. Loot disappears after 180 seconds.
+
+
+---
+
+## 4. Vertical-Slice Implementation (2026-10-09)
+
+Implemented server-side in `server/src/simulation/world_zone.ts` with shared rules in `shared/src/game/combat.ts` (values are slice values until the original formulas are recovered):
+
+- **Player swing:** 150 ms startup / 150 ms active / 250 ms recovery (3/3/5 ticks). A request during recovery is buffered; requests during startup/active are ignored, so spam cannot raise the hit rate. The server picks the combo index (1.0× / 1.25× / 1.6× of 12 base damage) when the next swing starts within 300 ms of the previous one.
+- **Hit test:** forward cone, 110° and 2.2 m reach (+ target capsule radius) for players; 90° and 2.0 m for the skeleton; each target at most once per swing.
+- **Skeleton Warrior AI:** idle → chase (nearest living player within 10 m) → attack in reach (400/150/500 ms swing + 300 ms cooldown, 8–12 damage) → return when the target is gone or the mob is more than 30 m from its spawn, healing on arrival. Threat = damage received.
+- **Death:** mobs leave a corpse for 10 s, then respawn at their spawn point; players respawn after 5 s at a spawn point with full health. The dead do not act (server and client prediction agree).
+- **Progression:** 25 XP and 5–10 gold per skeleton kill; level = 1 + ⌊XP / 100⌋ (max 50); +10 max HP per level and a full heal on level-up. Rewards trigger an immediate save; XP, gold, level and HP persist.
+- **Protocol:** `SC_PLAYER_STATS` (0x49) to the owner, `SC_COMBAT_EVENT` to players near the target, `ENTITY_SPAWN` carries kind/archetype/max HP, snapshots carry HP and the animation state (`ANIM.ATTACK + combo`, `ANIM.DEAD`).
+- **Client:** left click swings (local feedback immediately, the server decides hits), floating damage numbers, health bars over entities, HP/XP/gold panel, death notice. In development, characters use the original Drake and Skeleton Warrior models and animations converted from the user's installation (falls back to procedural avatars otherwise; never shipped).

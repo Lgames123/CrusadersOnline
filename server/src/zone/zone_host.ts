@@ -1,11 +1,11 @@
 import { Worker } from 'node:worker_threads';
-import type { JoinOptions, PersistRecord } from '../simulation/world_zone.ts';
+import type { JoinOptions, PersistReason, PersistRecord } from '../simulation/world_zone.ts';
 import type { FromZone, ToZone, ZoneMetrics, ZoneWorkerData } from './messages.ts';
 
 export interface ZoneHostEvents {
   deliver(connId: number, data: Uint8Array | string): void;
   metrics?(m: ZoneMetrics): void;
-  persist?(records: PersistRecord[], reason: 'periodic' | 'leave' | 'shutdown'): void;
+  persist?(records: PersistRecord[], reason: PersistReason): void;
   error?(err: Error): void;
 }
 
@@ -56,6 +56,10 @@ export class ZoneHost {
 
   join(connId: number, opts: JoinOptions): void {
     this.post({ t: 'join', connId, opts });
+  }
+
+  attack(connId: number): void {
+    this.post({ t: 'attack', connId });
   }
 
   leave(connId: number): void {

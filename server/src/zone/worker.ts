@@ -31,6 +31,9 @@ const zone = new WorldZone(rapier, zoneName, loadArena(arenaName), {
       transfer.push(buf);
     }
   },
+  persist(records, reason) {
+    post({ t: 'persist', reason, records });
+  },
 });
 
 const flush = () => {
@@ -54,6 +57,9 @@ port.on('message', (msg: ToZone) => {
     }
     case 'input':
       zone.receiveInput(msg.connId, new DataView(msg.data));
+      break;
+    case 'attack':
+      zone.attack(msg.connId);
       break;
     case 'stop':
       clock.stop();

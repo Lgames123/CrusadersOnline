@@ -12,15 +12,21 @@ export interface CharacterSpawnState {
   level: number;
   experience: number;
   gold: number;
+  hp: number;
 }
 
-/** Live state flushed from a zone (periodic, on leave and on shutdown). */
+/** Live state flushed from a zone (periodic, on leave, after progress and on shutdown). */
 export interface CharacterPersistRecord {
   characterId: string;
   x: number;
   y: number;
   z: number;
   yaw: number;
+  level: number;
+  experience: number;
+  gold: number;
+  hp: number;
+  maxHp: number;
 }
 
 export class CharacterRepository {
@@ -34,7 +40,7 @@ export class CharacterRepository {
   async loadOwned(accountId: string, characterId: string): Promise<CharacterSpawnState | null> {
     const r = await this.db
       .selectFrom('characters')
-      .select(['id', 'name', 'zone_id', 'pos_x', 'pos_y', 'pos_z', 'yaw', 'level', 'experience_points', 'gold'])
+      .select(['id', 'name', 'zone_id', 'pos_x', 'pos_y', 'pos_z', 'yaw', 'level', 'experience_points', 'gold', 'current_hp'])
       .where('id', '=', characterId)
       .where('account_id', '=', accountId)
       .executeTakeFirst();
@@ -49,6 +55,7 @@ export class CharacterRepository {
       level: r.level,
       experience: Number(r.experience_points),
       gold: r.gold,
+      hp: r.current_hp,
     };
   }
 
@@ -59,7 +66,18 @@ export class CharacterRepository {
       for (const r of records) {
         await trx
           .updateTable('characters')
-          .set({ pos_x: r.x, pos_y: r.y, pos_z: r.z, yaw: r.yaw, last_saved_at: now })
+          .set({
+            pos_x: r.x,
+            pos_y: r.y,
+            pos_z: r.z,
+            yaw: r.yaw,
+            level: r.level,
+            experience_points: r.experience,
+            gold: r.gold,
+            current_hp: r.hp,
+            max_hp: r.maxHp,
+            last_saved_at: now,
+          })
           .where('id', '=', r.characterId)
           .execute();
       }

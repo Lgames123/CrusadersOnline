@@ -1,4 +1,4 @@
-import type { JoinOptions, PersistRecord } from '../simulation/world_zone.ts';
+import type { JoinOptions, PersistReason, PersistRecord } from '../simulation/world_zone.ts';
 
 /** Main thread <-> zone worker messages (ADR-009). Binary payloads are transferred, not copied. */
 
@@ -6,6 +6,7 @@ export type ToZone =
   | { t: 'join'; connId: number; opts: JoinOptions }
   | { t: 'leave'; connId: number }
   | { t: 'input'; connId: number; data: ArrayBuffer }
+  | { t: 'attack'; connId: number }
   | { t: 'stop' };
 
 export interface ZoneMetrics {
@@ -24,7 +25,7 @@ export type FromZone =
   | { t: 'out'; tick: number; batch: [connId: number, data: ArrayBuffer | string][] }
   | { t: 'metrics'; metrics: ZoneMetrics }
   /** Character states to save: periodic flush, a player leaving, or final flush before stop. */
-  | { t: 'persist'; reason: 'periodic' | 'leave' | 'shutdown'; records: PersistRecord[] }
+  | { t: 'persist'; reason: PersistReason; records: PersistRecord[] }
   | { t: 'stopped' };
 
 export interface ZoneWorkerData {

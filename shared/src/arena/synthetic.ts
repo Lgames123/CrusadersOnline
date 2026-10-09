@@ -52,5 +52,7 @@ export function createSyntheticArena(): ArenaDef {
       { x: -3, y: 1, z: 3 },
       { x: 3, y: 1, z: -3 },
     ],
+    // The vertical slice's representative enemy, beyond aggro range of the player spawns.
+    mobSpawns: [{ archetype: 'skeleton_warrior', x: 0, y: 0.5, z: -15 }],
   };
 }

@@ -63,8 +63,15 @@
   - **Bug found and fixed:** shutdown waited for clients to finish the WebSocket close handshake before saving; an unresponsive client meant connected characters were not saved on `docker restart`. New shutdown order flushes the zone first; covered by a new integration test (child process that stops servicing its socket). Verified on the container stack: position restored after restart.
   - Dev database compose moved to port 5434. 58 tests passing on PGlite + PostgreSQL.
 
+- [x] Session 7 (2026-10-09):
+  - Commits `2da6981` (containerisation, shutdown fix, port 8090) and `f98db37` (UV fix: engine texture origin is bottom-left; Drake's face no longer on his back).
+  - **M08 combat:** Skeleton Warrior with aggro/chase/attack/leash/respawn, authoritative swings with combo and spam protection, cone hit tests, player death/respawn, XP/gold/level rewards persisted immediately; stats and combat events in the protocol.
+  - **Client:** attack on left click, damage numbers, health bars, HP/XP/gold panel, death notice; in development the original Drake and Skeleton Warrior models and animations are used.
+  - 7 new unit tests on the zone (combo damage 12/15/19, rewards, spam limit, death/respawn, level-up, leash) and a network test (kill → reward → reconnect keeps XP/gold) on PGlite and PostgreSQL. 59 tests total. Verified in the browser: kill sequence with combos, +25 XP +7 gold, HUD updated.
+
 ### Not Yet Done
-- Commits after `20e9f44`.
+- Commits after `f98db37`.
+- Playwright two-tab E2E (M08 criterion 14).
 - TLS on a real domain, backups, CI, image registry (M11).
 - World unit / physics constants (UNK-007), `.msh` levels, `.cap` collision.
 - Converter: browser Web Worker host, `.mdl`/`.ani`/`.msh` parsers, `items.ctx`/`models.ctx` parsers.

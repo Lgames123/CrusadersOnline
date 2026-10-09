@@ -3,7 +3,7 @@ import { dequantizeAngle, dequantizePosition } from '../math/quantize.ts';
 import { CS, SC } from '../protocol/opcodes.ts';
 import { INPUT_PACKET_MAX_BYTES, MAX_INPUT_FRAMES, createInputFrame, encodeInput, type InputFrame } from '../protocol/binary/input.ts';
 import { decodeSnapshot, type EntityState } from '../protocol/binary/snapshot.ts';
-import type { ServerControlMsg, WorldEnterMsg } from '../protocol/control/server.ts';
+import type { CombatEventMsg, EntitySpawnMsg, PlayerStatsMsg, ServerControlMsg, WorldEnterMsg } from '../protocol/control/server.ts';
 import type { ArenaDef } from '../arena/types.ts';
 import { createMovementWorld, type MovementWorld, type Rapier } from '../movement/physics.ts';
 import { createCharacter, setCharacterState, stepCharacter, type Character } from '../movement/character.ts';
@@ -20,14 +20,21 @@ export interface RemoteSample {
   z: number;
   yaw: number;
   anim: number;
+  hp: number;
 }
 
 interface RemoteFrame extends RemoteSample {
   tick: number;
 }
 
+export type PlayerStats = PlayerStatsMsg['d'];
+export type CombatEvent = CombatEventMsg['d'];
+export type EntityInfo = EntitySpawnMsg['d'];
+
 export interface ClientSessionEvents {
-  spawn?(id: number, name: string): void;
+  spawn?(id: number, name: string, info: EntityInfo): void;
+  stats?(stats: PlayerStats): void;
+  combat?(event: CombatEvent): void;
   despawn?(id: number): void;
   /** Local prediction was corrected by (dx, dy, dz) metres. */
   correction?(dx: number, dy: number, dz: number): void;
@@ -55,6 +62,9 @@ export class ClientSession {
   accountName = '';
   readonly stats: ClientSessionStats = { snapshots: 0, corrections: 0, lastCorrection: 0, rttMs: 0, bytesIn: 0, bytesOut: 0 };
   readonly names = new Map<number, string>();
+  readonly entities = new Map<number, EntityInfo>();
+  stats_: PlayerStats | null = null;
+  readonly combatLog: CombatEvent[] = [];
 
   private ws: WebSocket | null = null;
   private readonly events: ClientSessionEvents;
@@ -142,19 +152,45 @@ export class ClientSession {
         break;
       case SC.ENTITY_SPAWN:
         this.names.set(msg.d.id, msg.d.name);
-        this.events.spawn?.(msg.d.id, msg.d.name);
+        this.entities.set(msg.d.id, msg.d);
+        this.events.spawn?.(msg.d.id, msg.d.name, msg.d);
         break;
       case SC.ENTITY_DESPAWN:
         this.names.delete(msg.d.id);
+        this.entities.delete(msg.d.id);
         this.remote.delete(msg.d.id);
         this.events.despawn?.(msg.d.id);
         break;
       case SC.PONG:
         this.stats.rttMs = performance.now() - msg.d.clientTime;
         break;
+      case SC.PLAYER_STATS:
+        this.stats_ = msg.d;
+        this.events.stats?.(msg.d);
+        break;
+      case SC.COMBAT_EVENT:
+        this.combatLog.push(msg.d);
+        if (this.combatLog.length > 100) this.combatLog.shift();
+        this.events.combat?.(msg.d);
+        break;
       case SC.ERROR:
         break;
     }
+  }
+
+  /** Latest stats of the local player (null until the first PLAYER_STATS). */
+  get playerStats(): PlayerStats | null {
+    return this.stats_;
+  }
+
+  get dead(): boolean {
+    return this.stats_?.dead ?? false;
+  }
+
+  /** Requests a melee swing. The server decides timing and combo; spam is harmless. */
+  attack(): void {
+    if (!this.connected || this.dead) return;
+    this.sendJson({ op: CS.PLAYER_ATTACK, seq: ++this.seq, d: { comboIndex: 1, clientTick: this.clientTick } });
   }
 
   /**
@@ -167,7 +203,8 @@ export class ClientSession {
     const t = ++this.clientTick;
     const slot = this.inputs[t % INPUT_HISTORY]!;
     slot.clientTick = t;
-    slot.flags = input.flags;
+    // Mirror the server: the dead do not act (keeps prediction in agreement).
+    slot.flags = this.dead ? 0 : input.flags;
     slot.yaw = input.yaw;
     slot.pitch = input.pitch;
     stepCharacter(this.mw, c, slot, DEFAULT_MOVEMENT_STATS, TICK_DT);
@@ -201,6 +238,7 @@ export class ClientSession {
         z: dequantizePosition(e.z),
         yaw: dequantizeAngle(e.yaw),
         anim: e.anim,
+        hp: e.hp,
       });
       if (buf.length > REMOTE_BUFFER) buf.shift();
     }
@@ -259,6 +297,7 @@ export class ClientSession {
     const dyaw = Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw));
     out.yaw = a.yaw + dyaw * t;
     out.anim = t < 0.5 ? a.anim : b.anim;
+    out.hp = b.hp;
     return true;
   }
 }

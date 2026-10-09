@@ -29,4 +29,6 @@ export interface ArenaDef {
   boxes: BoxDef[];
   meshes: TriMeshDef[];
   spawnPoints: { x: number; y: number; z: number }[];
+  /** Hostile spawns: archetype id (game/combat.ts) and position. */
+  mobSpawns: { archetype: string; x: number; y: number; z: number }[];
 }

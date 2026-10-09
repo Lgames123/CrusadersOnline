@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PLAYER_HEIGHT, PLAYER_RADIUS, type BoxDef } from '@crusaders/shared';
+import type { BoxDef } from '@crusaders/shared';
 
 /** Procedural placeholder assets: the client is fully playable without any original files. */
 
@@ -46,33 +46,4 @@ export function boxMaterial(kind: BoxDef['kind'], repeatU: number, repeatV: numb
   map.repeat.set(repeatU, repeatV);
   map.needsUpdate = true;
   return new THREE.MeshLambertMaterial({ map });
-}
-
-/** Box-and-capsule mannequin with a visor showing facing direction (-Z). Origin at the feet. */
-export function createMannequin(color = 0x9a7b4f): THREE.Group {
-  const group = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.CapsuleGeometry(PLAYER_RADIUS, PLAYER_HEIGHT - PLAYER_RADIUS * 2, 4, 12),
-    new THREE.MeshLambertMaterial({ color }),
-  );
-  body.position.y = PLAYER_HEIGHT / 2;
-  body.castShadow = true;
-  group.add(body);
-
-  const visor = new THREE.Mesh(
-    new THREE.BoxGeometry(0.5, 0.12, 0.2),
-    new THREE.MeshLambertMaterial({ color: 0x2b2b30 }),
-  );
-  visor.position.set(0, PLAYER_HEIGHT - 0.3, -PLAYER_RADIUS + 0.02);
-  visor.castShadow = true;
-  group.add(visor);
-
-  const shield = new THREE.Mesh(
-    new THREE.BoxGeometry(0.08, 0.6, 0.45),
-    new THREE.MeshLambertMaterial({ color: 0x7a2e24 }),
-  );
-  shield.position.set(-PLAYER_RADIUS - 0.04, 1.05, -0.05);
-  shield.castShadow = true;
-  group.add(shield);
-  return group;
 }

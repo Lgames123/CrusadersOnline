@@ -27,11 +27,32 @@
       #login-error { min-height: 1.4em; color: #ff8a80; font-size: 13px; }
       #error { position: fixed; bottom: 12px; left: 12px; right: 12px; color: #ff8a80; white-space: pre-wrap; }
       a.link { color: #bfb8a5; font-size: 12px; cursor: pointer; text-decoration: underline; }
+      #world-ui { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+      .hpbar { position: absolute; left: 0; top: 0; text-align: center; font: 11px/1.2 system-ui, sans-serif; text-shadow: 0 1px 2px #000; white-space: nowrap; }
+      .hpbar .track { width: 64px; height: 5px; margin: 2px auto 0; background: rgba(0,0,0,.6); border: 1px solid rgba(0,0,0,.8); }
+      .hpbar .fill { height: 100%; background: #c0392b; }
+      .hpbar.player .fill { background: #4caf50; }
+      .hpbar.dead { opacity: .45; }
+      .floater { position: absolute; left: 0; top: 0; font: 700 16px/1 system-ui, sans-serif; text-shadow: 0 2px 3px #000; white-space: nowrap; }
+      .floater.dealt { color: #ffd54f; }
+      .floater.taken { color: #ff6e6e; }
+      .floater.other { color: #e0e0e0; font-size: 13px; }
+      #player-panel { position: fixed; left: 12px; bottom: 12px; width: 240px; padding: 8px 10px; background: rgba(12,11,9,.72); border: 1px solid #6b5a3a; font: 12px/1.4 system-ui, sans-serif; }
+      #player-panel .row { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+      #player-panel .row > span:first-child { width: 34px; color: #d9b45a; }
+      #player-panel .track { flex: 1; height: 8px; background: rgba(0,0,0,.6); border: 1px solid #000; }
+      #player-panel .hp .fill { height: 100%; background: #c0392b; }
+      #player-panel .xp .fill { height: 100%; background: #d9b45a; }
+      #player-panel .gold { color: #ffd54f; }
+      #death { position: fixed; top: 30%; left: 0; right: 0; text-align: center; font: 700 28px/1.2 system-ui, sans-serif; color: #ff6e6e; text-shadow: 0 2px 6px #000; pointer-events: none; }
     </style>
   </head>
   <body>
     <div id="app"></div>
+    <div id="world-ui"></div>
     <div id="hud"></div>
+    <div id="player-panel" hidden></div>
+    <div id="death" hidden>You have fallen — respawning…</div>
     <div id="login" class="overlay hidden">
       <div class="panel">
         <h1>CrusadersOnline</h1>
@@ -54,7 +75,7 @@
       <div class="panel">
         <h1>CrusadersOnline</h1>
         <p>Click to play</p>
-        <p>WASD move &middot; Mouse look &middot; Space jump &middot; Shift walk &middot; Esc release mouse</p>
+        <p>WASD move &middot; Mouse look &middot; Left click attack &middot; Space jump &middot; Shift walk &middot; Esc release mouse</p>
         <p><a class="link" id="btn-logout" hidden>Log out</a></p>
       </div>
     </div>

@@ -15,10 +15,13 @@ import {
 import { createRenderContext } from './engine/renderer.ts';
 import { ChaseCamera } from './engine/camera.ts';
 import { buildArenaMeshes } from './entities/arena.ts';
+import { ProceduralAvatar } from './entities/avatar.ts';
 import { LocalPlayer } from './entities/local_player.ts';
-import { RemotePlayers } from './entities/remote_players.ts';
+import { RemoteEntities } from './entities/remote_entities.ts';
+import { loadOriginalAvatars } from './assets/original_models.ts';
 import { InputManager } from './input/input_manager.ts';
 import { connectToWorld } from './network/connect.ts';
+import { CombatUi } from './ui/combat_ui.ts';
 import { Hud } from './ui/hud.ts';
 import { chooseAuth, logout } from './ui/login.ts';
 
@@ -28,43 +31,65 @@ async function main(): Promise<void> {
   const container = document.getElementById('app')!;
   const overlay = document.getElementById('overlay')!;
 
-  const rapier = await initPhysics();
+  const [rapier, originals] = await Promise.all([initPhysics(), loadOriginalAvatars()]);
   const arena = createSyntheticArena();
 
   const { renderer, scene } = createRenderContext(container);
   scene.add(buildArenaMeshes(arena));
-  const remotes = new RemotePlayers(scene);
+  const remotes = new RemoteEntities(scene, originals);
+  const combatUi = new CombatUi(document.getElementById('world-ui')!);
+  const hud = new Hud(document.getElementById('hud')!, document.getElementById('player-panel')!, document.getElementById('death')!);
 
   // Online: the session predicts and reconciles. Offline: plain local simulation.
   const auth = await chooseAuth();
   let player: LocalPlayer | null = null;
+  const headPos = new THREE.Vector3();
   const session: ClientSession | null =
     auth.kind === 'offline'
       ? null
       : await connectToWorld(rapier, arena, auth.kind, {
-          spawn: (id) => remotes.spawn(id),
+          spawn: (id, _name, info) => remotes.spawn(id, info),
           despawn: (id) => remotes.despawn(id),
           correction: (dx, dy, dz) => player?.correct(dx, dy, dz),
+          stats: (s) => {
+            hud.stats(s);
+            if (player) player.dead = s.dead;
+          },
+          combat: (e) => {
+            const target = remotes.byId.get(e.target);
+            const isMe = session !== null && e.target === session.entityId;
+            const obj = isMe ? player?.object : target?.avatar.object;
+            if (!obj) return;
+            headPos.copy(obj.position);
+            headPos.y += isMe ? player!.avatar.headHeight : target!.avatar.headHeight;
+            const mine = session !== null && e.attacker === session.entityId;
+            combatUi.damage(e, headPos, isMe ? 'taken' : mine ? 'dealt' : 'other');
+          },
           close: (code, reason) => {
             document.getElementById('error')!.textContent = `Disconnected from server (${code}${reason ? `: ${reason}` : ''}). Reload to reconnect.`;
           },
         });
+  const selfAvatar = originals?.('self') ?? new ProceduralAvatar('self');
   let mw: MovementWorld;
   if (session) {
     mw = session.mw;
-    player = new LocalPlayer(session.character!, (f) => session.tick(f));
+    player = new LocalPlayer(session.character!, selfAvatar, (f) => session.tick(f));
+    if (session.playerStats) hud.stats(session.playerStats);
+    for (const [id, info] of session.entities) remotes.spawn(id, info);
   } else {
     const offline = createMovementWorld(rapier, arena);
     mw = offline;
     const character = createCharacter(offline, arena.spawnPoints[0]!);
-    player = new LocalPlayer(character, (f) => stepCharacter(offline, character, f, DEFAULT_MOVEMENT_STATS, TICK_DT));
+    player = new LocalPlayer(character, selfAvatar, (f) => stepCharacter(offline, character, f, DEFAULT_MOVEMENT_STATS, TICK_DT));
   }
   const local = player;
   scene.add(local.object);
 
   const chase = new ChaseCamera(mw, container.clientWidth / container.clientHeight);
   const input = new InputManager(renderer.domElement);
-  const hud = new Hud(document.getElementById('hud')!);
+  input.onAttack = () => {
+    if (local.swing(input.yaw)) session?.attack();
+  };
 
   overlay.addEventListener('click', () => input.requestLock());
   overlay.classList.remove('hidden');
@@ -107,10 +132,11 @@ async function main(): Promise<void> {
     }
     const dt = frameMs / 1000;
     local.render(acc / TICK_MS, dt);
-    if (session) remotes.update(session);
+    if (session) remotes.update(session, dt);
     target.copy(local.object.position);
     chase.update(target, input.yaw, input.pitch, dt);
     renderer.render(scene, chase.camera);
+    combatUi.update(dt, chase.camera, remotes, container.clientWidth, container.clientHeight);
     hud.update(dt, tick, local.character, session, remotes.count);
   });
 }

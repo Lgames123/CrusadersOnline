@@ -87,9 +87,9 @@ Status values:
 | **SRV-005** | Auth: argon2id, session cookie, single-use WS ticket, rate limits | P0 | SRV-004 | Medium | **VERIFIED** | [security.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/security.md) | `server/src/auth/` |
 | **VRT-001** | Connect two client browser sessions to single server room | P0 | CLI-001, SRV-001 | Medium | **VERIFIED** | [08-vertical-slice.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/milestones/08-vertical-slice.md) | `client/src/network/` |
 | **VRT-002** | Interpolate remote players; predict + reconcile local player | P0 | VRT-001 | Medium | **IMPLEMENTED** (verified headless; visual smoothness pending interactive check) | [browser-client.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/browser-client.md) | `client/src/entities/remote_player.ts` |
-| **VRT-003** | Spawn server-authoritative skeleton mob with aggro and melee attack | P0 | SRV-002 | Medium | **READY** | [gameplay-systems.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/gameplay-systems.md) | `server/src/simulation/mob.ts` |
-| **VRT-004** | Authoritative melee combat resolution with damage numbers and health sync | P0 | VRT-003 | Medium | **READY** | [gameplay-specification.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/gameplay-specification.md) | `server/src/simulation/combat.ts` |
-| **VRT-005** | Persist character level, gold, and inventory to DB and verify reload survival | P0 | SRV-004, VRT-004 | Medium | **IN PROGRESS** (position/yaw persisted: leave, 60 s flush, shutdown) | [persistence.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/persistence.md) | `server/src/persistence/` |
+| **VRT-003** | Spawn server-authoritative skeleton mob with aggro and melee attack | P0 | SRV-002 | Medium | **VERIFIED** | [gameplay-systems.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/gameplay-systems.md) | `server/src/simulation/mob.ts` |
+| **VRT-004** | Authoritative melee combat resolution with damage numbers and health sync | P0 | VRT-003 | Medium | **VERIFIED** | [gameplay-specification.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/gameplay-specification.md) | `server/src/simulation/combat.ts` |
+| **VRT-005** | Persist character level, gold, and inventory to DB and verify reload survival | P0 | SRV-004, VRT-004 | Medium | **VERIFIED** (position, XP, gold, level, HP; inventory pending) | [persistence.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/persistence.md) | `server/src/persistence/` |
 
 ---
 
@@ -97,5 +97,5 @@ Status values:
 | Task ID | Description | Priority | Dependencies | Complexity | Status | Doc Link | Source Files |
 |---|---|---|---|---|---|---|---|
 | **TST-001** | Implement Vitest suite for math, packet parsing, and movement validation | P1 | ENG-001 | Low | **IN PROGRESS** (40 tests incl. 10 integration tests) | [testing-strategy.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/testing-strategy.md) | `tests/unit/` |
-| **TST-002** | Playwright multi-client end-to-end synchronization tests | P1 | VRT-001 | Medium | **READY** | [testing-strategy.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/testing-strategy.md) | `tests/e2e/` |
+| **TST-002** | Playwright multi-client end-to-end synchronization tests | P1 | VRT-001 | Medium | **READY** (next) | [testing-strategy.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/testing-strategy.md) | `tests/e2e/` |
 | **OPS-001** | Dockerize server, client, and PostgreSQL with single-command compose | P1 | VRT-005 | Low | **VERIFIED** (local Docker Desktop; TLS/backups pending) | [deployment.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/deployment.md) | `deployment/` |

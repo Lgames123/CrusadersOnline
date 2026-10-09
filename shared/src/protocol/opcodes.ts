@@ -22,6 +22,7 @@ export const SC = {
   INVENTORY_UPDATE: 0x46,
   CHAT_BROADCAST: 0x47,
   PONG: 0x48,
+  PLAYER_STATS: 0x49,
   ERROR: 0x4f,
 } as const;
 
