@@ -46,7 +46,8 @@ Status values:
 | **AST-003** | `.mdl` + `.ani` → skinned/animated glTF via `@gltf-transform/core` | P2 | ARC-004 | High | **IN PROGRESS** (247 models → skinned GLB in bind pose with textures, collision spheres and weapon lines; 1,501 animation clips with root motion and events) — **VERIFIED** in the dev viewer |
 | **ARC-006** | Decode `.ani` animation tracks (UNK-005) | P1 | ARC-004 | High | **VERIFIED** (1,499/1,501 pairs; engine evaluator in Ghidra) |
 | **ARC-008** | World unit + movement/physics constants from the executable (UNK-007) | P1 | ARC-006 | Medium | **IN PROGRESS** (locomotion/jump model and derived-stat formulas recovered) |
-| **ARC-009** | Damage application, resists, armour (UNK-008) | P1 | ARC-008 | High | **NOT STARTED** |
+| **ARC-009** | Damage application, resists, armour (UNK-008) | P1 | ARC-008 | High | **IMPLEMENTED** (formulas + items.json; wiring into server combat pending) |
+| **CMB-001** | Switch server combat to the original formulas (attributes, items.json weapons/armour, resists, flinch, block) | P1 | ARC-009 | Medium | **READY** |
 | **ARC-007** | Decode `.msh` level geometry and `.cap` collision | P1 | ARC-002 | High | **NOT STARTED** | [asset-formats.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/asset-formats.md) | `converter/src/formats/mdl.ts`, `converter/src/emit/gltf.ts` |
 | **AST-004** | Browser Web Worker host for the converter (OPFS output) | P2 | AST-002 | Medium | **NOT STARTED** | [asset-pipeline.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/asset-pipeline.md) | `converter/src/hosts/worker.ts` |
 

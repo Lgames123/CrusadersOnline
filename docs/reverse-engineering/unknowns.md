@@ -62,6 +62,7 @@ Every unknown item is assigned a priority and a concrete validation experiment t
 
 
 ### UNK-008: Damage Application and Resists
-- **Status:** Open | **Priority:** High
+- **Status:** Mostly resolved (2026-10-09) — executable-analysis.md §8. Remaining: data source of flat absorption, attack-mode selection (which attacks use ×1.25), creature resist tables.
+- **Original priority:** High
 - **Description:** How the target applies `DR` resist multipliers per damage type and difficulty, armour, blocking and the combo/attack-type modifiers. The code lives in regions Ghidra has not turned into functions yet.
 - **Next step:** re-run Ghidra auto-analysis with the aggressive function finder, then follow readers of the resist table filled by `Rules_LoadDefaultCtx`.

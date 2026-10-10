@@ -3,6 +3,7 @@ import { decodeTga, type DecodedImage } from './formats/tga.ts';
 import { interpretDefaultCtx, parseCtxTable } from './formats/ctx.ts';
 import { parseMdl } from './formats/mdl.ts';
 import { parseAni, type AniClip } from './formats/ani.ts';
+import { parseItemsCtx } from './formats/items_ctx.ts';
 import { parseModelsCtx } from './formats/models_ctx.ts';
 import { buildModelDocument, writeGlb } from './emit/gltf_model.ts';
 
@@ -137,6 +138,24 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
     await sink.writeFile(out, JSON.stringify({ drake: interpretDefaultCtx(table), raw: table.rows }, null, 2));
     manifest.rules['default'] = out;
     report.converted.push(ctxPath);
+  }
+
+  // --- Items: script/items.ctx -> rules/items.json (inheritance resolved)
+  const itemsPath = 'script/items.ctx';
+  const itemsBytes = await source.readFile(itemsPath);
+  if (!itemsBytes) {
+    report.warnings.push(`${itemsPath} not found`);
+  } else {
+    manifest.inputs[itemsPath] = await sha256Hex(itemsBytes);
+    try {
+      const items = parseItemsCtx(new TextDecoder('latin1').decode(itemsBytes));
+      await sink.writeFile('rules/items.json', JSON.stringify({ items }, null, 2));
+      manifest.rules['items'] = 'rules/items.json';
+      report.converted.push(itemsPath);
+      log(`items: ${items.length} definitions`);
+    } catch (err) {
+      report.warnings.push(`${itemsPath}: ${(err as Error).message}`);
+    }
   }
 
   // --- Models: script/models.ctx bindings -> models/<name>.glb (texture referenced, not embedded)

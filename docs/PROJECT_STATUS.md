@@ -73,9 +73,14 @@
   - Fixed folded characters (`.ani` quaternions are (w, x, y, z)); pushed through `9738d4c`.
   - Ghidra + Capstone: locomotion and jumps are root-motion driven (`Char_RootMotionVelocity` etc.), fallback speed 15 u/s; `default.ctx` loader mapped to player fields; effective attributes (cap 50) and derived stats recovered: max HP, max mana, damage multiplier, speed multiplier; weapon hit = stronger of slash/bash × multiplier. Implemented and tested in `shared/src/game/original_stats.ts`.
 
+- [x] Reverse-engineering session 4 (2026-10-09):
+  - `tools/re/ghidra/CreateFunctionsFromVtables.java` created 827 missing functions in the Ghidra database.
+  - Full damage pipeline recovered: 11-type damage vector; outgoing = (unarmed + weapon) → stronger of slash/bash × Might multiplier → × attack mode (1.0/1.25) → + bonus → × multipliers; incoming = max(0, dmg − absorb) × resist(DR by difficulty) × armour protection, summed; flinch/stagger roll; shield block cone (cos(30 rad) ≈ ±81°, original quirk).
+  - `items.ctx` parser (156 items) → `rules/items.json`; formulas in `shared/src/game/original_stats.ts`. 64 tests.
+
 ### Not Yet Done
 - Playwright two-tab E2E (M08 criterion 14).
-- Damage application/resists (UNK-008); many routines are not yet functions in the Ghidra database.
+- Wire the original formulas into server combat (CMB-001).
 - TLS on a real domain, backups, CI, image registry (M11).
 - World unit / physics constants (UNK-007), `.msh` levels, `.cap` collision.
 - Converter: browser Web Worker host, `.mdl`/`.ani`/`.msh` parsers, `items.ctx`/`models.ctx` parsers.

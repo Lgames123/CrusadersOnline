@@ -42,3 +42,38 @@ export function originalSpeedMultiplier(a: Attributes, level: number): number {
 export function originalWeaponHit(slash: number, bash: number, multiplier: number): { type: 'slash' | 'bash'; amount: number } {
   return slash > bash ? { type: 'slash', amount: slash * multiplier } : { type: 'bash', amount: bash * multiplier };
 }
+
+/** The engine's 11 damage types, in table order (default.ctx DR0..DR10 / DD0..DD10). */
+export const DAMAGE_TYPES = ['SLASH', 'BASH', 'FIRE', 'AIR', 'EARTH', 'WATER', 'MIND', 'SPIRIT', 'BODY', 'LIGHT', 'DARK'] as const;
+
+/**
+ * Damage taken (engine behaviour, executable-analysis.md §8): per type,
+ * max(0, incoming - absorb) x resist x protection, then the positive components are summed.
+ * `resist` is the default.ctx DR row for the difficulty (players) or the creature's table;
+ * `protection` is the product of equipped items' SetProtection multipliers (1 = none).
+ */
+export function originalDamageTaken(
+  incoming: readonly number[],
+  resist: readonly number[],
+  protection: readonly number[] = [],
+  absorb: readonly number[] = [],
+): number {
+  let total = 0;
+  for (let t = 0; t < DAMAGE_TYPES.length; t++) {
+    const v = Math.max(0, (incoming[t] ?? 0) - (absorb[t] ?? 0)) * (resist[t] ?? 1) * (protection[t] ?? 1);
+    if (v > 0) total += v;
+  }
+  return total;
+}
+
+/**
+ * Flinch roll after a non-lethal hit on the player: 0.5 x random + damage / hpBeforeHit.
+ * >= 0.8 heavy stagger, >= 0.7 light flinch, otherwise none.
+ */
+export function originalFlinch(damage: number, hpBefore: number, random: number): 'stagger' | 'flinch' | 'none' {
+  const v = random * 0.5 + damage / hpBefore;
+  return v >= 0.8 ? 'stagger' : v >= 0.7 ? 'flinch' : 'none';
+}
+
+/** Shield block cone: the engine compares the facing dot product with cos(30) — 30 radians, i.e. about +/-81 degrees. */
+export const ORIGINAL_BLOCK_COS = Math.cos(30);

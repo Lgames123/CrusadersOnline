@@ -141,3 +141,35 @@ Open point: `dt × 1000 × 1/30` advances 33.3 frames per second of `dt` if `dt`
 | `0x0044E260` | (method, not a function) | Weapon hit: takes the stronger of the weapon's SLASH and BASH components and scales it by the damage multiplier `+0x248`. |
 
 Implemented as pure functions in `shared/src/game/original_stats.ts` (tested); not yet wired into the vertical-slice balance.
+
+
+---
+
+## 8. Combat Damage Pipeline (2026-10-09)
+
+Recovered after creating 827 missing functions with `tools/re/ghidra/CreateFunctionsFromVtables.java` (vtable runs of 16-byte-aligned code pointers + unresolved call targets). Names below are set in the Ghidra project.
+
+### 8.1 Damage vector
+A small class (vtable `0x004E0814`) holding **11 floats**, one per damage type in the order `SLASH, BASH, FIRE, AIR, EARTH, WATER, MIND, SPIRIT, BODY, LIGHT, DARK` (string table at `0x004EE694`). Element-wise helpers: copy `0x00441CD0`, `DamageVec_Add` `0x00441CF0`, `DamageVec_SubtractClampZero` `0x00441D10` (`max(0, a − b)`), `DamageVec_Multiply` `0x00441D50`; `0x00441D70` maps a type name to its index.
+
+### 8.2 Outgoing damage — `Stats_GetOutgoingDamage` (`0x0044CCF0`)
+1. unarmed damage (`DD` row, `+0x18`) + equipped weapon damage (inventory at `+0x1B0`);
+2. stats vtable slot 45 (`0x0044E260`): keep the stronger of SLASH/BASH × damage multiplier (§7.2);
+3. × attack-mode scale (`+0x44`; `0x0044CDD0` sets 1.0 or **1.25**);
+4. + bonus damage (`+0xEC`, e.g. spell effects);
+5. × multipliers (`+0x11C`).
+
+### 8.3 Incoming damage — `Stats_TakeDamage` (`0x0044CBA0`)
+Per type: `max(0, incoming − absorb) × resist × protection`, then the positive components are summed into one number:
+- `resist` = the defender's resist table (`+0x74`; for the player the `DR` row of the current difficulty: e.g. SLASH/BASH 0.6 easy, 0.9 medium, 1.2 hard), combined with equipped items' `SetProtection` multipliers (armour: Scale 0.9, Banded 0.8, Light Plate 0.7, Heavy Plate 0.6) and other multipliers (`+0x14C`);
+- `absorb` = flat absorption (`+0xA4` and inventory, × `+0x17C`); its data source is not yet identified (zero for ordinary equipment).
+
+### 8.4 HP loss, flinch and death — `0x0044CA00` (stats vtable slot 19)
+- Ignored while the invulnerability flag (`+0x1F4 & 2`) is set.
+- `hp −= damage`. If `hp ≤ 0`: hp = 0, death handler (slot `0x90`).
+- If the player survives: `v = 0.5 × random + damage / hpBefore`; `v ≥ 0.8` → heavy stagger (physics flag `0x80000`), `v ≥ 0.7` → light flinch (state `0x4000000`).
+
+### 8.5 Shield block — `Stats_TryBlockWithShield` (`0x0044D5E0`)
+Only while the shield-raised states (5 or `0x1D`) are active: block if the dot product between the defender's facing and the direction to the attacker is greater than `cos(30.0)` — evaluated with **30 radians**, i.e. ≈ 0.154, a frontal cone of about **±81°** (very likely meant as 30°; reproduced as-is for parity). A successful block calls the shield's Use action.
+
+Implemented as pure functions in `shared/src/game/original_stats.ts` (`originalDamageTaken`, `originalFlinch`, `ORIGINAL_BLOCK_COS`) with tests. Item data: `converter/src/formats/items_ctx.ts` parses `script/items.ctx` (156 items, inheritance resolved) into `rules/items.json`.

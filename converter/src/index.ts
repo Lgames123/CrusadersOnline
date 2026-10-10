@@ -5,3 +5,4 @@ export * from './formats/mdl.ts';
 export * from './formats/models_ctx.ts';
 export * from './emit/gltf_model.ts';
 export * from './formats/ani.ts';
+export * from './formats/items_ctx.ts';
