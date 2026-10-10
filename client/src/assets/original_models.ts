@@ -24,11 +24,17 @@ interface ClipMap {
   block: string;
 }
 
-const MODELS: Record<Exclude<AvatarKind, 'player'>, { file: string; clips: ClipMap }> = {
+const STANDARD_CLIPS: ClipMap = { idle: 'pa21_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pa21_id_br', attacks: ['pn02_1_sw_lv', 'pn01_1_cp_lo', 'pn03_1_sw_ov'], death: 'pi03_hp', block: 'pt01_rdy_shld' };
+
+/** Avatar kind -> converted model, optional texture variant (models.ctx `T` lines) and clips. */
+const MODELS: Record<string, { file: string; texture?: string; clips: ClipMap }> = {
   self: {
     file: 'drake',
     clips: { idle: 'pa16_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pc03_ru_fw_jmp', attacks: ['pn09_1_sw_l', 'pn10_1_sw_r', 'pn03_1_sw_ov'], death: 'pi03_hp', block: 'pt01_rdy_shld' },
   },
+  skeleton_ghost: { file: 'skeletonwarriorcollision', texture: 'walking_dead_ghost', clips: STANDARD_CLIPS },
+  shadow: { file: 'skeletonwarriorcollision', texture: 'shadow', clips: STANDARD_CLIPS },
+  dark_mage: { file: 'dark_magecollision', clips: { ...STANDARD_CLIPS, idle: 'pa16_id_br' } },
   skeleton_warrior: {
     file: 'skeletonwarriorcollision',
     clips: { idle: 'pa21_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pa21_id_br', attacks: ['pn02_1_sw_lv', 'pn01_1_cp_lo', 'pn03_1_sw_ov'], death: 'pi03_hp', block: 'pt01_rdy_shld' },
@@ -44,12 +50,18 @@ class OriginalAvatar implements Avatar {
   private current: THREE.AnimationAction | null = null;
   private anim = -1;
 
-  constructor(source: GLTF, map: ClipMap) {
+  constructor(source: GLTF, map: ClipMap, texture?: THREE.Texture) {
     const model = cloneSkinned(source.scene);
     model.scale.setScalar(UNIT_SCALE);
     model.traverse((o) => {
       o.castShadow = true;
       o.frustumCulled = false; // skinned bounds do not follow animation
+      const mesh = o as THREE.Mesh;
+      if (texture && mesh.isMesh) {
+        const m = (mesh.material as THREE.MeshStandardMaterial).clone();
+        m.map = texture;
+        mesh.material = m;
+      }
     });
     this.object.add(model);
     this.mixer = new THREE.AnimationMixer(model);
@@ -106,19 +118,31 @@ export async function loadOriginalAvatars(): Promise<AvatarFactory | null> {
   try {
     const res = await fetch('/generated/manifest.json');
     if (!res.ok) return null;
-    const manifest = (await res.json()) as { models: Record<string, string> };
+    const manifest = (await res.json()) as { models: Record<string, string>; textures: Record<string, string> };
     const loader = new GLTFLoader();
-    const loaded = new Map<string, { gltf: GLTF; clips: ClipMap }>();
+    const textures = new THREE.TextureLoader();
+    const gltfs = new Map<string, GLTF>();
+    const loaded = new Map<string, { gltf: GLTF; clips: ClipMap; texture?: THREE.Texture }>();
     for (const [kind, def] of Object.entries(MODELS)) {
       const url = manifest.models[def.file];
       if (!url) continue;
-      loaded.set(kind, { gltf: await loader.loadAsync(`/generated/${url}`), clips: def.clips });
+      let gltf = gltfs.get(url);
+      if (!gltf) gltfs.set(url, (gltf = await loader.loadAsync(`/generated/${url}`)));
+      let texture: THREE.Texture | undefined;
+      const texUrl = def.texture ? manifest.textures[def.texture] : undefined;
+      if (texUrl) {
+        texture = await textures.loadAsync(`/generated/${texUrl}`);
+        texture.flipY = false; // glTF texture convention
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+      }
+      loaded.set(kind, { gltf, clips: def.clips, ...(texture ? { texture } : {}) });
     }
     if (loaded.size === 0) return null;
     console.info(`[assets] using original models from your installation: ${[...loaded.keys()].join(', ')}`);
     return (kind) => {
       const entry = loaded.get(kind === 'player' ? 'self' : kind);
-      return entry ? new OriginalAvatar(entry.gltf, entry.clips) : null;
+      return entry ? new OriginalAvatar(entry.gltf, entry.clips, entry.texture) : null;
     };
   } catch (err) {
     console.warn('[assets] original models unavailable:', err);

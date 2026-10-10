@@ -8,6 +8,8 @@ export type ToZone =
   | { t: 'input'; connId: number; data: ArrayBuffer }
   | { t: 'attack'; connId: number }
   | { t: 'equip'; connId: number; slot: number; equip: boolean }
+  | { t: 'interact'; connId: number; object: number }
+  | { t: 'use'; connId: number; slot: number }
   | { t: 'stop' };
 
 export interface ZoneMetrics {

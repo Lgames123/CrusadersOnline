@@ -320,3 +320,85 @@ describe('skeleton shield AI', () => {
     expect(t.events().some((e) => e.target === t.mob().id && e.blocked)).toBe(false);
   });
 });
+
+describe('world objects (original level placements)', () => {
+  /** Synthetic arena plus objects near the spawn (0, 0.5, 0); the skeleton is far away (z = -15). */
+  function objectZone() {
+    const arena = createSyntheticArena();
+    arena.objects = [
+      { id: 0, kind: 'item', x: 1, y: 0.5, z: 0, item: { name: 'Gold Pieces', quantity: 30 } },
+      { id: 1, kind: 'item', x: -1, y: 0.5, z: 0, item: { name: 'Healing Potion', quantity: 1 } },
+      { id: 2, kind: 'item', x: 0, y: 0.5, z: 1, item: { name: 'Healing Potion', quantity: 1 } },
+      { id: 3, kind: 'chest', x: 0, y: 0.5, z: 2, contents: [{ name: 'Long Sword', quantity: 1 }, { name: 'Gold Pieces', quantity: 12 }] },
+      { id: 4, kind: 'breakable', x: 0, y: 0.5, z: -1.5, hp: 8 },
+      { id: 5, kind: 'item', x: 10, y: 0.5, z: 10, item: { name: 'Gold Pieces', quantity: 5 } },
+    ];
+    const messages: ServerControlMsg[] = [];
+    const zone = new WorldZone(rapier, 'objects', arena, {
+      send: (_c, data) => { if (typeof data === 'string') messages.push(JSON.parse(data) as ServerControlMsg); },
+    }, { random: () => 0 });
+    zone.join(1, { name: 'Looter', characterId: null, position: { x: 0, y: 0.5, z: 0 } });
+    const last = <T extends ServerControlMsg['op']>(op: T) => messages.filter((m) => m.op === op).at(-1) as Extract<ServerControlMsg, { op: T }> | undefined;
+    return { zone, messages, last };
+  }
+
+  it('picks up gold and stacks potions within reach, refuses far objects', () => {
+    const t = objectZone();
+    t.zone.step();
+    t.zone.interact(1, 5); // 14 m away
+    expect(t.last(SC.OBJECT_STATE)?.d.full).toBe(true);
+    t.zone.interact(1, 0);
+    t.zone.interact(1, 1);
+    t.zone.interact(1, 2);
+    t.zone.step();
+    expect(t.last(SC.PLAYER_STATS)!.d.gold).toBe(30);
+    const potion = t.last(SC.INVENTORY_UPDATE)!.d.items.find((i) => i.itemId === 'healing_potion')!;
+    expect(potion).toMatchObject({ quantity: 2, heal: 10 });
+    const changes = t.messages.filter((m) => m.op === SC.OBJECT_STATE && !m.d.full).flatMap((m) => (m as Extract<ServerControlMsg, { op: typeof SC.OBJECT_STATE }>).d.objects);
+    expect(changes.map((c) => [c.id, c.state])).toEqual([[0, 'gone'], [1, 'gone'], [2, 'gone']]);
+    t.zone.interact(1, 0); // already taken
+    expect(t.messages.filter((m) => m.op === SC.OBJECT_STATE).length).toBe(4);
+  });
+
+  it('opens a chest once and grants its contents', () => {
+    const t = objectZone();
+    t.zone.interact(1, 3);
+    t.zone.step();
+    expect(t.last(SC.OBJECT_STATE)!.d.objects[0]).toMatchObject({ id: 3, state: 'open', loot: ['Long Sword', '12 Gold Pieces'] });
+    expect(t.last(SC.PLAYER_STATS)!.d.gold).toBe(12);
+    expect(t.last(SC.INVENTORY_UPDATE)!.d.items.some((i) => i.itemId === 'long_sword')).toBe(true);
+  });
+
+  it('drinks a potion to heal, capped at max HP', () => {
+    const t = objectZone();
+    t.zone.interact(1, 1);
+    const slot = t.last(SC.INVENTORY_UPDATE)!.d.items.find((i) => i.itemId === 'healing_potion')!.slot;
+    (t.zone as unknown as { players: Map<number, { hp: number }> }).players.get(1)!.hp = 50;
+    t.zone.useItem(1, slot);
+    t.zone.step();
+    expect(t.last(SC.PLAYER_STATS)!.d.hp).toBe(60);
+    expect(t.last(SC.INVENTORY_UPDATE)!.d.items.some((i) => i.itemId === 'healing_potion')).toBe(false);
+  });
+
+  it('breaks a prop with melee swings and brings it back later', () => {
+    const t = objectZone();
+    // Face -Z (yaw 0): the breakable is 1.5 m ahead. Axe hits 5 bash -> two swings for 8 HP.
+    const buf = new DataView(new ArrayBuffer(INPUT_PACKET_MAX_BYTES));
+    let tick = 0;
+    const run = (n: number, attack = false) => {
+      for (let i = 0; i < n; i++) {
+        const len = encodeInput(buf, 0, [{ clientTick: ++tick, flags: 0, yaw: quantizeAngle(0), pitch: 0 }]);
+        t.zone.receiveInput(1, new DataView(buf.buffer.slice(0, len)));
+        if (attack) t.zone.attack(1);
+        t.zone.step();
+      }
+    };
+    run(40, true);
+    const hits = t.messages.filter((m) => m.op === SC.OBJECT_STATE && !m.d.full).flatMap((m) => (m as Extract<ServerControlMsg, { op: typeof SC.OBJECT_STATE }>).d.objects).filter((o) => o.id === 4);
+    expect(hits[0]).toMatchObject({ state: 'present', damage: 5, hp: 3 });
+    expect(hits.at(-1)).toMatchObject({ state: 'gone', hp: 0 });
+    run(20 * 300 + 40);
+    const back = t.messages.filter((m) => m.op === SC.OBJECT_STATE).flatMap((m) => (m as Extract<ServerControlMsg, { op: typeof SC.OBJECT_STATE }>).d.objects).filter((o) => o.id === 4).at(-1);
+    expect(back?.state).toBe('present');
+  });
+});

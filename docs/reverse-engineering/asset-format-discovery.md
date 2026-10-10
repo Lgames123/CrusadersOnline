@@ -211,6 +211,35 @@ Individual placements override these values; level designers made stronger varia
 
 The creature's position (3 × float32, original units) is at XP block − 0x200. The `.cap` header names the level mesh it belongs to (`Ca1a.cap` → `Ca_a`). The 84 `.cap` files are the acts or variants of the 25 meshes.
 
+### 6.2.1 Generic object records (all classes) `[CONFIRMED: 12,025 objects in 84 files]`
+
+Every placed object starts with `[class u32][CD CD CD CD][3F 00 00 00][02 00 00 00]`. The instance name is at +0x40. Six **component pointers** at +0x28…+0x3C hold absolute addresses in the cap image (base `0x08000000`); each component starts with a type tag:
+
+| Slot | Component | Fields |
+|---|---|---|
+| 0 | transform | +4: 3 × 3 rotation (row-major; Direct3D row-vector convention), +0x28: position |
+| 4 | class component | props: HP at +8 (current) and +0xC (max), 0 = indestructible; ground items: quantity at +0x18, item name at +0x2C |
+| 5 | render | +0x18: `models.ctx` model id (e.g. 9 = barrel01.mdl) |
+
+Classes:
+
+| Class | Count | Content |
+|---|---|---|
+| 0x2D | 1,980 | creatures |
+| 0x34 | 10,734 | props: mushrooms, plants, rocks, barrels, crates, bottles, light volumes, furniture… Breakables carry HP, e.g. bottle 5, barrel 8–25, chair 15–25, armour suit 150, statue 400 |
+| 0x35 | 266 | ground items: potions, gold (quantity), weapons, shields |
+| 0x36 | 986 | sprites: the effect name is the first upper-case string in the record, e.g. `TORCHFIRE` |
+| 0x38 | 25 | chests; contained items appear as item sub-records (quantity at name − 0x14) |
+| 0x3A | 14 | flags in the wind |
+
+The model id resolves for all 12,025 objects, and object names match their models (`LargeCrate` → `crate1.mdl`, `Chair` → `plnchr.mdl`, `Mushroom` → `mushrm1/2.mdl`).
+
+**Audio.** `script/data.czx` is a ZIP archive containing `Sound.ctx`, the sound registry (1,143 entries). Its indices are the executable's sound ids: 417 = UILevel.wav (played by Stats_LevelUp) and 306 = SwStab02 (the default impact).
+
+The creature sound table at 0x004EEA88 has 16 bytes per creature type (type − 113): impact material (0 = bone, 1 = flesh), a second value, the damage cry and the death cry. For example, Skeleton Warrior = bone, SW1_GEN_03, SW1_GEN_04. The impact table at 0x004EEDA8 picks BlntBone01 / ShrpBone01 / BlntFlesh01 / SwStab… by material and weapon edge.
+
+`Textures/textures.zip/textures.nfo` maps texture material symbols (ST, WD, ML, …) to ricochet and footstep sounds.
+
 ### 6.3 `.msh` layout and geometry `[CONFIRMED on 24 of 25 levels]`
 
 **Memory images.** Both `.msh` and `.cap` files are memory images ("game DBs"). The loader decompresses them into game memory at fixed addresses, so internal pointers are absolute: the mesh DBs live at `0x06000000` and the cap DB at `0x08000000`. Each DB ends with a **per-type object table**: for every object type, a count followed by that many pointers. It is the "recyclable overhead" in the loader's messages.

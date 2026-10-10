@@ -22,6 +22,7 @@ import { LocalPlayer } from './entities/local_player.ts';
 import { RemoteEntities } from './entities/remote_entities.ts';
 import { loadOriginalAvatars } from './assets/original_models.ts';
 import { fetchServerArena, loadOriginalLevel, type OriginalLevel } from './assets/original_level.ts';
+import { CREATURE_SFX, SFX, SoundBank, pick } from './audio/sound_bank.ts';
 import { InputManager } from './input/input_manager.ts';
 import { connectToWorld } from './network/connect.ts';
 import { CombatUi } from './ui/combat_ui.ts';
@@ -35,7 +36,7 @@ async function main(): Promise<void> {
   const container = document.getElementById('app')!;
   const overlay = document.getElementById('overlay')!;
 
-  const [rapier, originals] = await Promise.all([initPhysics(), loadOriginalAvatars()]);
+  const [rapier, originals, sounds] = await Promise.all([initPhysics(), loadOriginalAvatars(), SoundBank.load()]);
   const { renderer, scene } = createRenderContext(container);
   const remotes = new RemoteEntities(scene, originals);
   const combatUi = new CombatUi(document.getElementById('world-ui')!);
@@ -57,12 +58,17 @@ async function main(): Promise<void> {
     levelView = await loadOriginalLevel(arenaName);
     arena = levelView.arena;
     scene.add(levelView.object);
+    levelView.applyAtmosphere(scene);
   } else {
     arena = createSyntheticArena();
     scene.add(buildArenaMeshes(arena));
   }
   let player: LocalPlayer | null = null;
   const headPos = new THREE.Vector3();
+  const prompt = document.getElementById('prompt')!;
+  let lastStats: { level: number; dead: boolean } | null = null;
+  /** Edge of the local player's weapon, for impact sounds (stronger of slash / bash). */
+  let myEdge: 'sharp' | 'blunt' = 'blunt';
   const session: ClientSession | null =
     auth.kind === 'offline'
       ? null
@@ -73,6 +79,9 @@ async function main(): Promise<void> {
           stats: (s) => {
             hud.stats(s);
             if (player) player.dead = s.dead;
+            if (lastStats && s.level > lastStats.level) sounds?.play(SFX.levelUp);
+            if (lastStats && s.dead && !lastStats.dead) sounds?.play(SFX.died);
+            lastStats = { level: s.level, dead: s.dead };
           },
           combat: (e) => {
             const target = remotes.byId.get(e.target);
@@ -83,10 +92,46 @@ async function main(): Promise<void> {
             headPos.y += isMe ? player!.avatar.headHeight : target!.avatar.headHeight;
             const mine = session !== null && e.attacker === session.entityId;
             combatUi.damage(e, headPos, isMe ? 'taken' : mine ? 'dealt' : 'other');
+            // Original impact / cry sounds (executable sound tables, Sound.ctx ids).
+            if (sounds) {
+              if (e.blocked) sounds.play(SFX.shieldBlockWood, headPos);
+              else if (isMe) {
+                sounds.play(SFX.impact.flesh.sharp, headPos);
+                sounds.play(pick(e.killed ? SFX.drakeDeath : SFX.drakeDamage), headPos);
+              } else if (target) {
+                const sfx = CREATURE_SFX[target.info.archetype ?? ''];
+                sounds.play(SFX.impact[sfx?.material ?? 'flesh'][mine ? myEdge : 'sharp'], headPos);
+                if (sfx) sounds.play(e.killed ? sfx.death : sfx.damage, headPos);
+              }
+            }
+          },
+          objects: (d) => {
+            for (const o of d.objects as { id: number; state: 'present' | 'gone' | 'open'; by?: number; loot?: string[]; damage?: number }[]) {
+              const view = levelView?.objects.get(o.id);
+              levelView?.setObjectState(o.id, o.state);
+              if (!view || d.full) continue;
+              const mine = session !== null && o.by === session.entityId;
+              const at = view.position;
+              if (view.def.kind === 'chest' && o.state === 'open') sounds?.play(SFX.chestOpen, at);
+              else if (view.def.kind === 'item' && o.state === 'gone' && mine) sounds?.play(SFX.click);
+              else if (view.def.kind === 'prop') {
+                const glass = /bottle|glass/i.test(view.def.name);
+                const barrel = /barrel/i.test(view.def.name);
+                if (o.state === 'gone') sounds?.play(glass ? SFX.breakGlass : barrel ? SFX.breakBarrel : SFX.breakWood, at);
+                else sounds?.play(SFX.hitWood, at);
+              }
+              if (mine && o.loot?.length) {
+                headPos.copy(at);
+                headPos.y += 1;
+                combatUi.notice(`+ ${o.loot.join(', ')}`, headPos);
+              }
+            }
           },
           inventory: (inv) => {
             inventoryPanel.update(inv);
             player?.setWeaponSpeed(inv.weaponSpeed);
+            const w = inv.items.find((i) => i.type === 'weapon' && i.equipped);
+            myEdge = w?.damage && w.damage[0]! > w.damage[1]! ? 'sharp' : 'blunt';
           },
           close: (code, reason) => {
             document.getElementById('error')!.textContent = `Disconnected from server (${code}${reason ? `: ${reason}` : ''}). Reload to reconnect.`;
@@ -97,7 +142,11 @@ async function main(): Promise<void> {
   if (session) {
     mw = session.mw;
     player = new LocalPlayer(session.character!, selfAvatar, (f) => session.tick(f));
-    if (session.playerStats) hud.stats(session.playerStats);
+    if (session.playerStats) {
+      hud.stats(session.playerStats);
+      lastStats = { level: session.playerStats.level, dead: session.playerStats.dead };
+    }
+    for (const [id, state] of session.objectStates) levelView?.setObjectState(id, state);
     if (session.inventory) {
       inventoryPanel.update(session.inventory);
       player.setWeaponSpeed(session.inventory.weaponSpeed);
@@ -115,10 +164,37 @@ async function main(): Promise<void> {
   const chase = new ChaseCamera(mw, container.clientWidth / container.clientHeight);
   const input = new InputManager(renderer.domElement);
   input.onAttack = () => {
-    if (local.swing(input.yaw)) session?.attack();
+    if (local.swing(input.yaw)) {
+      session?.attack();
+      sounds?.play(pick(SFX.swing), local.object.position, { volume: 0.7 });
+    }
   };
 
-  overlay.addEventListener('click', () => input.requestLock());
+  overlay.addEventListener('click', () => {
+    sounds?.unlock();
+    input.requestLock();
+  });
+
+  // Nearest item or chest within reach (the server re-checks); E picks up / opens.
+  const INTERACT_RANGE = 2.3;
+  const nearestInteractable = () => {
+    if (!levelView || !session) return null;
+    let best: { id: number; label: string; d: number } | null = null;
+    for (const [id, v] of levelView.objects) {
+      if (v.state !== 'present' || (v.def.kind !== 'item' && v.def.kind !== 'chest')) continue;
+      const p = local.object.position;
+      const d = Math.hypot(v.position.x - p.x, v.position.z - p.z);
+      if (d > INTERACT_RANGE || Math.abs(v.position.y - p.y) > 2 || (best && best.d < d)) continue;
+      const label = v.def.kind === 'chest' ? 'open chest' : `pick up ${v.def.item?.quantity && v.def.item.quantity > 1 ? `${v.def.item.quantity} ` : ''}${v.def.item?.name ?? v.def.name}`;
+      best = { id, label, d };
+    }
+    return best;
+  };
+  window.addEventListener('keydown', (e) => {
+    if (e.code !== 'KeyE' || !input.locked) return;
+    const target = nearestInteractable();
+    if (target) session?.interact(target.id);
+  });
   overlay.classList.remove('hidden');
   const logoutLink = document.getElementById('btn-logout')!;
   logoutLink.hidden = auth.kind !== 'account';
@@ -138,7 +214,11 @@ async function main(): Promise<void> {
     else input.requestLock();
     overlay.classList.toggle('hidden', open || input.locked);
   };
-  inventoryPanel.onToggleEquip = (slot, equip) => session?.equip(slot, equip);
+  inventoryPanel.onToggleEquip = (slot, equip) => {
+    const item = session?.inventory?.items.find((i) => i.slot === slot);
+    if (item?.type === 'potion') session?.useItem(slot);
+    else session?.equip(slot, equip);
+  };
   inventoryPanel.onClose = () => setInventoryOpen(false);
   window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyI' && !e.repeat) setInventoryOpen(!inventoryPanel.open);
@@ -162,6 +242,8 @@ async function main(): Promise<void> {
   let acc = 0;
   let last = performance.now();
   const target = new THREE.Vector3();
+  const lastStep = new THREE.Vector3();
+  let stepFoot = 0;
 
   renderer.setAnimationLoop((now) => {
     const frameMs = Math.min(now - last, MAX_FRAME_MS);
@@ -177,7 +259,21 @@ async function main(): Promise<void> {
     if (session) remotes.update(session, dt);
     target.copy(local.object.position);
     chase.update(target, input.yaw, input.pitch, dt);
-    levelView?.update(chase.camera);
+    levelView?.update(chase.camera, dt);
+    if (sounds) {
+      sounds.setListener(chase.camera);
+      // Footsteps on stone while running on the ground (catacomb floors are ST materials).
+      const moving = local.character.grounded && Math.hypot(local.object.position.x - lastStep.x, local.object.position.z - lastStep.z) > 1.1;
+      if (moving) {
+        lastStep.copy(local.object.position);
+        sounds.play(SFX.footstepStone[stepFoot = 1 - stepFoot]!, local.object.position, { volume: 0.35 });
+      }
+    }
+    if (levelView && session) {
+      const t = nearestInteractable();
+      prompt.hidden = !t;
+      if (t) prompt.textContent = `E — ${t.label}`;
+    }
     renderer.render(scene, chase.camera);
     combatUi.update(dt, chase.camera, remotes, container.clientWidth, container.clientHeight);
     hud.update(dt, tick, local.character, session, remotes.count);

@@ -79,6 +79,14 @@ port.on('message', (msg: ToZone) => {
       zone.equip(msg.connId, msg.slot, msg.equip);
       flush();
       break;
+    case 'interact':
+      zone.interact(msg.connId, msg.object);
+      flush();
+      break;
+    case 'use':
+      zone.useItem(msg.connId, msg.slot);
+      flush();
+      break;
     case 'stop':
       clock.stop();
       flush();

@@ -8,6 +8,7 @@ import { parseModelsCtx } from './formats/models_ctx.ts';
 import { buildModelDocument, writeGlb } from './emit/gltf_model.ts';
 import { parseMsh } from './formats/msh.ts';
 import { parseCap } from './formats/cap.ts';
+import { parseSoundCtx, parseTexturesNfo } from './formats/sound_ctx.ts';
 import { emitLevel } from './emit/gltf_level.ts';
 
 /** Read access to the user's original install. Paths are relative, forward-slash separated. */
@@ -116,6 +117,12 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
       report.skipped.push(zipPath);
       log(`textures: unchanged, ${Object.keys(prev.textures).length} cached`);
     } else {
+      const nfo = unzipSync(zip, { filter: (f) => f.name.toLowerCase().endsWith('textures.nfo') });
+      const nfoText = Object.values(nfo)[0];
+      if (nfoText) {
+        await sink.writeFile('rules/materials.json', JSON.stringify({ materials: parseTexturesNfo(new TextDecoder('latin1').decode(nfoText)) }, null, 1));
+        manifest.rules['materials'] = 'rules/materials.json';
+      }
       const entries = unzipSync(zip, { filter: (f) => f.name.toLowerCase().endsWith('.tga') });
       const names = Object.keys(entries).sort();
       log(`textures: decoding ${names.length} TGA files`);
@@ -137,6 +144,10 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
       report.converted.push(zipPath);
     }
   }
+
+  /** For level placements: item names (chest contents) and models.ctx id -> converted model. */
+  const itemNames = new Set<string>(['Gold Pieces']);
+  const modelById = new Map<number, string>();
 
   // --- Rules: script/default.ctx -> rules/default.json
   const ctxPath = 'script/default.ctx';
@@ -162,6 +173,7 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
     manifest.inputs[itemsPath] = await sha256Hex(itemsBytes);
     try {
       const items = parseItemsCtx(new TextDecoder('latin1').decode(itemsBytes));
+      for (const it of items) itemNames.add(it.name);
       await sink.writeFile('rules/items.json', JSON.stringify({ items }, null, 2));
       manifest.rules['items'] = 'rules/items.json';
       report.converted.push(itemsPath);
@@ -178,6 +190,7 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
     report.warnings.push(`${bindingsPath} not found`);
   } else {
     const bindings = parseModelsCtx(new TextDecoder('latin1').decode(bindingsBytes));
+    for (const b of bindings) if (!modelById.has(b.id)) modelById.set(b.id, b.file.replace(/\.mdl$/i, ''));
     const files = new Map<string, string | undefined>(); // lower-case file -> first texture
     const anims = new Map<string, Map<string, string>>(); // lower-case model file -> ani file -> label
     for (const b of bindings) {
@@ -234,6 +247,40 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
     report.converted.push(bindingsPath);
   }
 
+  // --- Audio: script/data.czx (ZIP) Sound.ctx -> rules/sounds.json; Sound/*.wav|mp3 copied as-is
+  // (browsers play PCM WAV and MP3 natively) to sounds/<lower-case name>.
+  const czx = await source.readFile('script/data.czx');
+  if (czx) {
+    manifest.inputs['script/data.czx'] = await sha256Hex(czx);
+    try {
+      const files = unzipSync(czx, { filter: (f) => f.name.toLowerCase() === 'sound.ctx' });
+      const text = Object.values(files)[0];
+      if (text) {
+        const sounds = parseSoundCtx(new TextDecoder('latin1').decode(text));
+        await sink.writeFile('rules/sounds.json', JSON.stringify({ sounds }, null, 1));
+        manifest.rules['sounds'] = 'rules/sounds.json';
+        log(`audio: ${sounds.length} sound registry entries`);
+      }
+    } catch (err) {
+      report.warnings.push(`script/data.czx: ${(err as Error).message}`);
+    }
+  }
+  const soundFiles = (await source.list?.('Sound'))?.filter((f) => /\.(wav|mp3)$/i.test(f)) ?? [];
+  let copied = 0;
+  for (const file of soundFiles) {
+    const out = `sounds/${file.toLowerCase()}`;
+    if (prev.audio[file.toLowerCase()] === out) {
+      manifest.audio[file.toLowerCase()] = out;
+      continue;
+    }
+    const bytes = await source.readFile(`Sound/${file}`);
+    if (!bytes) continue;
+    await sink.writeFile(out, bytes);
+    manifest.audio[file.toLowerCase()] = out;
+    copied++;
+  }
+  if (soundFiles.length) log(`audio: ${soundFiles.length} sound files (${copied} copied)`);
+
   // --- Levels: Meshes/*.msh -> levels/<name>.glb + _lightmap atlas + .collision.bin
   manifest.inputs['levels:emit'] = LEVEL_EMIT_VERSION;
   const meshFiles = (await source.list?.('Meshes'))?.filter((f) => f.toLowerCase().endsWith('.msh')).sort() ?? [];
@@ -289,11 +336,23 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
     const name = file.replace(/\.cap$/i, '').toLowerCase();
     manifest.inputs[path] = await sha256Hex(bytes);
     try {
-      const cap = parseCap(bytes);
+      const cap = parseCap(bytes, itemNames);
       const out = `levels/${name}.placements.json`;
+      // Mirror Z like the meshes: positions (x, y, -z), rotations M R M with M = diag(1, 1, -1).
+      const mirrorRot = (r: number[]) => r.map((v, i) => ([2, 5, 6, 7].includes(i) ? -v : v));
       await sink.writeFile(out, JSON.stringify({
         mesh: cap.mesh.toLowerCase(),
         creatures: cap.creatures.map((c) => ({ ...c, position: [c.position[0], c.position[1], -c.position[2]] })),
+        objects: cap.objects.map((o) => {
+          const model = o.kind === 'sprite' ? undefined : modelById.get(o.modelId);
+          const glb = model ? manifest.models[model] : undefined;
+          return {
+            ...o,
+            position: [o.position[0], o.position[1], -o.position[2]],
+            rotation: mirrorRot(o.rotation),
+            ...(glb ? { model: glb } : {}),
+          };
+        }),
       }));
       manifest.placements[name] = out;
       creatures += cap.creatures.length;

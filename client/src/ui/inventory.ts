@@ -1,12 +1,13 @@
 import { DAMAGE_TYPES, type Inventory, type InventoryItemView } from '@crusaders/shared';
 
-const SLOT_LABEL: Record<InventoryItemView['type'], string> = { weapon: 'Weapon', shield: 'Shield', armor: 'Armour' };
+const SLOT_LABEL: Record<InventoryItemView['type'], string> = { weapon: 'Weapon', shield: 'Shield', armor: 'Armour', potion: 'Potion' };
 
 function describe(item: InventoryItemView): string {
   const parts: string[] = [];
   item.damage?.forEach((v, i) => v > 0 && parts.push(`${v} ${DAMAGE_TYPES[i]!.toLowerCase()}`));
   if (item.speed !== undefined && item.speed !== 1) parts.push(`speed ${item.speed}`);
   item.protection?.forEach((v, i) => v < 1 && parts.push(`${DAMAGE_TYPES[i]!.toLowerCase()} ×${v}`));
+  if (item.heal) parts.push(`heals ${item.heal} — click to drink`);
   return parts.join(', ');
 }
 
@@ -47,7 +48,7 @@ export class InventoryPanel {
     const bag = items.filter((i) => !i.equipped);
     const row = (i: InventoryItemView) =>
       `<li data-slot="${i.slot}" data-equipped="${i.equipped}" title="${i.equipped ? 'Click to unequip' : 'Click to equip'}">` +
-      `<span class="kind">${SLOT_LABEL[i.type]}</span><span class="name">${escape(i.name)}</span><span class="stats">${escape(describe(i))}</span></li>`;
+      `<span class="kind">${SLOT_LABEL[i.type]}</span><span class="name">${escape(i.name)}${i.quantity && i.quantity > 1 ? ` ×${i.quantity}` : ''}</span><span class="stats">${escape(describe(i))}</span></li>`;
     this.root.innerHTML = `
       <div class="head"><h2>Inventory</h2><button type="button" class="secondary" data-close>Close (I)</button></div>
       <h3>Equipped</h3>

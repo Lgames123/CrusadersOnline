@@ -24,6 +24,25 @@ export interface TriMeshDef {
   indices: Uint32Array;
 }
 
+/**
+ * Interactive object of an original level (from its .cap placements); `id` is the index in the
+ * placements list, identical on server and client.
+ */
+export interface WorldObjectDef {
+  id: number;
+  kind: 'item' | 'chest' | 'breakable';
+  /** Metres. */
+  x: number;
+  y: number;
+  z: number;
+  /** Breakables: hit points. */
+  hp?: number;
+  /** Ground items. */
+  item?: { name: string; quantity: number };
+  /** Chests. */
+  contents?: { name: string; quantity: number }[];
+}
+
 export interface ArenaDef {
   name: string;
   boxes: BoxDef[];
@@ -34,4 +53,6 @@ export interface ArenaDef {
    * placement's own HP, XP value and resists, which override the archetype's.
    */
   mobSpawns: { archetype: string; x: number; y: number; z: number; hp?: number; xp?: number; resist?: number[] }[];
+  /** Items, chests and breakable props (original levels). */
+  objects?: WorldObjectDef[];
 }

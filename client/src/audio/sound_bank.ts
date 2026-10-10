@@ -1,0 +1,139 @@
+import * as THREE from 'three';
+
+/**
+ * Development-only: the original game's sounds, converted from the user's own installation
+ * (`pnpm convert` → local/generated/sounds, registry in rules/sounds.json from Sound.ctx).
+ * Sounds are addressed by their Sound.ctx id (the ids the executable uses) or file name.
+ * WebAudio with distance attenuation and stereo panning relative to the camera. Silent (all
+ * calls are no-ops) when the converted audio is not available.
+ */
+interface Manifest {
+  audio?: Record<string, string>;
+  rules?: Record<string, string>;
+}
+
+export class SoundBank {
+  private ctx: AudioContext | null = null;
+  private readonly buffers = new Map<string, Promise<AudioBuffer | null>>();
+  private readonly listener = new THREE.Vector3();
+  private readonly right = new THREE.Vector3(1, 0, 0);
+  private readonly files: Map<number, string>;
+  private readonly urls: Record<string, string>;
+  /** Master volume 0..1. */
+  volume = 0.8;
+
+  private constructor(files: Map<number, string>, urls: Record<string, string>) {
+    this.files = files;
+    this.urls = urls;
+  }
+
+  static async load(): Promise<SoundBank | null> {
+    if (!import.meta.env.DEV) return null;
+    try {
+      const manifest = (await (await fetch('/generated/manifest.json')).json()) as Manifest;
+      const rules = manifest.rules?.['sounds'];
+      if (!rules || !manifest.audio) return null;
+      const { sounds } = (await (await fetch(`/generated/${rules}`)).json()) as { sounds: { id: number; file: string }[] };
+      const files = new Map(sounds.map((s) => [s.id, s.file.toLowerCase()]));
+      return new SoundBank(files, manifest.audio);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Browsers only start audio after a user gesture; call from a click / key handler. */
+  unlock(): void {
+    this.ctx ??= new AudioContext();
+    if (this.ctx.state === 'suspended') void this.ctx.resume();
+  }
+
+  /** Camera position and orientation, every frame. */
+  setListener(camera: THREE.Camera): void {
+    this.listener.copy(camera.position);
+    this.right.set(1, 0, 0).applyQuaternion(camera.quaternion);
+  }
+
+  private buffer(file: string): Promise<AudioBuffer | null> {
+    let p = this.buffers.get(file);
+    if (!p) {
+      const url = this.urls[file];
+      p = url && this.ctx
+        ? fetch(`/generated/${url}`).then((r) => r.arrayBuffer()).then((b) => this.ctx!.decodeAudioData(b)).catch(() => null)
+        : Promise.resolve(null);
+      this.buffers.set(file, p);
+    }
+    return p;
+  }
+
+  /**
+   * Plays a sound (Sound.ctx id, or file name like "swswing01.wav") at a world position (or
+   * non-positional). Returns a stop function for loops.
+   */
+  play(ref: number | string, at?: THREE.Vector3 | null, opts: { volume?: number; loop?: boolean; maxDistance?: number } = {}): () => void {
+    const ctx = this.ctx;
+    const file = typeof ref === 'number' ? this.files.get(ref) : ref.toLowerCase();
+    if (!ctx || !file) return () => {};
+    let stopped = false;
+    let source: AudioBufferSourceNode | null = null;
+    const max = opts.maxDistance ?? 35;
+    let gainValue = (opts.volume ?? 1) * this.volume;
+    let pan = 0;
+    if (at) {
+      const d = at.distanceTo(this.listener);
+      if (d > max) return () => {};
+      gainValue *= Math.min(1, 4 / Math.max(1, d)) * (1 - d / max);
+      const dir = at.clone().sub(this.listener).normalize();
+      pan = Math.max(-1, Math.min(1, dir.dot(this.right)));
+    }
+    void this.buffer(file).then((buf) => {
+      if (!buf || stopped) return;
+      source = ctx.createBufferSource();
+      source.buffer = buf;
+      source.loop = !!opts.loop;
+      const gain = ctx.createGain();
+      gain.gain.value = gainValue;
+      const panner = ctx.createStereoPanner();
+      panner.pan.value = pan;
+      source.connect(gain).connect(panner).connect(ctx.destination);
+      source.start();
+    });
+    return () => {
+      stopped = true;
+      source?.stop();
+    };
+  }
+}
+
+/** Sound.ctx ids used by the game (resolved with the user's Sound.ctx). */
+export const SFX = {
+  swing: [309, 310, 311],
+  swingGrunt: 36,
+  drakeDamage: [0, 1, 2, 3],
+  drakeDeath: [4, 5, 6, 7],
+  footstepStone: [16, 17],
+  levelUp: 417,
+  died: 418,
+  click: 401,
+  shieldBlockWood: 345,
+  chestOpen: 520,
+  hitWood: 344,
+  breakBarrel: 358,
+  breakWood: 532,
+  breakGlass: 523,
+  fireLoop: 533,
+  /** Impact by target material x weapon edge (executable table 0x004EEDA8): bone / flesh. */
+  impact: { bone: { sharp: 308, blunt: 302 }, flesh: { sharp: 306, blunt: 303 } },
+} as const;
+
+/**
+ * Per-creature damage / death cries and impact material (executable creature sound table at
+ * 0x004EEA88, indexed by type id - 113).
+ */
+export const CREATURE_SFX: Readonly<Record<string, { material: 'bone' | 'flesh'; damage: number; death: number }>> = {
+  skeleton_warrior: { material: 'bone', damage: 163, death: 164 },
+  skeleton_ghost: { material: 'bone', damage: 167, death: 171 },
+  shadow: { material: 'bone', damage: 162, death: 170 },
+  dark_mage: { material: 'flesh', damage: 192, death: 195 },
+};
+
+export const pick = <T>(list: readonly T[]): T => list[Math.floor(Math.random() * list.length)]!;

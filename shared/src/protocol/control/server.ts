@@ -61,6 +61,8 @@ export interface InventoryItemView {
   name: string;
   type: ItemType;
   equipped: boolean;
+  quantity?: number;
+  heal?: number;
   damage?: number[];
   speed?: number;
   protection?: number[];
@@ -70,6 +72,13 @@ export interface InventoryItemView {
 export interface InventoryUpdateMsg {
   op: typeof SC.INVENTORY_UPDATE;
   d: { items: InventoryItemView[]; slots: number; weaponSpeed: number };
+}
+
+/** World object states (original levels): full list on entry, then changes. */
+export type WorldObjectState = 'present' | 'gone' | 'open';
+export interface ObjectStateMsg {
+  op: typeof SC.OBJECT_STATE;
+  d: { objects: { id: number; state: WorldObjectState }[]; full?: boolean };
 }
 
 export interface EntityDespawnMsg {
@@ -96,7 +105,8 @@ export type ServerControlMsg =
   | ErrorMsg
   | PlayerStatsMsg
   | CombatEventMsg
-  | InventoryUpdateMsg;
+  | InventoryUpdateMsg
+  | ObjectStateMsg;
 
 /** Animation state ids carried in snapshot `anim`. */
 export const ANIM = {

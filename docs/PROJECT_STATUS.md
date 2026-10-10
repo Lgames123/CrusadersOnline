@@ -98,8 +98,16 @@
   - Skeleton Warriors spawn where the original placed them, with each placement's HP, XP and resists.
   - Run with `ARENA=level:ca1a` on the server, or offline with `http://localhost:3000/?level=ca1a`. 81 tests.
 
+- [x] Session 12 (2026-10-10): **populated levels.**
+  - `.cap` generic object records decoded (components: transform, class data, render model id) for all 12,025 objects.
+  - The client renders props, ground items and chests with their original models, plus torch flames with a pooled point-light set.
+  - The server handles world objects: pick up items with E (gold, stacking potions, equipment), open chests, break props by melee (HP from the placement). Objects respawn after 5 minutes. Healing potions can be drunk from the inventory.
+  - New melee archetypes: Skeleton Ghost, Shadow, Dark Mage (template loadouts, placement stats; model texture variants).
+  - Original audio: Sound.ctx registry, executable creature and impact sound tables, swings, cries, block, chest, breaking, level-up, stone footsteps.
+  - Reviewed `GeminiDecomp/` (local, git-ignored): verified Sound.ctx, textures.nfo, the ASM state table and the creature templates; rejected unverified claims. 85 tests.
+
 ### Not Yet Done
-- Other creature types in original levels (Ghost, Shadow, Dark Mage… — data is there, archetypes and AI are not), level props and items from `.cap`, doors and scripted sequences, `Ws_a.msh`.
+- Spells and ranged attacks (Dark Mage, Ghost fireball), Ogre / Dasher / Dwarf / elemental archetypes, doors, levers and scripted sequences, `Ws_a.msh`, material-based footsteps, music.
 - Packaging the converter for players (browser conversion into OPFS) so original levels work outside the dev server.
 - Original AI maneuver scripts.
 - First deployment on a real domain (TLS certificate), off-host backups, metrics.

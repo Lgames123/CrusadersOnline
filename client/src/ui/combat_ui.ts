@@ -31,6 +31,15 @@ export class CombatUi {
     this.floaters.push({ el, pos: targetPos.clone(), age: 0 });
   }
 
+  /** Floating text at a world position (pickups, notices). */
+  notice(text: string, at: THREE.Vector3): void {
+    const el = document.createElement('div');
+    el.className = 'floater notice';
+    el.textContent = text;
+    this.root.appendChild(el);
+    this.floaters.push({ el, pos: at.clone(), age: 0 });
+  }
+
   update(dt: number, camera: THREE.Camera, remotes: RemoteEntities, width: number, height: number): void {
     // Health bars for visible remote entities.
     for (const e of remotes.byId.values()) {

@@ -1,4 +1,4 @@
-import type { ArenaDef, TriMeshDef } from './types.ts';
+import type { ArenaDef, TriMeshDef, WorldObjectDef } from './types.ts';
 
 /**
  * Arenas built from an original level converted from the user's own installation
@@ -24,14 +24,31 @@ export interface LevelCreature {
   resist: number[];
 }
 
+export interface LevelObject {
+  kind: 'prop' | 'item' | 'sprite' | 'chest' | 'flag';
+  name: string;
+  modelId: number;
+  /** Original units, Z mirrored. */
+  position: [number, number, number];
+  /** Row-major 3x3, mirrored. */
+  rotation: number[];
+  hp: number;
+  item?: { name: string; quantity: number };
+  contents?: { name: string; quantity: number }[];
+  effect?: string;
+  /** Converted model file (relative to the converter output), when available. */
+  model?: string;
+}
+
 export interface LevelPlacements {
   /** Lower-case mesh name, e.g. "ca_a". */
   mesh: string;
   creatures: LevelCreature[];
+  objects?: LevelObject[];
 }
 
 /** Creature type ids (creature template table) that the slice can spawn, by archetype. */
-export const LEVEL_ARCHETYPES: Readonly<Record<number, string>> = { 145: 'skeleton_warrior' };
+export const LEVEL_ARCHETYPES: Readonly<Record<number, string>> = { 143: 'dark_mage', 145: 'skeleton_warrior', 146: 'skeleton_ghost', 147: 'shadow' };
 
 /** Hostile disposition in the placement records. */
 const HOSTILE = 3;
@@ -105,5 +122,12 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
       resist: c.resist,
     });
   }
-  return { name, boxes: [], meshes: [mesh], spawnPoints: spawnPoints(mesh, hostiles, 8), mobSpawns };
+  const objects: WorldObjectDef[] = [];
+  (placements.objects ?? []).forEach((o, id) => {
+    const at = { x: o.position[0] * s, y: o.position[1] * s, z: o.position[2] * s };
+    if (o.kind === 'item' && o.item) objects.push({ id, kind: 'item', ...at, item: o.item });
+    else if (o.kind === 'chest') objects.push({ id, kind: 'chest', ...at, contents: o.contents ?? [] });
+    else if (o.kind === 'prop' && o.hp > 0) objects.push({ id, kind: 'breakable', ...at, hp: o.hp });
+  });
+  return { name, boxes: [], meshes: [mesh], spawnPoints: spawnPoints(mesh, hostiles, 8), mobSpawns, objects };
 }

@@ -52,11 +52,25 @@ export const EquipItemPacketSchema = z.object({
   }),
 });
 
+export const InteractPacketSchema = z.object({
+  op: z.literal(CS.INTERACT),
+  seq: z.number().int().positive(),
+  d: z.object({ object: z.number().int().min(0).max(1_000_000) }),
+});
+
+export const UseItemPacketSchema = z.object({
+  op: z.literal(CS.USE_ITEM),
+  seq: z.number().int().positive(),
+  d: z.object({ slot: z.number().int().min(0).max(31) }),
+});
+
 export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   AuthTicketPacketSchema,
   SelectCharacterPacketSchema,
   PlayerAttackPacketSchema,
   EquipItemPacketSchema,
+  InteractPacketSchema,
+  UseItemPacketSchema,
   ChatMessagePacketSchema,
   PingPacketSchema,
 ]);

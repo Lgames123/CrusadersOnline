@@ -90,35 +90,62 @@ export interface MobArchetype {
   respawnTicks: number;
 }
 
+/**
+ * Melee creatures of the original levels. Loadouts come from the creature template table
+ * (executable-analysis.md §9.1); HP, XP and resists are overridden per placement in original
+ * levels (the values here are each type's most common placement). AI, swing timings, loot and
+ * shield behaviour are slice values shared with the skeleton.
+ */
+function meleeVariant(base: MobArchetype, over: Partial<MobArchetype> & Pick<MobArchetype, 'id' | 'name'>): MobArchetype {
+  return { ...base, loot: [], ...over };
+}
+
+const SKELETON_WARRIOR: MobArchetype = {
+  id: 'skeleton_warrior',
+  name: 'Skeleton Warrior',
+  // Original: 25 HP, 40 XP and these resists in 357 of 480 level placements; loadout from the
+  // creature template table (Long Sword + Wooden Shield).
+  maxHp: 25,
+  weapon: 'long_sword',
+  shield: 'wooden_shield',
+  resist: [0.9, 1.1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.75],
+  blockChance: 0.35,
+  blockTicks: ticks(700),
+  blockCooldown: ticks(1500),
+  speed: 4.2,
+  aggroRadius: 10,
+  leashRadius: 30,
+  reach: 2.0,
+  arcDeg: 90,
+  swing: { startup: ticks(400), active: ticks(150), recovery: ticks(500) },
+  cooldown: ticks(300),
+  xpReward: 40,
+  goldMin: 5,
+  goldMax: 10,
+  loot: [
+    { itemId: 'long_sword', chance: 0.25 },
+    { itemId: 'scale_armor', chance: 0.1 },
+  ],
+  respawnTicks: ticks(10_000),
+};
+
 export const MOB_ARCHETYPES: Readonly<Record<string, MobArchetype>> = {
-  skeleton_warrior: {
-    id: 'skeleton_warrior',
-    name: 'Skeleton Warrior',
-    // Original: 25 HP, 40 XP and these resists in 357 of 480 level placements; loadout from the
-    // creature template table (Long Sword + Wooden Shield).
-    maxHp: 25,
-    weapon: 'long_sword',
-    shield: 'wooden_shield',
-    resist: [0.9, 1.1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.75],
-    blockChance: 0.35,
-    blockTicks: ticks(700),
-    blockCooldown: ticks(1500),
-    speed: 4.2,
-    aggroRadius: 10,
-    leashRadius: 30,
-    reach: 2.0,
-    arcDeg: 90,
-    swing: { startup: ticks(400), active: ticks(150), recovery: ticks(500) },
-    cooldown: ticks(300),
-    xpReward: 40,
-    goldMin: 5,
-    goldMax: 10,
-    loot: [
-      { itemId: 'long_sword', chance: 0.25 },
-      { itemId: 'scale_armor', chance: 0.1 },
-    ],
-    respawnTicks: ticks(10_000),
-  },
+  skeleton_warrior: SKELETON_WARRIOR,
+  // Skeleton Ghost: Long Sword + Wooden Shield; 40 HP, 75 XP.
+  skeleton_ghost: meleeVariant(SKELETON_WARRIOR, {
+    id: 'skeleton_ghost', name: 'Skeleton Ghost', maxHp: 40, xpReward: 75,
+    resist: [1, 0.75, 1, 0.75, 1.25, 1, 1.1, 1.5, 1, 1.25, 0.5],
+  }),
+  // Shadow: Heavy Mace + Wooden Shield; 60 HP, 200 XP.
+  shadow: meleeVariant(SKELETON_WARRIOR, {
+    id: 'shadow', name: 'Shadow', maxHp: 60, xpReward: 200, weapon: 'heavy_mace',
+    resist: [0.5, 0.25, 0.5, 0.5, 0.5, 0.5, 1.25, 1.25, 0, 1.5, 0.25],
+  }),
+  // Dark Mage: Mace + Metal Shield (its spells are not implemented); 45 HP, 60 XP.
+  dark_mage: meleeVariant(SKELETON_WARRIOR, {
+    id: 'dark_mage', name: 'Dark Mage', maxHp: 45, xpReward: 60, weapon: 'mace', shield: 'metal_shield',
+    resist: [1, 1, 0.75, 0.75, 0.75, 0.75, 1, 1, 1, 1.25, 0.5],
+  }),
 };
 
 export function levelForXp(xp: number): number {

@@ -51,7 +51,7 @@ export class CharacterRepository {
     if (!r) return null;
     const items = await this.db
       .selectFrom('inventory_items')
-      .select(['item_id', 'slot_index', 'is_equipped'])
+      .select(['item_id', 'slot_index', 'is_equipped', 'quantity'])
       .where('character_id', '=', characterId)
       .orderBy('slot_index')
       .execute();
@@ -66,7 +66,7 @@ export class CharacterRepository {
       experience: Number(r.experience_points),
       gold: r.gold,
       hp: r.current_hp,
-      inventory: items.map((i) => ({ slot: i.slot_index, itemId: i.item_id, equipped: i.is_equipped })),
+      inventory: items.map((i) => ({ slot: i.slot_index, itemId: i.item_id, equipped: i.is_equipped, ...(i.quantity > 1 ? { quantity: i.quantity } : {}) })),
     };
   }
 
@@ -96,7 +96,7 @@ export class CharacterRepository {
           if (r.inventory.length > 0) {
             await trx
               .insertInto('inventory_items')
-              .values(r.inventory.map((e) => ({ character_id: r.characterId, item_id: e.itemId, slot_index: e.slot, is_equipped: e.equipped })))
+              .values(r.inventory.map((e) => ({ character_id: r.characterId, item_id: e.itemId, slot_index: e.slot, is_equipped: e.equipped, quantity: e.quantity ?? 1 })))
               .execute();
           }
         }

@@ -121,6 +121,12 @@ export class SessionManager implements TransportHandlers {
         void this.enterWorld(s, s.account, summary.id, summary.name);
         return;
       }
+      case CS.INTERACT:
+        if (s.state === 'in_world') this.zone.interact(conn.id, msg.d.object);
+        return;
+      case CS.USE_ITEM:
+        if (s.state === 'in_world') this.zone.useItem(conn.id, msg.d.slot);
+        return;
       case CS.EQUIP_ITEM:
         if (s.state === 'in_world') this.zone.equip(conn.id, msg.d.slot, msg.d.equip);
         return;

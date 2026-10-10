@@ -74,3 +74,6 @@ tests/playwright-report/
 
 # Database backups (deployment/backup/backup.sh)
 deployment/backups/
+
+# Third-party / LLM-assisted RE notes kept local (may contain extracted data)
+GeminiDecomp/

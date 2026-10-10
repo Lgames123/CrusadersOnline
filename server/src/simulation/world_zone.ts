@@ -1,6 +1,9 @@
 import {
   ANIM,
   BUILTIN_ITEMS,
+  GOLD_ITEM,
+  itemSlug,
+  takeOne,
   addItem,
   equipmentOf,
   sanitizeInventory,
@@ -65,6 +68,8 @@ import {
   type MovementWorld,
   type Rapier,
   type ServerControlMsg,
+  type WorldObjectDef,
+  type WorldObjectState,
   type SwingTiming,
 } from '@crusaders/shared';
 import { InputQueue } from './input_queue.ts';
@@ -125,6 +130,34 @@ export interface WorldZoneOptions {
 /** Ticks a light flinch / heavy stagger interrupts the player (slice value). */
 const FLINCH_TICKS = 6;
 const STAGGER_TICKS = 14;
+
+/** World objects (original levels): interaction reach and respawn delays (slice values). */
+const INTERACT_RANGE = 2.5;
+const INTERACT_HEIGHT = 2;
+const OBJECT_RESPAWN_TICKS = 20 * 300; // 5 min, so a persistent world refills
+const BREAKABLE_RADIUS = 0.5;
+/** Hit-set key offset so swings can record breakables next to entity ids. */
+const OBJECT_HIT_KEY = 1_000_000;
+
+interface WorldObject {
+  def: WorldObjectDef;
+  state: WorldObjectState;
+  hp: number;
+  respawnAt: number;
+}
+
+/** One change in an OBJECT_STATE message. */
+interface ObjectChange {
+  id: number;
+  state: WorldObjectState;
+  /** Entity that caused it (pickup, opening, destruction). */
+  by?: number;
+  /** Item names granted to `by`. */
+  loot?: string[];
+  /** Breakables: damage of this hit and remaining HP. */
+  damage?: number;
+  hp?: number;
+}
 
 /** Saved positions outside these bounds are discarded (fell out of the world, corrupt data). */
 const MIN_VALID_Y = -50;
@@ -235,6 +268,7 @@ export class WorldZone {
   private readonly scratchIds: number[] = [];
   private readonly scratchFrames: InputFrame[] = Array.from({ length: MAX_INPUT_FRAMES }, createInputFrame);
   private readonly frame = createInputFrame();
+  private readonly objects = new Map<number, WorldObject>();
 
   constructor(rapier: Rapier, name: string, arena: ArenaDef, outbox: ZoneOutbox, opts: WorldZoneOptions = {}) {
     this.name = name;
@@ -245,6 +279,7 @@ export class WorldZone {
     this.items = opts.items ?? BUILTIN_ITEMS;
     this.mw = createMovementWorld(rapier, arena);
     for (const s of arena.mobSpawns) this.spawnMob(s.archetype, s);
+    for (const def of arena.objects ?? []) this.objects.set(def.id, { def, state: 'present', hp: def.hp ?? 0, respawnAt: 0 });
   }
 
   get playerCount(): number {
@@ -360,7 +395,99 @@ export class WorldZone {
     });
     this.sendStats(p);
     this.sendInventory(p);
+    if (this.objects.size) {
+      const changed = [...this.objects.values()].filter((o) => o.state !== 'present').map((o) => ({ id: o.def.id, state: o.state }));
+      this.sendJson(connId, { op: SC.OBJECT_STATE, d: { objects: changed, full: true } });
+    }
     return p.entityId;
+  }
+
+  /** Picks up a ground item or opens a chest (CS_INTERACT): within reach, still there, alive. */
+  interact(connId: number, id: number): void {
+    const p = this.players.get(connId);
+    const o = this.objects.get(id);
+    if (!p || !o || !alive(p) || o.state !== 'present' || o.def.kind === 'breakable') return;
+    const pos = p.character.position;
+    if (Math.hypot(o.def.x - pos.x, o.def.z - pos.z) > INTERACT_RANGE || Math.abs(o.def.y - pos.y) > INTERACT_HEIGHT) return;
+    const grants = o.def.kind === 'item' ? (o.def.item ? [o.def.item] : []) : (o.def.contents ?? []);
+    const loot: string[] = [];
+    for (const g of grants) if (this.grantItem(p, g.name, g.quantity)) loot.push(g.quantity > 1 ? `${g.quantity} ${g.name}` : g.name);
+    if (o.def.kind === 'item' && grants.length && !loot.length) return; // bag full: leave it
+    o.state = o.def.kind === 'chest' ? 'open' : 'gone';
+    o.respawnAt = this.tick + OBJECT_RESPAWN_TICKS;
+    this.broadcastObjects([{ id, state: o.state, by: p.entityId, loot }]);
+    const record = this.persistRecord(p);
+    if (record) this.outbox.persist?.([record], 'progress');
+  }
+
+  /** Gold goes to the purse; known items to the bag (stacking potions). False if not taken. */
+  private grantItem(p: Player, name: string, quantity: number): boolean {
+    if (name === GOLD_ITEM) {
+      p.gold += Math.max(1, quantity);
+      p.statsDirty = true;
+      return true;
+    }
+    const def = this.items.get(itemSlug(name));
+    if (!def) return false;
+    let added = false;
+    for (let i = 0; i < Math.max(1, def.stackable ? 1 : quantity); i++) {
+      if (addItem(p.inventory, def.id, def.stackable ? Math.max(1, quantity) : 1, this.items) === null) break;
+      added = true;
+    }
+    if (added) {
+      p.inventoryDirty = true;
+      this.sendInventory(p);
+    }
+    return added;
+  }
+
+  /** Drinks a potion from an inventory slot (CS_USE_ITEM). */
+  useItem(connId: number, slot: number): void {
+    const p = this.players.get(connId);
+    if (!p || !alive(p)) return;
+    const entry = p.inventory.find((e) => e.slot === slot);
+    const def = entry && this.items.get(entry.itemId);
+    if (!def || def.type !== 'potion' || !def.heal) return;
+    takeOne(p.inventory, slot, this.items);
+    p.hp = Math.min(p.maxHp, p.hp + def.heal);
+    p.statsDirty = true;
+    p.inventoryDirty = true;
+    this.sendInventory(p);
+    const record = this.persistRecord(p);
+    if (record) this.outbox.persist?.([record], 'progress');
+  }
+
+  private broadcastObjects(objects: ObjectChange[]): void {
+    for (const p of this.players.values()) this.sendJson(p.connId, { op: SC.OBJECT_STATE, d: { objects } });
+  }
+
+  /** A player's active swing against breakable props in its arc. */
+  private hitBreakables(a: Player, s: Swing, pos: { x: number; y: number; z: number }, yaw: number): void {
+    for (const o of this.objects.values()) {
+      if (o.def.kind !== 'breakable' || o.state !== 'present' || s.hit.has(OBJECT_HIT_KEY + o.def.id)) continue;
+      if (Math.abs(o.def.y - pos.y) > INTERACT_HEIGHT) continue;
+      if (!inMeleeArc(pos.x, pos.z, yaw, o.def.x, o.def.z, PLAYER_REACH, PLAYER_ARC_DEG, BREAKABLE_RADIUS)) continue;
+      s.hit.add(OBJECT_HIT_KEY + o.def.id);
+      const damage = Math.round(originalDamageTaken(this.rollDamage(a, s.combo), damageVector({}, 1)) * 100) / 100;
+      o.hp = Math.max(0, o.hp - damage);
+      if (o.hp <= 0) {
+        o.state = 'gone';
+        o.respawnAt = this.tick + OBJECT_RESPAWN_TICKS;
+      }
+      this.broadcastObjects([{ id: o.def.id, state: o.state, by: a.entityId, damage, hp: Math.ceil(o.hp) }]);
+    }
+  }
+
+  private respawnObjects(): void {
+    const back: ObjectChange[] = [];
+    for (const o of this.objects.values()) {
+      if (o.state === 'present' || this.tick < o.respawnAt) continue;
+      o.state = 'present';
+      o.hp = o.def.hp ?? 0;
+      o.respawnAt = 0;
+      back.push({ id: o.def.id, state: 'present' });
+    }
+    if (back.length) this.broadcastObjects(back);
   }
 
   /**
@@ -410,6 +537,8 @@ export class WorldZone {
         ...(def.damage ? { damage: def.damage } : {}),
         ...(def.speed !== undefined ? { speed: def.speed } : {}),
         ...(def.protection ? { protection: def.protection } : {}),
+        ...(e.quantity && e.quantity > 1 ? { quantity: e.quantity } : {}),
+        ...(def.heal ? { heal: def.heal } : {}),
       });
     }
     this.sendJson(p.connId, { op: SC.INVENTORY_UPDATE, d: { items, slots: INVENTORY_SLOTS, weaponSpeed: p.weapon.speed ?? 1 } });
@@ -553,7 +682,8 @@ export class WorldZone {
     // 3. Swings: hit windows, recovery, combo buffering.
     for (const a of this.actors.values()) if (a.swing && alive(a)) this.updateSwing(a);
 
-    // 4. Deaths and respawns.
+    // 4. Deaths and respawns (actors and world objects).
+    if (this.objects.size && tick % 20 === 0) this.respawnObjects();
     for (const a of this.actors.values()) {
       if (a.deadUntil !== 0 && tick >= a.deadUntil) this.respawn(a);
     }
@@ -676,6 +806,7 @@ export class WorldZone {
         this.applyDamage(a, target, this.rollDamage(a, s.combo));
         if (!alive(a)) return;
       }
+      if (a.kind === 'player' && this.objects.size) this.hitBreakables(a, s, pos, yaw);
     }
     if (elapsed >= t.startup + t.active + t.recovery) {
       a.swing = null;

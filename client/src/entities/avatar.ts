@@ -16,12 +16,16 @@ export interface Avatar {
   dispose(): void;
 }
 
-export type AvatarKind = 'player' | 'self' | 'skeleton_warrior';
+/** 'player' / 'self', or a mob archetype id (game/combat.ts). */
+export type AvatarKind = string;
 
-const COLORS: Record<AvatarKind, { body: number; trim: number }> = {
+const COLORS: Record<string, { body: number; trim: number }> = {
   self: { body: 0x9a7b4f, trim: 0x7a2e24 },
   player: { body: 0x4f6f9a, trim: 0x2e4a7a },
   skeleton_warrior: { body: 0xd8d0b8, trim: 0x5a5448 },
+  skeleton_ghost: { body: 0xa8c0c8, trim: 0x40505a },
+  shadow: { body: 0x3a3a44, trim: 0x18181e },
+  dark_mage: { body: 0x4a2a5a, trim: 0x2a1030 },
 };
 
 /** Procedural mannequin with a sword whose swing and death pose follow the state. */
@@ -38,7 +42,7 @@ export class ProceduralAvatar implements Avatar {
   private death = 0;
 
   constructor(kind: AvatarKind) {
-    const c = COLORS[kind];
+    const c = COLORS[kind] ?? COLORS['skeleton_warrior']!;
     const mat = (color: number) => new THREE.MeshLambertMaterial({ color });
     const torso = new THREE.Mesh(new THREE.CapsuleGeometry(PLAYER_RADIUS, PLAYER_HEIGHT - PLAYER_RADIUS * 2, 4, 12), mat(c.body));
     torso.position.y = PLAYER_HEIGHT / 2;

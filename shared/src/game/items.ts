@@ -6,7 +6,7 @@ import { damageVector, type DamageType, type DamageVector } from './ruleset.ts';
  * `rules/items.json` (converter/src/formats/items_ctx.ts) can replace it with the full table via
  * catalogFromItemRules().
  */
-export type ItemType = 'weapon' | 'shield' | 'armor';
+export type ItemType = 'weapon' | 'shield' | 'armor' | 'potion';
 
 export interface ItemDef {
   /** Stable slug, e.g. "long_sword" (stored in inventory_items.item_id). */
@@ -19,6 +19,10 @@ export interface ItemDef {
   speed?: number;
   /** Armour: damage-taken multipliers (items.ctx `SetProtection`), 1 = none. */
   protection?: DamageVector;
+  /** Potions with `Use HEAL`: hit points restored (items.ctx `UseParameters`). */
+  heal?: number;
+  /** Several of the same item share one inventory slot. */
+  stackable?: boolean;
   price: number;
 }
 
@@ -33,6 +37,7 @@ const weapon = (name: string, dmg: Partial<Record<DamageType, number>>, speed: n
 const shield = (name: string, price: number): ItemDef => ({ id: itemSlug(name), name, type: 'shield', price });
 const armor = (name: string, prot: Partial<Record<DamageType, number>>, price: number): ItemDef =>
   ({ id: itemSlug(name), name, type: 'armor', protection: damageVector(prot, 1), price });
+const potion = (name: string, heal: number, price: number): ItemDef => ({ id: itemSlug(name), name, type: 'potion', heal, stackable: true, price });
 
 export const BUILTIN_ITEMS: ItemCatalog = new Map(
   [
@@ -45,6 +50,8 @@ export const BUILTIN_ITEMS: ItemCatalog = new Map(
     shield('Metal Shield', 50),
     armor('Scale Armor', { SLASH: 0.9, BASH: 0.9 }, 150),
     armor('Banded Armor', { SLASH: 0.8, BASH: 0.8 }, 250),
+    potion('Healing Potion', 10, 100),
+    potion('Greater Healing Potion', 50, 300),
   ].map((d) => [d.id, d]),
 );
 
@@ -54,6 +61,7 @@ interface ItemRule {
   fields: Record<string, string | number>;
   damage: Partial<Record<string, number>>;
   protection: Partial<Record<string, number>>;
+  calls?: { name: string; args: (string | number)[] }[];
 }
 
 /**
@@ -72,6 +80,9 @@ export function catalogFromItemRules(rules: { items: readonly ItemRule[] }): Ite
       def = shield(r.name, price);
     } else if (type === 'ARMOR') {
       def = armor(r.name, r.protection as Partial<Record<DamageType, number>>, price);
+    } else if (type === 'POTION' && r.fields['Use'] === 'HEAL') {
+      const amount = Number(r.calls?.find((c) => c.name === 'UseParameters')?.args[0] ?? 0);
+      if (amount > 0) def = potion(r.name, amount, price);
     }
     if (def && def.id) out.set(def.id, def);
   }
@@ -85,7 +96,13 @@ export interface InventoryEntry {
   slot: number;
   itemId: string;
   equipped: boolean;
+  /** Stack size for stackable items (absent = 1). */
+  quantity?: number;
 }
+
+/** Engine name of the currency item; picked up as gold, never stored in the inventory. */
+export const GOLD_ITEM = 'Gold Pieces';
+export const MAX_STACK = 99;
 
 export const INVENTORY_SLOTS = 32;
 
@@ -103,6 +120,19 @@ export interface Equipment {
   armor: ItemDef | null;
 }
 
+/** Removes one item from the stack in `slot` (the entry goes away at zero). Returns its definition. */
+export function takeOne(inv: InventoryEntry[], slot: number, catalog: ItemCatalog): ItemDef | null {
+  const i = inv.findIndex((e) => e.slot === slot);
+  const e = inv[i];
+  const def = e && catalog.get(e.itemId);
+  if (!e || !def) return null;
+  const q = (e.quantity ?? 1) - 1;
+  if (q <= 0) inv.splice(i, 1);
+  else if (q === 1) delete e.quantity;
+  else e.quantity = q;
+  return def;
+}
+
 export function equipmentOf(inv: readonly InventoryEntry[], catalog: ItemCatalog): Equipment {
   const eq: Equipment = { weapon: UNARMED, shield: null, armor: null };
   for (const e of inv) {
@@ -110,17 +140,27 @@ export function equipmentOf(inv: readonly InventoryEntry[], catalog: ItemCatalog
     const def = catalog.get(e.itemId);
     if (!def) continue;
     if (def.type === 'weapon') eq.weapon = def;
-    else eq[def.type] = def;
+    else if (def.type !== 'potion') eq[def.type] = def;
   }
   return eq;
 }
 
-/** Adds an item to the first free slot; returns the slot or null when the bag is full. */
-export function addItem(inv: InventoryEntry[], itemId: string): number | null {
+/**
+ * Adds an item: stackable items join an existing stack first (up to MAX_STACK), otherwise the
+ * first free slot is used. Returns the slot, or null when the bag is full.
+ */
+export function addItem(inv: InventoryEntry[], itemId: string, quantity = 1, catalog?: ItemCatalog): number | null {
+  if (catalog?.get(itemId)?.stackable) {
+    const stack = inv.find((e) => e.itemId === itemId && (e.quantity ?? 1) + quantity <= MAX_STACK);
+    if (stack) {
+      stack.quantity = (stack.quantity ?? 1) + quantity;
+      return stack.slot;
+    }
+  }
   const used = new Set(inv.map((e) => e.slot));
   for (let s = 0; s < INVENTORY_SLOTS; s++) {
     if (!used.has(s)) {
-      inv.push({ slot: s, itemId, equipped: false });
+      inv.push(quantity > 1 ? { slot: s, itemId, equipped: false, quantity } : { slot: s, itemId, equipped: false });
       inv.sort((a, b) => a.slot - b.slot);
       return s;
     }
@@ -135,7 +175,7 @@ export function addItem(inv: InventoryEntry[], itemId: string): number | null {
 export function setEquipped(inv: InventoryEntry[], slot: number, equip: boolean, catalog: ItemCatalog): boolean {
   const entry = inv.find((e) => e.slot === slot);
   const def = entry && catalog.get(entry.itemId);
-  if (!entry || !def || entry.equipped === equip) return false;
+  if (!entry || !def || entry.equipped === equip || def.type === 'potion') return false;
   if (equip) {
     for (const e of inv) {
       if (e.equipped && catalog.get(e.itemId)?.type === def.type) e.equipped = false;
@@ -154,9 +194,10 @@ export function sanitizeInventory(inv: readonly InventoryEntry[], catalog: ItemC
     const def = catalog.get(e.itemId);
     if (!def || !Number.isInteger(e.slot) || e.slot < 0 || e.slot >= INVENTORY_SLOTS || slots.has(e.slot)) continue;
     slots.add(e.slot);
-    const eq = e.equipped && !equipped.has(def.type);
+    const eq = e.equipped && def.type !== 'potion' && !equipped.has(def.type);
     if (eq) equipped.add(def.type);
-    out.push({ slot: e.slot, itemId: e.itemId, equipped: eq });
+    const q = Math.floor(e.quantity ?? 1);
+    out.push(def.stackable && q > 1 ? { slot: e.slot, itemId: e.itemId, equipped: eq, quantity: Math.min(MAX_STACK, q) } : { slot: e.slot, itemId: e.itemId, equipped: eq });
   }
   return out;
 }

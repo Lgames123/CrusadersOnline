@@ -10,6 +10,7 @@ export const CS = {
   CHAT_MESSAGE: 0x08,
   PING: 0x09,
   EQUIP_ITEM: 0x0a,
+  USE_ITEM: 0x0b,
 } as const;
 
 /** Server -> client opcodes. */
@@ -24,6 +25,7 @@ export const SC = {
   CHAT_BROADCAST: 0x47,
   PONG: 0x48,
   PLAYER_STATS: 0x49,
+  OBJECT_STATE: 0x4a,
   ERROR: 0x4f,
 } as const;
 
