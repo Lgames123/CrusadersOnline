@@ -44,6 +44,7 @@ CrusadersOnline implements an automated testing strategy guaranteeing determinis
   - Player 1 moves forward; Tab 2 observes Player 1 avatar moving smoothly.
   - Player 1 attacks an enemy mob; Tab 2 observes combat damage number.
   - Player 1 disconnects; Tab 2 observes despawn.
+- `tests/e2e/import_game.spec.ts` imports the original installation through the real folder input, then checks Cache Storage and that /generated/* is served by the service worker. It runs only where the installation exists (`GAME_INSTALL_DIR`, default `Crusaders of Might and Magic/`) and is skipped in CI.
 - Implemented in `tests/e2e/two_clients.spec.ts` (two browser contexts as guests). Input goes through the client's real keyboard/mouse handlers; the dev-only `window.__co` hook stands in for pointer lock, which headless browsers do not grant.
 
 ---

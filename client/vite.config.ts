@@ -31,6 +31,9 @@ function localGeneratedAssets(): Plugin {
 
 export default defineConfig({
   plugins: [localGeneratedAssets()],
+  // Pre-bundle the in-browser converter's dependencies (worker) so the dev server does not
+  // discover them mid-import and reload the page.
+  optimizeDeps: { include: ['fflate', '@gltf-transform/core'] },
   server: {
     port: 3000,
     strictPort: true,

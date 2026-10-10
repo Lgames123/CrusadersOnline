@@ -73,9 +73,10 @@ export function parseLevelCollision(bytes: Uint8Array): TriMeshDef {
 }
 
 /**
- * Player spawn candidates: up-facing floor triangles of at least 1 m², 12–25 m (horizontally)
- * from the nearest hostile and within 2 m of its height (same floor). Deterministic: ordered by
- * area, then index. Falls back to the largest floor triangles.
+ * Player spawn candidates: up-facing floor triangles of at least 1 m², at least 15 m
+ * (horizontally) from every hostile on any floor, and within 30 m of one on the same floor
+ * (|dy| <= 2 m), so the player starts near the action but out of reach. Deterministic: ordered
+ * by area, then index. Falls back to the largest floor triangles.
  */
 function spawnPoints(mesh: TriMeshDef, hostiles: { x: number; y: number; z: number }[], count: number): { x: number; y: number; z: number }[] {
   const v = mesh.vertices, ix = mesh.indices;
@@ -90,12 +91,14 @@ function spawnPoints(mesh: TriMeshDef, hostiles: { x: number; y: number; z: numb
     const area = len / 2;
     if (area < 1) continue;
     const x = (v[a]! + v[b]! + v[c]!) / 3, y = (v[a + 1]! + v[b + 1]! + v[c + 1]!) / 3, z = (v[a + 2]! + v[b + 2]! + v[c + 2]!) / 3;
-    let nearest = Infinity;
+    let nearestAny = Infinity;
+    let nearestSameFloor = Infinity;
     for (const h of hostiles) {
-      if (Math.abs(h.y - y) > 2) continue;
-      nearest = Math.min(nearest, Math.hypot(h.x - x, h.z - z));
+      const d = Math.hypot(h.x - x, h.z - z);
+      nearestAny = Math.min(nearestAny, d);
+      if (Math.abs(h.y - y) <= 2) nearestSameFloor = Math.min(nearestSameFloor, d);
     }
-    cand.push({ x, y, z, area, ok: nearest >= 12 && nearest <= 25, i: t });
+    cand.push({ x, y, z, area, ok: nearestAny >= 15 && nearestSameFloor <= 30, i: t });
   }
   const pick = (list: typeof cand) => [...list].sort((p, q) => q.area - p.area || p.i - q.i).slice(0, count);
   const good = pick(cand.filter((c) => c.ok));

@@ -10,6 +10,7 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
+    "@crusaders/converter": "workspace:*",
     "@crusaders/shared": "workspace:*",
     "three": "^0.186.1"
   },

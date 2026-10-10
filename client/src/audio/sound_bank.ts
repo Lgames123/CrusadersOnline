@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 
 /**
- * Development-only: the original game's sounds, converted from the user's own installation
- * (`pnpm convert` → local/generated/sounds, registry in rules/sounds.json from Sound.ctx).
+ * The original game's sounds, converted from the player's own installation (imported in the
+ * browser or `pnpm convert`; files under /generated/sounds, registry rules/sounds.json from Sound.ctx).
  * Sounds are addressed by their Sound.ctx id (the ids the executable uses) or file name.
  * WebAudio with distance attenuation and stereo panning relative to the camera. Silent (all
  * calls are no-ops) when the converted audio is not available.
@@ -28,7 +28,6 @@ export class SoundBank {
   }
 
   static async load(): Promise<SoundBank | null> {
-    if (!import.meta.env.DEV) return null;
     try {
       const manifest = (await (await fetch('/generated/manifest.json')).json()) as Manifest;
       const rules = manifest.rules?.['sounds'];

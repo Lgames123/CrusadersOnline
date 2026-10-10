@@ -23,6 +23,8 @@ import { RemoteEntities } from './entities/remote_entities.ts';
 import { loadOriginalAvatars } from './assets/original_models.ts';
 import { fetchServerArena, loadOriginalLevel, type OriginalLevel } from './assets/original_level.ts';
 import { CREATURE_SFX, SFX, SoundBank, pick } from './audio/sound_bank.ts';
+import { registerAssetServiceWorker } from './assets/game_files.ts';
+import { GameFilesPanel } from './ui/game_files_panel.ts';
 import { InputManager } from './input/input_manager.ts';
 import { connectToWorld } from './network/connect.ts';
 import { CombatUi } from './ui/combat_ui.ts';
@@ -36,6 +38,10 @@ async function main(): Promise<void> {
   const container = document.getElementById('app')!;
   const overlay = document.getElementById('overlay')!;
 
+  // Original assets: imported in this browser (service worker over Cache Storage) or dev server.
+  await registerAssetServiceWorker();
+  const gameFiles = new GameFilesPanel(document.getElementById('game-files')!);
+  void gameFiles.init().then(() => (gameFiles.visible = true));
   const [rapier, originals, sounds] = await Promise.all([initPhysics(), loadOriginalAvatars(), SoundBank.load()]);
   const { renderer, scene } = createRenderContext(container);
   const remotes = new RemoteEntities(scene, originals);
@@ -55,7 +61,16 @@ async function main(): Promise<void> {
   let arena: ArenaDef;
   let levelView: OriginalLevel | null = null;
   if (arenaName.startsWith(LEVEL_PREFIX)) {
-    levelView = await loadOriginalLevel(arenaName);
+    try {
+      levelView = await loadOriginalLevel(arenaName);
+    } catch (err) {
+      // The world runs an original level: its geometry comes from the player's own game files.
+      console.warn('[assets] level unavailable:', err);
+      document.getElementById('error')!.textContent =
+        'This world takes place in an original Crusaders of Might and Magic level. Import your game files (top right) to enter.';
+      gameFiles.visible = true;
+      return;
+    }
     arena = levelView.arena;
     scene.add(levelView.object);
     levelView.applyAtmosphere(scene);
@@ -204,7 +219,10 @@ async function main(): Promise<void> {
     await logout();
     location.reload();
   });
-  input.onLockChange = (locked) => overlay.classList.toggle('hidden', locked || inventoryPanel.open);
+  input.onLockChange = (locked) => {
+    overlay.classList.toggle('hidden', locked || inventoryPanel.open);
+    gameFiles.visible = !locked;
+  };
 
   // Inventory (online only): I toggles it, releasing the pointer so items can be clicked.
   const setInventoryOpen = (open: boolean) => {

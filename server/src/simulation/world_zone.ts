@@ -134,6 +134,8 @@ const STAGGER_TICKS = 14;
 /** World objects (original levels): interaction reach and respawn delays (slice values). */
 const INTERACT_RANGE = 2.5;
 const INTERACT_HEIGHT = 2;
+/** Mobs only notice players within this height difference (slice value). */
+const AGGRO_HEIGHT = 3;
 const OBJECT_RESPAWN_TICKS = 20 * 300; // 5 min, so a persistent world refills
 const BREAKABLE_RADIUS = 0.5;
 /** Hit-set key offset so swings can record breakables next to entity ids. */
@@ -720,6 +722,9 @@ export class WorldZone {
       let bestDist = arch.aggroRadius;
       for (const p of this.players.values()) {
         if (!alive(p)) continue;
+        // Same floor only: original levels stack rooms, and a mob must not sense a player through
+        // the ceiling.
+        if (Math.abs(p.character.position.y - pos.y) > AGGRO_HEIGHT) continue;
         const d = Math.hypot(p.character.position.x - pos.x, p.character.position.z - pos.z);
         if (d <= bestDist) {
           best = p;

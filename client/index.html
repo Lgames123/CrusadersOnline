@@ -58,6 +58,12 @@
       #inventory .count { color: #7d766a; text-transform: none; }
       #prompt { position: fixed; left: 50%; bottom: 22%; transform: translateX(-50%); padding: 6px 12px; background: rgba(12,11,9,.72); border: 1px solid #6b5a3a; color: #f0e6cc; font: 14px/1.3 system-ui, sans-serif; pointer-events: none; }
       .floater.notice { color: #9be08a; font-size: 14px; }
+      #game-files { position: fixed; top: 12px; right: 12px; width: min(320px, calc(100vw - 32px)); padding: 10px 12px; background: rgba(20,18,14,.94); border: 1px solid #6b5a3a; z-index: 20; font: 13px/1.4 system-ui, sans-serif; box-sizing: border-box; }
+      #game-files .title { color: #d9b45a; font-weight: 600; letter-spacing: .04em; }
+      #game-files .status { margin: 4px 0; }
+      #game-files .hint { color: #9a8f78; font-size: 12px; margin: 6px 0 8px; }
+      #game-files .button { display: inline-block; padding: 6px 10px; border: 1px solid #8a7445; background: #3a2f1c; color: #f0e6cc; cursor: pointer; }
+      #game-files .log { margin: 8px 0 0; max-height: 120px; overflow: auto; white-space: pre-wrap; font: 11px/1.35 ui-monospace, Consolas, monospace; color: #bfb8a5; }
       #death { position: fixed; top: 30%; left: 0; right: 0; text-align: center; font: 700 28px/1.2 system-ui, sans-serif; color: #ff6e6e; text-shadow: 0 2px 6px #000; pointer-events: none; }
     </style>
   </head>
@@ -68,6 +74,7 @@
     <div id="player-panel" hidden></div>
     <div id="inventory" hidden></div>
     <div id="prompt" hidden></div>
+    <div id="game-files" hidden></div>
     <div id="death" hidden>You have fallen — respawning…</div>
     <div id="login" class="overlay hidden">
       <div class="panel">

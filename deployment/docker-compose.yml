@@ -33,6 +33,14 @@ services:
       DATABASE_URL: postgresql://crusaders:${DB_PASSWORD}@db:5432/crusaders_online
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # "synthetic-arena", or an original level act such as "level:ca1a". Original levels need the
+      # operator's own conversion (pnpm convert on their copy of the game) mounted below; players
+      # import their own copy in the browser for graphics and sound.
+      ARENA: ${ARENA:-synthetic-arena}
+      GENERATED_DIR: /app/local/generated
+      ITEM_RULES: ${ITEM_RULES:-}
+    volumes:
+      - ${GENERATED_DIR:-../local/generated}:/app/local/generated:ro
     networks: [internal]
 
   web:

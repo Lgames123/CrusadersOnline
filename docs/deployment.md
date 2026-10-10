@@ -66,6 +66,15 @@ Saving never depends on clients completing the WebSocket close handshake (covere
   - the Playwright two-browser E2E (Playwright's Chromium);
   - Docker builds of both images. Publishing is opt-in: with the repository variable `PUBLISH_IMAGES=true`, builds on `main` are pushed to GHCR as `ghcr.io/<owner>/<repo>-server` and `-web`, tagged `main` and `sha-<commit>`.
 
+## 6.1 Original game content (no original files are hosted)
+
+- **Players** import their own copy of Crusaders of Might and Magic in the browser. The *Original game files* panel (top right) takes the installation folder. `converter/src/hosts/browser.ts` converts it in a Web Worker (about 25 s in Edge; models, levels, lightmaps, textures, sounds, rules) into Cache Storage. The service worker `client/public/assets-sw.js` then serves it at `/generated/*`, the same URLs the dev server uses. Nothing is uploaded, and the site never serves original assets. Without an import the game uses placeholder graphics; a world running an original level asks the player to import first.
+- **The server** needs collision, placements and rules for original levels. The operator converts their own copy (`pnpm convert`). Compose mounts `${GENERATED_DIR}` (default `../local/generated`) read-only into the server; set `ARENA=level:<act>` (e.g. `level:ca1a`) and optionally `ITEM_RULES=/app/local/generated/rules/items.json`.
+- **Verified 2026-10-10 on the containerized stack (Caddy :8088, `ARENA=level:ca1a`):**
+  - a new browser shows "Not installed" and, after login, the import request;
+  - after the import and the automatic reload, the player is online in Ca_a, with the original models, at 120 FPS and with 0 corrections.
+- **Same-version rule:** client prediction and server collision come from the same converter. The operator should convert with the same game version the players own (the original 1999 release; GOG 2.0.0.7 was used here).
+
 ## 7. Not yet done
 
 - Deploying the published images to a real host and domain (first real certificate).

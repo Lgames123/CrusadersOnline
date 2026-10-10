@@ -14,6 +14,8 @@ COPY converter/package.json converter/
 COPY tests/package.json tests/
 RUN pnpm install --frozen-lockfile --filter "@crusaders/client..."
 COPY shared/ ./shared/
+# The in-browser converter (players convert their own copy of the game locally).
+COPY converter/ ./converter/
 COPY client/ ./client/
 RUN pnpm --filter @crusaders/client build
 

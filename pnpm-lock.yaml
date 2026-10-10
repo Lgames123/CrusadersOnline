@@ -168,6 +168,9 @@ importers:
 
   client:
     dependencies:
+      '@crusaders/converter':
+        specifier: workspace:*
+        version: link:../converter
       '@crusaders/shared':
         specifier: workspace:*
         version: link:../shared

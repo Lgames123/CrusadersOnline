@@ -106,6 +106,14 @@
   - Original audio: Sound.ctx registry, executable creature and impact sound tables, swings, cries, block, chest, breaking, level-up, stone footsteps.
   - Reviewed `GeminiDecomp/` (local, git-ignored): verified Sound.ctx, textures.nfo, the ASM state table and the creature templates; rejected unverified claims. 85 tests.
 
+- [x] Session 13 (2026-10-10): **the game in any browser, not just the dev server.**
+  - The converter runs in the browser (Web Worker; WebP via OffscreenCanvas, PNG fallback; Cache Storage sink; lazy File reads). A full import takes about 25 s in Edge.
+  - A service worker serves imported assets at /generated/*, and the dev-only gates are gone.
+  - The import panel lets players pick their installation folder, re-import or remove it.
+  - The server container mounts the operator's conversion; `ARENA` is configurable.
+  - Same-floor mob aggro and spawn points 15+ m from any hostile.
+  - New E2E `import_game.spec.ts` (local only; skipped without an installation) checks the import and the service-worker serving. 85 tests + 2 E2E.
+
 ### Not Yet Done
 - Spells and ranged attacks (Dark Mage, Ghost fireball), Ogre / Dasher / Dwarf / elemental archetypes, doors, levers and scripted sequences, `Ws_a.msh`, material-based footsteps, music.
 - Packaging the converter for players (browser conversion into OPFS) so original levels work outside the dev server.
