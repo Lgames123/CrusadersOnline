@@ -83,7 +83,7 @@ The vertical slice now uses the recovered engine rules (`shared/src/game/origina
 | Incoming damage | per type × difficulty resist (medium slash/bash 0.9) × armour protection, summed | engine pipeline |
 | Flinch | 0.5 × random + damage / HP before ≥ 0.7 interrupts the player (≥ 0.8 longer stagger) | engine formula; durations are slice values |
 
-Still slice values: swing timings at speed 1.0, AI, skeleton HP 25 and XP value, neutral creature resists, gold and loot chances. Shield blocking: hold the right mouse button (input flag `BLOCK`, bit 6). Every player starts with the "Wooden Shield". While the flag is held, and the player is not swinging or flinching, a hit from an attacker inside the original frontal cone (dot > cos(30 rad), about ±81°) is stopped completely and reported as `blocked`. Blocking does not change movement, so client prediction stays exact. Assumptions: a block negates the whole hit (the original calls the shield's Use action; any partial absorption is not yet identified), and mobs do not block.
+Creature HP, XP and resists: original placement data (Skeleton Warrior 25 HP, 40 XP, slash 0.9 / bash 1.1 / light 1.5 / dark 0.75). Still slice values: swing timings at speed 1.0, AI, gold and loot chances. Shield blocking: hold the right mouse button (input flag `BLOCK`, bit 6). Every player starts with the "Wooden Shield". While the flag is held, and the player is not swinging or flinching, a hit from an attacker inside the original frontal cone (dot > cos(30 rad), about ±81°) is stopped completely and reported as `blocked`. Blocking does not change movement, so client prediction stays exact. Assumptions: a block negates the whole hit (the original calls the shield's Use action; any partial absorption is not yet identified), and mobs do not block.
 
 ---
 
@@ -94,5 +94,9 @@ Still slice values: swing timings at speed 1.0, AI, skeleton HP 25 and XP value,
 - **Effects:** weapon damage and speed (swing length), shield (blocking needs one), armour protection (multiplies incoming damage after the difficulty resist).
 - **Creatures:** loadouts come from the original creature table. The Skeleton Warrior wields a Long Sword and deals its whole damage vector (10 slash, 9 after the medium resist): creatures skip the player's stronger-of-slash/bash and Might rules.
 - **Loot (slice values):** a skeleton kill rolls Long Sword (25%) and Scale Armor (10%) into the killer's bag. The combat event lists the dropped items.
-- **Experience (original):** thresholds 500, 1500, 3500, 6500, 10500, then +4000 per level. On level-up the max-HP gain is added to current HP; it is not a full heal. The skeleton's XP value (100) is a placeholder, see UNK-009.
+- **Experience (original):** thresholds 500, 1500, 3500, 6500, 10500, then +4000 per level. On level-up the max-HP gain is added to current HP; it is not a full heal. A Skeleton Warrior gives 40 XP.
 - **Client:** I opens the inventory window (click an item to equip or unequip it). The HUD XP bar follows the original thresholds.
+
+## 7. Creature Shield AI (slice, 2026-10-09)
+
+Creatures with a shield in their loadout (the Skeleton Warrior carries a Wooden Shield) can raise it against a player who starts a swing at them. The shield goes up if the creature is chasing, not mid-swing and off cooldown, and the creature is in the swing's reach + 1 m and arc; it then rolls a 35% chance. The shield stays up for 0.7 s, facing the attacker; during that time the creature neither moves nor attacks. The next block is possible 1.5 s after it lowers. A raised shield uses the same frontal cone as the player's (cos(30 rad) ≈ ±81°) and stops the whole hit ("Blocked"). The original AI chooses between the `SHIELD_BLOCK` and `SHIELD_COVER` maneuvers in scripts that are not decoded, so the chance and the durations are slice values.

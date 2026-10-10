@@ -32,7 +32,7 @@ beforeAll(async () => {
 const SKELETON = MOB_ARCHETYPES['skeleton_warrior']!;
 
 /** In-process zone with one player; captures JSON messages and persist requests. */
-function setup(opts: { experience?: number; inventory?: InventoryEntry[] } = {}) {
+function setup(opts: { experience?: number; inventory?: InventoryEntry[]; random?: () => number } = {}) {
   const messages: ServerControlMsg[] = [];
   const persisted: { records: PersistRecord[]; reason: string }[] = [];
   const zone = new WorldZone(rapier, 'test', createSyntheticArena(), {
@@ -40,7 +40,7 @@ function setup(opts: { experience?: number; inventory?: InventoryEntry[] } = {})
       if (typeof data === 'string') messages.push(JSON.parse(data) as ServerControlMsg);
     },
     persist: (records, reason) => persisted.push({ records, reason }),
-  }, { random: () => 0 });
+  }, { random: opts.random ?? (() => 0) });
   const entityId = zone.join(1, { name: 'Tester', characterId: 'c1', position: { x: 0, y: 0.5, z: 0 }, ...opts });
   const buf = new DataView(new ArrayBuffer(INPUT_PACKET_MAX_BYTES));
   let clientTick = 0;
@@ -107,7 +107,8 @@ describe('authoritative melee', () => {
     expect(t.mob().alive).toBe(false);
     const hits = t.events().filter((e) => e.target === t.mob().id);
     // Axe 5/5 (tie -> bash) x Might multiplier 1.0 x attack mode 1.0 / 1.0 / 1.25 (power hit)
-    expect(hits.map((e) => e.damage).slice(0, 3)).toEqual([5, 5, 6.25]);
+    // x the skeleton's original bash multiplier 1.1
+    expect(hits.map((e) => e.damage).slice(0, 3)).toEqual([5.5, 5.5, 6.88]);
     expect(hits.findIndex((e) => e.killed)).toBe(4); // 25 HP skeleton dies on the 5th hit
     const kill = hits.find((e) => e.killed)!;
     // random() = 0 makes every loot roll succeed.
@@ -115,7 +116,7 @@ describe('authoritative melee', () => {
     t.run(1);
     expect(t.stats().at(-1)).toMatchObject({ xp: SKELETON.xpReward, gold: SKELETON.goldMin });
     const saved = t.persisted.find((p) => p.reason === 'progress')?.records[0];
-    expect(saved).toMatchObject({ experience: 100, gold: 5 });
+    expect(saved).toMatchObject({ experience: 40, gold: 5 });
     expect(saved?.inventory?.map((e) => e.itemId)).toEqual(['axe', 'wooden_shield', 'long_sword', 'scale_armor']);
     expect(t.inventories().at(-1)?.items.map((i) => [i.name, i.equipped])).toEqual([
       ['Axe', true], ['Wooden Shield', true], ['Long Sword', false], ['Scale Armor', false],
@@ -152,14 +153,14 @@ describe('authoritative melee', () => {
   });
 
   it('levels up at the original threshold; the max-HP gain is added to current HP', () => {
-    const t = setup({ experience: 450 });
+    const t = setup({ experience: 470 });
     t.run(20, INPUT.FORWARD, 0);
     t.run(30);
     for (let i = 0; i < 200 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
     t.run(1);
     const s = t.stats();
     const up = s.findIndex((x) => x.level === 2);
-    expect(s[up]).toMatchObject({ level: 2, maxHp: 80, xp: 550 }); // 50 + 0.6 x 25 x 2
+    expect(s[up]).toMatchObject({ level: 2, maxHp: 80, xp: 510 }); // 50 + 0.6 x 25 x 2
     expect(s[up]!.hp).toBe(Math.min(80, s[up - 1]!.hp + 15));
   });
 });
@@ -266,7 +267,7 @@ describe('inventory and equipment', () => {
     t.run(30);
     for (let i = 0; i < 200 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
     const dealt = t.events().filter((e) => e.target === t.mob().id).map((e) => e.damage);
-    expect(dealt.slice(0, 3)).toEqual([10, 10, 12.5]); // Long Sword 10 slash, power hit x1.25
+    expect(dealt.slice(0, 3)).toEqual([9, 9, 11.25]); // Long Sword 10 slash x skeleton slash 0.9, power hit x1.25
     const taken = t.events().filter((e) => e.target === t.entityId && !e.blocked).map((e) => e.damage);
     expect(taken.length).toBeGreaterThan(0);
     expect(taken.every((d) => d === 8.1)).toBe(true); // 10 x resist 0.9 x Scale Armor 0.9
@@ -287,5 +288,35 @@ describe('inventory and equipment', () => {
   it('gives new characters the starting kit', () => {
     const t = setup();
     expect(t.inventories()[0]!.items.map((i) => [i.itemId, i.equipped])).toEqual([['axe', true], ['wooden_shield', true]]);
+  });
+});
+
+describe('skeleton shield AI', () => {
+  it('raises its shield against a frontal swing, then lowers it for a cooldown', () => {
+    // 0.99 passes the 35% block roll (and skips loot); 0 (the default) never blocks.
+    const t = setup({ random: () => 0.99 });
+    t.run(20, INPUT.FORWARD, 0);
+    t.run(30);
+    t.zone.attack(1);
+    t.run(12);
+    const first = t.events().filter((e) => e.target === t.mob().id);
+    expect(first).toHaveLength(1);
+    expect(first[0]).toMatchObject({ blocked: true, damage: 0 });
+    expect(t.mob().hp).toBe(SKELETON.maxHp);
+    // Within the cooldown the next swing connects.
+    t.zone.attack(1);
+    t.run(12);
+    const second = t.events().filter((e) => e.target === t.mob().id);
+    expect(second).toHaveLength(2);
+    expect(second[1]!.blocked).toBeUndefined();
+    expect(second[1]!.damage).toBeGreaterThan(0);
+  });
+
+  it('never blocks with a zero random source (deterministic combat tests)', () => {
+    const t = setup();
+    t.run(20, INPUT.FORWARD, 0);
+    t.run(30);
+    for (let i = 0; i < 200 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
+    expect(t.events().some((e) => e.target === t.mob().id && e.blocked)).toBe(false);
   });
 });

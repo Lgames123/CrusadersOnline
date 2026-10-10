@@ -99,5 +99,9 @@ Status values:
 | Task ID | Description | Priority | Dependencies | Complexity | Status | Doc Link | Source Files |
 |---|---|---|---|---|---|---|---|
 | **TST-001** | Implement Vitest suite for math, packet parsing, and movement validation | P1 | ENG-001 | Low | **IN PROGRESS** (40 tests incl. 10 integration tests) | [testing-strategy.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/testing-strategy.md) | `tests/unit/` |
-| **TST-002** | Playwright multi-client end-to-end synchronization tests | P1 | VRT-001 | Medium | **VERIFIED** (move, combat number, despawn across two tabs) | [testing-strategy.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/testing-strategy.md) | `tests/e2e/` |
+| **TST-002** | Playwright multi-client end-to-end synchronization tests | P1 | VRT-001 | Medium | **VERIFIED** (move, combat number, despawn across two tabs; runs in CI) |
+| **ARC-010** | `.cap`/`.msh` DCL compression and `.cap` creature records (UNK-009) | P1 | ARC-009 | High | **VERIFIED** (`tools/re/pkware_dcl.py`, `tools/re/cap_creatures.py`; `.msh` geometry layout pending) |
+| **OPS-001** | CI (typecheck, tests with PostgreSQL, E2E, image publishing to GHCR) | P1 | TST-002 | Medium | **IMPLEMENTED** (`.github/workflows/ci.yml`; first run on push) |
+| **OPS-002** | Scheduled database backups and restore procedure | P1 | SRV-004 | Low | **VERIFIED** (local restore drill) |
+| **OPS-003** | TLS on a real domain with HSTS | P1 | DEP-001 | Low | **READY** (config in place; needs a domain) | [testing-strategy.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/testing-strategy.md) | `tests/e2e/` |
 | **OPS-001** | Dockerize server, client, and PostgreSQL with single-command compose | P1 | VRT-005 | Low | **VERIFIED** (local Docker Desktop; TLS/backups pending) | [deployment.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/deployment.md) | `deployment/` |

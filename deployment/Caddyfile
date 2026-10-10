@@ -14,6 +14,10 @@
 		file_server
 	}
 
+	# HSTS only when actually served over HTTPS (a domain SITE_ADDRESS), never on local :80.
+	@https protocol https
+	header @https Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
 	header {
 		X-Content-Type-Options nosniff
 		Referrer-Policy same-origin

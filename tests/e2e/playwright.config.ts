@@ -5,7 +5,9 @@ import { defineConfig } from '@playwright/test';
  * PGlite, test env so guest play is enabled) plus the Vite dev client on their own ports, so a
  * running dev setup on 8090/3000 is never disturbed. Uses an installed browser channel
  * (PW_CHANNEL, default msedge; "chrome" also works) — no Playwright browser download needed.
+ * PW_CHANNEL=chromium uses Playwright's own Chromium (CI: `playwright install chromium`).
  */
+const channel = process.env['PW_CHANNEL'] ?? 'msedge';
 const SERVER_PORT = Number(process.env['E2E_SERVER_PORT'] ?? 8091);
 const CLIENT_PORT = Number(process.env['E2E_CLIENT_PORT'] ?? 3001);
 
@@ -17,7 +19,7 @@ export default defineConfig({
   reporter: [['list']],
   use: {
     baseURL: `http://localhost:${CLIENT_PORT}`,
-    channel: process.env['PW_CHANNEL'] ?? 'msedge',
+    ...(channel === 'chromium' ? {} : { channel }),
     headless: process.env['HEADED'] !== '1',
     viewport: { width: 960, height: 600 },
   },

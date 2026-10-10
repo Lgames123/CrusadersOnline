@@ -86,9 +86,14 @@
   - Inventory and equipment: item catalog (built-in or converted items.json), 32-slot inventory persisted in `inventory_items`, `CS_EQUIP_ITEM` / `SC_INVENTORY_UPDATE`, inventory window (I), skeleton with Long Sword + Wooden Shield, loot drops.
   - Playwright two-tab E2E (`pnpm test:e2e`): player 2 sees player 1 move, fight and despawn. 75 tests + 1 E2E.
 
+- [x] Session 10 (2026-10-09):
+  - Reverse engineering: `.cap`/`.msh` use PKWARE DCL compression (own decoder `tools/re/pkware_dcl.py`); `.cap` = level object placements with per-creature HP, XP, disposition and resists (`tools/re/cap_creatures.py`, UNK-009 resolved). The Skeleton Warrior now uses its original 25 HP, 40 XP and resists.
+  - Creature shield AI: skeletons raise their shield against frontal swings (35%, 0.7 s, 1.5 s cooldown; slice values).
+  - M11: GitHub Actions CI (typecheck, tests incl. PostgreSQL 18, E2E, GHCR images), scheduled `pg_dump` backups with restore script (drill done), HSTS on HTTPS. 77 tests + 1 E2E.
+
 ### Not Yet Done
-- Creature HP / XP values from level data (UNK-009), creature resists, creature shield use.
-- TLS on a real domain, backups, CI, image registry (M11).
+- `.msh` geometry decoding (level collision and rendering), original AI maneuver scripts.
+- First deployment on a real domain (TLS certificate), off-host backups, metrics.
 - World unit / physics constants (UNK-007), `.msh` levels, `.cap` collision.
 - Converter: browser Web Worker host, `.mdl`/`.ani`/`.msh` parsers, `items.ctx`/`models.ctx` parsers.
 - Client: 60 FPS and camera clipping not yet verified interactively (browser pane was hidden during the session).

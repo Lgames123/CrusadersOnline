@@ -19,7 +19,8 @@ Every unknown item is assigned a priority and a concrete validation experiment t
 ---
 
 ### UNK-002: Collision Capsule Representation in `.cap` Files
-- **Status:** Investigating | **Priority:** Medium
+- **Status:** Hypothesis rejected (2026-10-09) — `.cap` files are DCL-compressed level object placements (asset-format-discovery.md §6). Level collision must come from the `.msh` geometry.
+- **Original priority:** Medium
 - **Description:** How are collision hulls packed in `.cap` files (e.g. `Bs1a.cap`, 36 KB)?
 - **Hypothesis:** Series of oriented bounding boxes (OBB) or spherical/capsule primitives with center $(X,Y,Z)$, radius $R$, and height $H$.
 - **Verification Experiment:** Hex dump `Bs1a.cap`, test IEEE 754 float extraction, and check if bounding volumes align with the level mesh boundaries.
@@ -68,6 +69,7 @@ Every unknown item is assigned a priority and a concrete validation experiment t
 - **Next step:** re-run Ghidra auto-analysis with the aggressive function finder, then follow readers of the resist table filled by `Rules_LoadDefaultCtx`.
 
 ### UNK-009: Creature HP and XP Values
-- **Status:** Open | **Priority:** Medium
+- **Status:** Resolved (2026-10-09) — per-placement HP, XP, disposition and resists in the `.cap` object records (asset-format-discovery.md §6.2).
+- **Original priority:** Medium
 - **Description:** Creature HP and experience value are not in the creature template table (executable-analysis.md §9). Default HP is 20; actual values must come from per-placement records in the level `.msh` files.
 - **Verification Experiment:** Locate the `.msh` object-placement section (NUM_MESH_OBJ_TYPES check), find records carrying a creature type id (113–162) and correlate their numeric fields with in-game HP.

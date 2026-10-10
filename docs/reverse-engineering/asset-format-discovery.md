@@ -174,6 +174,43 @@ A sequence of 32-bit words processed **bone by bone, in model node order**:
 ### 4.5 Conversion
 The converter samples each channel once per original frame (30 fps) into LINEAR glTF channels, applies the same Z-mirror as the models, holds the root X/Z like the engine and stores `rootMotion`, `frames`, the designer label from `models.ctx` (e.g. "run forward") and the events in each animation's `extras`. Converted characters face **−Z**, matching the client's yaw convention; left/right is confirmed (right hand on +X when facing −Z).
 
+## 6. Level Files (`Meshes/*.msh`, `Caps/*.cap`) — Compression and Creature Records `[CONFIRMED]`
+
+### 6.1 Compression
+Both level file types are compressed with the **PKWARE Data Compression Library "implode"** method. The level loader allocates exactly the 12,596-byte work buffer the library's `explode` routine needs. `tools/re/pkware_dcl.py` is an independent decoder written from the published format description (the same format zlib's `contrib/blast` handles).
+- **`.cap`:** 0x94-byte header (uint32 uncompressed size, magic `0xD00D0012`, level name such as `Ca_a` at 0x34, 0xCD fill), then **one** DCL stream holding all the level's object records.
+- **`.msh`:** header starting `0A 00 ED FE` (uint32 sizes at 0x04 and 0x08; 0x08 equals the first stream's output size), then several sections. In `Bs1a.msh`: a DCL stream at 0x116 (1,029,016 bytes, geometry), an uncompressed block, then two more DCL streams (431,947 and 2,159,270 bytes; the last holds texture and material names). The geometry layout itself is not decoded yet.
+
+### 6.2 `.cap` object records
+`.cap` files are the level **object placements** (creatures, NPCs, containers, items, sprites, scripted sequences), not collision data.
+
+Each creature record starts with the marker `2D 00 00 00 CD CD CD CD`. At +0x1C it holds the creature type id (113–162, see executable-analysis.md §9.1); at +0x40 the instance name (e.g. `SkeletonWarrior18`). The record also contains the creature's items by name (e.g. `Long Sword`). Fields are best located relative to the **XP block** `02 00 00 00 | xp:int32 | 0 0 0 | disposition:int32 ×2`:
+
+| Field | Position | Notes |
+|---|---|---|
+| XP value | XP block + 4 | experience granted to the killer; **−10** for citizens, guards and named NPCs (killing them costs XP) |
+| Disposition | XP block + 20, + 24 | 0 named NPC, 1 citizen, 2 guard, 3 hostile, 4 possessed by the Deceiver |
+| Max HP | XP block − 0x1B8 (float32) | followed by a constant 200.0 |
+| Resists | XP block − 0x118 (11 × float32) | damage-taken multipliers, SLASH … DARK |
+
+`tools/re/cap_creatures.py` extracts these values from a local installation. Most common values per type (facts):
+
+| Creature | Placements | HP | XP | Notable resists |
+|---|---|---|---|---|
+| Skeleton Warrior | 480 (357 typical) | 25 | 40 | slash 0.9, bash 1.1, light 1.5, dark 0.75 |
+| Skeleton Ghost | 136 | 40 | 75 | bash 0.75, spirit 1.5, dark 0.5 |
+| Shadow | 98 | 60 | 200 | slash 0.5, bash 0.25, light 1.5 |
+| Dasher Brute / Scout | 309 / 86 | 30 / 20 | 50 / 40 | slash 0.8, bash 1.2 |
+| Dark Mage / Dark Master | 63 / 19 | 45 / 80 | 60 / 125 | light 1.25–1.35, dark 0.25–0.5 |
+| Dwarf Ironpick Rebel / Zealot | 48 / 23 | 40 / 60 | 60 / 100 | bash 0.8 / 0.5 |
+| Ogre Outlaw | 50 | 100 | 75 | — |
+| Ice Titan / Rock / Ice / Lava Elemental | 34 / 31 / 37 / 7 | 125 / 150 / 175 / 200 | 150 / 125 / 200 / 250 | elemental immunities (0.0) |
+| Necros (final boss) | 1 | 1000 | 10 | 0.13–0.8 on every type |
+
+Individual placements override these values; level designers made stronger variants. For example, 18 Skeleton Warriors have 80 HP and give 60 XP.
+
+---
+
 ## 5. Pipeline Conversion Strategy
 
 Because textures (`.tga`) and audio (`.wav`, `.mp3`) use standard industry formats:

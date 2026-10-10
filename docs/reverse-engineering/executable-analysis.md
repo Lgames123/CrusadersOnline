@@ -194,7 +194,7 @@ Examples (facts only):
 
 ### 9.2 Creature stats
 - Creature stats share the player's damage pipeline (§8) except vtable slot 45, which is empty for creatures: **creatures do not apply the Might multiplier or the stronger-of-slash/bash rule** — they deal the weapon's whole damage vector (unarmed `DD` row + weapon), × attack mode, + bonus, × multipliers. Skeleton Warrior with a Long Sword therefore hits for 10 slash (9 after the medium resist).
-- The creature constructor (`CreatureStats_Ctor` 0x0044C130) defaults HP/max HP to 20. Saved creature state (`CreatureStats_Save/Load`) contains HP, max HP and a level-like pair; no attribute or XP values. HP and the XP value of placed creatures therefore come from the level data (`.msh` placement records, still undecoded — UNK-009).
+- The creature constructor (`CreatureStats_Ctor` 0x0044C130) defaults HP/max HP to 20. Saved creature state (`CreatureStats_Save/Load`) contains HP, max HP and the disposition pair (`+0x1D4/+0x1D8`, default 3 = hostile; the Spectral Ally spell sets 6). HP, XP value and resists of placed creatures come from the `.cap` object records (asset-format-discovery.md §6.2).
 - `Stats_LoseHp` (0x0044CA00): the flinch/stagger roll (§8.4) only runs when the victim is the player; a hit from creature type 150 (Necros) always forces the light flinch.
 - On death (`CreatureStats_OnDeath` 0x0044C6A0) the creature's XP value (`+0x1C4`) is passed to the player via `Stats_AddExperience`, the death sound for its type is played and spell effects are released.
 

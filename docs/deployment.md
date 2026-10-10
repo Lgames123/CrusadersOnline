@@ -56,8 +56,18 @@ Saving never depends on clients completing the WebSocket close handshake (covere
 - Through Caddy on :8088: static client served, guest endpoint returns 404, registration sets an `HttpOnly; SameSite=Strict` cookie, ticket → WebSocket upgrade → world entry, 20 ticks of movement with 0 corrections.
 - `docker compose restart server` with a player connected: the character's position is restored exactly after the restart (≈1.5 s).
 
-## 6. Not yet done (M11)
+## 6. TLS, backups, CI (M11, 2026-10-09)
 
-- TLS on a real domain (`SITE_ADDRESS`), HSTS.
-- Database backups (`pg_dump` schedule, restore drill) — see backup-and-recovery.md.
-- Image publishing (registry, tags), CI build, resource limits, log shipping and metrics.
+- **TLS:** set `SITE_ADDRESS` to the public domain and `WEB_PORT=80`, `WEB_TLS_PORT=443`, `COOKIE_SECURE=true` in `deployment/.env`. The domain's DNS must point at the host with ports 80/443 reachable. Caddy then obtains and renews the certificate and redirects HTTP to HTTPS. **HSTS** (`max-age=31536000; includeSubDomains`) is sent only on HTTPS responses, so local `:80` testing is unaffected. The Caddyfile was validated with a domain address; obtaining a real certificate needs a real domain and has not been exercised.
+- **Backups:** compose service `backup` writes a `pg_dump` every 24 h into `deployment/backups/` and keeps 7 days; `deployment/backup/restore.sh` restores one. See backup-and-recovery.md (restore drill done locally).
+- **CI:** `.github/workflows/ci.yml` runs on pushes to `main` and on pull requests:
+  - typecheck;
+  - unit and integration tests against PGlite **and** a PostgreSQL 18 service container;
+  - the Playwright two-browser E2E (Playwright's Chromium);
+  - Docker builds of both images. Publishing is opt-in: with the repository variable `PUBLISH_IMAGES=true`, builds on `main` are pushed to GHCR as `ghcr.io/<owner>/<repo>-server` and `-web`, tagged `main` and `sha-<commit>`.
+
+## 7. Not yet done
+
+- Deploying the published images to a real host and domain (first real certificate).
+- Resource limits, log shipping, metrics and alerting.
+- Off-host backup upload.

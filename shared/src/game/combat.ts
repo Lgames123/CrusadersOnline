@@ -1,12 +1,13 @@
 import { TICK_RATE } from '../constants.ts';
 import { originalMaxHp, type Attributes } from './original_stats.ts';
-import { ATTACK_MODE_SCALE } from './ruleset.ts';
+import { ATTACK_MODE_SCALE, type DamageVector } from './ruleset.ts';
 
 /**
  * Combat and progression rules shared by server (authority) and client (presentation).
  * Damage, HP, resist and experience formulas follow the original engine (original_stats.ts,
- * ruleset.ts, executable-analysis.md §8–9); swing timings, AI parameters and creature HP / XP
- * values are vertical-slice values until the corresponding original data is recovered.
+ * ruleset.ts, executable-analysis.md §8–9); creature HP, XP and resists are the most common
+ * values of the original level placements (asset-format-discovery.md §6). Swing timings and AI
+ * parameters are vertical-slice values.
  */
 const ticks = (ms: number) => Math.round((ms / 1000) * TICK_RATE);
 
@@ -60,6 +61,16 @@ export interface MobArchetype {
   weapon: string;
   /** Item id of its shield, if any. */
   shield: string | null;
+  /** Damage-taken multipliers per type (level placement data, SLASH ... DARK). */
+  resist: DamageVector;
+  /**
+   * Shield AI (slice values; the original uses SHIELD_BLOCK / SHIELD_COVER maneuvers whose
+   * scripts are not decoded): chance to raise the shield when a player starts a swing at it,
+   * how long it stays up, and the minimum time before the next block.
+   */
+  blockChance: number;
+  blockTicks: number;
+  blockCooldown: number;
   /** Chase speed, m/s. */
   speed: number;
   aggroRadius: number;
@@ -83,11 +94,15 @@ export const MOB_ARCHETYPES: Readonly<Record<string, MobArchetype>> = {
   skeleton_warrior: {
     id: 'skeleton_warrior',
     name: 'Skeleton Warrior',
-    // HP placeholder until level placement data is decoded (UNK-009); loadout from the
-    // creature template table: Long Sword + Wooden Shield.
+    // Original: 25 HP, 40 XP and these resists in 357 of 480 level placements; loadout from the
+    // creature template table (Long Sword + Wooden Shield).
     maxHp: 25,
     weapon: 'long_sword',
     shield: 'wooden_shield',
+    resist: [0.9, 1.1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.75],
+    blockChance: 0.35,
+    blockTicks: ticks(700),
+    blockCooldown: ticks(1500),
     speed: 4.2,
     aggroRadius: 10,
     leashRadius: 30,
@@ -95,7 +110,7 @@ export const MOB_ARCHETYPES: Readonly<Record<string, MobArchetype>> = {
     arcDeg: 90,
     swing: { startup: ticks(400), active: ticks(150), recovery: ticks(500) },
     cooldown: ticks(300),
-    xpReward: 100,
+    xpReward: 40,
     goldMin: 5,
     goldMax: 10,
     loot: [

@@ -71,3 +71,6 @@ __pycache__/
 # Playwright output
 tests/test-results/
 tests/playwright-report/
+
+# Database backups (deployment/backup/backup.sh)
+deployment/backups/

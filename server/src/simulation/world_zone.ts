@@ -125,8 +125,6 @@ export interface WorldZoneOptions {
 /** Ticks a light flinch / heavy stagger interrupts the player (slice value). */
 const FLINCH_TICKS = 6;
 const STAGGER_TICKS = 14;
-/** Creatures currently use neutral resists (creature tables not decoded yet). */
-const NEUTRAL_RESIST: DamageVector = damageVector({}, 1);
 
 /** Saved positions outside these bounds are discarded (fell out of the world, corrupt data). */
 const MIN_VALID_Y = -50;
@@ -196,6 +194,10 @@ interface Mob extends ActorBase {
   kind: 'mob';
   archetype: MobArchetype;
   weapon: ItemDef;
+  shield: ItemDef | null;
+  /** Tick until which the shield is raised (AI block); 0 = lowered. */
+  blockUntil: number;
+  nextBlockTick: number;
   spawn: { x: number; y: number; z: number };
   state: 'idle' | 'chase' | 'return';
   threat: Map<number, number>;
@@ -280,6 +282,9 @@ export class WorldZone {
       deadUntil: 0,
       archetype,
       weapon,
+      shield: archetype.shield ? this.items.get(archetype.shield) ?? null : null,
+      blockUntil: 0,
+      nextBlockTick: 0,
       spawn: { ...at },
       state: 'idle',
       threat: new Map(),
@@ -489,6 +494,24 @@ export class WorldZone {
     const combo = chained ? p.lastCombo + 1 : 1;
     p.swing = { combo, start: this.tick, timing: p.swingTiming, hit: new Set() };
     p.queuedAttack = false;
+    this.mobsReactToSwing(p);
+  }
+
+  /** Shielded mobs in front of a player who starts a swing may raise their shield (AI block). */
+  private mobsReactToSwing(p: Player): void {
+    const pp = p.character.position;
+    const yaw = dequantizeAngle(p.yaw);
+    for (const m of this.actors.values()) {
+      if (m.kind !== 'mob' || !alive(m) || !m.shield || m.swing || m.state !== 'chase') continue;
+      if (this.tick < m.nextBlockTick || m.blockUntil > this.tick) continue;
+      const mp = m.character.position;
+      if (!inMeleeArc(pp.x, pp.z, yaw, mp.x, mp.z, PLAYER_REACH + 1, PLAYER_ARC_DEG, PLAYER_RADIUS)) continue;
+      // Written as 1 - chance so a zero random source (deterministic tests) never blocks.
+      if (this.random() < 1 - m.archetype.blockChance) continue;
+      m.blockUntil = this.tick + m.archetype.blockTicks;
+      m.nextBlockTick = m.blockUntil + m.archetype.blockCooldown;
+      m.yaw = quantizeAngle(yawTowards(mp.x, mp.z, pp.x, pp.z));
+    }
   }
 
   step(): void {
@@ -589,6 +612,10 @@ export class WorldZone {
       if (!target || fromSpawn > arch.leashRadius) {
         m.threat.clear();
         m.state = 'return';
+      } else if (m.blockUntil > this.tick) {
+        // Shield up: hold position facing the target.
+        const t = target.character.position;
+        m.yaw = quantizeAngle(yawTowards(pos.x, pos.z, t.x, t.z));
       } else if (!m.swing) {
         const t = target.character.position;
         const dist = Math.hypot(t.x - pos.x, t.z - pos.z);
@@ -615,7 +642,7 @@ export class WorldZone {
     m.input.yaw = m.yaw;
     m.input.clientTick = this.tick;
     stepCharacter(this.mw, m.character, m.input, m.stats, TICK_DT);
-    m.anim = m.input.flags & MOVE_MASK ? ANIM.RUN : ANIM.IDLE;
+    m.anim = m.blockUntil > this.tick ? ANIM.BLOCK : m.input.flags & MOVE_MASK ? ANIM.RUN : ANIM.IDLE;
   }
 
   private updateSwing(a: Actor): void {
@@ -632,7 +659,7 @@ export class WorldZone {
         const tp = target.character.position;
         if (!inMeleeArc(pos.x, pos.z, yaw, tp.x, tp.z, reach, arc, PLAYER_RADIUS)) continue;
         s.hit.add(target.entityId);
-        if (target.kind === 'player' && this.blocks(target, a)) {
+        if (this.blocks(target, a)) {
           this.broadcastNear(target, {
             op: SC.COMBAT_EVENT,
             d: { attacker: a.entityId, target: target.entityId, damage: 0, hp: Math.ceil(target.hp), killed: false, blocked: true },
@@ -663,8 +690,9 @@ export class WorldZone {
    * Engine Stats_TryBlockWithShield: a raised shield stops the hit when the attacker lies inside
    * the frontal cone dot(facing, toAttacker) > cos(30) — 30 radians in the original, ≈ ±81°.
    */
-  private blocks(p: Player, attacker: Actor): boolean {
-    if (!p.blocking) return false;
+  private blocks(p: Actor, attacker: Actor): boolean {
+    const raised = p.kind === 'player' ? p.blocking : p.shield !== null && p.blockUntil > this.tick;
+    if (!raised) return false;
     const pp = p.character.position;
     const ap = attacker.character.position;
     const dx = ap.x - pp.x;
@@ -691,7 +719,7 @@ export class WorldZone {
 
   /** Incoming damage (engine: Stats_TakeDamage + HP loss with flinch roll). */
   private applyDamage(attacker: Actor, target: Actor, incoming: DamageVector): void {
-    const resist = target.kind === 'player' ? target.resist : NEUTRAL_RESIST;
+    const resist = target.kind === 'player' ? target.resist : target.archetype.resist;
     const protection = target.kind === 'player' ? target.armor?.protection : undefined;
     const damage = Math.round(originalDamageTaken(incoming, resist, protection) * 100) / 100;
     const hpBefore = target.hp;
@@ -770,6 +798,7 @@ export class WorldZone {
     a.anim = ANIM.IDLE;
     if (a.kind === 'mob') {
       a.state = 'idle';
+      a.blockUntil = 0;
       a.threat.clear();
       setCharacterState(a.character, a.spawn, 0, false);
     } else {
