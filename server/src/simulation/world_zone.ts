@@ -8,12 +8,12 @@ import {
   MAX_INPUT_FRAMES,
   MOB_ARCHETYPES,
   PLAYER_ARC_DEG,
-  PLAYER_BASE_DAMAGE,
+  NO_ARMOR,
   PLAYER_RADIUS,
   PLAYER_REACH,
   PLAYER_RESPAWN_TICKS,
-  PLAYER_SWING,
   SC,
+  STARTING_WEAPON,
   SpatialHashGrid,
   TICK_DT,
   createCharacter,
@@ -24,8 +24,15 @@ import {
   dequantizeAngle,
   encodeSnapshot,
   inMeleeArc,
+  damageVector,
   levelForXp,
-  maxHpForLevel,
+  originalDamageMultiplier,
+  originalDamageTaken,
+  originalFlinch,
+  originalWeaponHit,
+  playerMaxHp,
+  playerRules,
+  swingForWeaponSpeed,
   quantizeAngle,
   quantizePosition,
   removeCharacter,
@@ -34,8 +41,12 @@ import {
   stepCharacter,
   yawTowards,
   type ArenaDef,
+  type ArmorDef,
+  type Attributes,
   type Character,
   type CombatEventMsg,
+  type DamageVector,
+  type Difficulty,
   type EntityKind,
   type EntityState,
   type InputFrame,
@@ -45,6 +56,7 @@ import {
   type Rapier,
   type ServerControlMsg,
   type SwingTiming,
+  type WeaponDef,
 } from '@crusaders/shared';
 import { InputQueue } from './input_queue.ts';
 
@@ -91,7 +103,15 @@ export interface PersistRecord {
 export interface WorldZoneOptions {
   /** Random source in [0, 1); injectable for deterministic tests. */
   random?: () => number;
+  /** Selects the default.ctx attribute and resist columns (default: medium). */
+  difficulty?: Difficulty;
 }
+
+/** Ticks a light flinch / heavy stagger interrupts the player (slice value). */
+const FLINCH_TICKS = 6;
+const STAGGER_TICKS = 14;
+/** Creatures currently use neutral resists (creature tables not decoded yet). */
+const NEUTRAL_RESIST: DamageVector = damageVector({}, 1);
 
 /** Saved positions outside these bounds are discarded (fell out of the world, corrupt data). */
 const MIN_VALID_Y = -50;
@@ -140,6 +160,14 @@ interface Player extends ActorBase {
   level: number;
   queuedAttack: boolean;
   statsDirty: boolean;
+  attributes: Attributes;
+  resist: DamageVector;
+  weapon: WeaponDef;
+  armor: ArmorDef;
+  damageMultiplier: number;
+  swingTiming: SwingTiming;
+  /** Tick until which a flinch/stagger keeps the player from acting; 0 = none. */
+  hitUntil: number;
 }
 
 interface Mob extends ActorBase {
@@ -170,6 +198,7 @@ export class WorldZone {
   private readonly mw: MovementWorld;
   private readonly outbox: ZoneOutbox;
   private readonly random: () => number;
+  private readonly difficulty: Difficulty;
   private readonly grid = new SpatialHashGrid(32);
   private readonly players = new Map<number, Player>(); // by connId
   private readonly actors = new Map<number, Actor>(); // by entityId
@@ -186,6 +215,7 @@ export class WorldZone {
     this.arena = arena;
     this.outbox = outbox;
     this.random = opts.random ?? Math.random;
+    this.difficulty = opts.difficulty ?? 'medium';
     this.mw = createMovementWorld(rapier, arena);
     for (const s of arena.mobSpawns) this.spawnMob(s.archetype, s);
   }
@@ -237,8 +267,10 @@ export class WorldZone {
     const spawn = validPosition(opts.position) ? opts.position : this.nextSpawnPoint();
     const xp = Math.max(0, Math.floor(opts.experience ?? 0));
     const level = levelForXp(xp);
-    const maxHp = maxHpForLevel(level);
+    const rules = playerRules(this.difficulty);
+    const maxHp = playerMaxHp(rules.attributes, level);
     const hp = opts.hp !== undefined && opts.hp > 0 ? Math.min(opts.hp, maxHp) : maxHp;
+    const weapon = STARTING_WEAPON;
     const p: Player = {
       kind: 'player',
       connId,
@@ -265,6 +297,13 @@ export class WorldZone {
       level,
       queuedAttack: false,
       statsDirty: true,
+      attributes: rules.attributes,
+      resist: rules.resist,
+      weapon,
+      armor: NO_ARMOR,
+      damageMultiplier: originalDamageMultiplier(rules.attributes, level),
+      swingTiming: swingForWeaponSpeed(weapon.speed),
+      hitUntil: 0,
     };
     this.players.set(connId, p);
     this.register(p);
@@ -290,7 +329,7 @@ export class WorldZone {
       level: p.level,
       experience: p.xp,
       gold: p.gold,
-      hp: p.hp,
+      hp: Math.ceil(p.hp),
       maxHp: p.maxHp,
     };
   }
@@ -340,7 +379,7 @@ export class WorldZone {
    */
   attack(connId: number): void {
     const p = this.players.get(connId);
-    if (!p || !alive(p)) return;
+    if (!p || !alive(p) || p.hitUntil > this.tick) return;
     if (p.swing) {
       const t = p.swing.timing;
       if (this.tick - p.swing.start >= t.startup + t.active) p.queuedAttack = true;
@@ -352,7 +391,7 @@ export class WorldZone {
   private startPlayerSwing(p: Player): void {
     const chained = this.tick - p.lastSwingEnd <= COMBO_WINDOW_TICKS && p.lastCombo < COMBO_MULTIPLIERS.length;
     const combo = chained ? p.lastCombo + 1 : 1;
-    p.swing = { combo, start: this.tick, timing: PLAYER_SWING, hit: new Set() };
+    p.swing = { combo, start: this.tick, timing: p.swingTiming, hit: new Set() };
     p.queuedAttack = false;
   }
 
@@ -371,7 +410,9 @@ export class WorldZone {
         p.lastProcessedInput = this.frame.clientTick;
         if (alive(p)) p.yaw = this.frame.yaw;
         const moving = (this.frame.flags & MOVE_MASK) !== 0;
-        p.anim = !p.character.grounded
+        p.anim = p.hitUntil > tick
+          ? ANIM.HIT
+          : !p.character.grounded
           ? ANIM.AIRBORNE
           : moving ? (this.frame.flags & INPUT.WALK ? ANIM.WALK : ANIM.RUN) : ANIM.IDLE;
       }
@@ -399,7 +440,7 @@ export class WorldZone {
       s.yaw = a.yaw;
       s.anim = !alive(a) ? ANIM.DEAD : a.swing ? ANIM.ATTACK + a.swing.combo - 1 : a.anim;
       s.animPhase = a.swing ? Math.min(255, tick - a.swing.start) : 0;
-      s.hp = a.hp;
+      s.hp = Math.ceil(a.hp);
     }
 
     // 6. Per-client stats + interest + delta snapshot.
@@ -505,15 +546,36 @@ export class WorldZone {
     }
   }
 
-  private rollDamage(a: Actor, combo: number): number {
-    if (a.kind === 'player') return Math.round(PLAYER_BASE_DAMAGE * COMBO_MULTIPLIERS[combo - 1]!);
+  /** Outgoing damage vector (engine: Stats_GetOutgoingDamage). */
+  private rollDamage(a: Actor, combo: number): DamageVector {
+    if (a.kind === 'player') {
+      const slash = a.weapon.damage[0]!;
+      const bash = a.weapon.damage[1]!;
+      const hit = originalWeaponHit(slash, bash, a.damageMultiplier);
+      const amount = hit.amount * COMBO_MULTIPLIERS[combo - 1]!;
+      return damageVector(hit.type === 'slash' ? { SLASH: amount } : { BASH: amount });
+    }
     const { damageMin, damageMax } = a.archetype;
-    return damageMin + Math.floor(this.random() * (damageMax - damageMin + 1));
+    return damageVector({ SLASH: damageMin + Math.floor(this.random() * (damageMax - damageMin + 1)) });
   }
 
-  private applyDamage(attacker: Actor, target: Actor, damage: number): void {
+  /** Incoming damage (engine: Stats_TakeDamage + HP loss with flinch roll). */
+  private applyDamage(attacker: Actor, target: Actor, incoming: DamageVector): void {
+    const resist = target.kind === 'player' ? target.resist : NEUTRAL_RESIST;
+    const protection = target.kind === 'player' ? target.armor.protection : undefined;
+    const damage = Math.round(originalDamageTaken(incoming, resist, protection) * 100) / 100;
+    const hpBefore = target.hp;
     target.hp = Math.max(0, target.hp - damage);
-    const killed = target.hp === 0;
+    const killed = target.hp <= 0;
+    if (killed) target.hp = 0;
+    if (!killed && target.kind === 'player' && hpBefore > 0) {
+      const reaction = originalFlinch(damage, hpBefore, this.random());
+      if (reaction !== 'none') {
+        target.swing = null;
+        target.queuedAttack = false;
+        target.hitUntil = this.tick + (reaction === 'stagger' ? STAGGER_TICKS : FLINCH_TICKS);
+      }
+    }
     let reward: CombatEventMsg['d']['reward'];
 
     if (target.kind === 'mob') {
@@ -537,7 +599,7 @@ export class WorldZone {
 
     this.broadcastNear(target, {
       op: SC.COMBAT_EVENT,
-      d: { attacker: attacker.entityId, target: target.entityId, damage, hp: target.hp, killed, ...(reward ? { reward } : {}) },
+      d: { attacker: attacker.entityId, target: target.entityId, damage, hp: Math.ceil(target.hp), killed, ...(reward ? { reward } : {}) },
     });
   }
 
@@ -548,7 +610,8 @@ export class WorldZone {
     const level = levelForXp(p.xp);
     if (level > p.level) {
       p.level = level;
-      p.maxHp = maxHpForLevel(level);
+      p.maxHp = playerMaxHp(p.attributes, level);
+      p.damageMultiplier = originalDamageMultiplier(p.attributes, level);
       p.hp = p.maxHp; // level-up heal
     }
     p.statsDirty = true;
@@ -568,6 +631,7 @@ export class WorldZone {
       setCharacterState(a.character, a.spawn, 0, false);
     } else {
       setCharacterState(a.character, this.nextSpawnPoint(), 0, false);
+      a.hitUntil = 0;
       a.statsDirty = true;
     }
   }
@@ -585,7 +649,7 @@ export class WorldZone {
     p.statsDirty = false;
     this.sendJson(p.connId, {
       op: SC.PLAYER_STATS,
-      d: { hp: p.hp, maxHp: p.maxHp, level: p.level, xp: p.xp, gold: p.gold, dead: !alive(p) },
+      d: { hp: Math.ceil(p.hp), maxHp: p.maxHp, level: p.level, xp: p.xp, gold: p.gold, dead: !alive(p) },
     });
   }
 

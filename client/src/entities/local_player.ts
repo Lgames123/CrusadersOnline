@@ -1,12 +1,13 @@
 import * as THREE from 'three';
-import { ANIM, INPUT, PLAYER_SWING, TICK_DT, dequantizeAngle, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
+import { ANIM, INPUT, STARTING_WEAPON, TICK_DT, dequantizeAngle, swingForWeaponSpeed, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
 import type { Avatar } from './avatar.ts';
 
 const TURN_RATE = 12; // rad/s, visual only
 const SMOOTH_RATE = 10; // 1/s decay of visual correction offset
 const SNAP_DISTANCE = 2; // corrections larger than this are shown immediately
 const MOVE_MASK = INPUT.FORWARD | INPUT.BACK | INPUT.LEFT | INPUT.RIGHT;
-const SWING_SECONDS = (PLAYER_SWING.startup + PLAYER_SWING.active + PLAYER_SWING.recovery) * TICK_DT;
+const SWING = swingForWeaponSpeed(STARTING_WEAPON.speed);
+const SWING_SECONDS = (SWING.startup + SWING.active + SWING.recovery) * TICK_DT;
 
 /**
  * View of the locally predicted character. Physics runs at the fixed tick (offline: local

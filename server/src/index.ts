@@ -40,7 +40,7 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
   const tickets = new TicketStore(config.wsTicketTtlSeconds);
   let sessions: SessionManager | null = null;
   const zone = new ZoneHost(
-    { zone: 'arena-1', arena: 'synthetic-arena' },
+    { zone: 'arena-1', arena: 'synthetic-arena', difficulty: config.difficulty },
     {
       deliver: (connId, data) => sessions?.deliver(connId, data),
       metrics: (m) => log.debug(m, 'zone tick metrics'),

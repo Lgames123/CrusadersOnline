@@ -17,6 +17,8 @@ export interface ServerConfig {
   /** Auth/ticket endpoints: requests per second per IP, and burst. */
   httpRate: number;
   httpBurst: number;
+  /** Original difficulty column for attributes and resists. */
+  difficulty: 'easy' | 'medium' | 'hard';
 }
 
 /** Repository root; relative paths (e.g. pglite:local/pgdata) resolve against it. */
@@ -41,6 +43,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     databaseUrl: process.env['DATABASE_URL'] ?? (env === 'production' ? '' : 'pglite:local/pgdata'),
     sessionTtlHours: Number(process.env['SESSION_TTL_HOURS'] ?? 168),
     cookieSecure: (process.env['COOKIE_SECURE'] ?? (env === 'production' ? 'true' : 'false')) === 'true',
+    difficulty: (['easy', 'medium', 'hard'].includes(process.env['DIFFICULTY'] ?? '') ? process.env['DIFFICULTY'] : 'medium') as ServerConfig['difficulty'],
     httpRate: 1,
     httpBurst: 10,
     ...overrides,

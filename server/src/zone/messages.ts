@@ -31,4 +31,5 @@ export type FromZone =
 export interface ZoneWorkerData {
   zone: string;
   arena: string;
+  difficulty: 'easy' | 'medium' | 'hard';
 }

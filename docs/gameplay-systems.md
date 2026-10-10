@@ -66,3 +66,21 @@ Implemented server-side in `server/src/simulation/world_zone.ts` with shared rul
 - **Progression:** 25 XP and 5–10 gold per skeleton kill; level = 1 + ⌊XP / 100⌋ (max 50); +10 max HP per level and a full heal on level-up. Rewards trigger an immediate save; XP, gold, level and HP persist.
 - **Protocol:** `SC_PLAYER_STATS` (0x49) to the owner, `SC_COMBAT_EVENT` to players near the target, `ENTITY_SPAWN` carries kind/archetype/max HP, snapshots carry HP and the animation state (`ANIM.ATTACK + combo`, `ANIM.DEAD`).
 - **Client:** left click swings (local feedback immediately, the server decides hits), floating damage numbers, health bars over entities, HP/XP/gold panel, death notice. In development, characters use the original Drake and Skeleton Warrior models and animations converted from the user's installation (falls back to procedural avatars otherwise; never shipped).
+
+
+---
+
+## 5. Original Combat Rules in the Server (2026-10-09)
+
+The vertical slice now uses the recovered engine rules (`shared/src/game/original_stats.ts`, `ruleset.ts`; executable-analysis.md §7–8). This supersedes the damage/HP values in §4:
+
+| Aspect | Rule | Source |
+|---|---|---|
+| Player attributes | default.ctx columns for the server's `DIFFICULTY` (default medium: M 20 / I 15 / E 25 / S 15) | original data (facts) |
+| Max HP | 50 + 0.6 × Endurance × level (medium L1 = 65, L2 = 80) | engine formula |
+| Outgoing hit | stronger of the weapon's slash/bash × Might multiplier × attack mode (1.0, 1.0, 1.25 for the 3rd combo hit) | engine pipeline |
+| Starting weapon | "Axe" numbers: 5 slash / 5 bash, speed 1.1 (shortens the swing) | items.ctx |
+| Incoming damage | per type × difficulty resist (medium slash/bash 0.9) × armour protection, summed | engine pipeline |
+| Flinch | 0.5 × random + damage / HP before ≥ 0.7 interrupts the player (≥ 0.8 longer stagger) | engine formula; durations are slice values |
+
+Still slice values: swing timings at speed 1.0, AI, skeleton stats (25 HP, 8–12 slash, neutral resists — creature data not decoded), XP per level, rewards. Shield blocking (`ORIGINAL_BLOCK_COS`) is implemented in the rules module but needs a block input and shields in inventory before it can be used.

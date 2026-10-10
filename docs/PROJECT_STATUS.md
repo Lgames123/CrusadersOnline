@@ -78,9 +78,11 @@
   - Full damage pipeline recovered: 11-type damage vector; outgoing = (unarmed + weapon) → stronger of slash/bash × Might multiplier → × attack mode (1.0/1.25) → + bonus → × multipliers; incoming = max(0, dmg − absorb) × resist(DR by difficulty) × armour protection, summed; flinch/stagger roll; shield block cone (cos(30 rad) ≈ ±81°, original quirk).
   - `items.ctx` parser (156 items) → `rules/items.json`; formulas in `shared/src/game/original_stats.ts`. 64 tests.
 
+- [x] Session 8 (2026-10-09): server combat switched to the original rules — difficulty attribute/resist columns (`DIFFICULTY`, default medium), max HP 50 + 0.6 × END × level, weapon hit (stronger of slash/bash × Might multiplier, power hit 1.25), Axe starting weapon (speed 1.1), resist × armour on incoming damage, flinch/stagger interrupts. Verified live: 65 HP start, hits 5/5/6.25, skeleton hits 7.2–10.8. 66 tests.
+
 ### Not Yet Done
 - Playwright two-tab E2E (M08 criterion 14).
-- Wire the original formulas into server combat (CMB-001).
+- Shield blocking input, inventory/equipment from items.json, creature data.
 - TLS on a real domain, backups, CI, image registry (M11).
 - World unit / physics constants (UNK-007), `.msh` levels, `.cap` collision.
 - Converter: browser Web Worker host, `.mdl`/`.ani`/`.msh` parsers, `items.ctx`/`models.ctx` parsers.

@@ -1,9 +1,12 @@
 import { TICK_RATE } from '../constants.ts';
+import { originalMaxHp, type Attributes } from './original_stats.ts';
+import { ATTACK_MODE_SCALE } from './ruleset.ts';
 
 /**
  * Combat and progression rules shared by server (authority) and client (presentation).
- * Values come from docs/gameplay-specification.md §4 and gameplay-systems.md §2.2; they are
- * vertical-slice values until the original formulas are recovered (reverse-engineering backlog).
+ * Damage, HP and resist formulas follow the original engine (original_stats.ts, ruleset.ts);
+ * swing timings, AI parameters, creature stats and the XP curve are vertical-slice values until
+ * the corresponding original data is recovered (reverse-engineering backlog).
  */
 const ticks = (ms: number) => Math.round((ms / 1000) * TICK_RATE);
 
@@ -16,16 +19,25 @@ export interface SwingTiming {
   recovery: number;
 }
 
+/** Base swing at weapon speed 1.0; see swingForWeaponSpeed(). */
 export const PLAYER_SWING: Readonly<SwingTiming> = { startup: ticks(150), active: ticks(150), recovery: ticks(250) };
+
+/** Weapon `Speed` scales the animation rate (engine field +0x28), so swings get shorter. */
+export function swingForWeaponSpeed(speed: number, base: Readonly<SwingTiming> = PLAYER_SWING): SwingTiming {
+  const s = speed > 0 ? speed : 1;
+  return {
+    startup: Math.max(1, Math.round(base.startup / s)),
+    active: Math.max(1, Math.round(base.active / s)),
+    recovery: Math.max(1, Math.round(base.recovery / s)),
+  };
+}
 /** Inputs arriving during recovery (or this many ticks after it) continue the combo. */
 export const COMBO_WINDOW_TICKS = ticks(300);
-export const COMBO_MULTIPLIERS = [1.0, 1.25, 1.6] as const;
-export const PLAYER_BASE_DAMAGE = 12;
+/** Attack-mode scale per combo hit: the third (power) hit uses the engine's 1.25 mode. */
+export const COMBO_MULTIPLIERS = [ATTACK_MODE_SCALE.normal, ATTACK_MODE_SCALE.normal, ATTACK_MODE_SCALE.power] as const;
 export const PLAYER_REACH = 2.2;
 export const PLAYER_ARC_DEG = 110;
 
-export const PLAYER_BASE_HP = 100;
-export const HP_PER_LEVEL = 10;
 export const PLAYER_RESPAWN_TICKS = ticks(5000);
 export const XP_PER_LEVEL = 100;
 export const MAX_LEVEL = 50;
@@ -57,7 +69,8 @@ export const MOB_ARCHETYPES: Readonly<Record<string, MobArchetype>> = {
   skeleton_warrior: {
     id: 'skeleton_warrior',
     name: 'Skeleton Warrior',
-    maxHp: 60,
+    // Placeholder until creature data is decoded; sized for the original weapon scale (5–14).
+    maxHp: 25,
     damageMin: 8,
     damageMax: 12,
     speed: 4.2,
@@ -78,8 +91,9 @@ export function levelForXp(xp: number): number {
   return Math.min(MAX_LEVEL, 1 + Math.floor(xp / XP_PER_LEVEL));
 }
 
-export function maxHpForLevel(level: number): number {
-  return PLAYER_BASE_HP + (level - 1) * HP_PER_LEVEL;
+/** Original formula: 50 + 0.6 × Endurance × level, rounded for the protocol. */
+export function playerMaxHp(attributes: Attributes, level: number): number {
+  return Math.round(originalMaxHp(attributes, level));
 }
 
 /** Facing vector for a yaw in radians (yaw 0 faces -Z, counter-clockwise from above). */

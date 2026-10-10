@@ -96,7 +96,9 @@ describe('authoritative melee', () => {
     for (let i = 0; i < 200 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
     expect(t.mob().alive).toBe(false);
     const hits = t.events().filter((e) => e.target === t.mob().id);
-    expect(hits.map((e) => e.damage).slice(0, 3)).toEqual([12, 15, 19]); // combo 1.0x / 1.25x / 1.6x
+    // Axe 5/5 (tie -> bash) x Might multiplier 1.0 x attack mode 1.0 / 1.0 / 1.25 (power hit)
+    expect(hits.map((e) => e.damage).slice(0, 3)).toEqual([5, 5, 6.25]);
+    expect(hits.findIndex((e) => e.killed)).toBe(4); // 25 HP skeleton dies on the 5th hit
     const kill = hits.find((e) => e.killed)!;
     expect(kill.reward).toEqual({ xp: SKELETON.xpReward, gold: SKELETON.goldMin });
     t.run(1);
@@ -113,7 +115,7 @@ describe('authoritative melee', () => {
       for (let k = 0; k < 10; k++) t.zone.attack(1);
     });
     const hits = t.events().filter((e) => e.target === t.mob().id).length - before;
-    // swing = 3 + 3 + 5 ticks => at most ceil(40 / 11) hits
+    // swing at weapon speed 1.1 = 3 + 3 + 5 ticks => at most ceil(40 / 11) hits
     expect(hits).toBeLessThanOrEqual(4);
     expect(hits).toBeGreaterThan(0);
   });
@@ -127,9 +129,10 @@ describe('authoritative melee', () => {
       if (!t.me().alive) deadAt = i;
     }
     expect(deadAt).toBeGreaterThan(0);
-    expect(t.events().every((e) => e.target !== t.entityId || (e.damage >= SKELETON.damageMin && e.damage <= SKELETON.damageMax))).toBe(true);
+    // Medium difficulty: slash resist 0.9
+    expect(t.events().every((e) => e.target !== t.entityId || (e.damage >= SKELETON.damageMin * 0.9 - 1e-9 && e.damage <= SKELETON.damageMax * 0.9 + 1e-9))).toBe(true);
     t.run(PLAYER_RESPAWN_TICKS + 1);
-    expect(t.me()).toMatchObject({ alive: true, hp: 100 });
+    expect(t.me()).toMatchObject({ alive: true, hp: 65 }); // 50 + 0.6 x Endurance 25 x level 1
   });
 
   it('levels up after enough kills (max HP grows and heals)', () => {
@@ -138,6 +141,28 @@ describe('authoritative melee', () => {
     t.run(30);
     for (let i = 0; i < 200 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
     t.run(1);
-    expect(t.stats().at(-1)).toMatchObject({ level: 2, maxHp: 110, hp: 110, xp: 115 });
+    expect(t.stats().at(-1)).toMatchObject({ level: 2, maxHp: 80, hp: 80, xp: 115 }); // 50 + 0.6 x 25 x 2
   });
 });
+
+describe('difficulty and flinch (original rules)', () => {
+  it('uses the difficulty columns for player HP and incoming damage', () => {
+    const easy = new WorldZone(rapier, 'easy', createSyntheticArena(), { send: () => {} }, { random: () => 0, difficulty: 'easy' });
+    easy.join(1, { name: 'E', characterId: null, position: { x: 0, y: 0.5, z: 0 } });
+    // Easy endurance 30: 50 + 0.6 x 30 = 68
+    expect(easy.inspect().find((a) => a.kind === 'player')!.hp).toBe(68);
+  });
+
+  it('interrupts the player with a flinch when a hit takes a large share of remaining HP', () => {
+    const t = setup();
+    t.run(20, INPUT.FORWARD, 0);
+    // Wait until the skeleton has brought us low enough that 7.2 damage >= 0.7 x HP before the hit.
+    let flinched = false;
+    for (let i = 0; i < 1500 && t.me().alive && !flinched; i++) {
+      t.run(1);
+      flinched = t.zone.inspect().length > 0 && (t.zone as unknown as { players: Map<number, { hitUntil: number }> }).players.get(1)!.hitUntil > t.zone.tick;
+    }
+    expect(flinched).toBe(true);
+  });
+});
+

@@ -14,3 +14,4 @@ export * from './spatial_hash.ts';
 export * from './net/client_session.ts';
 export * from './game/combat.ts';
 export * from './game/original_stats.ts';
+export * from './game/ruleset.ts';

@@ -9,7 +9,7 @@ const METRICS_EVERY_TICKS = 100; // 5 s
 const PERSIST_EVERY_TICKS = 20 * 60; // 60 s (persistence.md §2)
 
 const port = parentPort!;
-const { zone: zoneName, arena: arenaName } = workerData as ZoneWorkerData;
+const { zone: zoneName, arena: arenaName, difficulty } = workerData as ZoneWorkerData;
 
 function loadArena(name: string): ArenaDef {
   if (name === 'synthetic-arena') return createSyntheticArena();
@@ -34,7 +34,7 @@ const zone = new WorldZone(rapier, zoneName, loadArena(arenaName), {
   persist(records, reason) {
     post({ t: 'persist', reason, records });
   },
-});
+}, { difficulty });
 
 const flush = () => {
   if (batch.length === 0) return;
