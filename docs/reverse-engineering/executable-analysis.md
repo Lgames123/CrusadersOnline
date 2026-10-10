@@ -113,3 +113,31 @@ Functions identified and renamed in the Ghidra project:
 
 Constants used: `0x004DE468 = 0.0` (minimum time), `0x004DE65C = 1.0`, `0x004EC2B8 = 3.85` (root height override), `0x004EC2BC = 1.5` (root Z offset).
 Only behaviour is documented here; no decompiled code is copied into the source tree.
+
+
+---
+
+## 7. Movement and Character Stats (Ghidra + Capstone, 2026-10-09)
+
+Many routines in this region are not yet functions in the Ghidra database (auto-analysis left gaps); they were located through vtable references and disassembled with Capstone (`tools/re` workflow, scratch script). Only behaviour is recorded here.
+
+### 7.1 Locomotion is animation-driven
+| Address | Name | Behaviour |
+|---|---|---|
+| `0x00429810` | `Char_RootMotionVelocity` | Advances the current clip by `dt × 1000 × clip.frameTime(header +0x04) × rate(+0x28) × (speedModifier() + bonus(+0x2C))` and returns the root's horizontal displacement over that interval divided by `dt` — i.e. a velocity. Handles wrap-around at the clip end. |
+| `0x00427510` | `Char_HorizontalSpeed` | Speed magnitude and sign (forward/backward) for the current state. |
+| `0x004274D0` | `Char_ClipRootDistance` | Total root displacement of a state's clip. |
+| `0x0042AD30` | (vtable method, not a Ghidra function) | Horizontal speed query: returns a constant **15.0 units/s** when the creature is not animation-driven (flag mask `0x41`), 0 when frozen (`0x40`), otherwise the root-motion velocity. |
+| `0x0042AE60` | (vtable method) | Vertical velocity from the root's **Y** motion with the same time formula — **jumps and drops are animation-driven**; no ballistic jump constant was found for the player. |
+
+Open point: `dt × 1000 × 1/30` advances 33.3 frames per second of `dt` if `dt` is in seconds (vs. 30 fps authoring). The unit of `dt` still has to be confirmed at the caller.
+
+### 7.2 Attributes and derived stats
+| Address | Name | Behaviour |
+|---|---|---|
+| `0x00442000` | `Rules_LoadDefaultCtx` | Parses `script\default.ctx`. Attribute rows `DM/DI/DE/DS` go to the player at `+0x254/+0x258/+0x25C/+0x260` (column chosen by the difficulty byte at `[0x0058C268]+0x85`); `DR`/`DD` fill resist and unarmed-damage tables; `L` stores four ratios at `+0x238..+0x244`; `S` rows define spells. |
+| `0x0044E000` | `Stats_ComputeEffectiveAttributes` | Effective attribute = base + bonus (`+0xD4..+0xE0`, equipment/potions), **capped at 50**, stored as bytes at `+0x264..+0x267`. |
+| `0x0044E090` | `Stats_ComputeDerived` | With `level = [+0x230]`: damage multiplier `+0x248 = trunc(10 × (0.9 + 0.005 × Might × level)) / 10`; max mana `+0x22C = trunc(Intellect × level / 3) + 20`; max HP `+0x0C = 50 + 0.6 × Endurance × level`; speed multiplier `+0x24C = 0.999 + 0.01 × level + (Speed − 15) × 1.2 / 35 × 0.5`; current HP/mana clamped. |
+| `0x0044E260` | (method, not a function) | Weapon hit: takes the stronger of the weapon's SLASH and BASH components and scales it by the damage multiplier `+0x248`. |
+
+Implemented as pure functions in `shared/src/game/original_stats.ts` (tested); not yet wired into the vertical-slice balance.

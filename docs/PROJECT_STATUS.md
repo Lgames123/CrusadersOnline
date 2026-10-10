@@ -69,9 +69,13 @@
   - **Client:** attack on left click, damage numbers, health bars, HP/XP/gold panel, death notice; in development the original Drake and Skeleton Warrior models and animations are used.
   - 7 new unit tests on the zone (combo damage 12/15/19, rewards, spam limit, death/respawn, level-up, leash) and a network test (kill → reward → reconnect keeps XP/gold) on PGlite and PostgreSQL. 59 tests total. Verified in the browser: kill sequence with combos, +25 XP +7 gold, HUD updated.
 
+- [x] Reverse-engineering session 3 (2026-10-09):
+  - Fixed folded characters (`.ani` quaternions are (w, x, y, z)); pushed through `9738d4c`.
+  - Ghidra + Capstone: locomotion and jumps are root-motion driven (`Char_RootMotionVelocity` etc.), fallback speed 15 u/s; `default.ctx` loader mapped to player fields; effective attributes (cap 50) and derived stats recovered: max HP, max mana, damage multiplier, speed multiplier; weapon hit = stronger of slash/bash × multiplier. Implemented and tested in `shared/src/game/original_stats.ts`.
+
 ### Not Yet Done
-- Commits after `f98db37`.
 - Playwright two-tab E2E (M08 criterion 14).
+- Damage application/resists (UNK-008); many routines are not yet functions in the Ghidra database.
 - TLS on a real domain, backups, CI, image registry (M11).
 - World unit / physics constants (UNK-007), `.msh` levels, `.cap` collision.
 - Converter: browser Web Worker host, `.mdl`/`.ani`/`.msh` parsers, `items.ctx`/`models.ctx` parsers.

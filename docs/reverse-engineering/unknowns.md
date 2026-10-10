@@ -56,5 +56,12 @@ Every unknown item is assigned a priority and a concrete validation experiment t
 
 
 ### UNK-007: World Unit and Physics Constants
-- **Status:** Open | **Priority:** High
+- **Status:** Partially resolved (2026-10-09) — locomotion and jumps are animation-driven (executable-analysis.md §7.1), so there is no player gravity/jump constant to recover; fallback creature speed is 15 units/s. Still open: unit of `dt` at the caller (30 vs 33.3 frames/s) and units → metres.
+- **Original priority:** High
 - **Description:** Character heights (Drake 6.58 units) suggest feet. Confirm from the movement/jump code (gravity, jump impulse, step height) and replace the vertical-slice constants with the original values.
+
+
+### UNK-008: Damage Application and Resists
+- **Status:** Open | **Priority:** High
+- **Description:** How the target applies `DR` resist multipliers per damage type and difficulty, armour, blocking and the combo/attack-type modifiers. The code lives in regions Ghidra has not turned into functions yet.
+- **Next step:** re-run Ghidra auto-analysis with the aggressive function finder, then follow readers of the resist table filled by `Rules_LoadDefaultCtx`.

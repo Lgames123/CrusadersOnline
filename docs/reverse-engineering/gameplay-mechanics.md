@@ -110,3 +110,17 @@ The engine moves characters by animation root motion (executable-analysis.md §6
 | `PC07_hp_f` | hop forward | 0.67 s | 5.65 | 8.48 | 2.58 |
 
 The vertical-slice controller currently uses 6.0 m/s run and 2.5 m/s walk (gameplay-specification.md §3.1). These values should be replaced with the root-motion speeds once the unit is confirmed (next RE target: gravity/jump constants in the movement code).
+
+
+---
+
+## Derived stats (original engine) `[CONFIRMED from code]`
+
+| Stat | Formula | Drake, Medium, level 1 |
+|---|---|---|
+| Max HP | 50 + 0.6 × Endurance × level | 65 |
+| Max mana | trunc(Intellect × level / 3) + 20 | 25 |
+| Damage multiplier | trunc(10 × (0.9 + 0.005 × Might × level)) / 10 | 1.0 |
+| Speed multiplier | 0.999 + 0.01 × level + (Speed − 15) × 0.01714 | 1.009 |
+
+Attributes are base (default.ctx per difficulty) + equipment bonus, capped at 50. A weapon hit uses the stronger of its SLASH/BASH values × the damage multiplier (items.ctx: e.g. Axe 5/5, Battle Axe 8/5, Mace 0/10). Movement and jumps come from animation root motion scaled by the speed multiplier; the non-animated fallback speed is 15 units/s.
