@@ -64,6 +64,14 @@ export const STARTING_WEAPON: Readonly<WeaponDef> = {
   speed: 1.1,
 };
 
+/** items.ctx `Type SHIELD` with `Use BLOCK`; shields carry no damage or protection values. */
+export interface ShieldDef {
+  name: string;
+}
+
+/** The slice's starting shield ("Wooden Shield", the root of the shield hierarchy in items.ctx). */
+export const STARTING_SHIELD: Readonly<ShieldDef> = { name: 'Wooden Shield' };
+
 export const NO_ARMOR: Readonly<ArmorDef> = { name: 'None', protection: damageVector({}, 1) };
 
 /** Engine attack modes (Stats scale at +0x44): normal 1.0, power 1.25. The slice uses power for the 3rd combo hit. */

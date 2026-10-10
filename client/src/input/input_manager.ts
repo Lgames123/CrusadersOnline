@@ -19,7 +19,7 @@ export class InputManager {
   private latched = 0;
   private readonly bindings = DEFAULT_BINDINGS;
   onLockChange: (locked: boolean) => void = () => {};
-  /** Primary mouse button while the pointer is locked. */
+  /** Primary mouse button while the pointer is locked. The secondary button holds BLOCK. */
   onAttack: () => void = () => {};
 
   private readonly element: HTMLElement;
@@ -44,7 +44,15 @@ export class InputManager {
       this.pitch = Math.min(PITCH_MAX, Math.max(PITCH_MIN, this.pitch - e.movementY * MOUSE_SENSITIVITY));
     });
     document.addEventListener('mousedown', (e) => {
-      if (this.locked && e.button === 0) this.onAttack();
+      if (!this.locked) return;
+      if (e.button === 0) this.onAttack();
+      else if (e.button === 2) this.held |= INPUT.BLOCK;
+    });
+    document.addEventListener('mouseup', (e) => {
+      if (e.button === 2) this.held &= ~INPUT.BLOCK;
+    });
+    document.addEventListener('contextmenu', (e) => {
+      if (this.locked) e.preventDefault();
     });
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.element;

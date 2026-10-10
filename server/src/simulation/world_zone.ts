@@ -9,10 +9,12 @@ import {
   MOB_ARCHETYPES,
   PLAYER_ARC_DEG,
   NO_ARMOR,
+  ORIGINAL_BLOCK_COS,
   PLAYER_RADIUS,
   PLAYER_REACH,
   PLAYER_RESPAWN_TICKS,
   SC,
+  STARTING_SHIELD,
   STARTING_WEAPON,
   SpatialHashGrid,
   TICK_DT,
@@ -24,6 +26,7 @@ import {
   dequantizeAngle,
   encodeSnapshot,
   inMeleeArc,
+  forwardXZ,
   damageVector,
   levelForXp,
   originalDamageMultiplier,
@@ -55,6 +58,7 @@ import {
   type MovementWorld,
   type Rapier,
   type ServerControlMsg,
+  type ShieldDef,
   type SwingTiming,
   type WeaponDef,
 } from '@crusaders/shared';
@@ -168,6 +172,9 @@ interface Player extends ActorBase {
   swingTiming: SwingTiming;
   /** Tick until which a flinch/stagger keeps the player from acting; 0 = none. */
   hitUntil: number;
+  shield: ShieldDef | null;
+  /** Shield raised this tick (BLOCK held, shield equipped, not swinging or flinching). */
+  blocking: boolean;
 }
 
 interface Mob extends ActorBase {
@@ -304,6 +311,8 @@ export class WorldZone {
       damageMultiplier: originalDamageMultiplier(rules.attributes, level),
       swingTiming: swingForWeaponSpeed(weapon.speed),
       hitUntil: 0,
+      shield: STARTING_SHIELD,
+      blocking: false,
     };
     this.players.set(connId, p);
     this.register(p);
@@ -380,6 +389,7 @@ export class WorldZone {
   attack(connId: number): void {
     const p = this.players.get(connId);
     if (!p || !alive(p) || p.hitUntil > this.tick) return;
+    p.blocking = false; // swinging lowers the shield until the next input re-raises it
     if (p.swing) {
       const t = p.swing.timing;
       if (this.tick - p.swing.start >= t.startup + t.active) p.queuedAttack = true;
@@ -410,8 +420,11 @@ export class WorldZone {
         p.lastProcessedInput = this.frame.clientTick;
         if (alive(p)) p.yaw = this.frame.yaw;
         const moving = (this.frame.flags & MOVE_MASK) !== 0;
+        p.blocking = alive(p) && p.shield !== null && (this.frame.flags & INPUT.BLOCK) !== 0 && !p.swing && p.hitUntil <= tick;
         p.anim = p.hitUntil > tick
           ? ANIM.HIT
+          : p.blocking
+          ? ANIM.BLOCK
           : !p.character.grounded
           ? ANIM.AIRBORNE
           : moving ? (this.frame.flags & INPUT.WALK ? ANIM.WALK : ANIM.RUN) : ANIM.IDLE;
@@ -533,6 +546,13 @@ export class WorldZone {
         const tp = target.character.position;
         if (!inMeleeArc(pos.x, pos.z, yaw, tp.x, tp.z, reach, arc, PLAYER_RADIUS)) continue;
         s.hit.add(target.entityId);
+        if (target.kind === 'player' && this.blocks(target, a)) {
+          this.broadcastNear(target, {
+            op: SC.COMBAT_EVENT,
+            d: { attacker: a.entityId, target: target.entityId, damage: 0, hp: Math.ceil(target.hp), killed: false, blocked: true },
+          });
+          continue;
+        }
         this.applyDamage(a, target, this.rollDamage(a, s.combo));
         if (!alive(a)) return;
       }
@@ -544,6 +564,22 @@ export class WorldZone {
       if (a.kind === 'mob') a.nextSwingTick = this.tick + a.archetype.cooldown;
       else if (a.queuedAttack) this.startPlayerSwing(a);
     }
+  }
+
+  /**
+   * Engine Stats_TryBlockWithShield: a raised shield stops the hit when the attacker lies inside
+   * the frontal cone dot(facing, toAttacker) > cos(30) — 30 radians in the original, ≈ ±81°.
+   */
+  private blocks(p: Player, attacker: Actor): boolean {
+    if (!p.blocking) return false;
+    const pp = p.character.position;
+    const ap = attacker.character.position;
+    const dx = ap.x - pp.x;
+    const dz = ap.z - pp.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist < 1e-6) return true;
+    const f = forwardXZ(dequantizeAngle(p.yaw));
+    return (dx * f.x + dz * f.z) / dist > ORIGINAL_BLOCK_COS;
   }
 
   /** Outgoing damage vector (engine: Stats_GetOutgoingDamage). */

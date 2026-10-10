@@ -30,6 +30,8 @@ export class ProceduralAvatar implements Avatar {
   readonly headHeight = PLAYER_HEIGHT + 0.25;
   private readonly body = new THREE.Group();
   private readonly arm = new THREE.Group();
+  private readonly shield: THREE.Mesh;
+  private raise = 0;
   private anim: number = ANIM.IDLE;
   private swingSeconds = 0.5;
   private t = 0;
@@ -44,6 +46,7 @@ export class ProceduralAvatar implements Avatar {
     visor.position.set(0, PLAYER_HEIGHT - 0.3, -PLAYER_RADIUS + 0.02);
     const shield = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.6, 0.45), mat(c.trim));
     shield.position.set(-PLAYER_RADIUS - 0.04, 1.05, -0.05);
+    this.shield = shield;
     // Sword arm pivots at the right shoulder.
     this.arm.position.set(PLAYER_RADIUS + 0.05, 1.35, 0);
     const blade = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 1.1), mat(0xc8ccd4));
@@ -77,6 +80,11 @@ export class ProceduralAvatar implements Avatar {
       this.arm.rotation.x += (-0.3 - this.arm.rotation.x) * Math.min(1, dt * 10);
       this.arm.rotation.y += (0 - this.arm.rotation.y) * Math.min(1, dt * 10);
     }
+    // Raised shield swings in front of the body.
+    const raise = this.anim === ANIM.BLOCK ? 1 : 0;
+    this.raise += (raise - this.raise) * Math.min(1, dt * 14);
+    this.shield.position.set(-PLAYER_RADIUS - 0.04 + this.raise * 0.3, 1.05 + this.raise * 0.2, -0.05 - this.raise * 0.4);
+    this.shield.rotation.y = this.raise * (Math.PI / 2);
     const running = this.anim === ANIM.RUN || this.anim === ANIM.WALK;
     this.body.position.y = running ? Math.abs(Math.sin(this.t * 10)) * 0.08 : 0;
     // Topple over when dead, stand back up on respawn.

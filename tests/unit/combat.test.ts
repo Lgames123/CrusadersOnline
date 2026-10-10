@@ -166,3 +166,30 @@ describe('difficulty and flinch (original rules)', () => {
   });
 });
 
+describe('shield block (original rule)', () => {
+  it('stops every frontal hit while the shield is raised towards the attacker', () => {
+    const t = setup();
+    t.run(20, INPUT.FORWARD, 0); // aggro; we face -Z, the skeleton comes from -Z
+    t.run(300, INPUT.BLOCK, 0);
+    const onMe = t.events().filter((e) => e.target === t.entityId);
+    expect(onMe.length).toBeGreaterThan(3);
+    expect(onMe.every((e) => e.blocked === true && e.damage === 0)).toBe(true);
+    expect(t.me().hp).toBe(65);
+  });
+
+  it('does not protect against hits from behind', () => {
+    const t = setup();
+    t.run(20, INPUT.FORWARD, 0);
+    t.run(300, INPUT.BLOCK, Math.PI); // shield raised but facing away from the skeleton
+    const onMe = t.events().filter((e) => e.target === t.entityId);
+    expect(onMe.length).toBeGreaterThan(0);
+    expect(onMe.some((e) => !e.blocked && e.damage > 0)).toBe(true);
+  });
+
+  it('cannot block while swinging', () => {
+    const t = setup();
+    t.run(20, INPUT.FORWARD, 0);
+    t.run(300, INPUT.BLOCK, 0, () => t.zone.attack(1));
+    expect(t.events().some((e) => e.target === t.entityId && !e.blocked)).toBe(true);
+  });
+});

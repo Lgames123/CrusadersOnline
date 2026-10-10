@@ -66,7 +66,7 @@ offset  size  field
 2       4     ackSnapshotTick (uint32) — last snapshot the client applied
 --- repeated frameCount times (10 bytes each) ---
 +0      4     clientTick (uint32)
-+4      1     inputFlags (bit0 W, bit1 S, bit2 A, bit3 D, bit4 Jump, bit5 Walk, bit6-7 reserved)
++4      1     inputFlags (bit0 W, bit1 S, bit2 A, bit3 D, bit4 Jump, bit5 Walk, bit6 Block (held), bit7 reserved)
 +5      1     reserved
 +6      2     yaw   (uint16 quantized)
 +8      2     pitch (uint16 quantized)

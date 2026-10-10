@@ -27,6 +27,7 @@ export class LocalPlayer {
   private swingLeft = 0;
   private combo = 0;
   private sinceSwing = 99;
+  private blocking = false;
   dead = false;
 
   constructor(character: Character, avatar: Avatar, step: (input: Readonly<InputFrame>) => void) {
@@ -46,6 +47,8 @@ export class LocalPlayer {
     this.step(input);
     const moving = !this.dead && (input.flags & MOVE_MASK) !== 0;
     if (moving) this.targetFacing = dequantizeAngle(input.yaw);
+    this.blocking = !this.dead && (input.flags & INPUT.BLOCK) !== 0;
+    if (this.blocking) this.targetFacing = dequantizeAngle(input.yaw);
     this.moveAnim = !this.character.grounded ? ANIM.AIRBORNE : moving ? (input.flags & INPUT.WALK ? ANIM.WALK : ANIM.RUN) : ANIM.IDLE;
   }
 
@@ -85,7 +88,7 @@ export class LocalPlayer {
     } else {
       this.sinceSwing += dt;
     }
-    const anim = this.dead ? ANIM.DEAD : this.swingLeft > 0 ? ANIM.ATTACK + this.combo - 1 : this.moveAnim;
+    const anim = this.dead ? ANIM.DEAD : this.swingLeft > 0 ? ANIM.ATTACK + this.combo - 1 : this.blocking ? ANIM.BLOCK : this.moveAnim;
     this.avatar.setState(anim, SWING_SECONDS);
     this.avatar.update(dt);
   }

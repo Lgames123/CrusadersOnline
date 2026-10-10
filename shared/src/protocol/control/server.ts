@@ -46,6 +46,8 @@ export interface CombatEventMsg {
     /** Target HP after the hit. */
     hp: number;
     killed: boolean;
+    /** The target's raised shield stopped the hit (damage 0). */
+    blocked?: boolean;
     /** Present when the attacker is a player who got rewarded for the kill. */
     reward?: { xp: number; gold: number };
   };
@@ -86,4 +88,6 @@ export const ANIM = {
   ATTACK: 4,
   HIT: 7,
   DEAD: 8,
+  /** Shield raised. */
+  BLOCK: 9,
 } as const;

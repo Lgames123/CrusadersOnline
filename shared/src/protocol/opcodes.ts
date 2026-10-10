@@ -34,6 +34,8 @@ export const INPUT = {
   RIGHT: 1 << 3,
   JUMP: 1 << 4,
   WALK: 1 << 5,
+  /** Shield raised (held). Does not affect movement, so prediction is unchanged. */
+  BLOCK: 1 << 6,
 } as const;
 
-export const INPUT_VALID_MASK = 0b0011_1111;
+export const INPUT_VALID_MASK = 0b0111_1111;

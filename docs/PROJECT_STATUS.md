@@ -79,10 +79,11 @@
   - `items.ctx` parser (156 items) → `rules/items.json`; formulas in `shared/src/game/original_stats.ts`. 64 tests.
 
 - [x] Session 8 (2026-10-09): server combat switched to the original rules — difficulty attribute/resist columns (`DIFFICULTY`, default medium), max HP 50 + 0.6 × END × level, weapon hit (stronger of slash/bash × Might multiplier, power hit 1.25), Axe starting weapon (speed 1.1), resist × armour on incoming damage, flinch/stagger interrupts. Verified live: 65 HP start, hits 5/5/6.25, skeleton hits 7.2–10.8. 66 tests.
+- [x] Shield block (right mouse, input flag bit 6): original ±81° frontal cone, stops the whole hit, not while swinging or flinching; `pt01_rdy_shld` clip / procedural shield raise. 69 tests.
 
 ### Not Yet Done
 - Playwright two-tab E2E (M08 criterion 14).
-- Shield blocking input, inventory/equipment from items.json, creature data.
+- Inventory/equipment from items.json, creature data.
 - TLS on a real domain, backups, CI, image registry (M11).
 - World unit / physics constants (UNK-007), `.msh` levels, `.cap` collision.
 - Converter: browser Web Worker host, `.mdl`/`.ani`/`.msh` parsers, `items.ctx`/`models.ctx` parsers.

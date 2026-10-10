@@ -21,16 +21,17 @@ interface ClipMap {
   air: string;
   attacks: string[];
   death: string;
+  block: string;
 }
 
 const MODELS: Record<Exclude<AvatarKind, 'player'>, { file: string; clips: ClipMap }> = {
   self: {
     file: 'drake',
-    clips: { idle: 'pa16_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pc03_ru_fw_jmp', attacks: ['pn09_1_sw_l', 'pn10_1_sw_r', 'pn03_1_sw_ov'], death: 'pi03_hp' },
+    clips: { idle: 'pa16_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pc03_ru_fw_jmp', attacks: ['pn09_1_sw_l', 'pn10_1_sw_r', 'pn03_1_sw_ov'], death: 'pi03_hp', block: 'pt01_rdy_shld' },
   },
   skeleton_warrior: {
     file: 'skeletonwarriorcollision',
-    clips: { idle: 'pa21_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pa21_id_br', attacks: ['pn02_1_sw_lv', 'pn01_1_cp_lo', 'pn03_1_sw_ov'], death: 'pi03_hp' },
+    clips: { idle: 'pa21_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pa21_id_br', attacks: ['pn02_1_sw_lv', 'pn01_1_cp_lo', 'pn03_1_sw_ov'], death: 'pi03_hp', block: 'pt01_rdy_shld' },
   },
 };
 
@@ -63,6 +64,8 @@ class OriginalAvatar implements Avatar {
     const m = this.map;
     if (anim >= ANIM.ATTACK && anim < ANIM.ATTACK + 3) return { name: m.attacks[anim - ANIM.ATTACK] ?? m.attacks[0]!, loop: false };
     if (anim === ANIM.DEAD) return { name: m.death, loop: false };
+    // Raise the shield once and hold the final pose.
+    if (anim === ANIM.BLOCK) return { name: m.block, loop: false };
     if (anim === ANIM.RUN) return { name: m.run, loop: true };
     if (anim === ANIM.WALK) return { name: m.walk, loop: true };
     if (anim === ANIM.AIRBORNE) return { name: m.air, loop: false };
@@ -80,7 +83,7 @@ class OriginalAvatar implements Avatar {
     action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
     action.clampWhenFinished = !loop;
     // Fit attack clips to the authoritative swing duration.
-    action.timeScale = !loop && swingSeconds > 0 && anim !== ANIM.DEAD ? clip.duration / swingSeconds : 1;
+    action.timeScale = !loop && swingSeconds > 0 && anim !== ANIM.DEAD && anim !== ANIM.BLOCK ? clip.duration / swingSeconds : 1;
     if (this.current && this.current !== action) action.crossFadeFrom(this.current, FADE, false);
     action.play();
     this.current = action;

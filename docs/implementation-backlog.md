@@ -47,7 +47,7 @@ Status values:
 | **ARC-006** | Decode `.ani` animation tracks (UNK-005) | P1 | ARC-004 | High | **VERIFIED** (1,499/1,501 pairs; engine evaluator in Ghidra) |
 | **ARC-008** | World unit + movement/physics constants from the executable (UNK-007) | P1 | ARC-006 | Medium | **IN PROGRESS** (locomotion/jump model and derived-stat formulas recovered) |
 | **ARC-009** | Damage application, resists, armour (UNK-008) | P1 | ARC-008 | High | **IMPLEMENTED** (formulas + items.json; wiring into server combat pending) |
-| **CMB-001** | Switch server combat to the original formulas (attributes, items.json weapons/armour, resists, flinch, block) | P1 | ARC-009 | Medium | **IMPLEMENTED** (attributes, HP, weapon hit, attack modes, resists, flinch; blocking and inventory-driven equipment pending) |
+| **CMB-001** | Switch server combat to the original formulas (attributes, items.json weapons/armour, resists, flinch, block) | P1 | ARC-009 | Medium | **IMPLEMENTED** (attributes, HP, weapon hit, attack modes, resists, flinch, shield block; inventory-driven equipment pending) |
 | **ARC-007** | Decode `.msh` level geometry and `.cap` collision | P1 | ARC-002 | High | **NOT STARTED** | [asset-formats.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/asset-formats.md) | `converter/src/formats/mdl.ts`, `converter/src/emit/gltf.ts` |
 | **AST-004** | Browser Web Worker host for the converter (OPFS output) | P2 | AST-002 | Medium | **NOT STARTED** | [asset-pipeline.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/asset-pipeline.md) | `converter/src/hosts/worker.ts` |
 
