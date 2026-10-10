@@ -6,10 +6,15 @@ import { parseAni, type AniClip } from './formats/ani.ts';
 import { parseItemsCtx } from './formats/items_ctx.ts';
 import { parseModelsCtx } from './formats/models_ctx.ts';
 import { buildModelDocument, writeGlb } from './emit/gltf_model.ts';
+import { parseMsh } from './formats/msh.ts';
+import { parseCap } from './formats/cap.ts';
+import { emitLevel } from './emit/gltf_level.ts';
 
 /** Read access to the user's original install. Paths are relative, forward-slash separated. */
 export interface SourceFS {
   readFile(path: string): Promise<Uint8Array | null>;
+  /** File names (not paths) directly inside `dir`; hosts without listing return null. */
+  list?(dir: string): Promise<string[] | null>;
 }
 
 /** Destination for generated files (local/generated/ on Node, OPFS in the browser). */
@@ -30,8 +35,12 @@ export interface Manifest {
   /** SHA-256 of each consumed input, used to skip unchanged inputs on later runs. */
   inputs: Record<string, string>;
   textures: Record<string, string>;
+  /** Pixel size per texture (level UVs are stored in texels). */
+  textureSizes: Record<string, [number, number]>;
   models: Record<string, string>;
   levels: Record<string, { render: string; collision: string }>;
+  /** Level acts (`Caps/*.cap`): lower-case cap name -> placements JSON (mesh + creatures). */
+  placements: Record<string, string>;
   rules: Record<string, string>;
   audio: Record<string, string>;
 }
@@ -53,7 +62,9 @@ export interface ConvertReport {
   warnings: string[];
 }
 
-const MANIFEST_VERSION = '1.0.0';
+const MANIFEST_VERSION = '1.1.0';
+/** Bump when level output changes so cached levels are rebuilt. */
+const LEVEL_EMIT_VERSION = '2';
 
 export async function sha256Hex(data: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', data as Uint8Array<ArrayBuffer>);
@@ -61,7 +72,7 @@ export async function sha256Hex(data: Uint8Array): Promise<string> {
 }
 
 function emptyManifest(): Manifest {
-  return { version: MANIFEST_VERSION, generated_at: '', inputs: {}, textures: {}, models: {}, levels: {}, rules: {}, audio: {} };
+  return { version: MANIFEST_VERSION, generated_at: '', inputs: {}, textures: {}, textureSizes: {}, models: {}, levels: {}, placements: {}, rules: {}, audio: {} };
 }
 
 async function loadPrevious(sink: OutputSink): Promise<Manifest> {
@@ -101,6 +112,7 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
     manifest.inputs[zipPath] = hash;
     if (prev.inputs[zipPath] === hash && Object.keys(prev.textures).length > 0) {
       manifest.textures = prev.textures;
+      manifest.textureSizes = prev.textureSizes;
       report.skipped.push(zipPath);
       log(`textures: unchanged, ${Object.keys(prev.textures).length} cached`);
     } else {
@@ -115,6 +127,7 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
           const out = `textures/${base}.${encoder.ext}`;
           await sink.writeFile(out, await encoder.encode(image));
           manifest.textures[base] = out;
+          manifest.textureSizes[base] = [image.width, image.height];
         } catch (err) {
           report.warnings.push(`${name}: ${(err as Error).message}`);
         }
@@ -220,6 +233,75 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
     manifest.inputs[bindingsPath] = await sha256Hex(bindingsBytes);
     report.converted.push(bindingsPath);
   }
+
+  // --- Levels: Meshes/*.msh -> levels/<name>.glb + _lightmap atlas + .collision.bin
+  manifest.inputs['levels:emit'] = LEVEL_EMIT_VERSION;
+  const meshFiles = (await source.list?.('Meshes'))?.filter((f) => f.toLowerCase().endsWith('.msh')).sort() ?? [];
+  if (meshFiles.length === 0) report.warnings.push('Meshes/*.msh: none found (or the host cannot list directories)');
+  for (const file of meshFiles) {
+    const path = `Meshes/${file}`;
+    const bytes = await source.readFile(path);
+    if (!bytes) continue;
+    const name = file.replace(/\.msh$/i, '').toLowerCase();
+    const hash = await sha256Hex(bytes);
+    manifest.inputs[path] = hash;
+    if (prev.inputs[path] === hash && prev.levels[name] && prev.inputs['levels:emit'] === LEVEL_EMIT_VERSION && prev.inputs['Textures/textures.zip'] === manifest.inputs['Textures/textures.zip']) {
+      manifest.levels[name] = prev.levels[name]!;
+      report.skipped.push(path);
+      continue;
+    }
+    try {
+      const level = parseMsh(bytes);
+      const missing = new Set<string>();
+      const out = emitLevel(level, {
+        name,
+        lightmapUri: `${name}_lightmap.${encoder.ext}`,
+        texture: (m) => {
+          const file = manifest.textures[m];
+          const size = manifest.textureSizes[m];
+          if (!file || !size) {
+            missing.add(m);
+            return null;
+          }
+          return { uri: `../${file}`, width: size[0], height: size[1] };
+        },
+        nonSolid: (m) => m.startsWith('wld_sy_sky'),
+      });
+      await sink.writeFile(`levels/${name}.glb`, out.glb);
+      await sink.writeFile(`levels/${name}_lightmap.${encoder.ext}`, await encoder.encode(out.atlas));
+      await sink.writeFile(`levels/${name}.collision.bin`, out.collision);
+      manifest.levels[name] = { render: `levels/${name}.glb`, collision: `levels/${name}.collision.bin` };
+      if (missing.size) report.warnings.push(`${path}: ${missing.size} material(s) without texture (${[...missing].slice(0, 5).join(', ')})`);
+      log(`levels: ${name} ${level.polygons.length} polygons, ${level.materials.length} materials, ${out.triangles} collision triangles`);
+      report.converted.push(path);
+    } catch (err) {
+      report.warnings.push(`${path}: ${(err as Error).message}`);
+    }
+  }
+
+  // --- Placements: Caps/*.cap -> levels/<cap>.placements.json (positions mirrored like the meshes)
+  const capFiles = (await source.list?.('Caps'))?.filter((f) => f.toLowerCase().endsWith('.cap')).sort() ?? [];
+  let creatures = 0;
+  for (const file of capFiles) {
+    const path = `Caps/${file}`;
+    const bytes = await source.readFile(path);
+    if (!bytes) continue;
+    const name = file.replace(/\.cap$/i, '').toLowerCase();
+    manifest.inputs[path] = await sha256Hex(bytes);
+    try {
+      const cap = parseCap(bytes);
+      const out = `levels/${name}.placements.json`;
+      await sink.writeFile(out, JSON.stringify({
+        mesh: cap.mesh.toLowerCase(),
+        creatures: cap.creatures.map((c) => ({ ...c, position: [c.position[0], c.position[1], -c.position[2]] })),
+      }));
+      manifest.placements[name] = out;
+      creatures += cap.creatures.length;
+    } catch (err) {
+      report.warnings.push(`${path}: ${(err as Error).message}`);
+    }
+  }
+  if (capFiles.length) log(`placements: ${Object.keys(manifest.placements).length} level acts, ${creatures} creatures`);
 
   manifest.generated_at = (opts.now ?? (() => new Date()))().toISOString();
   await sink.writeFile('manifest.json', JSON.stringify(manifest, null, 2));

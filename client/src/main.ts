@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
   DEFAULT_MOVEMENT_STATS,
+  LEVEL_PREFIX,
   TICK_DT,
   TICK_MS,
   createCharacter,
@@ -9,6 +10,7 @@ import {
   createSyntheticArena,
   initPhysics,
   stepCharacter,
+  type ArenaDef,
   type ClientSession,
   type MovementWorld,
 } from '@crusaders/shared';
@@ -19,6 +21,7 @@ import { ProceduralAvatar } from './entities/avatar.ts';
 import { LocalPlayer } from './entities/local_player.ts';
 import { RemoteEntities } from './entities/remote_entities.ts';
 import { loadOriginalAvatars } from './assets/original_models.ts';
+import { fetchServerArena, loadOriginalLevel, type OriginalLevel } from './assets/original_level.ts';
 import { InputManager } from './input/input_manager.ts';
 import { connectToWorld } from './network/connect.ts';
 import { CombatUi } from './ui/combat_ui.ts';
@@ -33,10 +36,7 @@ async function main(): Promise<void> {
   const overlay = document.getElementById('overlay')!;
 
   const [rapier, originals] = await Promise.all([initPhysics(), loadOriginalAvatars()]);
-  const arena = createSyntheticArena();
-
   const { renderer, scene } = createRenderContext(container);
-  scene.add(buildArenaMeshes(arena));
   const remotes = new RemoteEntities(scene, originals);
   const combatUi = new CombatUi(document.getElementById('world-ui')!);
   const hud = new Hud(document.getElementById('hud')!, document.getElementById('player-panel')!, document.getElementById('death')!);
@@ -44,6 +44,23 @@ async function main(): Promise<void> {
 
   // Online: the session predicts and reconciles. Offline: plain local simulation.
   const auth = await chooseAuth();
+
+  // The zone's arena: the server's (online) or ?level=<act> / the synthetic arena (offline).
+  // Original levels come from the user's own converted installation (dev only).
+  const levelParam = new URLSearchParams(location.search).get('level');
+  const arenaName = auth.kind === 'offline'
+    ? (levelParam ? `${LEVEL_PREFIX}${levelParam}` : 'synthetic-arena')
+    : ((await fetchServerArena()) ?? 'synthetic-arena');
+  let arena: ArenaDef;
+  let levelView: OriginalLevel | null = null;
+  if (arenaName.startsWith(LEVEL_PREFIX)) {
+    levelView = await loadOriginalLevel(arenaName);
+    arena = levelView.arena;
+    scene.add(levelView.object);
+  } else {
+    arena = createSyntheticArena();
+    scene.add(buildArenaMeshes(arena));
+  }
   let player: LocalPlayer | null = null;
   const headPos = new THREE.Vector3();
   const session: ClientSession | null =
@@ -136,7 +153,7 @@ async function main(): Promise<void> {
 
   if (import.meta.env.DEV) {
     // Debug/E2E hook: lets tests drive input without pointer lock.
-    (window as unknown as { __co: unknown }).__co = { input, player: local, mw, session, remotes, inventory: inventoryPanel, render: () => renderer.render(scene, chase.camera) };
+    (window as unknown as { __co: unknown }).__co = { input, player: local, mw, session, remotes, inventory: inventoryPanel, scene, camera: chase.camera, renderer, level: levelView, render: () => renderer.render(scene, chase.camera) };
   }
 
   // Fixed-step simulation (same 20 Hz step as the server), interpolated rendering.
@@ -160,6 +177,7 @@ async function main(): Promise<void> {
     if (session) remotes.update(session, dt);
     target.copy(local.object.position);
     chase.update(target, input.yaw, input.pitch, dt);
+    levelView?.update(chase.camera);
     renderer.render(scene, chase.camera);
     combatUi.update(dt, chase.camera, remotes, container.clientWidth, container.clientHeight);
     hud.update(dt, tick, local.character, session, remotes.count);

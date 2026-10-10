@@ -68,6 +68,10 @@ Every unknown item is assigned a priority and a concrete validation experiment t
 - **Description:** How the target applies `DR` resist multipliers per damage type and difficulty, armour, blocking and the combo/attack-type modifiers. The code lives in regions Ghidra has not turned into functions yet.
 - **Next step:** re-run Ghidra auto-analysis with the aggressive function finder, then follow readers of the resist table filled by `Rules_LoadDefaultCtx`.
 
+### UNK-010: `Ws_a.msh` (header flags 2) and lightmap gain
+- **Status:** Open | **Priority:** Low
+- **Description:** `Ws_a.msh` sets header flag 2 and its lightmap block is not a DCL stream (probably stored uncompressed). The modulation factor between texture and lightmap (×2 assumed) is unverified.
+
 ### UNK-009: Creature HP and XP Values
 - **Status:** Resolved (2026-10-09) — per-placement HP, XP, disposition and resists in the `.cap` object records (asset-format-discovery.md §6.2).
 - **Original priority:** Medium

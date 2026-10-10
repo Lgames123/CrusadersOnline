@@ -262,9 +262,16 @@ export class WorldZone {
     this.grid.update(a.entityId, p.x, p.z);
   }
 
-  private spawnMob(archetypeId: string, at: { x: number; y: number; z: number }): void {
-    const archetype = MOB_ARCHETYPES[archetypeId];
-    if (!archetype) throw new Error(`unknown mob archetype ${archetypeId}`);
+  private spawnMob(archetypeId: string, at: ArenaDef['mobSpawns'][number]): void {
+    const base = MOB_ARCHETYPES[archetypeId];
+    if (!base) throw new Error(`unknown mob archetype ${archetypeId}`);
+    // Original level placements carry their own HP, XP value and resists.
+    const archetype: MobArchetype = {
+      ...base,
+      ...(at.hp !== undefined && at.hp > 0 ? { maxHp: at.hp } : {}),
+      ...(at.xp !== undefined ? { xpReward: at.xp } : {}),
+      ...(at.resist?.length === 11 ? { resist: at.resist } : {}),
+    };
     const weapon = this.items.get(archetype.weapon);
     if (!weapon) throw new Error(`unknown weapon ${archetype.weapon} for ${archetypeId}`);
     const mob: Mob = {
@@ -285,7 +292,7 @@ export class WorldZone {
       shield: archetype.shield ? this.items.get(archetype.shield) ?? null : null,
       blockUntil: 0,
       nextBlockTick: 0,
-      spawn: { ...at },
+      spawn: { x: at.x, y: at.y, z: at.z },
       state: 'idle',
       threat: new Map(),
       nextSwingTick: 0,

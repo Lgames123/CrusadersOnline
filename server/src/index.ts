@@ -41,7 +41,7 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
   const tickets = new TicketStore(config.wsTicketTtlSeconds);
   let sessions: SessionManager | null = null;
   const zone = new ZoneHost(
-    { zone: 'arena-1', arena: 'synthetic-arena', difficulty: config.difficulty, itemRulesPath: config.itemRulesPath },
+    { zone: 'arena-1', arena: config.arena, difficulty: config.difficulty, itemRulesPath: config.itemRulesPath, generatedDir: config.generatedDir },
     {
       deliver: (connId, data) => sessions?.deliver(connId, data),
       metrics: (m) => log.debug(m, 'zone tick metrics'),
@@ -64,7 +64,7 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
   const http = createServer((req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (req.method === 'GET' && url.pathname === '/healthz') {
-      return json(res, 200, { ok: true, zone: zone.zone, tick: zone.tick, players: sessions!.playerCount });
+      return json(res, 200, { ok: true, zone: zone.zone, arena: config.arena, tick: zone.tick, players: sessions!.playerCount });
     }
     if (url.pathname.startsWith('/api/')) {
       void api(req, res, url.pathname).then((handled) => {

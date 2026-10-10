@@ -18,7 +18,7 @@ export class ChaseCamera {
 
   constructor(mw: MovementWorld, aspect: number) {
     this.mw = mw;
-    this.camera = new THREE.PerspectiveCamera(70, aspect, 0.05, 400);
+    this.camera = new THREE.PerspectiveCamera(70, aspect, 0.05, 1500);
   }
 
   update(target: THREE.Vector3, yaw: number, pitch: number, dt: number): void {

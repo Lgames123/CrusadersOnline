@@ -3,7 +3,7 @@
  * CLI host: pnpm convert --input "<original install dir>" --out "./local/generated"
  * Reads the user's own installation (read-only) and writes browser-ready assets locally.
  */
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { convertInstall, type ImageEncoder, type OutputSink, type SourceFS } from '../pipeline.ts';
@@ -27,6 +27,13 @@ const source: SourceFS = {
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
       throw err;
+    }
+  },
+  async list(dir) {
+    try {
+      return (await readdir(path.join(input, dir), { withFileTypes: true })).filter((e) => e.isFile()).map((e) => e.name);
+    } catch {
+      return null;
     }
   },
 };

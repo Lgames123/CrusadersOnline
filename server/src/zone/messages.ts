@@ -35,4 +35,6 @@ export interface ZoneWorkerData {
   difficulty: 'easy' | 'medium' | 'hard';
   /** Converted items.json to use instead of the built-in catalog. */
   itemRulesPath: string | null;
+  /** Converter output directory, for "level:<act>" arenas. */
+  generatedDir: string;
 }

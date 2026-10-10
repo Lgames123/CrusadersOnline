@@ -1,7 +1,8 @@
 import { parentPort, workerData } from 'node:worker_threads';
 import { performance } from 'node:perf_hooks';
 import { readFileSync } from 'node:fs';
-import { BUILTIN_ITEMS, catalogFromItemRules, createSyntheticArena, initPhysics, type ArenaDef, type ItemCatalog } from '@crusaders/shared';
+import path from 'node:path';
+import { BUILTIN_ITEMS, LEVEL_PREFIX, buildLevelArena, catalogFromItemRules, createSyntheticArena, initPhysics, type ArenaDef, type ItemCatalog, type LevelPlacements } from '@crusaders/shared';
 import { SimulationClock, TickStats } from '../simulation/clock.ts';
 import { WorldZone } from '../simulation/world_zone.ts';
 import type { FromZone, ToZone, ZoneWorkerData } from './messages.ts';
@@ -10,7 +11,7 @@ const METRICS_EVERY_TICKS = 100; // 5 s
 const PERSIST_EVERY_TICKS = 20 * 60; // 60 s (persistence.md §2)
 
 const port = parentPort!;
-const { zone: zoneName, arena: arenaName, difficulty, itemRulesPath } = workerData as ZoneWorkerData;
+const { zone: zoneName, arena: arenaName, difficulty, itemRulesPath, generatedDir } = workerData as ZoneWorkerData;
 
 function loadItems(file: string | null): ItemCatalog {
   if (!file) return BUILTIN_ITEMS;
@@ -19,6 +20,13 @@ function loadItems(file: string | null): ItemCatalog {
 
 function loadArena(name: string): ArenaDef {
   if (name === 'synthetic-arena') return createSyntheticArena();
+  if (name.startsWith(LEVEL_PREFIX)) {
+    const act = name.slice(LEVEL_PREFIX.length);
+    if (!/^[a-z0-9_-]+$/.test(act)) throw new Error(`invalid level name ${name}`);
+    const placements = JSON.parse(readFileSync(path.join(generatedDir, 'levels', `${act}.placements.json`), 'utf8')) as LevelPlacements;
+    const collision = new Uint8Array(readFileSync(path.join(generatedDir, 'levels', `${placements.mesh}.collision.bin`)));
+    return buildLevelArena(name, collision, placements);
+  }
   throw new Error(`unknown arena ${name}`);
 }
 

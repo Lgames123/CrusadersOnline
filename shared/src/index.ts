@@ -8,6 +8,7 @@ export * from './protocol/control/schemas.ts';
 export * from './protocol/control/server.ts';
 export * from './arena/types.ts';
 export * from './arena/synthetic.ts';
+export * from './arena/level.ts';
 export * from './movement/physics.ts';
 export * from './movement/character.ts';
 export * from './spatial_hash.ts';

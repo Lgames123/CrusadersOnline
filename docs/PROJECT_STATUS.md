@@ -91,8 +91,17 @@
   - Creature shield AI: skeletons raise their shield against frontal swings (35%, 0.7 s, 1.5 s cooldown; slice values).
   - M11: GitHub Actions CI (typecheck, tests incl. PostgreSQL 18, E2E, GHCR images), scheduled `pg_dump` backups with restore script (drill done), HSTS on HTTPS. 77 tests + 1 E2E.
 
+- [x] Session 11 (2026-10-10): **original levels in the browser.**
+  - `.msh` decoded on 24 of 25 levels (asset-format-discovery.md §6.3): cells → faces → render fragments, texture axes, RGB555 lightmaps.
+  - The converter writes level GLBs, lightmap atlases and collision meshes, plus `.cap` placements for all 84 acts (2,037 creatures).
+  - The client renders an original level (textures × baked lightmap, sky box around the camera). Rapier collides against the original triangle mesh on both server and client.
+  - Skeleton Warriors spawn where the original placed them, with each placement's HP, XP and resists.
+  - Run with `ARENA=level:ca1a` on the server, or offline with `http://localhost:3000/?level=ca1a`. 81 tests.
+
 ### Not Yet Done
-- `.msh` geometry decoding (level collision and rendering), original AI maneuver scripts.
+- Other creature types in original levels (Ghost, Shadow, Dark Mage… — data is there, archetypes and AI are not), level props and items from `.cap`, doors and scripted sequences, `Ws_a.msh`.
+- Packaging the converter for players (browser conversion into OPFS) so original levels work outside the dev server.
+- Original AI maneuver scripts.
 - First deployment on a real domain (TLS certificate), off-host backups, metrics.
 - World unit / physics constants (UNK-007), `.msh` levels, `.cap` collision.
 - Converter: browser Web Worker host, `.mdl`/`.ani`/`.msh` parsers, `items.ctx`/`models.ctx` parsers.

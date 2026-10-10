@@ -24,6 +24,13 @@ export interface ServerConfig {
    * defaults to the user's own conversion output when present; otherwise built-in items only.
    */
   itemRulesPath: string | null;
+  /**
+   * Zone arena (ARENA): "synthetic-arena", or "level:<act>" for an original level converted from
+   * the user's own installation (e.g. "level:ca1a"), read from `generatedDir`.
+   */
+  arena: string;
+  /** Converter output directory (GENERATED_DIR, default local/generated). */
+  generatedDir: string;
 }
 
 /** Repository root; relative paths (e.g. pglite:local/pgdata) resolve against it. */
@@ -60,6 +67,8 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     httpRate: 1,
     httpBurst: 10,
     itemRulesPath: resolveItemRules(env),
+    arena: process.env['ARENA'] ?? 'synthetic-arena',
+    generatedDir: path.resolve(REPO_ROOT, process.env['GENERATED_DIR'] ?? 'local/generated'),
     ...overrides,
   };
 }

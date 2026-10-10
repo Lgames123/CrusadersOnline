@@ -100,7 +100,8 @@ Status values:
 |---|---|---|---|---|---|---|---|
 | **TST-001** | Implement Vitest suite for math, packet parsing, and movement validation | P1 | ENG-001 | Low | **IN PROGRESS** (40 tests incl. 10 integration tests) | [testing-strategy.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/testing-strategy.md) | `tests/unit/` |
 | **TST-002** | Playwright multi-client end-to-end synchronization tests | P1 | VRT-001 | Medium | **VERIFIED** (move, combat number, despawn across two tabs; runs in CI) |
-| **ARC-010** | `.cap`/`.msh` DCL compression and `.cap` creature records (UNK-009) | P1 | ARC-009 | High | **VERIFIED** (`tools/re/pkware_dcl.py`, `tools/re/cap_creatures.py`; `.msh` geometry layout pending) |
+| **ARC-010** | `.cap`/`.msh` DCL compression and `.cap` creature records (UNK-009) | P1 | ARC-009 | High | **VERIFIED** (`tools/re/pkware_dcl.py`, `tools/re/cap_creatures.py`) |
+| **ARC-011** | `.msh` level geometry, textures, lightmaps → GLB + collision; `.cap` placements | P0 | ARC-010 | High | **VERIFIED** (24/25 levels; client renders, server and client collide; skeletons at original placements) |
 | **OPS-001** | CI (typecheck, tests with PostgreSQL, E2E, image publishing to GHCR) | P1 | TST-002 | Medium | **IMPLEMENTED** (`.github/workflows/ci.yml`; first run on push) |
 | **OPS-002** | Scheduled database backups and restore procedure | P1 | SRV-004 | Low | **VERIFIED** (local restore drill) |
 | **OPS-003** | TLS on a real domain with HSTS | P1 | DEP-001 | Low | **READY** (config in place; needs a domain) | [testing-strategy.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/testing-strategy.md) | `tests/e2e/` |

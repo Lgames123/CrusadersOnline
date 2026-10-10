@@ -8,7 +8,11 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 interface Manifest {
   models: Record<string, string>;
+  levels?: Record<string, { render: string; collision: string }>;
 }
+
+/** Lightmap texels are stored dark; the original modulates with this gain (tuned by eye). */
+const LIGHTMAP_GAIN = 2;
 interface SphereExtra {
   node: number;
   center: [number, number, number];
@@ -79,10 +83,33 @@ function applyToggles(): void {
   });
 }
 
+/** Levels: unlit materials modulated by the lightmap atlas on UV set 1. */
+async function setupLevel(root: THREE.Object3D, lightmapUrl: string): Promise<void> {
+  const lightMap = await new THREE.TextureLoader().loadAsync(lightmapUrl);
+  lightMap.channel = 1;
+  lightMap.colorSpace = THREE.SRGBColorSpace;
+  lightMap.flipY = false;
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const old = mesh.material as THREE.MeshStandardMaterial;
+    mesh.material = new THREE.MeshLambertMaterial({ map: old.map, lightMap, lightMapIntensity: LIGHTMAP_GAIN * Math.PI, name: old.name });
+    old.dispose();
+  });
+}
+
 async function show(name: string, url: string): Promise<void> {
   clear();
   const gltf = await loader.loadAsync(`/generated/${url}`);
   current = gltf.scene;
+  const isLevel = url.startsWith('levels/');
+  if (isLevel) {
+    const lm = (gltf.scenes[0]?.userData as { lightmap?: string })['lightmap'];
+    if (lm) await setupLevel(current, `/generated/${url.replace(/[^/]+$/, '')}${lm}`);
+  }
+  camera.near = isLevel ? 0.5 : 0.01;
+  camera.far = isLevel ? 20000 : 500;
+  camera.updateProjectionMatrix();
   scene.add(current);
   mixer = new THREE.AnimationMixer(current);
   clips = gltf.animations;
@@ -147,7 +174,10 @@ async function main(): Promise<void> {
     return;
   }
   const manifest = (await res.json()) as Manifest;
-  const names = Object.keys(manifest.models).sort((a, b) => a.localeCompare(b));
+  const levels = Object.fromEntries(Object.entries(manifest.levels ?? {}).map(([k, v]) => [`level:${k}`, v.render]));
+  const all: Record<string, string> = { ...levels, ...manifest.models };
+  manifest.models = all;
+  const names = Object.keys(all).sort((a, b) => a.localeCompare(b));
   for (const n of names) select.add(new Option(n, n));
   const initial = decodeURIComponent(location.hash.slice(1)) || (names.includes('drake') ? 'drake' : names[0]!);
   select.value = initial;

@@ -209,6 +209,70 @@ Each creature record starts with the marker `2D 00 00 00 CD CD CD CD`. At +0x1C 
 
 Individual placements override these values; level designers made stronger variants. For example, 18 Skeleton Warriors have 80 HP and give 60 XP.
 
+The creature's position (3 × float32, original units) is at XP block − 0x200. The `.cap` header names the level mesh it belongs to (`Ca1a.cap` → `Ca_a`). The 84 `.cap` files are the acts or variants of the 25 meshes.
+
+### 6.3 `.msh` layout and geometry `[CONFIRMED on 24 of 25 levels]`
+
+**Memory images.** Both `.msh` and `.cap` files are memory images ("game DBs"). The loader decompresses them into game memory at fixed addresses, so internal pointers are absolute: the mesh DBs live at `0x06000000` and the cap DB at `0x08000000`. Each DB ends with a **per-type object table**: for every object type, a count followed by that many pointers. It is the "recyclable overhead" in the loader's messages.
+
+**File layout:**
+
+| Part | Content |
+|---|---|
+| Header (0x112 bytes) | magic `0xFEED000A`, offset of the SpaceMap header, lightmap byte size, lightmap count, flags (0; `Ws_a.msh` has 2 and is not decoded yet) |
+| `[u32 size][DCL]` | lightmap texels: 16-bit RGB555, tiles up to 16 × 16 |
+| Lightmap directory | 12 bytes per tile: `[?, ?, width, height][u32 byte offset][pad]` |
+| SpaceMap DB | 0x20-byte header (size, table bytes, version `0xA1A10001`, 11 types, …), then `[u32 size][DCL]`: 2D cell graph (cells with edges and neighbour links, for navigation and visibility) |
+| Mesh DB | 0x28-byte header (size, table bytes, version `0xBABE0002`, **8 types**, …), then `[u32 size][DCL]`. In game memory it follows the SpaceMap DB directly. |
+
+**Mesh object types:** type 0 = cells, type 1 = materials (texture name pointer at +8).
+
+**Cell** (convex vertical prism; many cells have no geometry):
+
+| Offset | Field |
+|---|---|
+| +0x3C | vertex pool, float32 xyz |
+| +0x40 | u16 vertex count |
+| +0x42 | u16 face count |
+| +0x44 | faces, 0x68 bytes each |
+
+**Face:**
+
+| Offset | Field |
+|---|---|
+| +0x00 | plane normal, then d (n·v + d = 0) |
+| +0x10 | texture origin P |
+| +0x1C | texture axis U |
+| +0x28 | texture axis V |
+| +0x34 | axis lengths |
+| +0x3C | the whole face as one render polygon |
+| +0x5C | fragment pointer |
+| +0x60 | u8 fragment count |
+
+Texture coordinates are u = U·(X − P), v = V·(X − P) in 32-texel units. Every level texture is 128 px, so one repeat covers about 4 ft (a basket-weave brick floor comes out at a realistic scale).
+
+**Fragment** (0x20 bytes; the engine's render polygon, queued through `+0x10` and flag byte `+0x1B` by the DrawPolys queue at 0x004994B0):
+
+| Offset | Field |
+|---|---|
+| +0x04 | u16 indices into the cell's vertex pool |
+| +0x08 | lightmap UVs, float32 pairs, 0..1 inside the tile |
+| +0x0C | material pointer |
+| +0x18 | u16 lightmap index |
+| +0x1A | u8 vertex count |
+
+**Totals for Bs1a:** 88 geometry cells, 6,040 faces, 9,002 fragments, 8,929 distinct lightmaps (the directory has 8,928). All fragments lie on their face plane.
+
+**Units.** Floor-to-ceiling heights are 14–16 units, and characters are 6.8 units tall: level units are feet, like the models.
+
+**Converter output.** `converter/src/formats/{dcl,msh,cap}.ts` and `converter/src/emit/gltf_level.ts` write:
+- `levels/<mesh>.glb`: one primitive per material; TEXCOORD_0 is the texture and TEXCOORD_1 the lightmap atlas;
+- `levels/<mesh>_lightmap.webp`;
+- `levels/<mesh>.collision.bin` ("COL1": float32 xyz + u32 triangles; sky materials excluded);
+- `levels/<act>.placements.json`.
+
+The sky box is a small cube modelled away from the map using the `wld_sy_sky*` materials; the client draws it around the camera.
+
 ---
 
 ## 5. Pipeline Conversion Strategy

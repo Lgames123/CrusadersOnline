@@ -4,13 +4,34 @@
     {
       "name": "client",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@crusaders/client", "dev"],
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/client",
+        "dev"
+      ],
       "port": 3000
     },
     {
       "name": "server",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@crusaders/server", "dev"],
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/server",
+        "dev"
+      ],
+      "port": 8090
+    },
+    {
+      "name": "server-level",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/server",
+        "dev"
+      ],
+      "env": {
+        "ARENA": "level:ca1a"
+      },
       "port": 8090
     }
   ]

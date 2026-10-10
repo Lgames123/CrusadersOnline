@@ -1,6 +1,6 @@
 /**
  * Static level description shared by renderer (client) and collision world (client + server).
- * Synthetic arenas use primitive boxes; converted levels will add triangle meshes.
+ * Synthetic arenas use primitive boxes; converted original levels use triangle meshes (level.ts).
  */
 export interface BoxDef {
   /** Centre, metres. */
@@ -29,6 +29,9 @@ export interface ArenaDef {
   boxes: BoxDef[];
   meshes: TriMeshDef[];
   spawnPoints: { x: number; y: number; z: number }[];
-  /** Hostile spawns: archetype id (game/combat.ts) and position. */
-  mobSpawns: { archetype: string; x: number; y: number; z: number }[];
+  /**
+   * Hostile spawns: archetype id (game/combat.ts) and position; original levels also carry the
+   * placement's own HP, XP value and resists, which override the archetype's.
+   */
+  mobSpawns: { archetype: string; x: number; y: number; z: number; hp?: number; xp?: number; resist?: number[] }[];
 }
