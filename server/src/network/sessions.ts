@@ -1,5 +1,5 @@
 import type { Logger } from 'pino';
-import { CS, SC, parseClientControl, type ServerControlMsg } from '@crusaders/shared';
+import { CS, LEVEL_PREFIX, SC, parseClientControl, type ServerControlMsg } from '@crusaders/shared';
 import type { Account, TicketStore } from '../auth/tickets.ts';
 import type { CharacterPersistRecord, CharacterRepository } from '../persistence/characters.ts';
 import type { JoinOptions, PersistRecord, TransferState } from '../simulation/world_zone.ts';
@@ -232,8 +232,10 @@ export class SessionManager implements TransportHandlers {
         const saved = await this.characters.loadOwned(account.id, characterId);
         if (!saved) return this.reject(s, 'character not found');
         if (!this.sessions.has(s.conn.id)) return; // disconnected while loading
-        // Resume in the saved zone when it still exists; the saved position belongs to it.
-        const resume = this.zones.available(saved.zone) ? saved.zone : this.defaultArena;
+        // Resume in the saved level zone when it still exists (the saved position belongs to it);
+        // characters last seen in the synthetic test arena, or anywhere unavailable, start in
+        // the server's default arena.
+        const resume = saved.zone.startsWith(LEVEL_PREFIX) && this.zones.available(saved.zone) ? saved.zone : this.defaultArena;
         await this.sendToZone(s, resume, {
           name: saved.name,
           characterId: saved.id,
