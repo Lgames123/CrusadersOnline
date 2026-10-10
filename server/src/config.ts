@@ -19,6 +19,11 @@ export interface ServerConfig {
   httpBurst: number;
   /** Original difficulty column for attributes and resists. */
   difficulty: 'easy' | 'medium' | 'hard';
+  /**
+   * Converted items.json replacing the built-in item catalog (ITEM_RULES). In development it
+   * defaults to the user's own conversion output when present; otherwise built-in items only.
+   */
+  itemRulesPath: string | null;
 }
 
 /** Repository root; relative paths (e.g. pglite:local/pgdata) resolve against it. */
@@ -28,6 +33,14 @@ export const DEFAULT_PORT = 8090;
 export const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 const envFile = path.join(REPO_ROOT, '.env');
 if (existsSync(envFile)) process.loadEnvFile(envFile);
+
+const DEV_ITEM_RULES = path.join(REPO_ROOT, 'local/generated/rules/items.json');
+
+function resolveItemRules(env: ServerConfig['env']): string | null {
+  const explicit = process.env['ITEM_RULES'];
+  if (explicit) return path.resolve(REPO_ROOT, explicit);
+  return env === 'development' && existsSync(DEV_ITEM_RULES) ? DEV_ITEM_RULES : null;
+}
 
 export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig {
   const env = (process.env['NODE_ENV'] ?? 'development') as ServerConfig['env'];
@@ -46,6 +59,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     difficulty: (['easy', 'medium', 'hard'].includes(process.env['DIFFICULTY'] ?? '') ? process.env['DIFFICULTY'] : 'medium') as ServerConfig['difficulty'],
     httpRate: 1,
     httpBurst: 10,
+    itemRulesPath: resolveItemRules(env),
     ...overrides,
   };
 }

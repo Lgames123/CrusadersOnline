@@ -3,7 +3,7 @@ import { dequantizeAngle, dequantizePosition } from '../math/quantize.ts';
 import { CS, SC } from '../protocol/opcodes.ts';
 import { INPUT_PACKET_MAX_BYTES, MAX_INPUT_FRAMES, createInputFrame, encodeInput, type InputFrame } from '../protocol/binary/input.ts';
 import { decodeSnapshot, type EntityState } from '../protocol/binary/snapshot.ts';
-import type { CombatEventMsg, EntitySpawnMsg, PlayerStatsMsg, ServerControlMsg, WorldEnterMsg } from '../protocol/control/server.ts';
+import type { CombatEventMsg, EntitySpawnMsg, InventoryUpdateMsg, PlayerStatsMsg, ServerControlMsg, WorldEnterMsg } from '../protocol/control/server.ts';
 import type { ArenaDef } from '../arena/types.ts';
 import { createMovementWorld, type MovementWorld, type Rapier } from '../movement/physics.ts';
 import { createCharacter, setCharacterState, stepCharacter, type Character } from '../movement/character.ts';
@@ -30,11 +30,13 @@ interface RemoteFrame extends RemoteSample {
 export type PlayerStats = PlayerStatsMsg['d'];
 export type CombatEvent = CombatEventMsg['d'];
 export type EntityInfo = EntitySpawnMsg['d'];
+export type Inventory = InventoryUpdateMsg['d'];
 
 export interface ClientSessionEvents {
   spawn?(id: number, name: string, info: EntityInfo): void;
   stats?(stats: PlayerStats): void;
   combat?(event: CombatEvent): void;
+  inventory?(inventory: Inventory): void;
   despawn?(id: number): void;
   /** Local prediction was corrected by (dx, dy, dz) metres. */
   correction?(dx: number, dy: number, dz: number): void;
@@ -65,6 +67,8 @@ export class ClientSession {
   readonly entities = new Map<number, EntityInfo>();
   stats_: PlayerStats | null = null;
   readonly combatLog: CombatEvent[] = [];
+  /** Latest inventory of the local player (null until the first INVENTORY_UPDATE). */
+  inventory: Inventory | null = null;
 
   private ws: WebSocket | null = null;
   private readonly events: ClientSessionEvents;
@@ -173,6 +177,10 @@ export class ClientSession {
         if (this.combatLog.length > 100) this.combatLog.shift();
         this.events.combat?.(msg.d);
         break;
+      case SC.INVENTORY_UPDATE:
+        this.inventory = msg.d;
+        this.events.inventory?.(msg.d);
+        break;
       case SC.ERROR:
         break;
     }
@@ -191,6 +199,12 @@ export class ClientSession {
   attack(): void {
     if (!this.connected || this.dead) return;
     this.sendJson({ op: CS.PLAYER_ATTACK, seq: ++this.seq, d: { comboIndex: 1, clientTick: this.clientTick } });
+  }
+
+  /** Equips or unequips the item in an inventory slot; the server answers with INVENTORY_UPDATE. */
+  equip(slot: number, equip: boolean): void {
+    if (!this.connected) return;
+    this.sendJson({ op: CS.EQUIP_ITEM, seq: ++this.seq, d: { slot, equip } });
   }
 
   /**

@@ -66,3 +66,8 @@ Every unknown item is assigned a priority and a concrete validation experiment t
 - **Original priority:** High
 - **Description:** How the target applies `DR` resist multipliers per damage type and difficulty, armour, blocking and the combo/attack-type modifiers. The code lives in regions Ghidra has not turned into functions yet.
 - **Next step:** re-run Ghidra auto-analysis with the aggressive function finder, then follow readers of the resist table filled by `Rules_LoadDefaultCtx`.
+
+### UNK-009: Creature HP and XP Values
+- **Status:** Open | **Priority:** Medium
+- **Description:** Creature HP and experience value are not in the creature template table (executable-analysis.md §9). Default HP is 20; actual values must come from per-placement records in the level `.msh` files.
+- **Verification Experiment:** Locate the `.msh` object-placement section (NUM_MESH_OBJ_TYPES check), find records carrying a creature type id (113–162) and correlate their numeric fields with in-game HP.

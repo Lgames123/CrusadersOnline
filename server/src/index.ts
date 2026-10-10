@@ -32,6 +32,7 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
   const applied = await migrateToLatest(database.db);
   for (const m of applied) log.info({ migration: m.migrationName, status: m.status }, 'migration');
   log.info({ kind: database.kind }, 'database ready');
+  log.info({ itemRules: config.itemRulesPath ?? 'built-in' }, 'item catalog');
   const accounts = new AccountRepository(database.db);
   const characters = new CharacterRepository(database.db);
 
@@ -40,7 +41,7 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
   const tickets = new TicketStore(config.wsTicketTtlSeconds);
   let sessions: SessionManager | null = null;
   const zone = new ZoneHost(
-    { zone: 'arena-1', arena: 'synthetic-arena', difficulty: config.difficulty },
+    { zone: 'arena-1', arena: 'synthetic-arena', difficulty: config.difficulty, itemRulesPath: config.itemRulesPath },
     {
       deliver: (connId, data) => sessions?.deliver(connId, data),
       metrics: (m) => log.debug(m, 'zone tick metrics'),

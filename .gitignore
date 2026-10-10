@@ -67,3 +67,7 @@ Thumbs.db
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Playwright output
+tests/test-results/
+tests/playwright-report/

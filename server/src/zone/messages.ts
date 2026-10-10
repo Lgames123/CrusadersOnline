@@ -7,6 +7,7 @@ export type ToZone =
   | { t: 'leave'; connId: number }
   | { t: 'input'; connId: number; data: ArrayBuffer }
   | { t: 'attack'; connId: number }
+  | { t: 'equip'; connId: number; slot: number; equip: boolean }
   | { t: 'stop' };
 
 export interface ZoneMetrics {
@@ -32,4 +33,6 @@ export interface ZoneWorkerData {
   zone: string;
   arena: string;
   difficulty: 'easy' | 'medium' | 'hard';
+  /** Converted items.json to use instead of the built-in catalog. */
+  itemRulesPath: string | null;
 }

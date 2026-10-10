@@ -4,9 +4,9 @@ import { ATTACK_MODE_SCALE } from './ruleset.ts';
 
 /**
  * Combat and progression rules shared by server (authority) and client (presentation).
- * Damage, HP and resist formulas follow the original engine (original_stats.ts, ruleset.ts);
- * swing timings, AI parameters, creature stats and the XP curve are vertical-slice values until
- * the corresponding original data is recovered (reverse-engineering backlog).
+ * Damage, HP, resist and experience formulas follow the original engine (original_stats.ts,
+ * ruleset.ts, executable-analysis.md §8–9); swing timings, AI parameters and creature HP / XP
+ * values are vertical-slice values until the corresponding original data is recovered.
  */
 const ticks = (ms: number) => Math.round((ms / 1000) * TICK_RATE);
 
@@ -39,15 +39,27 @@ export const PLAYER_REACH = 2.2;
 export const PLAYER_ARC_DEG = 110;
 
 export const PLAYER_RESPAWN_TICKS = ticks(5000);
-export const XP_PER_LEVEL = 100;
 export const MAX_LEVEL = 50;
+
+/** XP added to the next-level threshold when reaching level n (index = new level); 4000 from level 6. */
+const XP_STEP = [0, 500, 1000, 2000, 3000, 4000] as const;
+const XP_STEP_LATE = 4000;
+
+/** Total XP needed to reach `level` (engine Stats_LevelUp): 0, 500, 1500, 3500, 6500, 10500, +4000... */
+export function xpForLevel(level: number): number {
+  let total = 0;
+  for (let l = 2; l <= level; l++) total += l - 1 < XP_STEP.length ? XP_STEP[l - 1]! : XP_STEP_LATE;
+  return total;
+}
 
 export interface MobArchetype {
   id: string;
   name: string;
   maxHp: number;
-  damageMin: number;
-  damageMax: number;
+  /** Item id of the creature's weapon (creature template table); creatures deal its whole damage vector. */
+  weapon: string;
+  /** Item id of its shield, if any. */
+  shield: string | null;
   /** Chase speed, m/s. */
   speed: number;
   aggroRadius: number;
@@ -61,6 +73,8 @@ export interface MobArchetype {
   xpReward: number;
   goldMin: number;
   goldMax: number;
+  /** Items that may drop into the killer's inventory, each rolled independently (slice values). */
+  loot: readonly { itemId: string; chance: number }[];
   /** Ticks the corpse stays before the mob respawns. */
   respawnTicks: number;
 }
@@ -69,10 +83,11 @@ export const MOB_ARCHETYPES: Readonly<Record<string, MobArchetype>> = {
   skeleton_warrior: {
     id: 'skeleton_warrior',
     name: 'Skeleton Warrior',
-    // Placeholder until creature data is decoded; sized for the original weapon scale (5–14).
+    // HP placeholder until level placement data is decoded (UNK-009); loadout from the
+    // creature template table: Long Sword + Wooden Shield.
     maxHp: 25,
-    damageMin: 8,
-    damageMax: 12,
+    weapon: 'long_sword',
+    shield: 'wooden_shield',
     speed: 4.2,
     aggroRadius: 10,
     leashRadius: 30,
@@ -80,15 +95,21 @@ export const MOB_ARCHETYPES: Readonly<Record<string, MobArchetype>> = {
     arcDeg: 90,
     swing: { startup: ticks(400), active: ticks(150), recovery: ticks(500) },
     cooldown: ticks(300),
-    xpReward: 25,
+    xpReward: 100,
     goldMin: 5,
     goldMax: 10,
+    loot: [
+      { itemId: 'long_sword', chance: 0.25 },
+      { itemId: 'scale_armor', chance: 0.1 },
+    ],
     respawnTicks: ticks(10_000),
   },
 };
 
 export function levelForXp(xp: number): number {
-  return Math.min(MAX_LEVEL, 1 + Math.floor(xp / XP_PER_LEVEL));
+  let level = 1;
+  while (level < MAX_LEVEL && xp >= xpForLevel(level + 1)) level++;
+  return level;
 }
 
 /** Original formula: 50 + 0.6 × Endurance × level, rounded for the protocol. */

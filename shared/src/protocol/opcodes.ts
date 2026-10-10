@@ -9,6 +9,7 @@ export const CS = {
   INTERACT: 0x07,
   CHAT_MESSAGE: 0x08,
   PING: 0x09,
+  EQUIP_ITEM: 0x0a,
 } as const;
 
 /** Server -> client opcodes. */

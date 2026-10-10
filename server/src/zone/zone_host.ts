@@ -62,6 +62,10 @@ export class ZoneHost {
     this.post({ t: 'attack', connId });
   }
 
+  equip(connId: number, slot: number, equip: boolean): void {
+    this.post({ t: 'equip', connId, slot, equip });
+  }
+
   leave(connId: number): void {
     this.post({ t: 'leave', connId });
   }

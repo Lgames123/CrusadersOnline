@@ -4,15 +4,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc -p .",
+    "typecheck": "tsc -p . && tsc -p e2e",
     "test": "vitest run",
     "test:unit": "vitest run unit",
-    "test:integration": "vitest run integration"
+    "test:integration": "vitest run integration",
+    "test:e2e": "playwright test -c e2e/playwright.config.ts"
   },
   "devDependencies": {
     "@crusaders/converter": "workspace:*",
     "@crusaders/server": "workspace:*",
     "@crusaders/shared": "workspace:*",
+    "@playwright/test": "^1.64.0",
     "@types/node": "^26.6.5",
     "@types/pg": "^8.23.1",
     "fflate": "^0.8.3",

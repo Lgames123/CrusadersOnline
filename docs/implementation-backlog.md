@@ -47,7 +47,7 @@ Status values:
 | **ARC-006** | Decode `.ani` animation tracks (UNK-005) | P1 | ARC-004 | High | **VERIFIED** (1,499/1,501 pairs; engine evaluator in Ghidra) |
 | **ARC-008** | World unit + movement/physics constants from the executable (UNK-007) | P1 | ARC-006 | Medium | **IN PROGRESS** (locomotion/jump model and derived-stat formulas recovered) |
 | **ARC-009** | Damage application, resists, armour (UNK-008) | P1 | ARC-008 | High | **IMPLEMENTED** (formulas + items.json; wiring into server combat pending) |
-| **CMB-001** | Switch server combat to the original formulas (attributes, items.json weapons/armour, resists, flinch, block) | P1 | ARC-009 | Medium | **IMPLEMENTED** (attributes, HP, weapon hit, attack modes, resists, flinch, shield block; inventory-driven equipment pending) |
+| **CMB-001** | Switch server combat to the original formulas (attributes, items.json weapons/armour, resists, flinch, block) | P1 | ARC-009 | Medium | **IMPLEMENTED** (attributes, HP, weapon hit, attack modes, resists, flinch, shield block, inventory-driven equipment, creature loadouts, XP curve) |
 | **ARC-007** | Decode `.msh` level geometry and `.cap` collision | P1 | ARC-002 | High | **NOT STARTED** | [asset-formats.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/asset-formats.md) | `converter/src/formats/mdl.ts`, `converter/src/emit/gltf.ts` |
 | **AST-004** | Browser Web Worker host for the converter (OPFS output) | P2 | AST-002 | Medium | **NOT STARTED** | [asset-pipeline.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/asset-pipeline.md) | `converter/src/hosts/worker.ts` |
 
@@ -91,7 +91,7 @@ Status values:
 | **VRT-002** | Interpolate remote players; predict + reconcile local player | P0 | VRT-001 | Medium | **IMPLEMENTED** (verified headless; visual smoothness pending interactive check) | [browser-client.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/browser-client.md) | `client/src/entities/remote_player.ts` |
 | **VRT-003** | Spawn server-authoritative skeleton mob with aggro and melee attack | P0 | SRV-002 | Medium | **VERIFIED** | [gameplay-systems.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/gameplay-systems.md) | `server/src/simulation/mob.ts` |
 | **VRT-004** | Authoritative melee combat resolution with damage numbers and health sync | P0 | VRT-003 | Medium | **VERIFIED** | [gameplay-specification.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/gameplay-specification.md) | `server/src/simulation/combat.ts` |
-| **VRT-005** | Persist character level, gold, and inventory to DB and verify reload survival | P0 | SRV-004, VRT-004 | Medium | **VERIFIED** (position, XP, gold, level, HP; inventory pending) | [persistence.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/persistence.md) | `server/src/persistence/` |
+| **VRT-005** | Persist character level, gold, and inventory to DB and verify reload survival | P0 | SRV-004, VRT-004 | Medium | **VERIFIED** (position, XP, gold, level, HP, inventory) | [persistence.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/persistence.md) | `server/src/persistence/` |
 
 ---
 
@@ -99,5 +99,5 @@ Status values:
 | Task ID | Description | Priority | Dependencies | Complexity | Status | Doc Link | Source Files |
 |---|---|---|---|---|---|---|---|
 | **TST-001** | Implement Vitest suite for math, packet parsing, and movement validation | P1 | ENG-001 | Low | **IN PROGRESS** (40 tests incl. 10 integration tests) | [testing-strategy.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/testing-strategy.md) | `tests/unit/` |
-| **TST-002** | Playwright multi-client end-to-end synchronization tests | P1 | VRT-001 | Medium | **READY** (next) | [testing-strategy.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/testing-strategy.md) | `tests/e2e/` |
+| **TST-002** | Playwright multi-client end-to-end synchronization tests | P1 | VRT-001 | Medium | **VERIFIED** (move, combat number, despawn across two tabs) | [testing-strategy.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/testing-strategy.md) | `tests/e2e/` |
 | **OPS-001** | Dockerize server, client, and PostgreSQL with single-command compose | P1 | VRT-005 | Low | **VERIFIED** (local Docker Desktop; TLS/backups pending) | [deployment.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/deployment.md) | `deployment/` |

@@ -1,6 +1,7 @@
 import { parentPort, workerData } from 'node:worker_threads';
 import { performance } from 'node:perf_hooks';
-import { createSyntheticArena, initPhysics, type ArenaDef } from '@crusaders/shared';
+import { readFileSync } from 'node:fs';
+import { BUILTIN_ITEMS, catalogFromItemRules, createSyntheticArena, initPhysics, type ArenaDef, type ItemCatalog } from '@crusaders/shared';
 import { SimulationClock, TickStats } from '../simulation/clock.ts';
 import { WorldZone } from '../simulation/world_zone.ts';
 import type { FromZone, ToZone, ZoneWorkerData } from './messages.ts';
@@ -9,7 +10,12 @@ const METRICS_EVERY_TICKS = 100; // 5 s
 const PERSIST_EVERY_TICKS = 20 * 60; // 60 s (persistence.md §2)
 
 const port = parentPort!;
-const { zone: zoneName, arena: arenaName, difficulty } = workerData as ZoneWorkerData;
+const { zone: zoneName, arena: arenaName, difficulty, itemRulesPath } = workerData as ZoneWorkerData;
+
+function loadItems(file: string | null): ItemCatalog {
+  if (!file) return BUILTIN_ITEMS;
+  return catalogFromItemRules(JSON.parse(readFileSync(file, 'utf8')) as Parameters<typeof catalogFromItemRules>[0]);
+}
 
 function loadArena(name: string): ArenaDef {
   if (name === 'synthetic-arena') return createSyntheticArena();
@@ -34,7 +40,7 @@ const zone = new WorldZone(rapier, zoneName, loadArena(arenaName), {
   persist(records, reason) {
     post({ t: 'persist', reason, records });
   },
-}, { difficulty });
+}, { difficulty, items: loadItems(itemRulesPath) });
 
 const flush = () => {
   if (batch.length === 0) return;
@@ -60,6 +66,10 @@ port.on('message', (msg: ToZone) => {
       break;
     case 'attack':
       zone.attack(msg.connId);
+      break;
+    case 'equip':
+      zone.equip(msg.connId, msg.slot, msg.equip);
+      flush();
       break;
     case 'stop':
       clock.stop();

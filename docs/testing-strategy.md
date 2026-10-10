@@ -44,6 +44,7 @@ CrusadersOnline implements an automated testing strategy guaranteeing determinis
   - Player 1 moves forward; Tab 2 observes Player 1 avatar moving smoothly.
   - Player 1 attacks an enemy mob; Tab 2 observes combat damage number.
   - Player 1 disconnects; Tab 2 observes despawn.
+- Implemented in `tests/e2e/two_clients.spec.ts` (two browser contexts as guests). Input goes through the client's real keyboard/mouse handlers; the dev-only `window.__co` hook stands in for pointer lock, which headless browsers do not grant.
 
 ---
 
@@ -58,6 +59,7 @@ pnpm test:unit
 # Run Integration Tests
 pnpm test:integration
 
-# Run Playwright E2E Tests
+# Run Playwright E2E Tests (starts its own server on 8091 and client on 3001;
+# uses the installed Edge by default, PW_CHANNEL=chrome for Chrome, HEADED=1 to watch)
 pnpm test:e2e
 ```

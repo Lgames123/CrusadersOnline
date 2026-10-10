@@ -26,7 +26,7 @@ export class CombatUi {
     const el = document.createElement('div');
     el.className = `floater ${kind}`;
     el.textContent = event.blocked ? 'Blocked' : event.killed ? `${event.damage}!` : String(event.damage);
-    if (event.reward) el.textContent += `  +${event.reward.xp} XP  +${event.reward.gold}g`;
+    if (event.reward) el.textContent += `  +${event.reward.xp} XP  +${event.reward.gold}g${event.reward.loot ? `  ${event.reward.loot.join(', ')}` : ''}`;
     this.root.appendChild(el);
     this.floaters.push({ el, pos: targetPos.clone(), age: 0 });
   }

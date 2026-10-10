@@ -121,6 +121,9 @@ export class SessionManager implements TransportHandlers {
         void this.enterWorld(s, s.account, summary.id, summary.name);
         return;
       }
+      case CS.EQUIP_ITEM:
+        if (s.state === 'in_world') this.zone.equip(conn.id, msg.d.slot, msg.d.equip);
+        return;
       case CS.PLAYER_ATTACK:
         if (s.state === 'in_world') this.zone.attack(conn.id);
         return;
@@ -149,6 +152,7 @@ export class SessionManager implements TransportHandlers {
           experience: saved.experience,
           gold: saved.gold,
           hp: saved.hp,
+          inventory: saved.inventory,
         });
       }
       s.state = 'in_world';

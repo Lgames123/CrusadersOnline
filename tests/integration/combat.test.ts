@@ -64,12 +64,19 @@ describe.each(backends)('vertical-slice combat over the network on $name (M08)',
     expect(s.playerStats).toMatchObject({ xp: SKELETON.xpReward, level: 1 });
     const gold = s.playerStats!.gold;
     expect(gold).toBeGreaterThanOrEqual(SKELETON.goldMin);
+    // Lower the shield: the change must survive the reconnect (inventory_items).
+    const shield = s.inventory!.items.find((i) => i.type === 'shield')!;
+    s.equip(shield.slot, false);
+    await sleep(200);
+    expect(s.inventory!.items.find((i) => i.slot === shield.slot)!.equipped).toBe(false);
+    const items = s.inventory!.items.map((i) => [i.itemId, i.slot, i.equipped]);
     s.close();
     await sleep(300);
 
     const again = await play();
     await sleep(200);
     expect(again.playerStats).toMatchObject({ xp: SKELETON.xpReward, gold });
+    expect(again.inventory!.items.map((i) => [i.itemId, i.slot, i.equipped])).toEqual(items);
     again.close();
   });
 });

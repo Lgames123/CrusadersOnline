@@ -2,9 +2,10 @@ import { DAMAGE_TYPES, type Attributes } from './original_stats.ts';
 
 /**
  * Default ruleset: the original engine's numeric parameters needed by the vertical slice
- * (attribute rows, resist rows, one weapon), recorded as facts in the reverse-engineering docs
+ * (attribute rows, resist rows, attack modes), recorded as facts in the reverse-engineering docs
  * (gameplay-mechanics.md, executable-analysis.md §7–8). No original assets are involved; a
- * user's converted rules (local/generated/rules/*.json) contain the complete tables.
+ * user's converted rules (local/generated/rules/*.json) contain the complete tables. Items live
+ * in items.ts.
  */
 export type Difficulty = 'easy' | 'medium' | 'hard';
 export const DIFFICULTIES: readonly Difficulty[] = ['easy', 'medium', 'hard'];
@@ -15,19 +16,6 @@ export type DamageVector = number[];
 
 export function damageVector(parts: Partial<Record<DamageType, number>>, fill = 0): DamageVector {
   return DAMAGE_TYPES.map((t) => parts[t] ?? fill);
-}
-
-export interface WeaponDef {
-  name: string;
-  damage: DamageVector;
-  /** Animation/swing rate multiplier (items.ctx `Speed`). */
-  speed: number;
-}
-
-export interface ArmorDef {
-  name: string;
-  /** Damage-taken multipliers (items.ctx `SetProtection`), 1 = none. */
-  protection: DamageVector;
 }
 
 export interface PlayerRules {
@@ -56,23 +44,6 @@ export function playerRules(difficulty: Difficulty): PlayerRules {
   const r = PLAYER[difficulty];
   return { attributes: { ...r.attributes }, resist: [...r.resist] };
 }
-
-/** The slice's starting weapon uses the original "Axe" numbers (items.ctx). */
-export const STARTING_WEAPON: Readonly<WeaponDef> = {
-  name: 'Axe',
-  damage: damageVector({ SLASH: 5, BASH: 5 }),
-  speed: 1.1,
-};
-
-/** items.ctx `Type SHIELD` with `Use BLOCK`; shields carry no damage or protection values. */
-export interface ShieldDef {
-  name: string;
-}
-
-/** The slice's starting shield ("Wooden Shield", the root of the shield hierarchy in items.ctx). */
-export const STARTING_SHIELD: Readonly<ShieldDef> = { name: 'Wooden Shield' };
-
-export const NO_ARMOR: Readonly<ArmorDef> = { name: 'None', protection: damageVector({}, 1) };
 
 /** Engine attack modes (Stats scale at +0x44): normal 1.0, power 1.25. The slice uses power for the 3rd combo hit. */
 export const ATTACK_MODE_SCALE = { normal: 1.0, power: 1.25 } as const;

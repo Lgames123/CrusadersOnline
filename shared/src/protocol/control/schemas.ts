@@ -43,10 +43,20 @@ export const PingPacketSchema = z.object({
   d: z.object({ clientTime: z.number() }),
 });
 
+export const EquipItemPacketSchema = z.object({
+  op: z.literal(CS.EQUIP_ITEM),
+  seq: z.number().int().positive(),
+  d: z.object({
+    slot: z.number().int().min(0).max(31),
+    equip: z.boolean(),
+  }),
+});
+
 export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   AuthTicketPacketSchema,
   SelectCharacterPacketSchema,
   PlayerAttackPacketSchema,
+  EquipItemPacketSchema,
   ChatMessagePacketSchema,
   PingPacketSchema,
 ]);

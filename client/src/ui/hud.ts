@@ -1,5 +1,5 @@
 import type { Character, ClientSession, PlayerStats } from '@crusaders/shared';
-import { XP_PER_LEVEL } from '@crusaders/shared';
+import { xpForLevel } from '@crusaders/shared';
 
 /** Debug line plus the player panel (HP, level/XP, gold) and the death notice. */
 export class Hud {
@@ -19,10 +19,13 @@ export class Hud {
   stats(s: PlayerStats): void {
     this.panel.hidden = false;
     const hpPct = s.maxHp > 0 ? (100 * s.hp) / s.maxHp : 0;
-    const xpInto = s.xp % XP_PER_LEVEL;
+    // Original curve: thresholds 500, 1500, 3500, ... (xpForLevel).
+    const from = xpForLevel(s.level);
+    const span = Math.max(1, xpForLevel(s.level + 1) - from);
+    const xpInto = s.xp - from;
     this.panel.innerHTML = `
       <div class="row"><span>HP</span><div class="track hp"><div class="fill" style="width:${hpPct.toFixed(0)}%"></div></div><span>${s.hp}/${s.maxHp}</span></div>
-      <div class="row"><span>Lv ${s.level}</span><div class="track xp"><div class="fill" style="width:${((100 * xpInto) / XP_PER_LEVEL).toFixed(0)}%"></div></div><span>${xpInto}/${XP_PER_LEVEL}</span></div>
+      <div class="row"><span>Lv ${s.level}</span><div class="track xp"><div class="fill" style="width:${Math.min(100, (100 * xpInto) / span).toFixed(0)}%"></div></div><span>${xpInto}/${span}</span></div>
       <div class="row gold">${s.gold} gold</div>`;
     this.death.hidden = !s.dead;
   }

@@ -36,6 +36,7 @@ All game code talks to a `Transport` interface (`send(bytes|object)`, `onMessage
 | `0x07` | `CS_INTERACT` | JSON | Interact with chest, door, NPC, or item drop |
 | `0x08` | `CS_CHAT_MESSAGE` | JSON | Send local or global chat text |
 | `0x09` | `CS_PING` | JSON | Latency measurement heartbeat |
+| `0x0A` | `CS_EQUIP_ITEM` | JSON | `{ slot: 0..31, equip: boolean }` — equip or unequip an inventory slot (deferred to the end of a swing in progress) |
 
 ### Server to Client (S -> C: `0x40` - `0x7F`)
 | Opcode | Name | Encoding | Description |
@@ -46,7 +47,7 @@ All game code talks to a `Transport` interface (`send(bytes|object)`, `onMessage
 | `0x43` | `SC_ENTITY_SPAWN` | JSON | New player, mob, or drop entered interest area (static data: model, name) |
 | `0x44` | `SC_ENTITY_DESPAWN`| JSON | Entity exited interest area or died |
 | `0x45` | `SC_COMBAT_EVENT` | JSON | Damage dealt, missed, flinch, or death trigger |
-| `0x46` | `SC_INVENTORY_UPDATE`| JSON | Item added, removed, equipped, or moved |
+| `0x46` | `SC_INVENTORY_UPDATE`| JSON | Full inventory of the owner: `{ items: [{ slot, itemId, name, type, equipped, damage?, speed?, protection? }], slots, weaponSpeed }`, on entry and after every change |
 | `0x47` | `SC_CHAT_BROADCAST` | JSON | Incoming chat message |
 | `0x48` | `SC_PONG` | JSON | Heartbeat response with server timestamp |
 | `0x4F` | `SC_ERROR` | JSON | Rejection reason (insufficient mana, invalid target) |

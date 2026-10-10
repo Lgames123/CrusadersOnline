@@ -1,13 +1,15 @@
 import * as THREE from 'three';
-import { ANIM, INPUT, STARTING_WEAPON, TICK_DT, dequantizeAngle, swingForWeaponSpeed, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
+import { ANIM, INPUT, TICK_DT, dequantizeAngle, swingForWeaponSpeed, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
 import type { Avatar } from './avatar.ts';
 
 const TURN_RATE = 12; // rad/s, visual only
 const SMOOTH_RATE = 10; // 1/s decay of visual correction offset
 const SNAP_DISTANCE = 2; // corrections larger than this are shown immediately
 const MOVE_MASK = INPUT.FORWARD | INPUT.BACK | INPUT.LEFT | INPUT.RIGHT;
-const SWING = swingForWeaponSpeed(STARTING_WEAPON.speed);
-const SWING_SECONDS = (SWING.startup + SWING.active + SWING.recovery) * TICK_DT;
+function swingSeconds(weaponSpeed: number): number {
+  const s = swingForWeaponSpeed(weaponSpeed);
+  return (s.startup + s.active + s.recovery) * TICK_DT;
+}
 
 /**
  * View of the locally predicted character. Physics runs at the fixed tick (offline: local
@@ -28,6 +30,8 @@ export class LocalPlayer {
   private combo = 0;
   private sinceSwing = 99;
   private blocking = false;
+  /** Swing duration of the equipped weapon (server INVENTORY_UPDATE weaponSpeed). */
+  private swingTime = swingSeconds(1.1);
   dead = false;
 
   constructor(character: Character, avatar: Avatar, step: (input: Readonly<InputFrame>) => void) {
@@ -52,11 +56,15 @@ export class LocalPlayer {
     this.moveAnim = !this.character.grounded ? ANIM.AIRBORNE : moving ? (input.flags & INPUT.WALK ? ANIM.WALK : ANIM.RUN) : ANIM.IDLE;
   }
 
+  setWeaponSpeed(speed: number): void {
+    this.swingTime = swingSeconds(speed);
+  }
+
   /** Local swing feedback; mirrors the server's combo rule closely enough for presentation. */
   swing(cameraYaw: number): boolean {
     if (this.dead || this.swingLeft > 0) return false;
     this.combo = this.sinceSwing < 0.3 && this.combo < 3 ? this.combo + 1 : 1;
-    this.swingLeft = SWING_SECONDS;
+    this.swingLeft = this.swingTime;
     this.targetFacing = cameraYaw;
     return true;
   }
@@ -89,7 +97,7 @@ export class LocalPlayer {
       this.sinceSwing += dt;
     }
     const anim = this.dead ? ANIM.DEAD : this.swingLeft > 0 ? ANIM.ATTACK + this.combo - 1 : this.blocking ? ANIM.BLOCK : this.moveAnim;
-    this.avatar.setState(anim, SWING_SECONDS);
+    this.avatar.setState(anim, this.swingTime);
     this.avatar.update(dt);
   }
 }

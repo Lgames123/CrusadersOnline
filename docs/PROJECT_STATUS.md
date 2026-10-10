@@ -81,9 +81,13 @@
 - [x] Session 8 (2026-10-09): server combat switched to the original rules — difficulty attribute/resist columns (`DIFFICULTY`, default medium), max HP 50 + 0.6 × END × level, weapon hit (stronger of slash/bash × Might multiplier, power hit 1.25), Axe starting weapon (speed 1.1), resist × armour on incoming damage, flinch/stagger interrupts. Verified live: 65 HP start, hits 5/5/6.25, skeleton hits 7.2–10.8. 66 tests.
 - [x] Shield block (right mouse, input flag bit 6): original ±81° frontal cone, stops the whole hit, not while swinging or flinching; `pt01_rdy_shld` clip / procedural shield raise. 69 tests.
 
+- [x] Session 9 (2026-10-09):
+  - Reverse engineering: creature template table (50 types: loadout, disposition, spell mask), creatures deal their whole weapon vector, original XP curve (500 / 1500 / 3500 / 6500 / 10500 / +4000), level-up adds the max-HP gain, block = whole hit (executable-analysis.md §9).
+  - Inventory and equipment: item catalog (built-in or converted items.json), 32-slot inventory persisted in `inventory_items`, `CS_EQUIP_ITEM` / `SC_INVENTORY_UPDATE`, inventory window (I), skeleton with Long Sword + Wooden Shield, loot drops.
+  - Playwright two-tab E2E (`pnpm test:e2e`): player 2 sees player 1 move, fight and despawn. 75 tests + 1 E2E.
+
 ### Not Yet Done
-- Playwright two-tab E2E (M08 criterion 14).
-- Inventory/equipment from items.json, creature data.
+- Creature HP / XP values from level data (UNK-009), creature resists, creature shield use.
 - TLS on a real domain, backups, CI, image registry (M11).
 - World unit / physics constants (UNK-007), `.msh` levels, `.cap` collision.
 - Converter: browser Web Worker host, `.mdl`/`.ani`/`.msh` parsers, `items.ctx`/`models.ctx` parsers.

@@ -44,6 +44,18 @@
       #player-panel .hp .fill { height: 100%; background: #c0392b; }
       #player-panel .xp .fill { height: 100%; background: #d9b45a; }
       #player-panel .gold { color: #ffd54f; }
+      #inventory { position: fixed; right: 12px; top: 50%; transform: translateY(-50%); width: min(360px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; padding: 10px 14px; background: rgba(20,18,14,.96); border: 1px solid #6b5a3a; z-index: 10; box-sizing: border-box; }
+      #inventory .head { display: flex; align-items: center; justify-content: space-between; }
+      #inventory h2 { margin: 0; font-size: 16px; color: #d9b45a; letter-spacing: .06em; }
+      #inventory h3 { margin: 10px 0 4px; font-size: 12px; color: #bfb8a5; text-transform: uppercase; letter-spacing: .08em; }
+      #inventory ul { list-style: none; margin: 0; padding: 0; }
+      #inventory li { display: grid; grid-template-columns: 56px 1fr; gap: 0 8px; padding: 6px 8px; border: 1px solid transparent; cursor: pointer; }
+      #inventory li:hover { border-color: #8a7445; background: #2a2316; }
+      #inventory li[data-equipped="true"] .name { color: #ffd54f; }
+      #inventory li.empty { cursor: default; color: #7d766a; display: block; }
+      #inventory .kind { color: #9a8f78; font-size: 11px; grid-row: span 2; align-self: center; }
+      #inventory .stats { color: #9a8f78; font-size: 11px; }
+      #inventory .count { color: #7d766a; text-transform: none; }
       #death { position: fixed; top: 30%; left: 0; right: 0; text-align: center; font: 700 28px/1.2 system-ui, sans-serif; color: #ff6e6e; text-shadow: 0 2px 6px #000; pointer-events: none; }
     </style>
   </head>
@@ -52,6 +64,7 @@
     <div id="world-ui"></div>
     <div id="hud"></div>
     <div id="player-panel" hidden></div>
+    <div id="inventory" hidden></div>
     <div id="death" hidden>You have fallen — respawning…</div>
     <div id="login" class="overlay hidden">
       <div class="panel">
@@ -75,7 +88,7 @@
       <div class="panel">
         <h1>CrusadersOnline</h1>
         <p>Click to play</p>
-        <p>WASD move &middot; Mouse look &middot; Left click attack &middot; Space jump &middot; Shift walk &middot; Esc release mouse</p>
+        <p>WASD move &middot; Mouse look &middot; Left click attack &middot; Right click block &middot; I inventory &middot; Space jump &middot; Shift walk &middot; Esc release mouse</p>
         <p><a class="link" id="btn-logout" hidden>Log out</a></p>
       </div>
     </div>

@@ -1,5 +1,16 @@
 import {
   ANIM,
+  BUILTIN_ITEMS,
+  addItem,
+  equipmentOf,
+  sanitizeInventory,
+  setEquipped,
+  startingInventory,
+  INVENTORY_SLOTS,
+  type InventoryEntry,
+  type InventoryItemView,
+  type ItemCatalog,
+  type ItemDef,
   COMBO_MULTIPLIERS,
   COMBO_WINDOW_TICKS,
   DEFAULT_MOVEMENT_STATS,
@@ -8,14 +19,11 @@ import {
   MAX_INPUT_FRAMES,
   MOB_ARCHETYPES,
   PLAYER_ARC_DEG,
-  NO_ARMOR,
   ORIGINAL_BLOCK_COS,
   PLAYER_RADIUS,
   PLAYER_REACH,
   PLAYER_RESPAWN_TICKS,
   SC,
-  STARTING_SHIELD,
-  STARTING_WEAPON,
   SpatialHashGrid,
   TICK_DT,
   createCharacter,
@@ -44,7 +52,6 @@ import {
   stepCharacter,
   yawTowards,
   type ArenaDef,
-  type ArmorDef,
   type Attributes,
   type Character,
   type CombatEventMsg,
@@ -58,9 +65,7 @@ import {
   type MovementWorld,
   type Rapier,
   type ServerControlMsg,
-  type ShieldDef,
   type SwingTiming,
-  type WeaponDef,
 } from '@crusaders/shared';
 import { InputQueue } from './input_queue.ts';
 
@@ -88,6 +93,8 @@ export interface JoinOptions {
   experience?: number;
   gold?: number;
   hp?: number;
+  /** Saved inventory; absent or empty => the starting kit. */
+  inventory?: InventoryEntry[];
 }
 
 /** State a zone hands back for saving (see persistence/characters.ts). */
@@ -102,6 +109,8 @@ export interface PersistRecord {
   gold: number;
   hp: number;
   maxHp: number;
+  /** Full inventory, present only when it changed since the previous record. */
+  inventory?: InventoryEntry[];
 }
 
 export interface WorldZoneOptions {
@@ -109,6 +118,8 @@ export interface WorldZoneOptions {
   random?: () => number;
   /** Selects the default.ctx attribute and resist columns (default: medium). */
   difficulty?: Difficulty;
+  /** Item definitions (default: the built-in catalog). */
+  items?: ItemCatalog;
 }
 
 /** Ticks a light flinch / heavy stagger interrupts the player (slice value). */
@@ -166,13 +177,17 @@ interface Player extends ActorBase {
   statsDirty: boolean;
   attributes: Attributes;
   resist: DamageVector;
-  weapon: WeaponDef;
-  armor: ArmorDef;
+  inventory: InventoryEntry[];
+  inventoryDirty: boolean;
+  /** Equipment change requested mid-swing, applied when the swing ends. */
+  pendingEquip: { slot: number; equip: boolean } | null;
+  weapon: ItemDef;
+  armor: ItemDef | null;
   damageMultiplier: number;
   swingTiming: SwingTiming;
   /** Tick until which a flinch/stagger keeps the player from acting; 0 = none. */
   hitUntil: number;
-  shield: ShieldDef | null;
+  shield: ItemDef | null;
   /** Shield raised this tick (BLOCK held, shield equipped, not swinging or flinching). */
   blocking: boolean;
 }
@@ -180,6 +195,7 @@ interface Player extends ActorBase {
 interface Mob extends ActorBase {
   kind: 'mob';
   archetype: MobArchetype;
+  weapon: ItemDef;
   spawn: { x: number; y: number; z: number };
   state: 'idle' | 'chase' | 'return';
   threat: Map<number, number>;
@@ -206,6 +222,7 @@ export class WorldZone {
   private readonly outbox: ZoneOutbox;
   private readonly random: () => number;
   private readonly difficulty: Difficulty;
+  private readonly items: ItemCatalog;
   private readonly grid = new SpatialHashGrid(32);
   private readonly players = new Map<number, Player>(); // by connId
   private readonly actors = new Map<number, Actor>(); // by entityId
@@ -223,6 +240,7 @@ export class WorldZone {
     this.outbox = outbox;
     this.random = opts.random ?? Math.random;
     this.difficulty = opts.difficulty ?? 'medium';
+    this.items = opts.items ?? BUILTIN_ITEMS;
     this.mw = createMovementWorld(rapier, arena);
     for (const s of arena.mobSpawns) this.spawnMob(s.archetype, s);
   }
@@ -245,6 +263,8 @@ export class WorldZone {
   private spawnMob(archetypeId: string, at: { x: number; y: number; z: number }): void {
     const archetype = MOB_ARCHETYPES[archetypeId];
     if (!archetype) throw new Error(`unknown mob archetype ${archetypeId}`);
+    const weapon = this.items.get(archetype.weapon);
+    if (!weapon) throw new Error(`unknown weapon ${archetype.weapon} for ${archetypeId}`);
     const mob: Mob = {
       kind: 'mob',
       entityId: this.nextEntityId++,
@@ -259,6 +279,7 @@ export class WorldZone {
       lastCombo: 0,
       deadUntil: 0,
       archetype,
+      weapon,
       spawn: { ...at },
       state: 'idle',
       threat: new Map(),
@@ -277,7 +298,9 @@ export class WorldZone {
     const rules = playerRules(this.difficulty);
     const maxHp = playerMaxHp(rules.attributes, level);
     const hp = opts.hp !== undefined && opts.hp > 0 ? Math.min(opts.hp, maxHp) : maxHp;
-    const weapon = STARTING_WEAPON;
+    const saved = sanitizeInventory(opts.inventory ?? [], this.items);
+    const inventory = saved.length > 0 ? saved : startingInventory();
+    const eq = equipmentOf(inventory, this.items);
     const p: Player = {
       kind: 'player',
       connId,
@@ -306,12 +329,15 @@ export class WorldZone {
       statsDirty: true,
       attributes: rules.attributes,
       resist: rules.resist,
-      weapon,
-      armor: NO_ARMOR,
+      inventory,
+      inventoryDirty: saved.length === 0,
+      pendingEquip: null,
+      weapon: eq.weapon,
+      armor: eq.armor,
       damageMultiplier: originalDamageMultiplier(rules.attributes, level),
-      swingTiming: swingForWeaponSpeed(weapon.speed),
+      swingTiming: swingForWeaponSpeed(eq.weapon.speed ?? 1),
       hitUntil: 0,
-      shield: STARTING_SHIELD,
+      shield: eq.shield,
       blocking: false,
     };
     this.players.set(connId, p);
@@ -321,7 +347,60 @@ export class WorldZone {
       d: { entityId: p.entityId, zone: this.name, arena: this.arena.name, serverTick: this.tick, spawn: { ...p.character.position } },
     });
     this.sendStats(p);
+    this.sendInventory(p);
     return p.entityId;
+  }
+
+  /**
+   * Equip or unequip the item in an inventory slot (CS_EQUIP_ITEM). Ignored while dead; during a
+   * swing the request is deferred to the swing's end so a weapon change never alters a swing
+   * already in progress (the latest request wins).
+   */
+  equip(connId: number, slot: number, equip: boolean): void {
+    const p = this.players.get(connId);
+    if (!p || !alive(p)) return;
+    if (p.swing) {
+      p.pendingEquip = { slot, equip };
+      return;
+    }
+    this.applyEquipRequest(p, slot, equip);
+  }
+
+  private applyEquipRequest(p: Player, slot: number, equip: boolean): void {
+    if (!setEquipped(p.inventory, slot, equip, this.items)) return;
+    this.applyEquipment(p);
+    p.inventoryDirty = true;
+    this.sendInventory(p);
+    const record = this.persistRecord(p);
+    if (record) this.outbox.persist?.([record], 'progress');
+  }
+
+  private applyEquipment(p: Player): void {
+    const eq = equipmentOf(p.inventory, this.items);
+    p.weapon = eq.weapon;
+    p.shield = eq.shield;
+    p.armor = eq.armor;
+    p.swingTiming = swingForWeaponSpeed(eq.weapon.speed ?? 1);
+    if (!p.shield) p.blocking = false;
+  }
+
+  private sendInventory(p: Player): void {
+    const items: InventoryItemView[] = [];
+    for (const e of p.inventory) {
+      const def = this.items.get(e.itemId);
+      if (!def) continue;
+      items.push({
+        slot: e.slot,
+        itemId: e.itemId,
+        name: def.name,
+        type: def.type,
+        equipped: e.equipped,
+        ...(def.damage ? { damage: def.damage } : {}),
+        ...(def.speed !== undefined ? { speed: def.speed } : {}),
+        ...(def.protection ? { protection: def.protection } : {}),
+      });
+    }
+    this.sendJson(p.connId, { op: SC.INVENTORY_UPDATE, d: { items, slots: INVENTORY_SLOTS, weaponSpeed: p.weapon.speed ?? 1 } });
   }
 
   private nextSpawnPoint(): { x: number; y: number; z: number } {
@@ -340,7 +419,14 @@ export class WorldZone {
       gold: p.gold,
       hp: Math.ceil(p.hp),
       maxHp: p.maxHp,
+      ...(this.takeInventoryChange(p)),
     };
+  }
+
+  private takeInventoryChange(p: Player): { inventory?: InventoryEntry[] } {
+    if (!p.inventoryDirty) return {};
+    p.inventoryDirty = false;
+    return { inventory: p.inventory.map((e) => ({ ...e })) };
   }
 
   /** Current state of every persistent character in the zone (periodic flush / shutdown). */
@@ -562,7 +648,14 @@ export class WorldZone {
       a.lastSwingEnd = this.tick;
       a.lastCombo = s.combo;
       if (a.kind === 'mob') a.nextSwingTick = this.tick + a.archetype.cooldown;
-      else if (a.queuedAttack) this.startPlayerSwing(a);
+      else {
+        if (a.pendingEquip) {
+          const { slot, equip } = a.pendingEquip;
+          a.pendingEquip = null;
+          this.applyEquipRequest(a, slot, equip);
+        }
+        if (a.queuedAttack) this.startPlayerSwing(a);
+      }
     }
   }
 
@@ -585,20 +678,21 @@ export class WorldZone {
   /** Outgoing damage vector (engine: Stats_GetOutgoingDamage). */
   private rollDamage(a: Actor, combo: number): DamageVector {
     if (a.kind === 'player') {
-      const slash = a.weapon.damage[0]!;
-      const bash = a.weapon.damage[1]!;
+      const dmg = a.weapon.damage!;
+      const slash = dmg[0]!;
+      const bash = dmg[1]!;
       const hit = originalWeaponHit(slash, bash, a.damageMultiplier);
       const amount = hit.amount * COMBO_MULTIPLIERS[combo - 1]!;
       return damageVector(hit.type === 'slash' ? { SLASH: amount } : { BASH: amount });
     }
-    const { damageMin, damageMax } = a.archetype;
-    return damageVector({ SLASH: damageMin + Math.floor(this.random() * (damageMax - damageMin + 1)) });
+    // Creatures skip the stronger-of-slash/bash and Might rules (empty stats slot 45): whole weapon vector.
+    return [...a.weapon.damage!];
   }
 
   /** Incoming damage (engine: Stats_TakeDamage + HP loss with flinch roll). */
   private applyDamage(attacker: Actor, target: Actor, incoming: DamageVector): void {
     const resist = target.kind === 'player' ? target.resist : NEUTRAL_RESIST;
-    const protection = target.kind === 'player' ? target.armor.protection : undefined;
+    const protection = target.kind === 'player' ? target.armor?.protection : undefined;
     const damage = Math.round(originalDamageTaken(incoming, resist, protection) * 100) / 100;
     const hpBefore = target.hp;
     target.hp = Math.max(0, target.hp - damage);
@@ -629,6 +723,7 @@ export class WorldZone {
         if (attacker.kind === 'player') reward = this.grantReward(attacker, target.archetype);
       } else {
         target.deadUntil = this.tick + PLAYER_RESPAWN_TICKS;
+        target.pendingEquip = null;
         target.queuedAttack = false;
       }
     }
@@ -639,21 +734,33 @@ export class WorldZone {
     });
   }
 
-  private grantReward(p: Player, arch: MobArchetype): { xp: number; gold: number } {
+  private grantReward(p: Player, arch: MobArchetype): { xp: number; gold: number; loot?: string[] } {
     const gold = arch.goldMin + Math.floor(this.random() * (arch.goldMax - arch.goldMin + 1));
     p.xp += arch.xpReward;
     p.gold += gold;
     const level = levelForXp(p.xp);
     if (level > p.level) {
+      // Engine Stats_LevelUp: derived stats are recomputed and the max-HP gain is added to HP.
+      const before = p.maxHp;
       p.level = level;
       p.maxHp = playerMaxHp(p.attributes, level);
       p.damageMultiplier = originalDamageMultiplier(p.attributes, level);
-      p.hp = p.maxHp; // level-up heal
+      p.hp = Math.min(p.maxHp, p.hp + (p.maxHp - before));
+    }
+    const loot: string[] = [];
+    for (const drop of arch.loot) {
+      if (this.random() >= drop.chance) continue;
+      const def = this.items.get(drop.itemId);
+      if (def && addItem(p.inventory, def.id) !== null) loot.push(def.name);
+    }
+    if (loot.length > 0) {
+      p.inventoryDirty = true;
+      this.sendInventory(p);
     }
     p.statsDirty = true;
     const record = this.persistRecord(p);
     if (record) this.outbox.persist?.([record], 'progress');
-    return { xp: arch.xpReward, gold };
+    return { xp: arch.xpReward, gold, ...(loot.length > 0 ? { loot } : {}) };
   }
 
   private respawn(a: Actor): void {

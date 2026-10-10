@@ -23,6 +23,7 @@ import { InputManager } from './input/input_manager.ts';
 import { connectToWorld } from './network/connect.ts';
 import { CombatUi } from './ui/combat_ui.ts';
 import { Hud } from './ui/hud.ts';
+import { InventoryPanel } from './ui/inventory.ts';
 import { chooseAuth, logout } from './ui/login.ts';
 
 const MAX_FRAME_MS = 250;
@@ -39,6 +40,7 @@ async function main(): Promise<void> {
   const remotes = new RemoteEntities(scene, originals);
   const combatUi = new CombatUi(document.getElementById('world-ui')!);
   const hud = new Hud(document.getElementById('hud')!, document.getElementById('player-panel')!, document.getElementById('death')!);
+  const inventoryPanel = new InventoryPanel(document.getElementById('inventory')!);
 
   // Online: the session predicts and reconciles. Offline: plain local simulation.
   const auth = await chooseAuth();
@@ -65,6 +67,10 @@ async function main(): Promise<void> {
             const mine = session !== null && e.attacker === session.entityId;
             combatUi.damage(e, headPos, isMe ? 'taken' : mine ? 'dealt' : 'other');
           },
+          inventory: (inv) => {
+            inventoryPanel.update(inv);
+            player?.setWeaponSpeed(inv.weaponSpeed);
+          },
           close: (code, reason) => {
             document.getElementById('error')!.textContent = `Disconnected from server (${code}${reason ? `: ${reason}` : ''}). Reload to reconnect.`;
           },
@@ -75,6 +81,10 @@ async function main(): Promise<void> {
     mw = session.mw;
     player = new LocalPlayer(session.character!, selfAvatar, (f) => session.tick(f));
     if (session.playerStats) hud.stats(session.playerStats);
+    if (session.inventory) {
+      inventoryPanel.update(session.inventory);
+      player.setWeaponSpeed(session.inventory.weaponSpeed);
+    }
     for (const [id, info] of session.entities) remotes.spawn(id, info);
   } else {
     const offline = createMovementWorld(rapier, arena);
@@ -101,7 +111,22 @@ async function main(): Promise<void> {
     await logout();
     location.reload();
   });
-  input.onLockChange = (locked) => overlay.classList.toggle('hidden', locked);
+  input.onLockChange = (locked) => overlay.classList.toggle('hidden', locked || inventoryPanel.open);
+
+  // Inventory (online only): I toggles it, releasing the pointer so items can be clicked.
+  const setInventoryOpen = (open: boolean) => {
+    if (!session || open === inventoryPanel.open) return;
+    inventoryPanel.open = open;
+    if (open) document.exitPointerLock();
+    else input.requestLock();
+    overlay.classList.toggle('hidden', open || input.locked);
+  };
+  inventoryPanel.onToggleEquip = (slot, equip) => session?.equip(slot, equip);
+  inventoryPanel.onClose = () => setInventoryOpen(false);
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyI' && !e.repeat) setInventoryOpen(!inventoryPanel.open);
+    else if (e.code === 'Escape' && inventoryPanel.open) setInventoryOpen(false);
+  });
 
   window.addEventListener('resize', () => {
     renderer.setSize(container.clientWidth, container.clientHeight);
@@ -111,7 +136,7 @@ async function main(): Promise<void> {
 
   if (import.meta.env.DEV) {
     // Debug/E2E hook: lets tests drive input without pointer lock.
-    (window as unknown as { __co: unknown }).__co = { input, player: local, mw, session, remotes, render: () => renderer.render(scene, chase.camera) };
+    (window as unknown as { __co: unknown }).__co = { input, player: local, mw, session, remotes, inventory: inventoryPanel, render: () => renderer.render(scene, chase.camera) };
   }
 
   // Fixed-step simulation (same 20 Hz step as the server), interpolated rendering.

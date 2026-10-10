@@ -6,11 +6,20 @@ import {
   MOB_ARCHETYPES,
   PLAYER_RESPAWN_TICKS,
   SC,
+  BUILTIN_ITEMS,
+  addItem,
   createSyntheticArena,
   encodeInput,
+  equipmentOf,
+  levelForXp,
+  sanitizeInventory,
+  setEquipped,
+  startingInventory,
+  xpForLevel,
   inMeleeArc,
   initPhysics,
   quantizeAngle,
+  type InventoryEntry,
   type Rapier,
   type ServerControlMsg,
 } from '@crusaders/shared';
@@ -23,7 +32,7 @@ beforeAll(async () => {
 const SKELETON = MOB_ARCHETYPES['skeleton_warrior']!;
 
 /** In-process zone with one player; captures JSON messages and persist requests. */
-function setup(opts: { experience?: number } = {}) {
+function setup(opts: { experience?: number; inventory?: InventoryEntry[] } = {}) {
   const messages: ServerControlMsg[] = [];
   const persisted: { records: PersistRecord[]; reason: string }[] = [];
   const zone = new WorldZone(rapier, 'test', createSyntheticArena(), {
@@ -48,7 +57,8 @@ function setup(opts: { experience?: number } = {}) {
   const me = () => zone.inspect().find((a) => a.id === entityId)!;
   const events = () => messages.filter((m) => m.op === SC.COMBAT_EVENT).map((m) => m.d as Extract<ServerControlMsg, { op: typeof SC.COMBAT_EVENT }>['d']);
   const stats = () => messages.filter((m) => m.op === SC.PLAYER_STATS).map((m) => m.d as Extract<ServerControlMsg, { op: typeof SC.PLAYER_STATS }>['d']);
-  return { zone, run, mob, me, events, stats, persisted, entityId };
+  const inventories = () => messages.filter((m) => m.op === SC.INVENTORY_UPDATE).map((m) => m.d as Extract<ServerControlMsg, { op: typeof SC.INVENTORY_UPDATE }>['d']);
+  return { zone, run, mob, me, events, stats, inventories, persisted, entityId };
 }
 
 describe('melee arc', () => {
@@ -100,10 +110,16 @@ describe('authoritative melee', () => {
     expect(hits.map((e) => e.damage).slice(0, 3)).toEqual([5, 5, 6.25]);
     expect(hits.findIndex((e) => e.killed)).toBe(4); // 25 HP skeleton dies on the 5th hit
     const kill = hits.find((e) => e.killed)!;
-    expect(kill.reward).toEqual({ xp: SKELETON.xpReward, gold: SKELETON.goldMin });
+    // random() = 0 makes every loot roll succeed.
+    expect(kill.reward).toEqual({ xp: SKELETON.xpReward, gold: SKELETON.goldMin, loot: ['Long Sword', 'Scale Armor'] });
     t.run(1);
     expect(t.stats().at(-1)).toMatchObject({ xp: SKELETON.xpReward, gold: SKELETON.goldMin });
-    expect(t.persisted.find((p) => p.reason === 'progress')?.records[0]).toMatchObject({ experience: 25, gold: 5 });
+    const saved = t.persisted.find((p) => p.reason === 'progress')?.records[0];
+    expect(saved).toMatchObject({ experience: 100, gold: 5 });
+    expect(saved?.inventory?.map((e) => e.itemId)).toEqual(['axe', 'wooden_shield', 'long_sword', 'scale_armor']);
+    expect(t.inventories().at(-1)?.items.map((i) => [i.name, i.equipped])).toEqual([
+      ['Axe', true], ['Wooden Shield', true], ['Long Sword', false], ['Scale Armor', false],
+    ]);
   });
 
   it('ignores attack spam: at most one hit per swing lifecycle', () => {
@@ -129,19 +145,22 @@ describe('authoritative melee', () => {
       if (!t.me().alive) deadAt = i;
     }
     expect(deadAt).toBeGreaterThan(0);
-    // Medium difficulty: slash resist 0.9
-    expect(t.events().every((e) => e.target !== t.entityId || (e.damage >= SKELETON.damageMin * 0.9 - 1e-9 && e.damage <= SKELETON.damageMax * 0.9 + 1e-9))).toBe(true);
+    // Long Sword 10 slash, whole vector (creatures skip the Might rule) x medium slash resist 0.9
+    expect(t.events().filter((e) => e.target === t.entityId).every((e) => e.damage === 9)).toBe(true);
     t.run(PLAYER_RESPAWN_TICKS + 1);
     expect(t.me()).toMatchObject({ alive: true, hp: 65 }); // 50 + 0.6 x Endurance 25 x level 1
   });
 
-  it('levels up after enough kills (max HP grows and heals)', () => {
-    const t = setup({ experience: 90 });
+  it('levels up at the original threshold; the max-HP gain is added to current HP', () => {
+    const t = setup({ experience: 450 });
     t.run(20, INPUT.FORWARD, 0);
     t.run(30);
     for (let i = 0; i < 200 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
     t.run(1);
-    expect(t.stats().at(-1)).toMatchObject({ level: 2, maxHp: 80, hp: 80, xp: 115 }); // 50 + 0.6 x 25 x 2
+    const s = t.stats();
+    const up = s.findIndex((x) => x.level === 2);
+    expect(s[up]).toMatchObject({ level: 2, maxHp: 80, xp: 550 }); // 50 + 0.6 x 25 x 2
+    expect(s[up]!.hp).toBe(Math.min(80, s[up - 1]!.hp + 15));
   });
 });
 
@@ -191,5 +210,82 @@ describe('shield block (original rule)', () => {
     t.run(20, INPUT.FORWARD, 0);
     t.run(300, INPUT.BLOCK, 0, () => t.zone.attack(1));
     expect(t.events().some((e) => e.target === t.entityId && !e.blocked)).toBe(true);
+  });
+});
+
+describe('experience curve (original)', () => {
+  it('uses the engine thresholds 500, 1500, 3500, 6500, 10500, then +4000', () => {
+    expect([2, 3, 4, 5, 6, 7, 8].map(xpForLevel)).toEqual([500, 1500, 3500, 6500, 10500, 14500, 18500]);
+    expect(levelForXp(0)).toBe(1);
+    expect(levelForXp(499)).toBe(1);
+    expect(levelForXp(500)).toBe(2);
+    expect(levelForXp(14_500)).toBe(7);
+  });
+});
+
+describe('inventory and equipment', () => {
+  it('equips one item per equipment slot and keeps the bag consistent', () => {
+    const inv = startingInventory();
+    expect(addItem(inv, 'long_sword')).toBe(2);
+    expect(setEquipped(inv, 2, true, BUILTIN_ITEMS)).toBe(true);
+    expect(inv.filter((e) => e.equipped).map((e) => e.itemId)).toEqual(['wooden_shield', 'long_sword']);
+    expect(equipmentOf(inv, BUILTIN_ITEMS).weapon.name).toBe('Long Sword');
+    expect(setEquipped(inv, 2, true, BUILTIN_ITEMS)).toBe(false); // no-op
+    expect(setEquipped(inv, 9, true, BUILTIN_ITEMS)).toBe(false); // empty slot
+    const full: InventoryEntry[] = Array.from({ length: 32 }, (_, slot) => ({ slot, itemId: 'axe', equipped: false }));
+    expect(addItem(full, 'mace')).toBeNull();
+  });
+
+  it('drops unknown items, bad slots and duplicate equipped items from saved data', () => {
+    const clean = sanitizeInventory([
+      { slot: 0, itemId: 'axe', equipped: true },
+      { slot: 1, itemId: 'mace', equipped: true },
+      { slot: 1, itemId: 'long_sword', equipped: false },
+      { slot: 2, itemId: 'excalibur', equipped: true },
+      { slot: 40, itemId: 'mace', equipped: false },
+    ], BUILTIN_ITEMS);
+    expect(clean).toEqual([
+      { slot: 0, itemId: 'axe', equipped: true },
+      { slot: 1, itemId: 'mace', equipped: false },
+    ]);
+  });
+
+  it('applies the equipped weapon and armour to combat', () => {
+    const t = setup({
+      inventory: [
+        { slot: 0, itemId: 'axe', equipped: true },
+        { slot: 1, itemId: 'wooden_shield', equipped: true },
+        { slot: 2, itemId: 'long_sword', equipped: false },
+        { slot: 3, itemId: 'scale_armor', equipped: false },
+      ],
+    });
+    t.zone.equip(1, 2, true);
+    t.zone.equip(1, 3, true);
+    expect(t.inventories().at(-1)!.weaponSpeed).toBe(1);
+    t.run(20, INPUT.FORWARD, 0);
+    t.run(30);
+    for (let i = 0; i < 200 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
+    const dealt = t.events().filter((e) => e.target === t.mob().id).map((e) => e.damage);
+    expect(dealt.slice(0, 3)).toEqual([10, 10, 12.5]); // Long Sword 10 slash, power hit x1.25
+    const taken = t.events().filter((e) => e.target === t.entityId && !e.blocked).map((e) => e.damage);
+    expect(taken.length).toBeGreaterThan(0);
+    expect(taken.every((d) => d === 8.1)).toBe(true); // 10 x resist 0.9 x Scale Armor 0.9
+  });
+
+  it('defers equipment changes requested during a swing to the end of the swing', () => {
+    const t = setup({ inventory: [{ slot: 0, itemId: 'axe', equipped: true }, { slot: 1, itemId: 'mace', equipped: false }] });
+    t.run(1);
+    t.zone.attack(1);
+    t.run(1);
+    const before = t.inventories().length;
+    t.zone.equip(1, 1, true);
+    expect(t.inventories().length).toBe(before); // not yet
+    t.run(20);
+    expect(t.inventories().at(-1)!.items.find((i) => i.slot === 1)!.equipped).toBe(true);
+  });
+
+  it('gives new characters the starting kit', () => {
+    const t = setup();
+    expect(t.inventories()[0]!.items.map((i) => [i.itemId, i.equipped])).toEqual([['axe', true], ['wooden_shield', true]]);
   });
 });

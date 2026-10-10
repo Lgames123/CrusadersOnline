@@ -173,3 +173,36 @@ Per type: `max(0, incoming − absorb) × resist × protection`, then the positi
 Only while the shield-raised states (5 or `0x1D`) are active: block if the dot product between the defender's facing and the direction to the attacker is greater than `cos(30.0)` — evaluated with **30 radians**, i.e. ≈ 0.154, a frontal cone of about **±81°** (very likely meant as 30°; reproduced as-is for parity). A successful block calls the shield's Use action.
 
 Implemented as pure functions in `shared/src/game/original_stats.ts` (`originalDamageTaken`, `originalFlinch`, `ORIGINAL_BLOCK_COS`) with tests. Item data: `converter/src/formats/items_ctx.ts` parses `script/items.ctx` (156 items, inheritance resolved) into `rules/items.json`.
+
+---
+
+## 9. Creatures, Experience and Blocking Follow-up (2026-10-09)
+
+### 9.1 Creature template table (`.data` 0x004ED058–0x004ED9B8)
+50 records of 0x30 bytes, ids 113–162 (the engine's creature type id range 0x71–0xCA is used to index per-type hit and death sound tables). Fields per record, in order: type id; appearance (low byte = model index, next byte = texture variant); five item-name pointers (weapon, shield, three extra); four dwords, of which the third is a **disposition** (1 = citizen, 2 = guard / friendly fighter, 3 = hostile, 255 = unused slot) and the fourth a **spell bit mask** (non-zero only for casters: elementals, Deceiver, Dark Mage/Master, Necros, Skeleton Ghost); the creature's display name. `Stats_EquipLoadout` (0x0044D9D0) equips the item fields when a creature is created.
+
+Examples (facts only):
+
+| Creature | Weapon | Shield | Disposition |
+|---|---|---|---|
+| Skeleton Warrior | Long Sword | Wooden Shield | hostile |
+| Skeleton Ghost | Long Sword | Wooden Shield | hostile (spell mask 2) |
+| Shadow | Heavy Mace | Wooden Shield | hostile |
+| Dark Mage / Dark Master | Mace / Heavy Mace | Metal Shield | hostile (casters) |
+| Ogre Outlaw | Battle Axe | — | hostile |
+| High Guard / Old Guard | Long Sword | Metal Shield | guard |
+
+### 9.2 Creature stats
+- Creature stats share the player's damage pipeline (§8) except vtable slot 45, which is empty for creatures: **creatures do not apply the Might multiplier or the stronger-of-slash/bash rule** — they deal the weapon's whole damage vector (unarmed `DD` row + weapon), × attack mode, + bonus, × multipliers. Skeleton Warrior with a Long Sword therefore hits for 10 slash (9 after the medium resist).
+- The creature constructor (`CreatureStats_Ctor` 0x0044C130) defaults HP/max HP to 20. Saved creature state (`CreatureStats_Save/Load`) contains HP, max HP and a level-like pair; no attribute or XP values. HP and the XP value of placed creatures therefore come from the level data (`.msh` placement records, still undecoded — UNK-009).
+- `Stats_LoseHp` (0x0044CA00): the flinch/stagger roll (§8.4) only runs when the victim is the player; a hit from creature type 150 (Necros) always forces the light flinch.
+- On death (`CreatureStats_OnDeath` 0x0044C6A0) the creature's XP value (`+0x1C4`) is passed to the player via `Stats_AddExperience`, the death sound for its type is played and spell effects are released.
+
+### 9.3 Experience curve — `Stats_AddExperience` (0x0044DE40) / `Stats_LevelUp` (0x0044DEE0)
+- New player: level 1, XP 0, next threshold **500** (`PlayerStats_InitDefaults` 0x0044DC60, which also sets base HP 50).
+- On reaching the threshold: level + 1; threshold += table[new level] with table = `0, 500, 1000, 2000, 3000, 4000` for levels below 6, **+4000** from level 6 on. Thresholds: L2 500, L3 1500, L4 3500, L5 6500, L6 10500, then every 4000.
+- Level-up recomputes derived stats and **adds the max-HP gain to current HP** (not a full heal).
+- XP loss (negative amounts) cannot drop below the current level's start.
+
+### 9.4 Shield block result
+`Stats_TryBlockWithShield` (§8.5) returns a boolean; on success it calls the shield's Use behaviour (item behaviour vtable slot 1). No partial-damage path was found: the slice treats a block as stopping the whole hit (still an assumption, see UNK-008).

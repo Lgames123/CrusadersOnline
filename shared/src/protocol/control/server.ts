@@ -1,4 +1,5 @@
 import { SC } from '../opcodes.ts';
+import type { ItemType } from '../../game/items.ts';
 
 /** JSON control messages sent by the server. Trusted direction, so plain types (no Zod). */
 
@@ -48,9 +49,27 @@ export interface CombatEventMsg {
     killed: boolean;
     /** The target's raised shield stopped the hit (damage 0). */
     blocked?: boolean;
-    /** Present when the attacker is a player who got rewarded for the kill. */
-    reward?: { xp: number; gold: number };
+    /** Present when the attacker is a player who got rewarded for the kill (loot = item names added). */
+    reward?: { xp: number; gold: number; loot?: string[] };
   };
+}
+
+/** One inventory slot as shown to its owner, with the item numbers the UI and prediction need. */
+export interface InventoryItemView {
+  slot: number;
+  itemId: string;
+  name: string;
+  type: ItemType;
+  equipped: boolean;
+  damage?: number[];
+  speed?: number;
+  protection?: number[];
+}
+
+/** Full inventory of the owning player: on entry and after every change. */
+export interface InventoryUpdateMsg {
+  op: typeof SC.INVENTORY_UPDATE;
+  d: { items: InventoryItemView[]; slots: number; weaponSpeed: number };
 }
 
 export interface EntityDespawnMsg {
@@ -76,7 +95,8 @@ export type ServerControlMsg =
   | PongMsg
   | ErrorMsg
   | PlayerStatsMsg
-  | CombatEventMsg;
+  | CombatEventMsg
+  | InventoryUpdateMsg;
 
 /** Animation state ids carried in snapshot `anim`. */
 export const ANIM = {
