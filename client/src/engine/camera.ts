@@ -14,7 +14,8 @@ export class ChaseCamera {
   private readonly pivot = new THREE.Vector3();
   private readonly dir = new THREE.Vector3();
 
-  private readonly mw: MovementWorld;
+  /** Collision world for camera clipping; replaced on zone changes. */
+  mw: MovementWorld;
 
   constructor(mw: MovementWorld, aspect: number) {
     this.mw = mw;

@@ -43,6 +43,11 @@ export class RemoteEntities {
     this.byId.set(id, { id, info, avatar, visible: false, hp: info.maxHp });
   }
 
+  /** Removes every remote entity (zone change). */
+  clear(): void {
+    for (const id of [...this.byId.keys()]) this.despawn(id);
+  }
+
   despawn(id: number): void {
     const e = this.byId.get(id);
     if (!e) return;

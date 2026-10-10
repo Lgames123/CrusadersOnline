@@ -11,6 +11,7 @@ export const CS = {
   PING: 0x09,
   EQUIP_ITEM: 0x0a,
   USE_ITEM: 0x0b,
+  ZONE_READY: 0x0c,
 } as const;
 
 /** Server -> client opcodes. */
@@ -26,6 +27,7 @@ export const SC = {
   PONG: 0x48,
   PLAYER_STATS: 0x49,
   OBJECT_STATE: 0x4a,
+  ZONE_CHANGE: 0x4b,
   ERROR: 0x4f,
 } as const;
 

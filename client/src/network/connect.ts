@@ -1,6 +1,7 @@
 import { ClientSession, type ArenaDef, type ClientSessionEvents, type Rapier } from '@crusaders/shared';
 
-const CONNECT_TIMEOUT_MS = 3000;
+/** Covers ticket redemption and loading the first zone's level. */
+const CONNECT_TIMEOUT_MS = 60_000;
 
 /**
  * Obtains a single-use WebSocket ticket (account session cookie, or the development guest
@@ -11,6 +12,8 @@ export async function connectToWorld(
   arena: ArenaDef,
   mode: 'account' | 'guest',
   events: ClientSessionEvents,
+  /** Receives the session as soon as it exists (zone events arrive before connect resolves). */
+  onCreate?: (session: ClientSession) => void,
 ): Promise<ClientSession | null> {
   try {
     const res = await fetch(mode === 'account' ? '/api/ws-ticket' : '/api/dev/guest-ticket', {
@@ -21,6 +24,7 @@ export async function connectToWorld(
     const { ticket } = (await res.json()) as { ticket: string };
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
     const session = new ClientSession(rapier, arena, events);
+    onCreate?.(session);
     await session.connect(`${scheme}://${location.host}/ws`, ticket, CONNECT_TIMEOUT_MS);
     return session;
   } catch (err) {

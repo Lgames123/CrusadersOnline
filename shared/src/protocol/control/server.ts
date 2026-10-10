@@ -81,6 +81,15 @@ export interface ObjectStateMsg {
   d: { objects: { id: number; state: WorldObjectState }[]; full?: boolean };
 }
 
+/**
+ * The player is (re)entering the world in this arena: the client loads it, then answers
+ * CS_ZONE_READY; SC_WORLD_ENTER follows. Sent on login and on every portal transition.
+ */
+export interface ZoneChangeMsg {
+  op: typeof SC.ZONE_CHANGE;
+  d: { arena: string };
+}
+
 export interface EntityDespawnMsg {
   op: typeof SC.ENTITY_DESPAWN;
   d: { id: number };
@@ -106,7 +115,8 @@ export type ServerControlMsg =
   | PlayerStatsMsg
   | CombatEventMsg
   | InventoryUpdateMsg
-  | ObjectStateMsg;
+  | ObjectStateMsg
+  | ZoneChangeMsg;
 
 /** Animation state ids carried in snapshot `anim`. */
 export const ANIM = {

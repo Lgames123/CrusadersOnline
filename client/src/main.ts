@@ -21,7 +21,7 @@ import { ProceduralAvatar } from './entities/avatar.ts';
 import { LocalPlayer } from './entities/local_player.ts';
 import { RemoteEntities } from './entities/remote_entities.ts';
 import { loadOriginalAvatars } from './assets/original_models.ts';
-import { fetchServerArena, loadOriginalLevel, type OriginalLevel } from './assets/original_level.ts';
+import { loadOriginalLevel, type OriginalLevel } from './assets/original_level.ts';
 import { CREATURE_SFX, SFX, SoundBank, pick } from './audio/sound_bank.ts';
 import { registerAssetServiceWorker } from './assets/game_files.ts';
 import { GameFilesPanel } from './ui/game_files_panel.ts';
@@ -52,38 +52,49 @@ async function main(): Promise<void> {
   // Online: the session predicts and reconciles. Offline: plain local simulation.
   const auth = await chooseAuth();
 
-  // The zone's arena: the server's (online) or ?level=<act> / the synthetic arena (offline).
-  // Original levels come from the user's own converted installation (dev only).
-  const levelParam = new URLSearchParams(location.search).get('level');
-  const arenaName = auth.kind === 'offline'
-    ? (levelParam ? `${LEVEL_PREFIX}${levelParam}` : 'synthetic-arena')
-    : ((await fetchServerArena()) ?? 'synthetic-arena');
-  let arena: ArenaDef;
-  let levelView: OriginalLevel | null = null;
-  if (arenaName.startsWith(LEVEL_PREFIX)) {
-    try {
-      levelView = await loadOriginalLevel(arenaName);
-    } catch (err) {
-      // The world runs an original level: its geometry comes from the player's own game files.
-      console.warn('[assets] level unavailable:', err);
-      document.getElementById('error')!.textContent =
-        'This world takes place in an original Crusaders of Might and Magic level. Import your game files (top right) to enter.';
-      gameFiles.visible = true;
-      return;
+  // Zones: online, the server announces the arena on login and on every portal transition
+  // (SC_ZONE_CHANGE); offline it is ?level=<act> or the synthetic arena. Original levels come
+  // from the player's own game files.
+  const errorBox = document.getElementById('error')!;
+  let arena: ArenaDef = createSyntheticArena();
+  let levelView = null as OriginalLevel | null;
+  let arenaObject: THREE.Object3D | null = null;
+  /** Loads an arena into the scene, replacing the previous one. Null if it cannot be shown. */
+  const showArena = async (name: string): Promise<ArenaDef | null> => {
+    let next: ArenaDef;
+    let view: OriginalLevel | null = null;
+    if (name.startsWith(LEVEL_PREFIX)) {
+      try {
+        view = await loadOriginalLevel(name);
+      } catch (err) {
+        console.warn('[assets] level unavailable:', err);
+        errorBox.textContent = 'This world takes place in an original Crusaders of Might and Magic level. Import your game files (top right) to enter.';
+        gameFiles.visible = true;
+        return null;
+      }
+      next = view.arena;
+    } else {
+      next = createSyntheticArena();
     }
-    arena = levelView.arena;
-    scene.add(levelView.object);
-    levelView.applyAtmosphere(scene);
-  } else {
-    arena = createSyntheticArena();
-    scene.add(buildArenaMeshes(arena));
-  }
+    if (arenaObject) scene.remove(arenaObject);
+    arenaObject = view ? view.object : buildArenaMeshes(next);
+    scene.add(arenaObject);
+    view?.applyAtmosphere(scene);
+    levelView = view;
+    arena = next;
+    return next;
+  };
+  const levelParam = new URLSearchParams(location.search).get('level');
+  if (auth.kind === 'offline' && !(await showArena(levelParam ? `${LEVEL_PREFIX}${levelParam}` : 'synthetic-arena'))) return;
   let player: LocalPlayer | null = null;
+  let chase!: ChaseCamera;
   const headPos = new THREE.Vector3();
   const prompt = document.getElementById('prompt')!;
   let lastStats: { level: number; dead: boolean } | null = null;
   /** Edge of the local player's weapon, for impact sounds (stronger of slash / bash). */
   let myEdge: 'sharp' | 'blunt' = 'blunt';
+  /** Set as soon as the session exists: zone / enter events fire before connectToWorld resolves. */
+  let live: ClientSession | null = null;
   const session: ClientSession | null =
     auth.kind === 'offline'
       ? null
@@ -148,10 +159,27 @@ async function main(): Promise<void> {
             const w = inv.items.find((i) => i.type === 'weapon' && i.equipped);
             myEdge = w?.damage && w.damage[0]! > w.damage[1]! ? 'sharp' : 'blunt';
           },
+          zone: (name) => {
+            // Portal transitions (and the first entry): swap the level, then tell the server.
+            errorBox.textContent = `Entering ${name.replace(LEVEL_PREFIX, '').toUpperCase()}…`;
+            remotes.clear();
+            void showArena(name).then((next) => {
+              if (!next || !live) return;
+              live.setArena(next);
+              live.zoneReady(name);
+            });
+          },
+          enter: () => {
+            errorBox.textContent = '';
+            if (!live || !player) return; // first entry: the player is created below
+            player.character = live.character!;
+            chase.mw = live.mw;
+            for (const [id, state] of live.objectStates) levelView?.setObjectState(id, state);
+          },
           close: (code, reason) => {
             document.getElementById('error')!.textContent = `Disconnected from server (${code}${reason ? `: ${reason}` : ''}). Reload to reconnect.`;
           },
-        });
+        }, (created) => (live = created));
   const selfAvatar = originals?.('self') ?? new ProceduralAvatar('self');
   let mw: MovementWorld;
   if (session) {
@@ -176,7 +204,7 @@ async function main(): Promise<void> {
   const local = player;
   scene.add(local.object);
 
-  const chase = new ChaseCamera(mw, container.clientWidth / container.clientHeight);
+  chase = new ChaseCamera(mw, container.clientWidth / container.clientHeight);
   const input = new InputManager(renderer.domElement);
   input.onAttack = () => {
     if (local.swing(input.yaw)) {

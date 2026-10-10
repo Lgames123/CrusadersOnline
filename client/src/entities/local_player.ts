@@ -18,7 +18,8 @@ function swingSeconds(weaponSpeed: number): number {
  * shown immediately on click; the server decides whether they hit.
  */
 export class LocalPlayer {
-  readonly character: Character;
+  /** Predicted character; replaced when the player enters another zone. */
+  character: Character;
   readonly avatar: Avatar;
   private readonly step: (input: Readonly<InputFrame>) => void;
   private readonly prev: Vec3;

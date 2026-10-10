@@ -1,4 +1,4 @@
-import type { JoinOptions, PersistReason, PersistRecord } from '../simulation/world_zone.ts';
+import type { JoinOptions, PersistReason, PersistRecord, TransferState } from '../simulation/world_zone.ts';
 
 /** Main thread <-> zone worker messages (ADR-009). Binary payloads are transferred, not copied. */
 
@@ -10,6 +10,8 @@ export type ToZone =
   | { t: 'equip'; connId: number; slot: number; equip: boolean }
   | { t: 'interact'; connId: number; object: number }
   | { t: 'use'; connId: number; slot: number }
+  /** Remove the player for a zone transfer; answered with 'transferred'. */
+  | { t: 'transfer'; connId: number }
   | { t: 'stop' };
 
 export interface ZoneMetrics {
@@ -29,6 +31,9 @@ export type FromZone =
   | { t: 'metrics'; metrics: ZoneMetrics }
   /** Character states to save: periodic flush, a player leaving, or final flush before stop. */
   | { t: 'persist'; reason: PersistReason; records: PersistRecord[] }
+  /** A player entered a portal trigger (the main thread decides whether to transfer). */
+  | { t: 'portal'; connId: number; target: string }
+  | { t: 'transferred'; connId: number; record: PersistRecord | null; state: TransferState | null }
   | { t: 'stopped' };
 
 export interface ZoneWorkerData {

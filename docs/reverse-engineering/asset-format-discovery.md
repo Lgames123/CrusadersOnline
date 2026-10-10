@@ -240,6 +240,19 @@ The creature sound table at 0x004EEA88 has 16 bytes per creature type (type − 
 
 `Textures/textures.zip/textures.nfo` maps texture material symbols (ST, WD, ML, …) to ricochet and footstep sounds.
 
+### 6.2.2 Level exits (portals) `[CONFIRMED: 192 portals, all destinations exist]`
+
+Portal records live outside the object list:
+
+| Offset | Content |
+|---|---|
+| +0 | pointer to the record's own destination string at +0x20 |
+| +4 | `0xFFFF0000` OR exit number |
+| +0x10 | trigger position (3 × float32) |
+| +0x20 | NUL-terminated destination act, e.g. `Ca1a` → `Ca1b`, `Ca1c` → `Du1a`, `Cs1b-Inn` → `Cs1b` |
+
+Exits come in pairs: the destination has a portal back to the source, which is where an arriving player appears. The four acts of a mesh (e.g. Ca1a/Ca2a/Ca3a) link to the matching act of their neighbours.
+
 ### 6.3 `.msh` layout and geometry `[CONFIRMED on 24 of 25 levels]`
 
 **Memory images.** Both `.msh` and `.cap` files are memory images ("game DBs"). The loader decompresses them into game memory at fixed addresses, so internal pointers are absolute: the mesh DBs live at `0x06000000` and the cap DB at `0x08000000`. Each DB ends with a **per-type object table**: for every object type, a count followed by that many pointers. It is the "recyclable overhead" in the loader's messages.

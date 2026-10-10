@@ -9,7 +9,7 @@ import { CharacterRepository } from './persistence/characters.ts';
 import { migrateToLatest, openDatabase } from './persistence/db.ts';
 import { SessionManager } from './network/sessions.ts';
 import { createWsTransport } from './network/ws_transport.ts';
-import { ZoneHost } from './zone/zone_host.ts';
+import { ZoneManager } from './zone/zone_manager.ts';
 
 export interface RunningServer {
   port: number;
@@ -40,31 +40,36 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
   const pendingSaves = new Set<Promise<void>>();
   const tickets = new TicketStore(config.wsTicketTtlSeconds);
   let sessions: SessionManager | null = null;
-  const zone = new ZoneHost(
-    { zone: 'arena-1', arena: config.arena, difficulty: config.difficulty, itemRulesPath: config.itemRulesPath, generatedDir: config.generatedDir },
+  const save = (records: Parameters<CharacterRepository['saveStates']>[0], reason: string) => {
+    if (records.length === 0) return;
+    const p = characters
+      .saveStates(records)
+      .then(() => log.debug({ count: records.length, reason }, 'characters saved'))
+      .catch((err: unknown) => log.error({ err, reason }, 'character save failed'))
+      .finally(() => pendingSaves.delete(p));
+    pendingSaves.add(p);
+  };
+  // One zone worker per arena, started on demand (login into a saved zone, portals).
+  const zones = new ZoneManager(
+    { difficulty: config.difficulty, itemRulesPath: config.itemRulesPath, generatedDir: config.generatedDir },
     {
       deliver: (connId, data) => sessions?.deliver(connId, data),
       metrics: (m) => log.debug(m, 'zone tick metrics'),
-      error: (err) => log.error({ err }, 'zone worker error'),
-      persist: (records, reason) => {
-        if (records.length === 0) return;
-        const p = characters
-          .saveStates(records)
-          .then(() => log.debug({ count: records.length, reason }, 'characters saved'))
-          .catch((err: unknown) => log.error({ err, reason }, 'character save failed'))
-          .finally(() => pendingSaves.delete(p));
-        pendingSaves.add(p);
-      },
+      error: (arena, err) => log.error({ err, arena }, 'zone worker error'),
+      persist: (records, reason) => save(records, reason),
+      portal: (arena, connId, target) => sessions?.onPortal(arena, connId, target),
+      transferred: (arena, connId, record, state) => sessions?.onTransferred(arena, connId, record, state),
     },
   );
-  await zone.whenReady();
-  sessions = new SessionManager(tickets, zone, characters, log);
+  if (!zones.available(config.arena)) throw new Error(`ARENA ${config.arena} is not available (convert the level into ${config.generatedDir})`);
+  await zones.get(config.arena);
+  sessions = new SessionManager(tickets, zones, characters, log, { defaultArena: config.arena, persist: (r) => save(r, 'transfer') });
   const api = createApiHandler({ config, accounts, tickets, log });
 
   const http = createServer((req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (req.method === 'GET' && url.pathname === '/healthz') {
-      return json(res, 200, { ok: true, zone: zone.zone, arena: config.arena, tick: zone.tick, players: sessions!.playerCount });
+      return json(res, 200, { ok: true, arena: config.arena, zones: zones.names, tick: zones.host(config.arena)?.tick ?? 0, players: sessions!.playerCount });
     }
     if (url.pathname.startsWith('/api/')) {
       void api(req, res, url.pathname).then((handled) => {
@@ -77,7 +82,7 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
 
   const transport = createWsTransport(http, '/ws', sessions);
   const shutdownBackends = async () => {
-    await zone.stop();
+    await zones.stopAll();
     await Promise.allSettled([...pendingSaves]);
     await database.close();
   };
@@ -108,7 +113,7 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
       // 1. Stop accepting connections. 2. Stop the zone, which flushes every character still in
       // the world. 3. Close (then terminate) sockets and idle HTTP connections. 4. Await saves.
       const httpClosed = new Promise<void>((resolve) => http.close(() => resolve()));
-      await zone.stop();
+      await zones.stopAll();
       await transport.close();
       http.closeAllConnections();
       await httpClosed;

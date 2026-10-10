@@ -343,6 +343,9 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
       await sink.writeFile(out, JSON.stringify({
         mesh: cap.mesh.toLowerCase(),
         creatures: cap.creatures.map((c) => ({ ...c, position: [c.position[0], c.position[1], -c.position[2]] })),
+        portals: cap.portals
+          .filter((p) => capFiles.some((f) => f.toLowerCase() === `${p.target.toLowerCase()}.cap`))
+          .map((p) => ({ exit: p.exit, target: p.target.toLowerCase(), position: [p.position[0], p.position[1], -p.position[2]] })),
         objects: cap.objects.map((o) => {
           const model = o.kind === 'sprite' ? undefined : modelById.get(o.modelId);
           const glb = model ? manifest.models[model] : undefined;

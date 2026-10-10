@@ -5,7 +5,7 @@ import { INPUT_PACKET_MAX_BYTES, MAX_INPUT_FRAMES, createInputFrame, encodeInput
 import { decodeSnapshot, type EntityState } from '../protocol/binary/snapshot.ts';
 import type { CombatEventMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PlayerStatsMsg, ServerControlMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
 import type { ArenaDef } from '../arena/types.ts';
-import { createMovementWorld, type MovementWorld, type Rapier } from '../movement/physics.ts';
+import { createMovementWorld, disposeMovementWorld, type MovementWorld, type Rapier } from '../movement/physics.ts';
 import { createCharacter, setCharacterState, stepCharacter, type Character } from '../movement/character.ts';
 
 const INPUT_HISTORY = 64;
@@ -39,6 +39,13 @@ export interface ClientSessionEvents {
   inventory?(inventory: Inventory): void;
   objects?(changes: ObjectStateMsg['d']): void;
   despawn?(id: number): void;
+  /**
+   * The server moves the player to `arena` (login or portal). Load it, call setArena() with its
+   * definition, then zoneReady(). Not called when the session was created with that arena.
+   */
+  zone?(arena: string): void;
+  /** World entry in the current zone (first login and after every zone change). */
+  enter?(d: WorldEnterMsg['d']): void;
   /** Local prediction was corrected by (dx, dy, dz) metres. */
   correction?(dx: number, dy: number, dz: number): void;
   close?(code: number, reason: string): void;
@@ -59,7 +66,9 @@ export interface ClientSessionStats {
  * Uses the global WebSocket, so it runs in browsers and in Node (tests, bots).
  */
 export class ClientSession {
-  readonly mw: MovementWorld;
+  mw: MovementWorld;
+  /** Arena the session currently simulates. */
+  arenaName = '';
   character: Character | null = null;
   entityId = 0;
   accountName = '';
@@ -86,9 +95,40 @@ export class ClientSession {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private seq = 0;
 
+  private readonly rapier: Rapier;
+  /** Arena given at construction: zone changes to it are acknowledged automatically. */
+  private readonly autoArena: ArenaDef | null;
+
   constructor(rapier: Rapier, arena: ArenaDef, events: ClientSessionEvents = {}) {
+    this.rapier = rapier;
+    this.autoArena = arena;
     this.mw = createMovementWorld(rapier, arena);
+    this.arenaName = arena.name;
     this.events = events;
+  }
+
+  /**
+   * Switches the simulated arena (zone change): new collision world, and every per-zone state
+   * (character, snapshots, remote entities, object states) is reset.
+   */
+  setArena(arena: ArenaDef): void {
+    disposeMovementWorld(this.mw);
+    this.mw = createMovementWorld(this.rapier, arena);
+    this.arenaName = arena.name;
+    this.character = null;
+    this.entityId = 0;
+    this.snapshots.clear();
+    this.remote.clear();
+    this.entities.clear();
+    this.names.clear();
+    this.objectStates.clear();
+    this.latestTick = 0;
+    this.stats.snapshots = 0;
+  }
+
+  /** Tells the server the arena announced by SC_ZONE_CHANGE is loaded. */
+  zoneReady(arena: string): void {
+    this.sendJson({ op: CS.ZONE_READY, seq: ++this.seq, d: { arena } });
   }
 
   get connected(): boolean {
@@ -150,12 +190,22 @@ export class ClientSession {
         if (c) this.sendJson({ op: CS.SELECT_CHARACTER, seq: this.seq++, d: { characterId: c.id } });
         break;
       }
+      case SC.ZONE_CHANGE:
+        if (!this.events.zone && this.autoArena && msg.d.arena === this.autoArena.name) {
+          if (this.arenaName !== msg.d.arena || this.character) this.setArena(this.autoArena);
+          this.zoneReady(msg.d.arena);
+        } else {
+          this.events.zone?.(msg.d.arena);
+        }
+        break;
       case SC.WORLD_ENTER:
+        if (this.pingTimer) clearInterval(this.pingTimer);
         this.entityId = msg.d.entityId;
         this.character = createCharacter(this.mw, msg.d.spawn);
         this.latestTick = this.serverTickEstimate = msg.d.serverTick;
         this.latestAt = performance.now();
         this.pingTimer = setInterval(() => this.sendJson({ op: CS.PING, seq: this.seq++, d: { clientTime: performance.now() } }), 2000);
+        this.events.enter?.(msg.d);
         break;
       case SC.ENTITY_SPAWN:
         this.names.set(msg.d.id, msg.d.name);

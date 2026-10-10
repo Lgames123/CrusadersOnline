@@ -31,6 +31,10 @@ export interface CharacterPersistRecord {
   maxHp: number;
   /** Full inventory replacing the stored one; omitted when unchanged. */
   inventory?: InventoryEntry[];
+  /** Arena the character is in. */
+  zone?: string;
+  /** Clear the saved position (the character spawns at the zone's arrival point). */
+  resetPosition?: boolean;
 }
 
 export class CharacterRepository {
@@ -78,9 +82,10 @@ export class CharacterRepository {
         await trx
           .updateTable('characters')
           .set({
-            pos_x: r.x,
-            pos_y: r.y,
-            pos_z: r.z,
+            pos_x: r.resetPosition ? null : r.x,
+            pos_y: r.resetPosition ? null : r.y,
+            pos_z: r.resetPosition ? null : r.z,
+            ...(r.zone ? { zone_id: r.zone.slice(0, 32) } : {}),
             yaw: r.yaw,
             level: r.level,
             experience_points: r.experience,

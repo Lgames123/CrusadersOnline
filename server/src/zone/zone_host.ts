@@ -1,5 +1,5 @@
 import { Worker } from 'node:worker_threads';
-import type { JoinOptions, PersistReason, PersistRecord } from '../simulation/world_zone.ts';
+import type { JoinOptions, PersistReason, PersistRecord, TransferState } from '../simulation/world_zone.ts';
 import type { FromZone, ToZone, ZoneMetrics, ZoneWorkerData } from './messages.ts';
 
 export interface ZoneHostEvents {
@@ -7,6 +7,8 @@ export interface ZoneHostEvents {
   metrics?(m: ZoneMetrics): void;
   persist?(records: PersistRecord[], reason: PersistReason): void;
   error?(err: Error): void;
+  portal?(connId: number, target: string): void;
+  transferred?(connId: number, record: PersistRecord | null, state: TransferState | null): void;
 }
 
 /** Main-thread handle for one zone worker. */
@@ -36,6 +38,12 @@ export class ZoneHost {
             break;
           case 'persist':
             events.persist?.(msg.records, msg.reason);
+            break;
+          case 'portal':
+            events.portal?.(msg.connId, msg.target);
+            break;
+          case 'transferred':
+            events.transferred?.(msg.connId, msg.record, msg.state);
             break;
         }
       });
@@ -72,6 +80,10 @@ export class ZoneHost {
 
   useItem(connId: number, slot: number): void {
     this.post({ t: 'use', connId, slot });
+  }
+
+  transfer(connId: number): void {
+    this.post({ t: 'transfer', connId });
   }
 
   leave(connId: number): void {

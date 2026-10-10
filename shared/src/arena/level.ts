@@ -1,4 +1,4 @@
-import type { ArenaDef, TriMeshDef, WorldObjectDef } from './types.ts';
+import type { ArenaDef, PortalDef, TriMeshDef, WorldObjectDef } from './types.ts';
 
 /**
  * Arenas built from an original level converted from the user's own installation
@@ -40,11 +40,46 @@ export interface LevelObject {
   model?: string;
 }
 
+export interface LevelPortal {
+  exit: number;
+  /** Lower-case destination act, e.g. "ca1b". */
+  target: string;
+  /** Original units, Z mirrored. */
+  position: [number, number, number];
+}
+
 export interface LevelPlacements {
   /** Lower-case mesh name, e.g. "ca_a". */
   mesh: string;
   creatures: LevelCreature[];
   objects?: LevelObject[];
+  portals?: LevelPortal[];
+}
+
+/** Horizontal radius / height of a portal trigger, metres (slice values). */
+export const PORTAL_RADIUS = 1.6;
+export const PORTAL_HEIGHT = 2.5;
+
+/**
+ * Where a player arriving from `fromArena` appears: in front of this arena's portal that leads
+ * back there (offset towards the nearest spawn point so they stand outside the trigger), else
+ * the first spawn point.
+ */
+export function arrivalPoint(arena: ArenaDef, fromArena: string | undefined): { x: number; y: number; z: number } {
+  const back = fromArena ? arena.portals?.find((p) => p.target === fromArena) : undefined;
+  const fallback = arena.spawnPoints[0] ?? { x: 0, y: 1, z: 0 };
+  if (!back) return fallback;
+  // Step out of the trigger along the direction to the nearest spawn point (a floor area).
+  let best = fallback;
+  let bestD = Infinity;
+  for (const s of arena.spawnPoints) {
+    const d = Math.hypot(s.x - back.x, s.z - back.z);
+    if (d < bestD) (bestD = d), (best = s);
+  }
+  const dx = best.x - back.x, dz = best.z - back.z;
+  const len = Math.hypot(dx, dz) || 1;
+  const step = Math.min(len, PORTAL_RADIUS + 1.2);
+  return { x: back.x + (dx / len) * step, y: back.y + 0.3, z: back.z + (dz / len) * step };
 }
 
 /** Creature type ids (creature template table) that the slice can spawn, by archetype. */
@@ -132,5 +167,12 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
     else if (o.kind === 'chest') objects.push({ id, kind: 'chest', ...at, contents: o.contents ?? [] });
     else if (o.kind === 'prop' && o.hp > 0) objects.push({ id, kind: 'breakable', ...at, hp: o.hp });
   });
-  return { name, boxes: [], meshes: [mesh], spawnPoints: spawnPoints(mesh, hostiles, 8), mobSpawns, objects };
+  const portals: PortalDef[] = (placements.portals ?? []).map((p, id) => ({
+    id,
+    target: `${LEVEL_PREFIX}${p.target}`,
+    x: p.position[0] * s,
+    y: p.position[1] * s,
+    z: p.position[2] * s,
+  }));
+  return { name, boxes: [], meshes: [mesh], spawnPoints: spawnPoints(mesh, hostiles, 8), mobSpawns, objects, portals };
 }

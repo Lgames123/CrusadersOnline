@@ -114,7 +114,15 @@
   - Same-floor mob aggro and spawn points 15+ m from any hostile.
   - New E2E `import_game.spec.ts` (local only; skipped without an installation) checks the import and the service-worker serving. 85 tests + 2 E2E.
 
+- [x] Session 14 (2026-10-10): **level transitions — a connected world.**
+  - `.cap` portals decoded (192; asset-format-discovery.md §6.2.2).
+  - One zone worker per arena, started on demand (`ZoneManager`).
+  - Walking into a portal moves the player to the destination zone, at its portal leading back. HP, XP, gold and inventory carry over, and the character's zone is saved, so login resumes there.
+  - The client swaps levels in place (SC_ZONE_CHANGE / CS_ZONE_READY), without a page reload.
+  - Verified in the browser: Cs1b-Inn → Cs1b. Integration test on two generated levels. 86 tests.
+
 ### Not Yet Done
+- Idle zones are never stopped; portals to acts without a converted mesh (Ws_a) answer "This way is blocked".
 - Spells and ranged attacks (Dark Mage, Ghost fireball), Ogre / Dasher / Dwarf / elemental archetypes, doors, levers and scripted sequences, `Ws_a.msh`, material-based footsteps, music.
 - Packaging the converter for players (browser conversion into OPFS) so original levels work outside the dev server.
 - Original AI maneuver scripts.

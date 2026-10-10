@@ -43,6 +43,17 @@ export interface WorldObjectDef {
   contents?: { name: string; quantity: number }[];
 }
 
+/** Level exit: walking into its trigger moves the player to another zone (arena). */
+export interface PortalDef {
+  id: number;
+  /** Destination arena name, e.g. "level:ca1b". */
+  target: string;
+  /** Trigger centre, metres. */
+  x: number;
+  y: number;
+  z: number;
+}
+
 export interface ArenaDef {
   name: string;
   boxes: BoxDef[];
@@ -55,4 +66,6 @@ export interface ArenaDef {
   mobSpawns: { archetype: string; x: number; y: number; z: number; hp?: number; xp?: number; resist?: number[] }[];
   /** Items, chests and breakable props (original levels). */
   objects?: WorldObjectDef[];
+  /** Exits to other zones (original levels). */
+  portals?: PortalDef[];
 }

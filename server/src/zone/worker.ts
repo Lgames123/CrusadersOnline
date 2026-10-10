@@ -48,6 +48,9 @@ const zone = new WorldZone(rapier, zoneName, loadArena(arenaName), {
   persist(records, reason) {
     post({ t: 'persist', reason, records });
   },
+  portal(connId, target) {
+    post({ t: 'portal', connId, target });
+  },
 }, { difficulty, items: loadItems(itemRulesPath) });
 
 const flush = () => {
@@ -87,6 +90,12 @@ port.on('message', (msg: ToZone) => {
       zone.useItem(msg.connId, msg.slot);
       flush();
       break;
+    case 'transfer': {
+      flush();
+      const r = zone.leaveForTransfer(msg.connId);
+      post({ t: 'transferred', connId: msg.connId, record: r?.record ?? null, state: r?.state ?? null });
+      break;
+    }
     case 'stop':
       clock.stop();
       flush();

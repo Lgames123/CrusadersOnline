@@ -43,11 +43,25 @@ export interface CapObject {
   effect?: string;
 }
 
+/**
+ * Level exit (asset-format-discovery.md §6.2.2): trigger position and the act it leads to. The
+ * arrival point in the destination is that act's portal leading back here.
+ */
+export interface CapPortal {
+  /** Exit number within the level (low half of the record's +4 word). */
+  exit: number;
+  /** Destination act, as written (e.g. "Ca1b"; compare case-insensitively). */
+  target: string;
+  /** Original units and axes. */
+  position: [number, number, number];
+}
+
 export interface CapLevel {
   /** Mesh file base name, e.g. "Ca_a". */
   mesh: string;
   creatures: CapCreature[];
   objects: CapObject[];
+  portals: CapPortal[];
 }
 
 /** Object class (record +0x00) -> kind. 0x2D = creature. */
@@ -102,7 +116,24 @@ export function parseCap(bytes: Uint8Array, itemNames: ReadonlySet<string> = new
     });
     a = x;
   }
-  return { mesh, creatures, objects };
+  return { mesh, creatures, objects, portals: parsePortals(data, dv) };
+}
+
+/**
+ * Portal record: [pointer to its own name at +0x20][0xFFFF0000 | exit][...][+0x10 position]
+ * [+0x20 NUL-terminated destination act name].
+ */
+function parsePortals(data: Uint8Array, dv: DataView): CapPortal[] {
+  const out: CapPortal[] = [];
+  for (let o = 0; o + 0x30 < data.length; o++) {
+    if (dv.getUint32(o, true) !== CAP_BASE + o + 0x20 || dv.getUint16(o + 6, true) !== 0xffff) continue;
+    const target = ascii(data, o + 0x20, 24);
+    if (!/^[A-Za-z]{2}[A-Za-z0-9_-]{1,20}$/.test(target) || data[o + 0x20 + target.length] !== 0) continue;
+    const position: [number, number, number] = [dv.getFloat32(o + 0x10, true), dv.getFloat32(o + 0x14, true), dv.getFloat32(o + 0x18, true)];
+    if (!position.every((v) => Number.isFinite(v) && Math.abs(v) < 1e5)) continue;
+    out.push({ exit: dv.getUint16(o + 4, true), target, position });
+  }
+  return out;
 }
 
 const ascii = (data: Uint8Array, o: number, max = 64): string => {

@@ -1,6 +1,9 @@
 import {
   ANIM,
   BUILTIN_ITEMS,
+  PORTAL_HEIGHT,
+  PORTAL_RADIUS,
+  arrivalPoint,
   GOLD_ITEM,
   itemSlug,
   takeOne,
@@ -86,6 +89,8 @@ export interface ZoneOutbox {
   send(connId: number, data: Uint8Array | string): void;
   /** Immediate save request (e.g. after a kill reward or level-up). */
   persist?(records: PersistRecord[], reason: PersistReason): void;
+  /** A player walked into a portal trigger leading to `target` (once per entry). */
+  portal?(connId: number, target: string): void;
 }
 
 export interface JoinOptions {
@@ -100,7 +105,12 @@ export interface JoinOptions {
   hp?: number;
   /** Saved inventory; absent or empty => the starting kit. */
   inventory?: InventoryEntry[];
+  /** Arriving through a portal from this arena: placed at the portal leading back there. */
+  arrivingFrom?: string;
 }
+
+/** Player state carried across a zone transfer (everything but the position). */
+export type TransferState = Omit<JoinOptions, 'position' | 'arrivingFrom'>;
 
 /** State a zone hands back for saving (see persistence/characters.ts). */
 export interface PersistRecord {
@@ -116,6 +126,10 @@ export interface PersistRecord {
   maxHp: number;
   /** Full inventory, present only when it changed since the previous record. */
   inventory?: InventoryEntry[];
+  /** Arena the character is in (characters.zone_id). */
+  zone?: string;
+  /** Forget the saved position (zone transfer: spawn at the destination's arrival point). */
+  resetPosition?: boolean;
 }
 
 export interface WorldZoneOptions {
@@ -221,6 +235,8 @@ interface Player extends ActorBase {
   /** Tick until which a flinch/stagger keeps the player from acting; 0 = none. */
   hitUntil: number;
   shield: ItemDef | null;
+  /** Portals whose trigger the player is standing in (fires on entry only). */
+  inPortal: Set<number>;
   /** Shield raised this tick (BLOCK held, shield equipped, not swinging or flinching). */
   blocking: boolean;
 }
@@ -341,7 +357,9 @@ export class WorldZone {
 
   join(connId: number, opts: JoinOptions): number {
     if (this.players.has(connId)) throw new Error(`connection ${connId} already in zone`);
-    const spawn = validPosition(opts.position) ? opts.position : this.nextSpawnPoint();
+    const spawn = opts.arrivingFrom
+      ? arrivalPoint(this.arena, opts.arrivingFrom)
+      : validPosition(opts.position) ? opts.position : this.nextSpawnPoint();
     const xp = Math.max(0, Math.floor(opts.experience ?? 0));
     const level = levelForXp(xp);
     const rules = playerRules(this.difficulty);
@@ -387,10 +405,14 @@ export class WorldZone {
       swingTiming: swingForWeaponSpeed(eq.weapon.speed ?? 1),
       hitUntil: 0,
       shield: eq.shield,
+      inPortal: new Set(),
       blocking: false,
     };
     this.players.set(connId, p);
     this.register(p);
+    for (const portal of this.arena.portals ?? []) {
+      if (Math.hypot(portal.x - spawn.x, portal.z - spawn.z) <= PORTAL_RADIUS + 0.5 && Math.abs(portal.y - spawn.y) <= PORTAL_HEIGHT) p.inPortal.add(portal.id);
+    }
     this.sendJson(connId, {
       op: SC.WORLD_ENTER,
       d: { entityId: p.entityId, zone: this.name, arena: this.arena.name, serverTick: this.tick, spawn: { ...p.character.position } },
@@ -562,6 +584,7 @@ export class WorldZone {
       gold: p.gold,
       hp: Math.ceil(p.hp),
       maxHp: p.maxHp,
+      zone: this.arena.name,
       ...(this.takeInventoryChange(p)),
     };
   }
@@ -580,6 +603,42 @@ export class WorldZone {
       if (r) out.push(r);
     }
     return out;
+  }
+
+  /**
+   * Removes a player who is moving to another zone: returns the save record (null for guests)
+   * and the state to recreate them with in the destination.
+   */
+  leaveForTransfer(connId: number): { record: PersistRecord | null; state: TransferState } | null {
+    const p = this.players.get(connId);
+    if (!p) return null;
+    p.inventoryDirty = true; // always save the inventory with a transfer
+    const state: TransferState = {
+      name: p.name,
+      characterId: p.characterId,
+      yaw: p.yaw,
+      experience: p.xp,
+      gold: p.gold,
+      hp: Math.max(1, Math.ceil(p.hp)),
+      inventory: p.inventory.map((e) => ({ ...e })),
+    };
+    const record = this.leave(connId);
+    return { record, state };
+  }
+
+  private checkPortals(p: Player): void {
+    const portals = this.arena.portals;
+    if (!portals?.length || !alive(p)) return;
+    const pos = p.character.position;
+    for (const portal of portals) {
+      const inside = Math.hypot(portal.x - pos.x, portal.z - pos.z) <= PORTAL_RADIUS && Math.abs(portal.y - pos.y) <= PORTAL_HEIGHT;
+      if (!inside) {
+        p.inPortal.delete(portal.id);
+      } else if (!p.inPortal.has(portal.id)) {
+        p.inPortal.add(portal.id);
+        this.outbox.portal?.(p.connId, portal.target);
+      }
+    }
   }
 
   /** Removes the player; returns its final state for saving (null for guests / unknown). */
@@ -666,6 +725,7 @@ export class WorldZone {
         stepCharacter(this.mw, p.character, this.frame, DEFAULT_MOVEMENT_STATS, TICK_DT);
         p.lastProcessedInput = this.frame.clientTick;
         if (alive(p)) p.yaw = this.frame.yaw;
+        this.checkPortals(p);
         const moving = (this.frame.flags & MOVE_MASK) !== 0;
         p.blocking = alive(p) && p.shield !== null && (this.frame.flags & INPUT.BLOCK) !== 0 && !p.swing && p.hitUntil <= tick;
         p.anim = p.hitUntil > tick

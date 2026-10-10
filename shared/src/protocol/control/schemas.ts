@@ -64,6 +64,12 @@ export const UseItemPacketSchema = z.object({
   d: z.object({ slot: z.number().int().min(0).max(31) }),
 });
 
+export const ZoneReadyPacketSchema = z.object({
+  op: z.literal(CS.ZONE_READY),
+  seq: z.number().int().positive(),
+  d: z.object({ arena: z.string().min(1).max(64) }),
+});
+
 export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   AuthTicketPacketSchema,
   SelectCharacterPacketSchema,
@@ -71,6 +77,7 @@ export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   EquipItemPacketSchema,
   InteractPacketSchema,
   UseItemPacketSchema,
+  ZoneReadyPacketSchema,
   ChatMessagePacketSchema,
   PingPacketSchema,
 ]);
