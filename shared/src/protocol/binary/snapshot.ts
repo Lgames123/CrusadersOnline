@@ -32,10 +32,13 @@ export interface SnapshotHeader {
   /** Receiving player's own vertical velocity, mm/s (needed to replay inputs mid-jump). */
   selfVelY: number;
   selfGrounded: boolean;
+  /** Receiver's roll in progress (0 = none): direction 1-4 (ROLL_DIRS + 1) and ticks left. */
+  selfRollDir: number;
+  selfRollTicks: number;
 }
 
-const HEADER_BYTES = 20;
-const ENTITY_COUNT_AT = 18;
+const HEADER_BYTES = 21;
+const ENTITY_COUNT_AT = 19;
 const ENTITY_MAX_BYTES = 4 + 1 + 12 + 2 + 2 + 2 + 1;
 
 export function snapshotMaxBytes(entities: number, removed: number): number {
@@ -73,7 +76,8 @@ export function encodeSnapshot(
   view.setUint32(5, baseline ? header.baselineTick >>> 0 : 0, true);
   view.setUint32(9, header.lastProcessedInput >>> 0, true);
   view.setInt32(13, header.selfVelY | 0, true);
-  view.setUint8(17, header.selfGrounded ? 1 : 0);
+  view.setUint8(17, (header.selfGrounded ? 1 : 0) | ((header.selfRollDir & 7) << 1));
+  view.setUint8(18, header.selfRollTicks & 0xff);
   let o = HEADER_BYTES;
   let count = 0;
   for (const e of current.values()) {
@@ -128,8 +132,10 @@ export function decodeSnapshot(
     lastProcessedInput: view.getUint32(9, true),
     selfVelY: view.getInt32(13, true),
     selfGrounded: (view.getUint8(17) & 1) === 1,
+    selfRollDir: (view.getUint8(17) >> 1) & 7,
+    selfRollTicks: view.getUint8(18),
   };
-  if ((view.getUint8(17) & ~1) !== 0) return null;
+  if ((view.getUint8(17) & ~0b1111) !== 0 || ((view.getUint8(17) >> 1) & 7) > 4) return null;
   const base = header.baselineTick === 0 ? null : baseline;
   if (header.baselineTick !== 0 && !base) return null;
 

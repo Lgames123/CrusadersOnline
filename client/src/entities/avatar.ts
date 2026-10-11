@@ -15,6 +15,10 @@ export interface Avatar {
    * swingId changes for every new swing, so back-to-back swings of one kind restart the clip.
    */
   setState(anim: number, swingSeconds: number, swingId?: number): void;
+  /** Hit reaction from a direction: 0 front, 1 left, 2 right, 3 back (original models only). */
+  react?(dir: number): void;
+  /** Death-variant seed (entity id), so all clients pick the same death animation. */
+  seed?: number;
   update(dt: number): void;
   dispose(): void;
 }
@@ -67,6 +71,7 @@ export class ProceduralAvatar implements Avatar {
   }
 
   private swingId = 0;
+  seed = 0;
 
   setState(anim: number, swingSeconds: number, swingId = 0): void {
     const restart = isAttackAnim(anim) && swingId !== this.swingId;

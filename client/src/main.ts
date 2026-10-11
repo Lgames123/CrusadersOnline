@@ -39,6 +39,17 @@ import { chooseAuth, logout } from './ui/login.ts';
 
 const MAX_FRAME_MS = 250;
 
+/** Side of `target` (facing its rotation.y, 0 = -Z) that `from` stands on: 0 front, 1 left, 2 right, 3 back. */
+function impactSide(target: THREE.Object3D, from: THREE.Object3D): number {
+  const yaw = target.rotation.y;
+  const dx = from.position.x - target.position.x;
+  const dz = from.position.z - target.position.z;
+  const ahead = -Math.sin(yaw) * dx - Math.cos(yaw) * dz;
+  const right = Math.cos(yaw) * dx - Math.sin(yaw) * dz;
+  if (Math.abs(ahead) >= Math.abs(right)) return ahead >= 0 ? 0 : 3;
+  return right >= 0 ? 2 : 1;
+}
+
 async function main(): Promise<void> {
   const container = document.getElementById('app')!;
   const overlay = document.getElementById('overlay')!;
@@ -124,6 +135,10 @@ async function main(): Promise<void> {
             headPos.y += isMe ? player!.avatar.headHeight : target!.avatar.headHeight;
             const mine = session !== null && e.attacker === session.entityId;
             combatUi.damage(e, headPos, isMe ? 'taken' : mine ? 'dealt' : 'other');
+            // Hit reaction from the attacker's side (ASM_IMPACT_FRONT/LEFT/RIGHT/BACK).
+            const from = mine ? player?.object : remotes.byId.get(e.attacker)?.avatar.object;
+            const avatar = isMe ? player?.avatar : target?.avatar;
+            if (from && avatar?.react && !e.blocked && !e.killed && e.damage > 0) avatar.react(impactSide(obj, from));
             // Original impact / cry sounds (executable sound tables, Sound.ctx ids).
             if (sounds) {
               if (e.blocked) sounds.play(SFX.shieldBlockWood, headPos);
@@ -188,6 +203,7 @@ async function main(): Promise<void> {
           },
         }, (created) => (live = created));
   const selfAvatar = originals?.('self') ?? new ProceduralAvatar('self');
+  if (session) selfAvatar.seed = session.entityId;
   let mw: MovementWorld;
   if (session) {
     mw = session.mw;

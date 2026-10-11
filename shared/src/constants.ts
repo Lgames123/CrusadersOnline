@@ -51,6 +51,24 @@ export const DEFAULT_MOVEMENT_STATS: Readonly<MovementStats> = {
   jumpVelocity: 6.5,
 };
 
+/**
+ * Drake's rolls (C + direction): root displacement and length of ASM_ROLL_F/B/L/R
+ * (PE03 / PE06 / PE04 / PE05) at 30 fps, in feet and frames (executable-analysis.md §11).
+ * Index = roll direction - 1: forward, back, left, right.
+ */
+export const ORIGINAL_ROLLS: readonly { distanceFt: number; frames: number }[] = [
+  { distanceFt: 10.73, frames: 25 },
+  { distanceFt: 10.96, frames: 25 },
+  { distanceFt: 10.8, frames: 27 },
+  { distanceFt: 9.99, frames: 25 },
+];
+
+/** Roll length in simulation ticks and speed in metres per second, per direction - 1. */
+export const ROLLS: readonly { ticks: number; speed: number }[] = ORIGINAL_ROLLS.map((r) => {
+  const ticks = Math.round((r.frames / 30) * TICK_RATE);
+  return { ticks, speed: (r.distanceFt * FT) / (ticks / TICK_RATE) };
+});
+
 /** Same speed in every direction (creatures until their own clips are measured). */
 export function uniformMovementStats(speed: number, jumpVelocity = 0): MovementStats {
   return { runSpeed: speed, backSpeed: speed, strafeSpeed: speed, walkSpeed: speed, walkBackSpeed: speed, walkStrafeSpeed: speed, jumpVelocity };

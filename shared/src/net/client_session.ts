@@ -340,6 +340,8 @@ export class ClientSession {
       { x: dequantizePosition(self.x), y: dequantizePosition(self.y), z: dequantizePosition(self.z) },
       header.selfVelY / 1000,
       header.selfGrounded,
+      header.selfRollDir,
+      header.selfRollTicks,
     );
     const from = Math.max(header.lastProcessedInput + 1, this.clientTick - INPUT_HISTORY + 1);
     for (let t = from; t <= this.clientTick; t++) {

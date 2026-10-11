@@ -46,6 +46,10 @@ export const INPUT = {
    * feet while attacking). Set by the client from its swing; it only ever restricts the sender.
    */
   ROOTED: 1 << 7,
+  /** Crouch / duck (C held). Second flags byte. */
+  DUCK: 1 << 8,
+  /** Roll in the held direction (C pressed with a direction; latched like JUMP). */
+  ROLL: 1 << 9,
 } as const;
 
-export const INPUT_VALID_MASK = 0b1111_1111;
+export const INPUT_VALID_MASK = 0b11_1111_1111;

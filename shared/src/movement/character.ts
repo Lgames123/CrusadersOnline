@@ -1,5 +1,5 @@
 import type RAPIER from '@dimforge/rapier3d-deterministic-compat';
-import { GRAVITY, PLAYER_HALF_SEGMENT, PLAYER_HEIGHT, PLAYER_RADIUS, type MovementStats } from '../constants.ts';
+import { GRAVITY, PLAYER_HALF_SEGMENT, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
 import type { Vec3 } from '../math/vec3.ts';
 import { dequantizeAngle } from '../math/quantize.ts';
 import { INPUT } from '../protocol/opcodes.ts';
@@ -17,6 +17,10 @@ export interface Character {
   position: Vec3;
   velocityY: number;
   grounded: boolean;
+  /** Roll in progress: 0 none, 1 forward, 2 back, 3 left, 4 right. */
+  rollDir: number;
+  /** Ticks of the roll still to run. */
+  rollTicks: number;
 }
 
 const HALF_HEIGHT = PLAYER_HEIGHT / 2;
@@ -34,6 +38,8 @@ export function createCharacter(mw: MovementWorld, feet: Readonly<Vec3>): Charac
     position: { x: snapMm(feet.x), y: snapMm(feet.y), z: snapMm(feet.z) },
     velocityY: 0,
     grounded: false,
+    rollDir: 0,
+    rollTicks: 0,
   };
 }
 
@@ -42,7 +48,9 @@ export function removeCharacter(mw: MovementWorld, c: Character): void {
 }
 
 /** Hard-sets the character state (spawn, teleport, reconciliation). Values are snapped to wire resolution. */
-export function setCharacterState(c: Character, feet: Readonly<Vec3>, velocityY: number, grounded: boolean): void {
+export function setCharacterState(c: Character, feet: Readonly<Vec3>, velocityY: number, grounded: boolean, rollDir = 0, rollTicks = 0): void {
+  c.rollDir = rollTicks > 0 ? rollDir : 0;
+  c.rollTicks = c.rollDir ? rollTicks : 0;
   c.position.x = snapMm(feet.x);
   c.position.y = snapMm(feet.y);
   c.position.z = snapMm(feet.z);
@@ -69,8 +77,17 @@ export function stepCharacter(
   const f = input.flags;
   let fwd = 0;
   let right = 0;
-  // Attacking plants the feet (INPUT.ROOTED); gravity still applies.
-  if (!(f & INPUT.ROOTED)) {
+  // C + direction starts a roll (grounded, not attacking); it then runs its full length.
+  if (c.rollTicks === 0 && c.grounded && f & INPUT.ROLL && !(f & INPUT.ROOTED)) {
+    const dir = rollDirection(f);
+    if (dir) {
+      c.rollDir = dir;
+      c.rollTicks = ROLLS[dir - 1]!.ticks;
+    }
+  }
+  const rolling = c.rollTicks > 0;
+  // Attacking plants the feet (INPUT.ROOTED), so does ducking (C held); gravity still applies.
+  if (!rolling && !(f & (INPUT.ROOTED | INPUT.DUCK))) {
     if (f & INPUT.FORWARD) fwd += 1;
     if (f & INPUT.BACK) fwd -= 1;
     if (f & INPUT.RIGHT) right += 1;
@@ -79,7 +96,16 @@ export function stepCharacter(
 
   let vx = 0;
   let vz = 0;
-  if (fwd !== 0 || right !== 0) {
+  if (rolling) {
+    const yaw = dequantizeAngle(input.yaw);
+    const s = Math.sin(yaw);
+    const co = Math.cos(yaw);
+    const speed = ROLLS[c.rollDir - 1]!.speed;
+    const along = c.rollDir === 1 ? speed : c.rollDir === 2 ? -speed : 0;
+    const side = c.rollDir === 4 ? speed : c.rollDir === 3 ? -speed : 0;
+    vx = -s * along + co * side;
+    vz = -co * along - s * side;
+  } else if (fwd !== 0 || right !== 0) {
     const yaw = dequantizeAngle(input.yaw);
     const s = Math.sin(yaw);
     const co = Math.cos(yaw);
@@ -97,7 +123,7 @@ export function stepCharacter(
   }
 
   let vy = c.velocityY;
-  if (c.grounded && f & INPUT.JUMP) vy = stats.jumpVelocity;
+  if (c.grounded && f & INPUT.JUMP && !rolling && !(f & INPUT.DUCK)) vy = stats.jumpVelocity;
   vy += GRAVITY * dt;
 
   desired.x = vx * dt;
@@ -111,10 +137,22 @@ export function stepCharacter(
   if (desired.y > 0 && moved.y < desired.y * 0.5) vy = 0;
   if (grounded && vy < 0) vy = 0;
 
+  const rollTicks = rolling ? c.rollTicks - 1 : 0;
   setCharacterState(
     c,
     { x: c.position.x + moved.x, y: c.position.y + moved.y, z: c.position.z + moved.z },
     vy,
     grounded,
+    c.rollDir,
+    rollTicks,
   );
+}
+
+/** Roll direction for held movement flags: 1 forward, 2 back, 3 left, 4 right, 0 none. */
+export function rollDirection(flags: number): number {
+  if (flags & INPUT.FORWARD && !(flags & INPUT.BACK)) return 1;
+  if (flags & INPUT.BACK && !(flags & INPUT.FORWARD)) return 2;
+  if (flags & INPUT.LEFT && !(flags & INPUT.RIGHT)) return 3;
+  if (flags & INPUT.RIGHT && !(flags & INPUT.LEFT)) return 4;
+  return 0;
 }

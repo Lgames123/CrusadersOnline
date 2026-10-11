@@ -30,8 +30,9 @@ export function encodeInput(view: DataView, ackSnapshotTick: number, frames: rea
   let o = HEADER_BYTES;
   for (const f of frames) {
     view.setUint32(o, f.clientTick >>> 0, true);
-    view.setUint8(o + 4, f.flags & INPUT_VALID_MASK);
-    view.setUint8(o + 5, 0);
+    const flags = f.flags & INPUT_VALID_MASK;
+    view.setUint8(o + 4, flags & 0xff);
+    view.setUint8(o + 5, flags >>> 8);
     view.setUint16(o + 6, f.yaw & 0xffff, true);
     view.setUint16(o + 8, f.pitch & 0xffff, true);
     o += FRAME_BYTES;
@@ -59,9 +60,9 @@ export function decodeInput(view: DataView, out: InputFrame[]): DecodedInputHead
   let prevTick = -1;
   for (let i = 0; i < count; i++) {
     const tick = view.getUint32(o, true);
-    const flags = view.getUint8(o + 4);
+    const flags = view.getUint8(o + 4) | (view.getUint8(o + 5) << 8);
     if (tick <= prevTick) return null;
-    if ((flags & ~INPUT_VALID_MASK) !== 0 || view.getUint8(o + 5) !== 0) return null;
+    if ((flags & ~INPUT_VALID_MASK) !== 0) return null;
     const f = out[i]!;
     f.clientTick = tick;
     f.flags = flags;

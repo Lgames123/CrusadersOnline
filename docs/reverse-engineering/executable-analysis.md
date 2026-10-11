@@ -263,3 +263,8 @@ The mouse wheel blends the camera from the classic rig (closest) to the optional
 | `PC07/PC08` hop forward / back | 20 | 5.7 / 5.8 | 8.5 / 8.7 ft/s |
 
 The run speed agrees with the 15 units/s constant used for creatures that are not animation-driven (§7.1). The jump clips (`PC01`–`PC06`) move the root only ~0.9 ft up and hardly at all horizontally, so jump height and distance come from somewhere else (UNK-012). These speeds are used as `DEFAULT_MOVEMENT_STATS` (`shared/src/constants.ts`); the per-character speed multiplier (`+0x24C`, §7.2) is not applied yet.
+
+Rolls (C + direction; `ASM_ROLL_F/B/L/R`): forward 10.73 ft in 25 frames, back 10.96 ft / 25, left 10.80 ft / 27, right 9.99 ft / 25 (`ORIGINAL_ROLLS`). A roll runs its full length once started. C alone ducks in place (`ASM_CROUCHING`, `PE02_dk_cvr`).
+The jump search (UNK-012) found the AI maneuver tables (`0x004EA268`: RANGED / RUNNING_JUMP / JUMP / MELEE and NONE … THROW_WEAPON, MANEUVER_LR/BACK) but no player jump impulse; the only `GRAVITY` string belongs to the particle system.
+
+Hit reactions: creature and player models bind `ASM_IMPACT_FRONT/LEFT/RIGHT/BACK` (`PI15`–`PI18`), `ASM_IMPACT_SEVERE` and alternates, and up to nine death clips (`ASM_HIT_POINTS_DEPLETED` + `_ALT_01..08`). The client plays the impact for the attacker's side and a death variant seeded by the entity id.

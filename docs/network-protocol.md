@@ -72,6 +72,7 @@ offset  size  field
 --- repeated frameCount times (10 bytes each) ---
 +0      4     clientTick (uint32)
 +4      1     inputFlags (bit0 W, bit1 S, bit2 A, bit3 D, bit4 Jump, bit5 Walk, bit6 Block (held), bit7 Rooted — own swing playing, no ground movement; set by the client, it only restricts the sender. Gap: a modified client could omit it to move while attacking; a server-side swing-window check is pending)
++5      1     inputFlags2 (bit0 Duck (C held), bit1 Roll (C pressed with a direction, latched); other bits must be 0)
 +5      1     reserved
 +6      2     yaw   (uint16 quantized)
 +8      2     pitch (uint16 quantized)
@@ -85,8 +86,9 @@ Server rules: at most one input applied per server tick per player (extras queue
 5       4     baselineTick (uint32) — 0 = full snapshot, otherwise delta vs this acked tick
 9       4     lastProcessedInput (uint32) — for client reconciliation
 13      4     selfVelY (int32, mm/s) — receiver's own vertical velocity (replay mid-jump)
-17      1     selfFlags (bit0 grounded; other bits must be 0)
-18      2     entityCount (uint16)
+17      1     selfFlags (bit0 grounded, bits1-3 roll direction 0 none / 1 forward / 2 back / 3 left / 4 right; other bits must be 0)
+18      1     selfRollTicks (uint8) — ticks left of the receiver's roll (replay mid-roll)
+19      2     entityCount (uint16)
 --- per entity ---
 +0      4     entityId (uint32)
 +4      1     changedMask (bit0 pos, bit1 yaw, bit2 anim, bit3 hp, bit4 flags)

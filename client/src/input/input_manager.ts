@@ -41,6 +41,8 @@ export class InputManager {
       const flag = this.bindings[e.code];
       if (flag !== undefined) {
         e.preventDefault();
+        // C pressed while a direction is held: roll that way (original controls).
+        if (flag === INPUT.DUCK && !e.repeat && this.held & (INPUT.FORWARD | INPUT.BACK | INPUT.LEFT | INPUT.RIGHT)) this.latched |= INPUT.ROLL;
         this.held |= flag;
         this.latched |= flag;
       }
@@ -120,7 +122,7 @@ export class InputManager {
   /** Fills `out` with the input for the next fixed step. */
   sample(out: InputFrame, clientTick: number): void {
     out.clientTick = clientTick;
-    out.flags = this.held | (this.latched & INPUT.JUMP);
+    out.flags = this.held | (this.latched & (INPUT.JUMP | INPUT.ROLL));
     out.yaw = quantizeAngle(this.yaw);
     out.pitch = quantizePitch(this.pitch);
     this.latched = 0;

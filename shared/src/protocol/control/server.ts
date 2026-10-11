@@ -142,7 +142,20 @@ export const ANIM = {
   ATTACK_OVERHEAD: 15,
   ATTACK_LEFT: 16,
   ATTACK_RIGHT: 17,
+  /** Rolls (C + direction): ROLL + direction - 1 (forward, back, left, right). */
+  ROLL: 18,
+  /** Ducking (C held). */
+  CROUCH: 22,
 } as const;
+
+/** Animation for a character's own movement state (roll, duck, airborne, locomotion, idle). */
+export function movementAnim(flags: number, grounded: boolean, rollDir: number): number {
+  if (rollDir) return ANIM.ROLL + rollDir - 1;
+  if (!grounded) return ANIM.AIRBORNE;
+  if (flags & INPUT.DUCK) return ANIM.CROUCH;
+  if (flags & INPUT.ROOTED) return ANIM.IDLE;
+  return locomotionAnim(flags);
+}
 
 export type AttackKind = 'normal' | 'overhead' | 'left' | 'right';
 

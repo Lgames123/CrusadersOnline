@@ -22,6 +22,7 @@ import {
   DEFAULT_MOVEMENT_STATS,
   uniformMovementStats,
   locomotionAnim,
+  movementAnim,
   movementFacingOffset,
   attackAnim,
   type AttackKind,
@@ -748,9 +749,7 @@ export class WorldZone {
           ? ANIM.HIT
           : p.blocking
           ? ANIM.BLOCK
-          : !p.character.grounded
-          ? ANIM.AIRBORNE
-          : moving ? locomotionAnim(this.frame.flags) : ANIM.IDLE;
+          : movementAnim(this.frame.flags, p.character.grounded, p.character.rollDir);
       }
     }
 
@@ -1082,6 +1081,8 @@ export class WorldZone {
         lastProcessedInput: p.lastProcessedInput,
         selfVelY: Math.round(p.character.velocityY * 1000),
         selfGrounded: p.character.grounded,
+        selfRollDir: p.character.rollDir,
+        selfRollTicks: p.character.rollTicks,
       },
       current,
       baseline,

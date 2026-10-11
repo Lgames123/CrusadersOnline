@@ -22,6 +22,8 @@ export const DEFAULT_BINDINGS: Readonly<Record<string, number>> = {
   Space: INPUT.JUMP,
   ShiftLeft: INPUT.WALK,
   ShiftRight: INPUT.WALK,
+  // C held ducks; pressed with a direction it rolls (input manager latches INPUT.ROLL).
+  KeyC: INPUT.DUCK,
 };
 
 /** Keys that turn or tilt the view (handled by the input manager, not sent as flags). */
@@ -45,7 +47,6 @@ export const ACTION_KEYS = {
   nextSpell: ['KeyT'],
   castSpell: ['KeyR'],
   quickSelect: ['KeyX'],
-  crouch: ['KeyC'],
   map: ['KeyM'],
 } as const;
 
@@ -62,4 +63,4 @@ export function actionFor(code: string): Action | null {
 export const CONTROLS_HELP =
   'WASD move · Mouse look · Wheel camera distance · ←/→ turn · Numpad 9/7/5 look up/down/centre · ' +
   'Click attack (W/A/D + click: overhead / left / right) · Right click block · ' +
-  'Space jump · Shift walk · Tab pick up / open · H health potion · I inventory · Esc release mouse';
+  'Space jump · C duck (C + direction: roll) · Shift walk · Tab pick up / open · H health potion · I inventory · Esc release mouse';

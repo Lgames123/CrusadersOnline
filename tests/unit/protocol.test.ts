@@ -50,7 +50,7 @@ describe('CS_PLAYER_INPUT codec', () => {
     const out = outFrames();
     expect(decodeInput(new DataView(view.buffer, 0, len - 1), out)).toBeNull(); // truncated
     const bad = new Uint8Array(view.buffer.slice(0, len));
-    bad[6 + 5] = 1; // reserved byte must be zero
+    bad[6 + 5] = 0b1000_0000; // unknown flag bit (second flags byte)
     expect(decodeInput(new DataView(bad.buffer), out)).toBeNull();
     const wrongOp = new Uint8Array(view.buffer.slice(0, len));
     wrongOp[0] = CS.PING;
@@ -95,6 +95,8 @@ describe('SC_WORLD_SNAPSHOT codec', () => {
     lastProcessedInput: 900,
     selfVelY: -1234,
     selfGrounded: true,
+    selfRollDir: 3,
+    selfRollTicks: 12,
   });
 
   const state = (id: number, x: number, hp = 100): EntityState => ({ ...createEntityState(id), x, y: 50, z: -x, yaw: 300, hp });

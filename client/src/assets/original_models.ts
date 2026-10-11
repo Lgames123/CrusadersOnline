@@ -32,6 +32,13 @@ interface ClipMap {
   attackOverhead?: string;
   attackLeft?: string;
   attackRight?: string;
+  /** Rolls forward / back / left / right and ducking. */
+  rolls?: string[];
+  crouch?: string;
+  /** Hit reactions: front, left, right, back (ASM_IMPACT_*). */
+  impacts?: string[];
+  /** Death variants (ASM_HIT_POINTS_DEPLETED and its ALT_01..08). */
+  deaths?: string[];
 }
 
 /**
@@ -47,6 +54,10 @@ function withStates(base: ClipMap, states: Record<string, string> | undefined): 
     strafeRight: base.strafeRight ?? st['ASM_SIDE_STEP_R'] ?? base.run,
     walkStrafeLeft: base.walkStrafeLeft ?? st['ASM_SIDE_STEP_L'] ?? base.walk,
     walkStrafeRight: base.walkStrafeRight ?? st['ASM_SIDE_STEP_R'] ?? base.walk,
+    rolls: base.rolls ?? ['ASM_ROLL_F', 'ASM_ROLL_B', 'ASM_ROLL_L', 'ASM_ROLL_R'].map((k) => st[k] ?? base.run),
+    crouch: base.crouch ?? st['ASM_CROUCHING'] ?? base.idle,
+    impacts: base.impacts ?? ['FRONT', 'LEFT', 'RIGHT', 'BACK'].map((k) => st[`ASM_IMPACT_${k}`]).filter((c): c is string => !!c),
+    deaths: base.deaths ?? [st['ASM_HIT_POINTS_DEPLETED'] ?? base.death, ...[1, 2, 3, 4, 5, 6, 7, 8].map((i) => st[`ASM_HIT_POINTS_DEPLETED_ALT_0${i}`]).filter((c): c is string => !!c)],
     attackOverhead: base.attackOverhead ?? st['ASM_SWING_OVERHEAD'] ?? base.attacks[0]!,
     attackLeft: base.attackLeft ?? st['ASM_SWING_LEVEL'] ?? base.attacks[0]!,
     attackRight: base.attackRight ?? st['ASM_SWING_LEVEL'] ?? base.attacks[0]!,
@@ -112,10 +123,16 @@ class OriginalAvatar implements Avatar {
   private clipFor(anim: number): { name: string; loop: boolean } {
     const m = this.map;
     if (anim >= ANIM.ATTACK && anim < ANIM.ATTACK + 3) return { name: m.attacks[anim - ANIM.ATTACK] ?? m.attacks[0]!, loop: false };
+    if (anim >= ANIM.ROLL && anim < ANIM.ROLL + 4) return { name: m.rolls?.[anim - ANIM.ROLL] ?? m.run, loop: false };
+    if (anim === ANIM.CROUCH) return { name: m.crouch ?? m.idle, loop: false };
     if (anim === ANIM.ATTACK_OVERHEAD) return { name: m.attackOverhead ?? m.attacks[0]!, loop: false };
     if (anim === ANIM.ATTACK_LEFT) return { name: m.attackLeft ?? m.attacks[0]!, loop: false };
     if (anim === ANIM.ATTACK_RIGHT) return { name: m.attackRight ?? m.attacks[0]!, loop: false };
-    if (anim === ANIM.DEAD) return { name: m.death, loop: false };
+    if (anim === ANIM.DEAD) {
+      const deaths = m.deaths?.length ? m.deaths : [m.death];
+      return { name: deaths[this.deathCount % deaths.length]!, loop: false };
+    }
+    if (anim === ANIM.HIT) return { name: m.impacts?.[0] ?? m.idle, loop: false };
     // Raise the shield once and hold the final pose.
     if (anim === ANIM.BLOCK) return { name: m.block, loop: false };
     if (anim === ANIM.RUN) return { name: m.run, loop: true };
@@ -130,28 +147,65 @@ class OriginalAvatar implements Avatar {
   }
 
   private swingId = 0;
+  private swingSeconds = 0;
+  /** Picks the death variant; seeded per entity so every client shows the same one. */
+  private deathCount = 0;
+  /** Seconds left of a hit reaction overriding the current state. */
+  private reactLeft = 0;
+
+  set seed(v: number) {
+    this.deathCount = Math.abs(Math.trunc(v));
+  }
+
+  /** Hit reaction from a direction (0 front, 1 left, 2 right, 3 back), over the current state. */
+  react(dir: number): void {
+    if (this.anim === ANIM.DEAD || isAttackAnim(this.anim)) return;
+    const name = this.map.impacts?.[dir] ?? this.map.impacts?.[0];
+    const clip = name ? this.clips.get(name) : undefined;
+    if (!clip) return;
+    this.play(clip, false, 1);
+    this.reactLeft = clip.duration;
+  }
 
   setState(anim: number, swingSeconds: number, swingId = 0): void {
     const restart = isAttackAnim(anim) && swingId !== this.swingId;
     this.swingId = swingId;
+    this.swingSeconds = swingSeconds;
     if (anim === this.anim && !restart) return;
+    if (this.anim === ANIM.DEAD && anim !== ANIM.DEAD) this.deathCount++;
     this.anim = anim;
+    // Swings and deaths cut a hit reaction short; anything else waits for it to finish.
+    if (this.reactLeft > 0 && !isAttackAnim(anim) && anim !== ANIM.DEAD) return;
+    this.reactLeft = 0;
+    this.apply();
+  }
+
+  private apply(): void {
+    const anim = this.anim;
     const { name, loop } = this.clipFor(anim);
     // Models without a direction's clip fall back to their run cycle.
     const clip = this.clips.get(name) ?? (isLocomotionAnim(anim) ? this.clips.get(this.map.run) : undefined);
     if (!clip) return;
+    // Fit attack clips to the authoritative swing duration.
+    this.play(clip, loop, isAttackAnim(anim) && this.swingSeconds > 0 ? clip.duration / this.swingSeconds : 1);
+  }
+
+  private play(clip: THREE.AnimationClip, loop: boolean, timeScale: number): void {
     const action = this.mixer.clipAction(clip);
     action.reset();
     action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
     action.clampWhenFinished = !loop;
-    // Fit attack clips to the authoritative swing duration.
-    action.timeScale = !loop && swingSeconds > 0 && anim !== ANIM.DEAD && anim !== ANIM.BLOCK ? clip.duration / swingSeconds : 1;
+    action.timeScale = timeScale;
     if (this.current && this.current !== action) action.crossFadeFrom(this.current, FADE, false);
     action.play();
     this.current = action;
   }
 
   update(dt: number): void {
+    if (this.reactLeft > 0 && (this.reactLeft -= dt) <= 0) {
+      this.reactLeft = 0;
+      this.apply(); // back to the current state
+    }
     this.mixer.update(dt);
   }
 

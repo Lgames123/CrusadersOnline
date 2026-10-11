@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import {
   DEFAULT_MOVEMENT_STATS,
   INPUT,
+  ROLLS,
   attackKindFor,
   movementFacingOffset,
   PLAYER_RADIUS,
@@ -101,6 +102,38 @@ describe('shared character controller', () => {
     run(mw, c, 0, 0, 10);
     const start = { ...c.position };
     run(mw, c, INPUT.FORWARD | INPUT.ROOTED, 0, 10);
+    expect(Math.hypot(c.position.x - start.x, c.position.z - start.z)).toBeLessThan(1e-3);
+  });
+
+  it('rolls the original distance in the held direction, then stops (C + direction)', () => {
+    const { mw, c } = setup();
+    run(mw, c, 0, 0, 10);
+    const start = { ...c.position };
+    run(mw, c, INPUT.FORWARD | INPUT.ROLL, 0, 1);
+    expect(c.rollDir).toBe(1);
+    run(mw, c, 0, 0, ROLLS[0]!.ticks + 5); // keys released: the roll still runs its length
+    expect(c.rollDir).toBe(0);
+    expect(start.z - c.position.z).toBeCloseTo(10.73 * 0.3048, 1);
+  });
+
+  it('replays a roll exactly from a mid-roll snapshot (reconciliation)', () => {
+    const a = setup();
+    run(a.mw, a.c, 0, 0, 10);
+    run(a.mw, a.c, INPUT.LEFT | INPUT.ROLL, 0, 1);
+    run(a.mw, a.c, INPUT.LEFT, 0, 4);
+    const snap = { pos: { ...a.c.position }, vy: a.c.velocityY, g: a.c.grounded, dir: a.c.rollDir, ticks: a.c.rollTicks };
+    run(a.mw, a.c, INPUT.LEFT, 0, 8);
+    const b = setup();
+    setCharacterState(b.c, snap.pos, snap.vy, snap.g, snap.dir, snap.ticks);
+    run(b.mw, b.c, INPUT.LEFT, 0, 8);
+    expect(b.c.position).toEqual(a.c.position);
+  });
+
+  it('ducks in place while C is held', () => {
+    const { mw, c } = setup();
+    run(mw, c, 0, 0, 10);
+    const start = { ...c.position };
+    run(mw, c, INPUT.FORWARD | INPUT.DUCK, 0, 10);
     expect(Math.hypot(c.position.x - start.x, c.position.z - start.z)).toBeLessThan(1e-3);
   });
 

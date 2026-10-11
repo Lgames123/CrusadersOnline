@@ -42,6 +42,7 @@ export class RemoteEntities {
     const kind: AvatarKind = info.kind === 'mob' ? ((info.archetype ?? 'skeleton_warrior') as AvatarKind) : 'player';
     const avatar = this.originals?.(kind) ?? new ProceduralAvatar(kind);
     avatar.object.visible = false; // until the first sample arrives
+    avatar.seed = id;
     this.scene.add(avatar.object);
     this.byId.set(id, { id, info, avatar, visible: false, hp: info.maxHp, swingId: 0, lastPhase: 0 });
   }
