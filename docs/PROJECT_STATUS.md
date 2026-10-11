@@ -120,6 +120,15 @@
   - Walking into a portal moves the player to the destination zone, at its portal leading back. HP, XP, gold and inventory carry over, and the character's zone is saved, so login resumes there.
   - The client swaps levels in place (SC_ZONE_CHANGE / CS_ZONE_READY), without a page reload.
   - Verified in the browser: Cs1b-Inn → Cs1b. Integration test on two generated levels. 86 tests.
+- [x] Session 15 (2026-10-11): **classic feel — camera, speeds, locomotion animations.**
+  - Direction agreed with the user: the original's feel by default; quality-of-life features as options. Presentation options are per player; gameplay rules are per server.
+  - Original camera recovered from the exe and made the default: `ClassicCamera`, executable-analysis.md §10. The former camera stays as the "Modern" setting.
+  - Settings on the click-to-play screen: camera mode, mouse sensitivity, invert Y.
+  - Original controls moved from ESDF to WASD (keybindings.ts).
+  - Player speeds from Drake's root motion (§11): run 15.6 ft/s, retreat 3.9, sidestep 10.3.
+  - models.ctx ASM state bindings kept by the converter. Retreat and sidestep clips are played.
+  - 87 tests + 2 E2E.
+  - Open: turn and look rates (UNK-011); jump impulse and clip playback rate (UNK-012).
 
 ### Not Yet Done
 - Idle zones are never stopped; portals to acts without a converted mesh (Ws_a) answer "This way is blocked".
