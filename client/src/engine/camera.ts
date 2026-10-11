@@ -7,7 +7,10 @@ const PIVOT_HEIGHT = PLAYER_HEIGHT - 0.15;
 const CLEARANCE = 0.25;
 const SMOOTH = 18;
 
-/** Third-person orbit/chase camera that pulls in when level geometry blocks the view. */
+/**
+ * "Modern" camera (optional): an over-the-shoulder orbit that pulls in when level geometry
+ * blocks the view. The default is the original game's camera (classic_camera.ts).
+ */
 export class ChaseCamera {
   readonly camera: THREE.PerspectiveCamera;
   private distance = DISTANCE;
@@ -22,7 +25,16 @@ export class ChaseCamera {
     this.camera = new THREE.PerspectiveCamera(70, aspect, 0.05, 1500);
   }
 
-  update(target: THREE.Vector3, yaw: number, pitch: number, dt: number): void {
+  resize(aspect: number): void {
+    this.camera.aspect = aspect;
+    this.camera.updateProjectionMatrix();
+  }
+
+  snap(): void {
+    this.distance = DISTANCE;
+  }
+
+  update(target: THREE.Vector3, yaw: number, pitch: number, dt: number, _moving = false): void {
     const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     this.pivot.copy(target).addScaledVector(right, SHOULDER);
     this.pivot.y += PIVOT_HEIGHT;

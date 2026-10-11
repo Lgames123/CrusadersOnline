@@ -72,6 +72,11 @@ Every unknown item is assigned a priority and a concrete validation experiment t
 - **Status:** Open | **Priority:** Low
 - **Description:** `Ws_a.msh` sets header flag 2 and its lightmap block is not a DCL stream (probably stored uncompressed). The modulation factor between texture and lightmap (×2 assumed) is unverified.
 
+### UNK-011: Keyboard Turn Rate, Look Rate and Pitch Limits
+- **Status:** Open | **Priority:** Medium
+- **Description:** The camera rig is recovered (executable-analysis.md §10), but the keyboard rotation speed (arrows), the numpad look speed, the mouse look sensitivity and the pitch limits are not. The client uses provisional values (2.5 rad/s turn, 1.2 rad/s look, pitch −1.2..0.6 rad). Rotation may be animation-driven (`ASM_TURN_L/R`).
+- **Verification Experiment:** Find the player input handler that writes the character's heading and pitch (callers of the orientation component setters used by the camera rig) and read its constants.
+
 ### UNK-009: Creature HP and XP Values
 - **Status:** Resolved (2026-10-09) — per-placement HP, XP, disposition and resists in the `.cap` object records (asset-format-discovery.md §6.2).
 - **Original priority:** Medium

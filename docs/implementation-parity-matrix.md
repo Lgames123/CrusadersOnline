@@ -18,10 +18,10 @@ Every mechanic from the original 1999 game is tracked against our clean-room imp
 
 | Subsystem | Mechanic | Original 1999 Behavior | MMORPG Reconstruction | Status | Notes |
 |---|---|---|---|---|---|
-| **Movement** | WASD / Strafe | Gridless free movement | Server-simulated from client inputs (shared Rapier controller) | `SPECIFIED` | No client positions accepted |
+| **Movement** | ESDF (moved to WASD) / Strafe | Gridless free movement | Server-simulated from client inputs (shared Rapier controller) | `SPECIFIED` | No client positions accepted |
 | **Movement** | Jump Impulse | Upward arc with gravity | Fixed $+6.5 \text{ m/s}$ impulse at 20Hz | `SPECIFIED` | Parity with Drake height |
 | **Movement** | Ledge Clamber | Drake pulls up on ledges | Deferred to Phase 8 | `SPECIFIED` | Complex animation blend |
-| **Camera** | 3rd-Person Chase | Orbital chase with terrain avoidance | Three.js orbital camera with raycast | `SPECIFIED` | Smooth mouse look |
+| **Camera** | 3rd-Person Chase | Rig 4 ft + 2.2 ft up, 7 ft back, aim 8 ft ahead, distance-proportional smoothing, 79.6° horizontal FOV (executable-analysis.md §10) | `ClassicCamera` (default) + optional `ChaseCamera` "Modern" (player setting) | `IMPLEMENTED` | Turn/look rates provisional (UNK-011) |
 | **Combat** | Sword Slash 1 | Right-to-left sweep (150ms active) | Server-authoritative capsule sweep | `SPECIFIED` | Standardized hitboxes |
 | **Combat** | 3-Hit Combo | Timing window chains 3 attacks | Server buffers attack sequence index | `SPECIFIED` | Multipliers 1.0, 1.25, 1.6 |
 | **Combat** | Shield Block | Blocks forward arc, drains stamina | Reduces incoming damage by 70% | `SPECIFIED` | Shield durability added |

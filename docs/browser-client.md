@@ -15,7 +15,8 @@ client/src/
 ├── main.ts                    # Bootstrap: Canvas mount & state machine init
 ├── engine/
 │   ├── scene.ts               # Three.js Scene, Frustum, and Light setup
-│   ├── camera.ts              # 3rd-person chase camera with orbital mouse look
+│   ├── classic_camera.ts      # the original's camera rig (default)
+│   ├── camera.ts              # optional "Modern" over-the-shoulder camera
 │   └── renderer.ts            # WebGL2 renderer lifecycle and resize handler
 ├── entities/
 │   ├── local_player.ts        # Client player entity (Immediate input response)

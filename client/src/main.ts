@@ -16,6 +16,10 @@ import {
 } from '@crusaders/shared';
 import { createRenderContext } from './engine/renderer.ts';
 import { ChaseCamera } from './engine/camera.ts';
+import { ClassicCamera } from './engine/classic_camera.ts';
+import { SettingsStore } from './settings.ts';
+import { SettingsPanel } from './ui/settings_panel.ts';
+import { CONTROLS_HELP } from './input/keybindings.ts';
 import { buildArenaMeshes } from './entities/arena.ts';
 import { ProceduralAvatar } from './entities/avatar.ts';
 import { LocalPlayer } from './entities/local_player.ts';
@@ -87,7 +91,10 @@ async function main(): Promise<void> {
   const levelParam = new URLSearchParams(location.search).get('level');
   if (auth.kind === 'offline' && !(await showArena(levelParam ? `${LEVEL_PREFIX}${levelParam}` : 'synthetic-arena'))) return;
   let player: LocalPlayer | null = null;
-  let chase!: ChaseCamera;
+  let classicCam!: ClassicCamera;
+  let modernCam!: ChaseCamera;
+  /** The active camera (player setting: classic by default). */
+  let chase!: ClassicCamera | ChaseCamera;
   const headPos = new THREE.Vector3();
   const prompt = document.getElementById('prompt')!;
   let lastStats: { level: number; dead: boolean } | null = null;
@@ -173,7 +180,8 @@ async function main(): Promise<void> {
             errorBox.textContent = '';
             if (!live || !player) return; // first entry: the player is created below
             player.character = live.character!;
-            chase.mw = live.mw;
+            classicCam.mw = modernCam.mw = live.mw;
+            chase.snap();
             for (const [id, state] of live.objectStates) levelView?.setObjectState(id, state);
           },
           close: (code, reason) => {
@@ -204,8 +212,22 @@ async function main(): Promise<void> {
   const local = player;
   scene.add(local.object);
 
-  chase = new ChaseCamera(mw, container.clientWidth / container.clientHeight);
+  const settings = new SettingsStore();
+  classicCam = new ClassicCamera(mw, container.clientWidth / container.clientHeight);
+  modernCam = new ChaseCamera(mw, container.clientWidth / container.clientHeight);
   const input = new InputManager(renderer.domElement);
+  const applySettings = () => {
+    const s = settings.current;
+    const next = s.camera === 'modern' ? modernCam : classicCam;
+    if (next !== chase) next.snap();
+    chase = next;
+    input.sensitivity = s.mouseSensitivity;
+    input.invertY = s.invertMouseY;
+  };
+  applySettings();
+  settings.onChange(applySettings);
+  new SettingsPanel(document.getElementById('settings')!, settings);
+  document.getElementById('controls-help')!.textContent = CONTROLS_HELP;
   input.onAttack = () => {
     if (local.swing(input.yaw)) {
       session?.attack();
@@ -233,11 +255,17 @@ async function main(): Promise<void> {
     }
     return best;
   };
-  window.addEventListener('keydown', (e) => {
-    if (e.code !== 'KeyE' || !input.locked) return;
-    const target = nearestInteractable();
-    if (target) session?.interact(target.id);
-  });
+  input.onAction = (action) => {
+    if (action === 'interact') {
+      const target = nearestInteractable();
+      if (target) session?.interact(target.id);
+    } else if (action === 'healthPotion') {
+      // H: drink the weakest healing potion carried (the original's quick potion key).
+      const potions = (session?.inventory?.items ?? []).filter((i) => i.type === 'potion');
+      const potion = potions.sort((a, b) => (a.heal ?? 0) - (b.heal ?? 0))[0];
+      if (potion) session?.useItem(potion.slot);
+    }
+  };
   overlay.classList.remove('hidden');
   const logoutLink = document.getElementById('btn-logout')!;
   logoutLink.hidden = auth.kind !== 'account';
@@ -273,13 +301,13 @@ async function main(): Promise<void> {
 
   window.addEventListener('resize', () => {
     renderer.setSize(container.clientWidth, container.clientHeight);
-    chase.camera.aspect = container.clientWidth / container.clientHeight;
-    chase.camera.updateProjectionMatrix();
+    classicCam.resize(container.clientWidth / container.clientHeight);
+    modernCam.resize(container.clientWidth / container.clientHeight);
   });
 
   if (import.meta.env.DEV) {
     // Debug/E2E hook: lets tests drive input without pointer lock.
-    (window as unknown as { __co: unknown }).__co = { input, player: local, mw, session, remotes, inventory: inventoryPanel, scene, camera: chase.camera, renderer, level: levelView, render: () => renderer.render(scene, chase.camera) };
+    (window as unknown as { __co: unknown }).__co = { input, player: local, mw, session, remotes, inventory: inventoryPanel, scene, get camera() { return chase.camera; }, cameras: { classic: classicCam, modern: modernCam }, settings, renderer, level: levelView, render: () => renderer.render(scene, chase.camera) };
   }
 
   // Fixed-step simulation (same 20 Hz step as the server), interpolated rendering.
@@ -303,8 +331,10 @@ async function main(): Promise<void> {
     const dt = frameMs / 1000;
     local.render(acc / TICK_MS, dt);
     if (session) remotes.update(session, dt);
+    input.updateView(dt);
+    const movingNow = Math.hypot(local.object.position.x - target.x, local.object.position.z - target.z) > 1e-4;
     target.copy(local.object.position);
-    chase.update(target, input.yaw, input.pitch, dt);
+    chase.update(target, input.yaw, input.pitch, dt, movingNow);
     levelView?.update(chase.camera, dt);
     if (sounds) {
       sounds.setListener(chase.camera);
@@ -318,7 +348,7 @@ async function main(): Promise<void> {
     if (levelView && session) {
       const t = nearestInteractable();
       prompt.hidden = !t;
-      if (t) prompt.textContent = `E — ${t.label}`;
+      if (t) prompt.textContent = `Tab — ${t.label}`;
     }
     renderer.render(scene, chase.camera);
     combatUi.update(dt, chase.camera, remotes, container.clientWidth, container.clientHeight);

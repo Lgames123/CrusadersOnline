@@ -206,3 +206,38 @@ Examples (facts only):
 
 ### 9.4 Shield block result
 `Stats_TryBlockWithShield` (§8.5) returns a boolean; on success it calls the shield's Use behaviour (item behaviour vtable slot 1). No partial-damage path was found: the slice treats a block as stopping the whole hit (still an assumption, see UNK-008).
+
+
+---
+
+## 10. Third-Person Camera and Controls (2026-10-11)
+
+The chase camera class (vtable `0x004DF124`; most methods are not Ghidra functions and were read with Capstone) keeps its parameters in feet. Behaviour only:
+
+### 10.1 Rig geometry
+| Field | Value | Meaning |
+|---|---|---|
+| `+0x3BC/+0x3C0/+0x3C4` | 0, **4.0**, 0 | Rig anchor offset from the character position (feet) |
+| `+0x3CC` (`0x004ECC58`) | **2.2** | Height of eye and aim point above the anchor, in the rotated frame (debug key "Cam Height", step 0.1 at `0x004DF89C`) |
+| `0x004ECC5C` | **−7.0** | Eye distance along the view axis (debug key "Cam Distance"); −6 and no pitch when the character's state flag `0x20000` is set (state not identified) |
+| `+0x3D0` | **8.0** | Aim point distance ahead of the anchor |
+
+- The rig rotates with the character's heading and look pitch (Euler builder `0x0042D580`, degrees: yaw about Y, then pitch about X, then roll; plus a pitch offset argument). The eye is anchor + R·(0, 2.2, −7), the aim point anchor + R·(0, 2.2, 8): at pitch 0 the camera looks level from head height.
+- Line of sight is tested from 2 ft above the character position. When the eye is hidden, its distance shrinks in 1 ft steps until the line is clear; the aim distance shrinks the same way from 8.
+
+### 10.2 Per-frame smoothing (`0x00430C30`)
+Frame time `ms` comes from `0x004FDFA4` (integer milliseconds). With `gap` = distance from the current point to its target (feet):
+- eye: `t = min(1, gap × ms × k × 0.002)`, `k = (2 − gap) × 5 + 1` when the character is not moving horizontally and `gap < 2`, else 1;
+- aim point: `t = min(1, gap × ms × k × 0.0008)`, `k = (5 − gap) × 2 + 1` under the same conditions with `gap < 5`;
+- both snap on the first frame (flag byte `0x004ECC60`); a smoothed eye that falls outside the level's cells jumps to its target.
+The camera orientation is then derived from eye → aim point (atan2 for yaw and pitch).
+
+### 10.3 Projection
+View window ±100 × ±75 at distance 120 (`+0x244..+0x250`, `+0x220`): a fixed **horizontal** field of view of 2·atan(100/120) ≈ 79.6°, the vertical extent following the viewport aspect (`0x0042E5D0`). Near 0.5 ft, far 1600 ft (`+0x16C/+0x170`, far clamped to 15–2000).
+
+### 10.4 HUD screen size
+Numpad +/− change a screen-size step: with the HUD shown the 3D view uses the top three quarters of the screen, and each step insets it by 16 × 9 pixels (`0x00468960`).
+
+### 10.5 Controls (game Readme)
+ESDF movement (E forward, D back, S/F strafe), arrows / numpad 4-6 rotate, numpad 9/7/5 look up / down / centre, mouse free look, Space jump (with a direction: directional jumps and flips), C crouch (with a direction: rolls), Shift + direction walk carefully. LMB attack (combos by repeated taps; C/Space/E/S/F + LMB select crouch, jump, overhand, left and right attacks), RMB block, Space + RMB shield rush, Tab interact, R cast, Z use item, W/T/Q cycle weapon/spell/item, A quick select, I inventory, M map, H health potion.
+CrusadersOnline moves the scheme to WASD (`client/src/input/keybindings.ts`); keys displaced by the shift go to the nearest free key (next weapon → E, quick select → X).
