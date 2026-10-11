@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ANIM, INPUT, TICK_DT, dequantizeAngle, locomotionAnim, swingForWeaponSpeed, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
+import { ANIM, INPUT, TICK_DT, attackAnim, dequantizeAngle, locomotionAnim, movementFacingOffset, type AttackKind, swingForWeaponSpeed, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
 import type { Avatar } from './avatar.ts';
 
 const TURN_RATE = 12; // rad/s, visual only
@@ -29,6 +29,8 @@ export class LocalPlayer {
   private moveAnim: number = ANIM.IDLE;
   private swingLeft = 0;
   private combo = 0;
+  private kind: AttackKind = 'normal';
+  private swingCount = 0;
   private sinceSwing = 99;
   private blocking = false;
   /** Swing duration of the equipped weapon (server INVENTORY_UPDATE weaponSpeed). */
@@ -50,8 +52,9 @@ export class LocalPlayer {
     const p = this.character.position;
     this.prev.x = p.x; this.prev.y = p.y; this.prev.z = p.z;
     this.step(input);
-    const moving = !this.dead && (input.flags & MOVE_MASK) !== 0;
-    if (moving) this.targetFacing = dequantizeAngle(input.yaw);
+    const moving = !this.dead && (input.flags & MOVE_MASK) !== 0 && !(input.flags & INPUT.ROOTED);
+    // On diagonals the body turns into the direction of travel (as the server replicates it).
+    if (moving) this.targetFacing = dequantizeAngle(input.yaw) + movementFacingOffset(input.flags);
     this.blocking = !this.dead && (input.flags & INPUT.BLOCK) !== 0;
     if (this.blocking) this.targetFacing = dequantizeAngle(input.yaw);
     this.moveAnim = !this.character.grounded ? ANIM.AIRBORNE : moving ? locomotionAnim(input.flags) : ANIM.IDLE;
@@ -62,12 +65,20 @@ export class LocalPlayer {
   }
 
   /** Local swing feedback; mirrors the server's combo rule closely enough for presentation. */
-  swing(cameraYaw: number): boolean {
+  swing(cameraYaw: number, kind: AttackKind = 'normal'): boolean {
     if (this.dead || this.swingLeft > 0) return false;
-    this.combo = this.sinceSwing < 0.3 && this.combo < 3 ? this.combo + 1 : 1;
+    // Directional attacks are single hits; plain clicks chain the combo.
+    this.combo = kind === 'normal' && this.kind === 'normal' && this.sinceSwing < 0.3 && this.combo < 3 ? this.combo + 1 : 1;
+    this.kind = kind;
+    this.swingCount++;
     this.swingLeft = this.swingTime;
     this.targetFacing = cameraYaw;
     return true;
+  }
+
+  /** Own swing playing: the feet stay planted (sent as INPUT.ROOTED). */
+  get rooted(): boolean {
+    return this.swingLeft > 0;
   }
 
   /** The authoritative state moved the prediction by (dx, dy, dz). */
@@ -97,8 +108,8 @@ export class LocalPlayer {
     } else {
       this.sinceSwing += dt;
     }
-    const anim = this.dead ? ANIM.DEAD : this.swingLeft > 0 ? ANIM.ATTACK + this.combo - 1 : this.blocking ? ANIM.BLOCK : this.moveAnim;
-    this.avatar.setState(anim, this.swingTime);
+    const anim = this.dead ? ANIM.DEAD : this.swingLeft > 0 ? attackAnim(this.kind, this.combo) : this.blocking ? ANIM.BLOCK : this.moveAnim;
+    this.avatar.setState(anim, this.swingTime, this.swingCount);
     this.avatar.update(dt);
   }
 }

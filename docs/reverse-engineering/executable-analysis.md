@@ -242,6 +242,9 @@ Numpad +/− change a screen-size step: with the HUD shown the 3D view uses the 
 ESDF movement (E forward, D back, S/F strafe), arrows / numpad 4-6 rotate, numpad 9/7/5 look up / down / centre, mouse free look, Space jump (with a direction: directional jumps and flips), C crouch (with a direction: rolls), Shift + direction walk carefully. LMB attack (combos by repeated taps; C/Space/E/S/F + LMB select crouch, jump, overhand, left and right attacks), RMB block, Space + RMB shield rush, Tab interact, R cast, Z use item, W/T/Q cycle weapon/spell/item, A quick select, I inventory, M map, H health potion.
 CrusadersOnline moves the scheme to WASD (`client/src/input/keybindings.ts`); keys displaced by the shift go to the nearest free key (next weapon → E, quick select → X).
 
+Implemented: forward + click plays `ASM_SWING_OVERHEAD`, left / right + click Drake's side swings (`PN09`/`PN10`), plain clicks the `models.ctx` combo sequence (`PN02` → `PN25` → `PN15`); directional swings are single hits outside the combo chain. The attack-mode scale `0x0044CDD0` (1.0 / 1.25) is chosen per difficulty, not per attack, so the swing kind changes only the animation. The feet stay planted during the player's swing, and on diagonals the body turns 45° into the motion and keeps the run (or retreat) cycle and speed instead of sliding sideways. Both rules are CrusadersOnline's reading of the original's look (user playtest); they are not recovered from the executable.
+The mouse wheel blends the camera from the classic rig (closest) to the optional modern one (farthest).
+
 ---
 
 ## 11. Player Locomotion Speeds from Root Motion (2026-10-11)

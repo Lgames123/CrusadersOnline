@@ -1,5 +1,6 @@
 import { Worker } from 'node:worker_threads';
 import type { JoinOptions, PersistReason, PersistRecord, TransferState } from '../simulation/world_zone.ts';
+import type { AttackKind } from '@crusaders/shared';
 import type { FromZone, ToZone, ZoneMetrics, ZoneWorkerData } from './messages.ts';
 
 export interface ZoneHostEvents {
@@ -66,8 +67,8 @@ export class ZoneHost {
     this.post({ t: 'join', connId, opts });
   }
 
-  attack(connId: number): void {
-    this.post({ t: 'attack', connId });
+  attack(connId: number, kind: AttackKind = 'normal'): void {
+    this.post({ t: 'attack', connId, kind });
   }
 
   equip(connId: number, slot: number, equip: boolean): void {

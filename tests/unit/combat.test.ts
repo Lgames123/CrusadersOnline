@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { WorldZone, type PersistRecord } from '@crusaders/server/simulation/world_zone';
 import {
+  ANIM,
   DEFAULT_MOVEMENT_STATS,
   INPUT,
   TICK_RATE,
@@ -167,6 +168,21 @@ describe('authoritative melee', () => {
     const up = s.findIndex((x) => x.level === 2);
     expect(s[up]).toMatchObject({ level: 2, maxHp: 80, xp: 510 }); // 50 + 0.6 x 25 x 2
     expect(s[up]!.hp).toBe(Math.min(80, s[up - 1]!.hp + 15));
+  });
+});
+
+describe('directional attacks (original controls)', () => {
+  it('replicates the side swing and keeps it out of the combo chain', () => {
+    const t = setup();
+    t.run(APPROACH, INPUT.FORWARD, 0);
+    t.run(30);
+    t.zone.attack(1, 'left');
+    t.run(1);
+    expect(t.me().anim).toBe(ANIM.ATTACK_LEFT);
+    t.run(30);
+    t.zone.attack(1); // a plain click right after starts the combo at hit 1
+    t.run(1);
+    expect(t.me().anim).toBe(ANIM.ATTACK);
   });
 });
 

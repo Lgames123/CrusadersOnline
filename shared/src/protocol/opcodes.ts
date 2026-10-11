@@ -41,6 +41,11 @@ export const INPUT = {
   WALK: 1 << 5,
   /** Shield raised (held). Does not affect movement, so prediction is unchanged. */
   BLOCK: 1 << 6,
+  /**
+   * The player's own swing is playing: no ground movement this step (the original plants the
+   * feet while attacking). Set by the client from its swing; it only ever restricts the sender.
+   */
+  ROOTED: 1 << 7,
 } as const;
 
-export const INPUT_VALID_MASK = 0b0111_1111;
+export const INPUT_VALID_MASK = 0b1111_1111;

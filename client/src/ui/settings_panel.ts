@@ -1,16 +1,13 @@
 import type { SettingsStore } from '../settings.ts';
 
-/** Settings section of the "click to play" screen (camera mode, mouse). */
+/** Settings section of the "click to play" screen (camera distance, mouse). */
 export class SettingsPanel {
   constructor(root: HTMLElement, store: SettingsStore) {
     const s = store.current;
     root.innerHTML = `
       <div class="settings">
-        <label>Camera
-          <select id="set-camera">
-            <option value="classic"${s.camera === 'classic' ? ' selected' : ''}>Classic (original)</option>
-            <option value="modern"${s.camera === 'modern' ? ' selected' : ''}>Modern (over the shoulder)</option>
-          </select>
+        <label>Camera <span class="hint">Classic ↔ Modern (mouse wheel)</span>
+          <input id="set-zoom" type="range" min="0" max="1" step="0.05" value="${s.cameraZoom}" />
         </label>
         <label>Mouse sensitivity
           <input id="set-sens" type="range" min="0.25" max="4" step="0.05" value="${s.mouseSensitivity}" />
@@ -19,10 +16,14 @@ export class SettingsPanel {
       </div>`;
     // Clicks here must not start the game (the overlay requests pointer lock on click).
     root.addEventListener('click', (e) => e.stopPropagation());
-    const camera = root.querySelector<HTMLSelectElement>('#set-camera')!;
+    const zoom = root.querySelector<HTMLInputElement>('#set-zoom')!;
     const sens = root.querySelector<HTMLInputElement>('#set-sens')!;
     const invert = root.querySelector<HTMLInputElement>('#set-invert')!;
-    camera.addEventListener('change', () => store.update({ camera: camera.value === 'modern' ? 'modern' : 'classic' }));
+    zoom.addEventListener('input', () => store.update({ cameraZoom: Number(zoom.value) }));
+    // Keep the slider in step with mouse-wheel zooming during play.
+    store.onChange((v) => {
+      if (Number(zoom.value) !== v.cameraZoom) zoom.value = String(v.cameraZoom);
+    });
     sens.addEventListener('input', () => store.update({ mouseSensitivity: Number(sens.value) }));
     invert.addEventListener('change', () => store.update({ invertMouseY: invert.checked }));
   }

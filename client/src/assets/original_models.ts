@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { ANIM, isLocomotionAnim } from '@crusaders/shared';
+import { ANIM, isAttackAnim, isLocomotionAnim } from '@crusaders/shared';
 import type { Avatar, AvatarKind } from '../entities/avatar.ts';
 
 /**
@@ -28,6 +28,10 @@ interface ClipMap {
   strafeRight?: string;
   walkStrafeLeft?: string;
   walkStrafeRight?: string;
+  /** Forward / left / right + click attacks. */
+  attackOverhead?: string;
+  attackLeft?: string;
+  attackRight?: string;
 }
 
 /**
@@ -43,6 +47,9 @@ function withStates(base: ClipMap, states: Record<string, string> | undefined): 
     strafeRight: base.strafeRight ?? st['ASM_SIDE_STEP_R'] ?? base.run,
     walkStrafeLeft: base.walkStrafeLeft ?? st['ASM_SIDE_STEP_L'] ?? base.walk,
     walkStrafeRight: base.walkStrafeRight ?? st['ASM_SIDE_STEP_R'] ?? base.walk,
+    attackOverhead: base.attackOverhead ?? st['ASM_SWING_OVERHEAD'] ?? base.attacks[0]!,
+    attackLeft: base.attackLeft ?? st['ASM_SWING_LEVEL'] ?? base.attacks[0]!,
+    attackRight: base.attackRight ?? st['ASM_SWING_LEVEL'] ?? base.attacks[0]!,
   };
 }
 
@@ -53,7 +60,14 @@ const MODELS: Record<string, { file: string; texture?: string; clips: ClipMap }>
   self: {
     file: 'drake',
     // Drake's ASM_SIDE_STEP states use the running sidesteps; Shift uses the careful ones.
-    clips: { idle: 'pa16_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pc03_ru_fw_jmp', attacks: ['pn09_1_sw_l', 'pn10_1_sw_r', 'pn03_1_sw_ov'], death: 'pi03_hp', block: 'pt01_rdy_shld', walkStrafeLeft: 'pb02_sdstp_l', walkStrafeRight: 'pb03_sdstp_r' },
+    // Plain clicks: Drake's combo sequence in models.ctx (COMBO 1-3). Forward + click: the
+    // overhead swing; left / right + click: the side swings (game Readme).
+    clips: {
+      idle: 'pa16_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pc03_ru_fw_jmp', death: 'pi03_hp', block: 'pt01_rdy_shld',
+      attacks: ['pn02_1_sw_lv', 'pn25_combo_a', 'pn15_1_chn_atk_a'],
+      attackOverhead: 'pn03_1_sw_ov', attackLeft: 'pn09_1_sw_l', attackRight: 'pn10_1_sw_r',
+      walkStrafeLeft: 'pb02_sdstp_l', walkStrafeRight: 'pb03_sdstp_r',
+    },
   },
   skeleton_ghost: { file: 'skeletonwarriorcollision', texture: 'walking_dead_ghost', clips: STANDARD_CLIPS },
   shadow: { file: 'skeletonwarriorcollision', texture: 'shadow', clips: STANDARD_CLIPS },
@@ -98,6 +112,9 @@ class OriginalAvatar implements Avatar {
   private clipFor(anim: number): { name: string; loop: boolean } {
     const m = this.map;
     if (anim >= ANIM.ATTACK && anim < ANIM.ATTACK + 3) return { name: m.attacks[anim - ANIM.ATTACK] ?? m.attacks[0]!, loop: false };
+    if (anim === ANIM.ATTACK_OVERHEAD) return { name: m.attackOverhead ?? m.attacks[0]!, loop: false };
+    if (anim === ANIM.ATTACK_LEFT) return { name: m.attackLeft ?? m.attacks[0]!, loop: false };
+    if (anim === ANIM.ATTACK_RIGHT) return { name: m.attackRight ?? m.attacks[0]!, loop: false };
     if (anim === ANIM.DEAD) return { name: m.death, loop: false };
     // Raise the shield once and hold the final pose.
     if (anim === ANIM.BLOCK) return { name: m.block, loop: false };
@@ -112,8 +129,12 @@ class OriginalAvatar implements Avatar {
     return { name: m.idle, loop: true };
   }
 
-  setState(anim: number, swingSeconds: number): void {
-    if (anim === this.anim) return;
+  private swingId = 0;
+
+  setState(anim: number, swingSeconds: number, swingId = 0): void {
+    const restart = isAttackAnim(anim) && swingId !== this.swingId;
+    this.swingId = swingId;
+    if (anim === this.anim && !restart) return;
     this.anim = anim;
     const { name, loop } = this.clipFor(anim);
     // Models without a direction's clip fall back to their run cycle.

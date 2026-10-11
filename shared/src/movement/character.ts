@@ -69,10 +69,13 @@ export function stepCharacter(
   const f = input.flags;
   let fwd = 0;
   let right = 0;
-  if (f & INPUT.FORWARD) fwd += 1;
-  if (f & INPUT.BACK) fwd -= 1;
-  if (f & INPUT.RIGHT) right += 1;
-  if (f & INPUT.LEFT) right -= 1;
+  // Attacking plants the feet (INPUT.ROOTED); gravity still applies.
+  if (!(f & INPUT.ROOTED)) {
+    if (f & INPUT.FORWARD) fwd += 1;
+    if (f & INPUT.BACK) fwd -= 1;
+    if (f & INPUT.RIGHT) right += 1;
+    if (f & INPUT.LEFT) right -= 1;
+  }
 
   let vx = 0;
   let vz = 0;
@@ -81,11 +84,14 @@ export function stepCharacter(
     const s = Math.sin(yaw);
     const co = Math.cos(yaw);
     // forward = (-sin, -cos), right = (cos, -sin)
-    // Unit input direction, each axis scaled by that direction's speed (diagonals blend).
+    // Straight: that direction's speed. Diagonal: the body turns into the motion
+    // (movementFacingOffset) and keeps the forward or backward cycle's speed.
     const len = Math.hypot(fwd, right);
     const walk = (f & INPUT.WALK) !== 0;
-    const along = (fwd / len) * (fwd > 0 ? (walk ? stats.walkSpeed : stats.runSpeed) : (walk ? stats.walkBackSpeed : stats.backSpeed));
-    const side = (right / len) * (walk ? stats.walkStrafeSpeed : stats.strafeSpeed);
+    const lengthwise = fwd > 0 ? (walk ? stats.walkSpeed : stats.runSpeed) : (walk ? stats.walkBackSpeed : stats.backSpeed);
+    const sideways = fwd !== 0 ? lengthwise : walk ? stats.walkStrafeSpeed : stats.strafeSpeed;
+    const along = (fwd / len) * lengthwise;
+    const side = (right / len) * sideways;
     vx = -s * along + co * side;
     vz = -co * along - s * side;
   }

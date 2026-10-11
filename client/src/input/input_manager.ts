@@ -112,6 +112,11 @@ export class InputManager {
     if (this.viewHeld(VIEW_KEYS.lookCentre)) this.pitch = 0;
   }
 
+  /** Movement flags currently held (attack selection reads them at click time). */
+  get heldFlags(): number {
+    return this.held;
+  }
+
   /** Fills `out` with the input for the next fixed step. */
   sample(out: InputFrame, clientTick: number): void {
     out.clientTick = clientTick;

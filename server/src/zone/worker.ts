@@ -76,7 +76,7 @@ port.on('message', (msg: ToZone) => {
       zone.receiveInput(msg.connId, new DataView(msg.data));
       break;
     case 'attack':
-      zone.attack(msg.connId);
+      zone.attack(msg.connId, msg.kind);
       break;
     case 'equip':
       zone.equip(msg.connId, msg.slot, msg.equip);

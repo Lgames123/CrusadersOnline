@@ -3,24 +3,24 @@
  * and controlled on this machine; gameplay rules are the server's. Defaults are the
  * original game's ("classic"); everything else is an opt-in quality-of-life option.
  */
-export type CameraMode = 'classic' | 'modern';
-
 export interface Settings {
-  camera: CameraMode;
+  /** Camera distance: 0 = the original's camera (closest), 1 = the modern one (farthest). */
+  cameraZoom: number;
   /** Mouse sensitivity multiplier (1 = default). */
   mouseSensitivity: number;
   invertMouseY: boolean;
 }
 
-export const CLASSIC_SETTINGS: Readonly<Settings> = { camera: 'classic', mouseSensitivity: 1, invertMouseY: false };
+export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false };
 
 const KEY = 'crusaders.settings';
 
 function sanitize(raw: unknown): Settings {
-  const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<keyof Settings, unknown>>;
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<keyof Settings | 'camera', unknown>>;
   const sens = typeof r.mouseSensitivity === 'number' && Number.isFinite(r.mouseSensitivity) ? r.mouseSensitivity : 1;
   return {
-    camera: r.camera === 'modern' ? 'modern' : 'classic',
+    // Older settings stored a camera mode instead of a distance.
+    cameraZoom: typeof r.cameraZoom === 'number' && Number.isFinite(r.cameraZoom) ? Math.min(1, Math.max(0, r.cameraZoom)) : r.camera === 'modern' ? 1 : 0,
     mouseSensitivity: Math.min(4, Math.max(0.25, sens)),
     invertMouseY: r.invertMouseY === true,
   };

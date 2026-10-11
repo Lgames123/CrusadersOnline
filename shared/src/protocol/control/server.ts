@@ -138,7 +138,42 @@ export const ANIM = {
   /** Careful sidesteps (Shift). */
   WALK_STRAFE_LEFT: 13,
   WALK_STRAFE_RIGHT: 14,
+  /** Directional attacks (forward / left / right + click); plain clicks use ATTACK + combo. */
+  ATTACK_OVERHEAD: 15,
+  ATTACK_LEFT: 16,
+  ATTACK_RIGHT: 17,
 } as const;
+
+export type AttackKind = 'normal' | 'overhead' | 'left' | 'right';
+
+/** The original's attack selection: forward + click overhead, left/right + click side swings. */
+export function attackKindFor(flags: number): AttackKind {
+  if (flags & INPUT.FORWARD) return 'overhead';
+  if (flags & INPUT.LEFT && !(flags & INPUT.RIGHT)) return 'left';
+  if (flags & INPUT.RIGHT && !(flags & INPUT.LEFT)) return 'right';
+  return 'normal';
+}
+
+/** Animation code of a swing. */
+export function attackAnim(kind: AttackKind, combo: number): number {
+  return kind === 'overhead' ? ANIM.ATTACK_OVERHEAD : kind === 'left' ? ANIM.ATTACK_LEFT : kind === 'right' ? ANIM.ATTACK_RIGHT : ANIM.ATTACK + combo - 1;
+}
+
+export function isAttackAnim(anim: number): boolean {
+  return (anim >= ANIM.ATTACK && anim < ANIM.ATTACK + 3) || (anim >= ANIM.ATTACK_OVERHEAD && anim <= ANIM.ATTACK_RIGHT);
+}
+
+/**
+ * Body yaw offset from the view yaw while moving: on diagonals the character turns into the
+ * direction of travel (running) or away from it (retreating), so the run / retreat cycle
+ * matches the motion instead of sliding sideways.
+ */
+export function movementFacingOffset(flags: number): number {
+  const fwd = (flags & INPUT.FORWARD ? 1 : 0) - (flags & INPUT.BACK ? 1 : 0);
+  const right = (flags & INPUT.RIGHT ? 1 : 0) - (flags & INPUT.LEFT ? 1 : 0);
+  if (fwd === 0 || right === 0) return 0;
+  return -Math.atan2(fwd * right, 1);
+}
 
 /** Ground locomotion animation for held movement flags (IDLE when none). */
 export function locomotionAnim(flags: number): number {

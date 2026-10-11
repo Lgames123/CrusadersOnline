@@ -22,6 +22,9 @@ import {
   DEFAULT_MOVEMENT_STATS,
   uniformMovementStats,
   locomotionAnim,
+  movementFacingOffset,
+  attackAnim,
+  type AttackKind,
   INPUT,
   INTEREST_RADIUS,
   MAX_INPUT_FRAMES,
@@ -188,6 +191,8 @@ function validPosition(p: JoinOptions['position']): p is { x: number; y: number;
 
 interface Swing {
   combo: number;
+  /** Directional attacks are single hits outside the combo chain. */
+  kind: AttackKind;
   start: number;
   timing: SwingTiming;
   hit: Set<number>;
@@ -223,6 +228,9 @@ interface Player extends ActorBase {
   gold: number;
   level: number;
   queuedAttack: boolean;
+  queuedKind: AttackKind;
+  /** Body yaw offset from the view yaw (diagonal movement), radians; replicated in the yaw. */
+  facingOffset: number;
   statsDirty: boolean;
   attributes: Attributes;
   resist: DamageVector;
@@ -395,6 +403,8 @@ export class WorldZone {
       gold: Math.max(0, Math.floor(opts.gold ?? 0)),
       level,
       queuedAttack: false,
+      queuedKind: 'normal',
+      facingOffset: 0,
       statsDirty: true,
       attributes: rules.attributes,
       resist: rules.resist,
@@ -676,22 +686,25 @@ export class WorldZone {
    * client: a request during recovery is buffered, requests during startup/active are ignored,
    * so attacking faster than the swing lifecycle has no effect.
    */
-  attack(connId: number): void {
+  attack(connId: number, kind: AttackKind = 'normal'): void {
     const p = this.players.get(connId);
     if (!p || !alive(p) || p.hitUntil > this.tick) return;
     p.blocking = false; // swinging lowers the shield until the next input re-raises it
     if (p.swing) {
       const t = p.swing.timing;
-      if (this.tick - p.swing.start >= t.startup + t.active) p.queuedAttack = true;
+      if (this.tick - p.swing.start >= t.startup + t.active) {
+        p.queuedAttack = true;
+        p.queuedKind = kind;
+      }
       return;
     }
-    this.startPlayerSwing(p);
+    this.startPlayerSwing(p, kind);
   }
 
-  private startPlayerSwing(p: Player): void {
-    const chained = this.tick - p.lastSwingEnd <= COMBO_WINDOW_TICKS && p.lastCombo < COMBO_MULTIPLIERS.length;
+  private startPlayerSwing(p: Player, kind: AttackKind): void {
+    const chained = kind === 'normal' && this.tick - p.lastSwingEnd <= COMBO_WINDOW_TICKS && p.lastCombo < COMBO_MULTIPLIERS.length;
     const combo = chained ? p.lastCombo + 1 : 1;
-    p.swing = { combo, start: this.tick, timing: p.swingTiming, hit: new Set() };
+    p.swing = { combo, kind, start: this.tick, timing: p.swingTiming, hit: new Set() };
     p.queuedAttack = false;
     this.mobsReactToSwing(p);
   }
@@ -721,14 +734,15 @@ export class WorldZone {
     //    consume inputs without acting on them.
     for (const p of this.players.values()) {
       if (p.queue.shift(this.frame)) {
-        // Movement stays free during swings (client prediction cannot know the exact server
-        // tick a swing starts on); the dead do not act. The client mirrors the dead rule.
+        // The client roots itself during its own swing (INPUT.ROOTED, same tick on both
+        // sides); the dead do not act. The client mirrors the dead rule.
         if (!alive(p)) this.frame.flags = 0;
         stepCharacter(this.mw, p.character, this.frame, DEFAULT_MOVEMENT_STATS, TICK_DT);
         p.lastProcessedInput = this.frame.clientTick;
         if (alive(p)) p.yaw = this.frame.yaw;
         this.checkPortals(p);
-        const moving = (this.frame.flags & MOVE_MASK) !== 0;
+        const moving = (this.frame.flags & MOVE_MASK) !== 0 && !(this.frame.flags & INPUT.ROOTED);
+        p.facingOffset = moving ? movementFacingOffset(this.frame.flags) : 0;
         p.blocking = alive(p) && p.shield !== null && (this.frame.flags & INPUT.BLOCK) !== 0 && !p.swing && p.hitUntil <= tick;
         p.anim = p.hitUntil > tick
           ? ANIM.HIT
@@ -760,8 +774,8 @@ export class WorldZone {
       s.x = quantizePosition(pos.x);
       s.y = quantizePosition(pos.y);
       s.z = quantizePosition(pos.z);
-      s.yaw = a.yaw;
-      s.anim = !alive(a) ? ANIM.DEAD : a.swing ? ANIM.ATTACK + a.swing.combo - 1 : a.anim;
+      s.yaw = a.kind === 'player' && a.facingOffset ? quantizeAngle(dequantizeAngle(a.yaw) + a.facingOffset) : a.yaw;
+      s.anim = !alive(a) ? ANIM.DEAD : a.swing ? attackAnim(a.swing.kind, a.swing.combo) : a.anim;
       s.animPhase = a.swing ? Math.min(255, tick - a.swing.start) : 0;
       s.hp = Math.ceil(a.hp);
     }
@@ -827,7 +841,7 @@ export class WorldZone {
         if (dist > arch.reach * 0.85) {
           m.input.flags = INPUT.FORWARD;
         } else if (this.tick >= m.nextSwingTick) {
-          m.swing = { combo: 1, start: this.tick, timing: arch.swing, hit: new Set() };
+          m.swing = { combo: 1, kind: 'normal', start: this.tick, timing: arch.swing, hit: new Set() };
         }
       }
     }
@@ -878,7 +892,7 @@ export class WorldZone {
     if (elapsed >= t.startup + t.active + t.recovery) {
       a.swing = null;
       a.lastSwingEnd = this.tick;
-      a.lastCombo = s.combo;
+      a.lastCombo = s.kind === 'normal' ? s.combo : 0;
       if (a.kind === 'mob') a.nextSwingTick = this.tick + a.archetype.cooldown;
       else {
         if (a.pendingEquip) {
@@ -886,7 +900,7 @@ export class WorldZone {
           a.pendingEquip = null;
           this.applyEquipRequest(a, slot, equip);
         }
-        if (a.queuedAttack) this.startPlayerSwing(a);
+        if (a.queuedAttack) this.startPlayerSwing(a, a.queuedKind);
       }
     }
   }
@@ -1084,7 +1098,7 @@ export class WorldZone {
   }
 
   /** Debug/test view of every actor. */
-  inspect(): { id: number; kind: Actor['kind']; hp: number; alive: boolean; state?: Mob['state']; swinging: boolean; x: number; z: number }[] {
+  inspect(): { id: number; kind: Actor['kind']; hp: number; alive: boolean; state?: Mob['state']; swinging: boolean; anim: number; x: number; z: number }[] {
     return [...this.actors.values()].map((a) => ({
       id: a.entityId,
       kind: a.kind,
@@ -1092,6 +1106,7 @@ export class WorldZone {
       alive: alive(a),
       ...(a.kind === 'mob' ? { state: a.state } : {}),
       swinging: !!a.swing,
+      anim: this.states.get(a.entityId)?.anim ?? 0,
       x: a.character.position.x,
       z: a.character.position.z,
     }));

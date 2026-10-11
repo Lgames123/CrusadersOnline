@@ -3,7 +3,7 @@ import { dequantizeAngle, dequantizePosition } from '../math/quantize.ts';
 import { CS, SC } from '../protocol/opcodes.ts';
 import { INPUT_PACKET_MAX_BYTES, MAX_INPUT_FRAMES, createInputFrame, encodeInput, type InputFrame } from '../protocol/binary/input.ts';
 import { decodeSnapshot, type EntityState } from '../protocol/binary/snapshot.ts';
-import type { CombatEventMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PlayerStatsMsg, ServerControlMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
+import type { AttackKind, CombatEventMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PlayerStatsMsg, ServerControlMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
 import type { ArenaDef } from '../arena/types.ts';
 import { createMovementWorld, disposeMovementWorld, type MovementWorld, type Rapier } from '../movement/physics.ts';
 import { createCharacter, setCharacterState, stepCharacter, type Character } from '../movement/character.ts';
@@ -20,6 +20,8 @@ export interface RemoteSample {
   z: number;
   yaw: number;
   anim: number;
+  /** Ticks since the current swing started (0 when not swinging). */
+  animPhase: number;
   hp: number;
 }
 
@@ -254,9 +256,9 @@ export class ClientSession {
   }
 
   /** Requests a melee swing. The server decides timing and combo; spam is harmless. */
-  attack(): void {
+  attack(kind: AttackKind = 'normal'): void {
     if (!this.connected || this.dead) return;
-    this.sendJson({ op: CS.PLAYER_ATTACK, seq: ++this.seq, d: { comboIndex: 1, clientTick: this.clientTick } });
+    this.sendJson({ op: CS.PLAYER_ATTACK, seq: ++this.seq, d: { comboIndex: 1, clientTick: this.clientTick, kind } });
   }
 
   /** Equips or unequips the item in an inventory slot; the server answers with INVENTORY_UPDATE. */
@@ -322,6 +324,7 @@ export class ClientSession {
         z: dequantizePosition(e.z),
         yaw: dequantizeAngle(e.yaw),
         anim: e.anim,
+        animPhase: e.animPhase,
         hp: e.hp,
       });
       if (buf.length > REMOTE_BUFFER) buf.shift();
@@ -381,6 +384,7 @@ export class ClientSession {
     const dyaw = Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw));
     out.yaw = a.yaw + dyaw * t;
     out.anim = t < 0.5 ? a.anim : b.anim;
+    out.animPhase = t < 0.5 ? a.animPhase : b.animPhase;
     out.hp = b.hp;
     return true;
   }

@@ -50,7 +50,7 @@ describe('CS_PLAYER_INPUT codec', () => {
     const out = outFrames();
     expect(decodeInput(new DataView(view.buffer, 0, len - 1), out)).toBeNull(); // truncated
     const bad = new Uint8Array(view.buffer.slice(0, len));
-    bad[6 + 4] = 0b1000_0000; // unknown flag bit
+    bad[6 + 5] = 1; // reserved byte must be zero
     expect(decodeInput(new DataView(bad.buffer), out)).toBeNull();
     const wrongOp = new Uint8Array(view.buffer.slice(0, len));
     wrongOp[0] = CS.PING;

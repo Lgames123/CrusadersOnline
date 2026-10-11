@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ANIM, PLAYER_HEIGHT, PLAYER_RADIUS, isLocomotionAnim } from '@crusaders/shared';
+import { ANIM, PLAYER_HEIGHT, PLAYER_RADIUS, isAttackAnim, isLocomotionAnim } from '@crusaders/shared';
 
 /**
  * Visual representation of a character, driven by the replicated animation state. Two
@@ -10,8 +10,11 @@ export interface Avatar {
   readonly object: THREE.Object3D;
   /** Height above the feet where name plates / health bars go, metres. */
   readonly headHeight: number;
-  /** anim = ANIM.* value; swingSeconds = duration of the current swing when attacking. */
-  setState(anim: number, swingSeconds: number): void;
+  /**
+   * anim = ANIM.* value; swingSeconds = duration of the current swing when attacking;
+   * swingId changes for every new swing, so back-to-back swings of one kind restart the clip.
+   */
+  setState(anim: number, swingSeconds: number, swingId?: number): void;
   update(dt: number): void;
   dispose(): void;
 }
@@ -63,17 +66,21 @@ export class ProceduralAvatar implements Avatar {
     this.object.add(this.body);
   }
 
-  setState(anim: number, swingSeconds: number): void {
-    if (anim !== this.anim) {
+  private swingId = 0;
+
+  setState(anim: number, swingSeconds: number, swingId = 0): void {
+    const restart = isAttackAnim(anim) && swingId !== this.swingId;
+    this.swingId = swingId;
+    if (anim !== this.anim || restart) {
       this.t = 0;
-      if (anim >= ANIM.ATTACK && anim < ANIM.ATTACK + 3) this.swingSeconds = Math.max(0.1, swingSeconds);
+      if (isAttackAnim(anim)) this.swingSeconds = Math.max(0.1, swingSeconds);
     }
     this.anim = anim;
   }
 
   update(dt: number): void {
     this.t += dt;
-    const attacking = this.anim >= ANIM.ATTACK && this.anim < ANIM.ATTACK + 3;
+    const attacking = isAttackAnim(this.anim);
     if (attacking) {
       // Wind up, strike across, recover — direction alternates with the combo index.
       const k = Math.min(1, this.t / this.swingSeconds);

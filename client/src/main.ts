@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import {
   DEFAULT_MOVEMENT_STATS,
+  INPUT,
   LEVEL_PREFIX,
+  attackKindFor,
   TICK_DT,
   TICK_MS,
   createCharacter,
@@ -15,8 +17,7 @@ import {
   type MovementWorld,
 } from '@crusaders/shared';
 import { createRenderContext } from './engine/renderer.ts';
-import { ChaseCamera } from './engine/camera.ts';
-import { ClassicCamera } from './engine/classic_camera.ts';
+import { CameraRig } from './engine/camera_rig.ts';
 import { SettingsStore } from './settings.ts';
 import { SettingsPanel } from './ui/settings_panel.ts';
 import { CONTROLS_HELP } from './input/keybindings.ts';
@@ -91,10 +92,8 @@ async function main(): Promise<void> {
   const levelParam = new URLSearchParams(location.search).get('level');
   if (auth.kind === 'offline' && !(await showArena(levelParam ? `${LEVEL_PREFIX}${levelParam}` : 'synthetic-arena'))) return;
   let player: LocalPlayer | null = null;
-  let classicCam!: ClassicCamera;
-  let modernCam!: ChaseCamera;
-  /** The active camera (player setting: classic by default). */
-  let chase!: ClassicCamera | ChaseCamera;
+  /** View camera between the original's (default) and the modern one (mouse wheel). */
+  let chase!: CameraRig;
   const headPos = new THREE.Vector3();
   const prompt = document.getElementById('prompt')!;
   let lastStats: { level: number; dead: boolean } | null = null;
@@ -180,7 +179,7 @@ async function main(): Promise<void> {
             errorBox.textContent = '';
             if (!live || !player) return; // first entry: the player is created below
             player.character = live.character!;
-            classicCam.mw = modernCam.mw = live.mw;
+            chase.mw = live.mw;
             chase.snap();
             for (const [id, state] of live.objectStates) levelView?.setObjectState(id, state);
           },
@@ -213,14 +212,11 @@ async function main(): Promise<void> {
   scene.add(local.object);
 
   const settings = new SettingsStore();
-  classicCam = new ClassicCamera(mw, container.clientWidth / container.clientHeight);
-  modernCam = new ChaseCamera(mw, container.clientWidth / container.clientHeight);
+  chase = new CameraRig(mw, container.clientWidth / container.clientHeight);
   const input = new InputManager(renderer.domElement);
   const applySettings = () => {
     const s = settings.current;
-    const next = s.camera === 'modern' ? modernCam : classicCam;
-    if (next !== chase) next.snap();
-    chase = next;
+    chase.zoom = s.cameraZoom;
     input.sensitivity = s.mouseSensitivity;
     input.invertY = s.invertMouseY;
   };
@@ -228,9 +224,17 @@ async function main(): Promise<void> {
   settings.onChange(applySettings);
   new SettingsPanel(document.getElementById('settings')!, settings);
   document.getElementById('controls-help')!.textContent = CONTROLS_HELP;
+  // Mouse wheel: zoom between the classic camera (closest) and the modern one (farthest).
+  renderer.domElement.addEventListener('wheel', (e) => {
+    if (!input.locked) return;
+    e.preventDefault();
+    settings.update({ cameraZoom: Math.round((settings.current.cameraZoom + Math.sign(e.deltaY) * 0.1) * 100) / 100 });
+  }, { passive: false });
   input.onAttack = () => {
-    if (local.swing(input.yaw)) {
-      session?.attack();
+    // The movement key held with the click picks the attack (original controls).
+    const kind = attackKindFor(input.heldFlags);
+    if (local.swing(input.yaw, kind)) {
+      session?.attack(kind);
       sounds?.play(pick(SFX.swing), local.object.position, { volume: 0.7 });
     }
   };
@@ -301,13 +305,12 @@ async function main(): Promise<void> {
 
   window.addEventListener('resize', () => {
     renderer.setSize(container.clientWidth, container.clientHeight);
-    classicCam.resize(container.clientWidth / container.clientHeight);
-    modernCam.resize(container.clientWidth / container.clientHeight);
+    chase.resize(container.clientWidth / container.clientHeight);
   });
 
   if (import.meta.env.DEV) {
     // Debug/E2E hook: lets tests drive input without pointer lock.
-    (window as unknown as { __co: unknown }).__co = { input, player: local, mw, session, remotes, inventory: inventoryPanel, scene, get camera() { return chase.camera; }, cameras: { classic: classicCam, modern: modernCam }, settings, renderer, level: levelView, render: () => renderer.render(scene, chase.camera) };
+    (window as unknown as { __co: unknown }).__co = { input, player: local, mw, session, remotes, inventory: inventoryPanel, scene, get camera() { return chase.camera; }, cameras: { classic: chase.classic, modern: chase.modern }, rig: chase, settings, renderer, level: levelView, render: () => renderer.render(scene, chase.camera) };
   }
 
   // Fixed-step simulation (same 20 Hz step as the server), interpolated rendering.
@@ -325,6 +328,7 @@ async function main(): Promise<void> {
     acc += frameMs;
     while (acc >= TICK_MS) {
       input.sample(frame, ++tick);
+      if (local.rooted) frame.flags |= INPUT.ROOTED;
       local.fixedStep(frame);
       acc -= TICK_MS;
     }

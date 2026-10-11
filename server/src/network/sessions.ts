@@ -213,7 +213,7 @@ export class SessionManager implements TransportHandlers {
         if (s.state === 'in_world') this.zoneOf(s)?.equip(conn.id, msg.d.slot, msg.d.equip);
         return;
       case CS.PLAYER_ATTACK:
-        if (s.state === 'in_world') this.zoneOf(s)?.attack(conn.id);
+        if (s.state === 'in_world') this.zoneOf(s)?.attack(conn.id, msg.d.kind ?? 'normal');
         return;
       case CS.PING:
         this.send(s, { op: SC.PONG, d: { clientTime: msg.d.clientTime, serverTick: this.zoneOf(s)?.tick ?? 0 } });

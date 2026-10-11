@@ -30,7 +30,7 @@ All game code talks to a `Transport` interface (`send(bytes|object)`, `onMessage
 | `0x01` | `CS_AUTH_TICKET` | JSON | Redeem single-use WebSocket ticket (ADR-008) |
 | `0x02` | `CS_SELECT_CHARACTER`| JSON | Select character to enter the world |
 | `0x03` | `CS_PLAYER_INPUT` | **Binary** | Input frame(s): flags, yaw, pitch, client tick — **no positions** (ADR-006) |
-| `0x04` | `CS_PLAYER_ATTACK` | JSON | Trigger weapon attack action |
+| `0x04` | `CS_PLAYER_ATTACK` | JSON | Trigger weapon attack action; `kind` normal (combo) / overhead / left / right from the movement key held with the click |
 | `0x05` | `CS_PLAYER_BLOCK` | JSON | Raise or lower shield |
 | `0x06` | `CS_CAST_SPELL` | JSON | Trigger spellcast with aim direction |
 | `0x07` | `CS_INTERACT` | JSON | Interact with chest, door, NPC, or item drop |
@@ -71,7 +71,7 @@ offset  size  field
 2       4     ackSnapshotTick (uint32) — last snapshot the client applied
 --- repeated frameCount times (10 bytes each) ---
 +0      4     clientTick (uint32)
-+4      1     inputFlags (bit0 W, bit1 S, bit2 A, bit3 D, bit4 Jump, bit5 Walk, bit6 Block (held), bit7 reserved)
++4      1     inputFlags (bit0 W, bit1 S, bit2 A, bit3 D, bit4 Jump, bit5 Walk, bit6 Block (held), bit7 Rooted — own swing playing, no ground movement; set by the client, it only restricts the sender. Gap: a modified client could omit it to move while attacking; a server-side swing-window check is pending)
 +5      1     reserved
 +6      2     yaw   (uint16 quantized)
 +8      2     pitch (uint16 quantized)

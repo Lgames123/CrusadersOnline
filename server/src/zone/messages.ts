@@ -1,4 +1,5 @@
 import type { JoinOptions, PersistReason, PersistRecord, TransferState } from '../simulation/world_zone.ts';
+import type { AttackKind } from '@crusaders/shared';
 
 /** Main thread <-> zone worker messages (ADR-009). Binary payloads are transferred, not copied. */
 
@@ -6,7 +7,7 @@ export type ToZone =
   | { t: 'join'; connId: number; opts: JoinOptions }
   | { t: 'leave'; connId: number }
   | { t: 'input'; connId: number; data: ArrayBuffer }
-  | { t: 'attack'; connId: number }
+  | { t: 'attack'; connId: number; kind: AttackKind }
   | { t: 'equip'; connId: number; slot: number; equip: boolean }
   | { t: 'interact'; connId: number; object: number }
   | { t: 'use'; connId: number; slot: number }

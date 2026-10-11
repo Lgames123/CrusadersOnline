@@ -16,6 +16,9 @@ export interface RemoteEntity {
   avatar: Avatar;
   visible: boolean;
   hp: number;
+  /** Swing counter: bumps whenever the replicated swing phase starts over. */
+  swingId: number;
+  lastPhase: number;
 }
 
 /** Other players and mobs, rendered 100 ms in the past and interpolated between snapshots. */
@@ -23,7 +26,7 @@ export class RemoteEntities {
   readonly byId = new Map<number, RemoteEntity>();
   private readonly scene: THREE.Scene;
   private readonly originals: AvatarFactory | null;
-  private readonly sample: RemoteSample = { x: 0, y: 0, z: 0, yaw: 0, anim: 0, hp: 0 };
+  private readonly sample: RemoteSample = { x: 0, y: 0, z: 0, yaw: 0, anim: 0, animPhase: 0, hp: 0 };
 
   constructor(scene: THREE.Scene, originals: AvatarFactory | null) {
     this.scene = scene;
@@ -40,7 +43,7 @@ export class RemoteEntities {
     const avatar = this.originals?.(kind) ?? new ProceduralAvatar(kind);
     avatar.object.visible = false; // until the first sample arrives
     this.scene.add(avatar.object);
-    this.byId.set(id, { id, info, avatar, visible: false, hp: info.maxHp });
+    this.byId.set(id, { id, info, avatar, visible: false, hp: info.maxHp, swingId: 0, lastPhase: 0 });
   }
 
   /** Removes every remote entity (zone change). */
@@ -67,7 +70,9 @@ export class RemoteEntities {
       const arch = e.info.archetype ? MOB_ARCHETYPES[e.info.archetype] : undefined;
       const swing = arch ? arch.swing : null;
       const swingSeconds = swing ? (swing.startup + swing.active + swing.recovery) * TICK_DT : 0.55;
-      e.avatar.setState(this.sample.anim, swingSeconds);
+      if (this.sample.animPhase < e.lastPhase) e.swingId++;
+      e.lastPhase = this.sample.animPhase;
+      e.avatar.setState(this.sample.anim, swingSeconds, e.swingId);
       e.avatar.update(dt);
     }
   }

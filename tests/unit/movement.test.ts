@@ -2,6 +2,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import {
   DEFAULT_MOVEMENT_STATS,
   INPUT,
+  attackKindFor,
+  movementFacingOffset,
   PLAYER_RADIUS,
   TICK_DT,
   createCharacter,
@@ -80,6 +82,34 @@ describe('shared character controller', () => {
     run(mw, c, INPUT.FORWARD | INPUT.LEFT, 0, 20);
     const d = Math.hypot(c.position.x - start.x, c.position.z - start.z);
     expect(d).toBeLessThanOrEqual(DEFAULT_MOVEMENT_STATS.runSpeed + 0.01);
+  });
+
+  it('runs diagonals at the run speed with the body turned into the motion', () => {
+    const { mw, c } = setup();
+    run(mw, c, 0, 0, 10);
+    const start = { ...c.position };
+    run(mw, c, INPUT.FORWARD | INPUT.RIGHT, 0, 20);
+    expect(Math.hypot(c.position.x - start.x, c.position.z - start.z)).toBeCloseTo(DEFAULT_MOVEMENT_STATS.runSpeed, 1);
+    expect(c.position.x - start.x).toBeCloseTo(start.z - c.position.z, 1); // 45° to the right
+    expect(movementFacingOffset(INPUT.FORWARD | INPUT.RIGHT)).toBeCloseTo(-Math.PI / 4);
+    expect(movementFacingOffset(INPUT.BACK | INPUT.RIGHT)).toBeCloseTo(Math.PI / 4); // faces away from the motion
+    expect(movementFacingOffset(INPUT.LEFT)).toBe(0);
+  });
+
+  it('plants the feet while the own swing plays (INPUT.ROOTED)', () => {
+    const { mw, c } = setup();
+    run(mw, c, 0, 0, 10);
+    const start = { ...c.position };
+    run(mw, c, INPUT.FORWARD | INPUT.ROOTED, 0, 10);
+    expect(Math.hypot(c.position.x - start.x, c.position.z - start.z)).toBeLessThan(1e-3);
+  });
+
+  it('picks the attack from the movement key held with the click', () => {
+    expect(attackKindFor(0)).toBe('normal');
+    expect(attackKindFor(INPUT.FORWARD | INPUT.LEFT)).toBe('overhead');
+    expect(attackKindFor(INPUT.LEFT)).toBe('left');
+    expect(attackKindFor(INPUT.RIGHT)).toBe('right');
+    expect(attackKindFor(INPUT.BACK)).toBe('normal');
   });
 
   it('is stopped by the perimeter wall', () => {
