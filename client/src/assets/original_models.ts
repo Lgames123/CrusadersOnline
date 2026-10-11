@@ -32,6 +32,8 @@ interface ClipMap {
   attackOverhead?: string;
   attackLeft?: string;
   attackRight?: string;
+  attackLow?: string;
+  attackJump?: string;
   /** Rolls forward / back / left / right and ducking. */
   rolls?: string[];
   crouch?: string;
@@ -60,6 +62,8 @@ function withStates(base: ClipMap, states: Record<string, string> | undefined): 
     deaths: base.deaths ?? [st['ASM_HIT_POINTS_DEPLETED'] ?? base.death, ...[1, 2, 3, 4, 5, 6, 7, 8].map((i) => st[`ASM_HIT_POINTS_DEPLETED_ALT_0${i}`]).filter((c): c is string => !!c)],
     attackOverhead: base.attackOverhead ?? st['ASM_SWING_OVERHEAD'] ?? base.attacks[0]!,
     attackLeft: base.attackLeft ?? st['ASM_SWING_LEVEL'] ?? base.attacks[0]!,
+    attackLow: base.attackLow ?? st['ASM_CHOP_LOW'] ?? base.attacks[0]!,
+    attackJump: base.attackJump ?? st['ASM_JUMP_ATTACK'] ?? base.attacks[0]!,
     attackRight: base.attackRight ?? st['ASM_SWING_LEVEL'] ?? base.attacks[0]!,
   };
 }
@@ -128,6 +132,8 @@ class OriginalAvatar implements Avatar {
     if (anim === ANIM.ATTACK_OVERHEAD) return { name: m.attackOverhead ?? m.attacks[0]!, loop: false };
     if (anim === ANIM.ATTACK_LEFT) return { name: m.attackLeft ?? m.attacks[0]!, loop: false };
     if (anim === ANIM.ATTACK_RIGHT) return { name: m.attackRight ?? m.attacks[0]!, loop: false };
+    if (anim === ANIM.ATTACK_LOW) return { name: m.attackLow ?? m.attacks[0]!, loop: false };
+    if (anim === ANIM.ATTACK_JUMP) return { name: m.attackJump ?? m.attacks[0]!, loop: false };
     if (anim === ANIM.DEAD) {
       const deaths = m.deaths?.length ? m.deaths : [m.death];
       return { name: deaths[this.deathCount % deaths.length]!, loop: false };

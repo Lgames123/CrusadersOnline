@@ -62,5 +62,5 @@ export function actionFor(code: string): Action | null {
 /** Help line shown on the "click to play" screen. */
 export const CONTROLS_HELP =
   'WASD move · Mouse look · Wheel camera distance · ←/→ turn · Numpad 9/7/5 look up/down/centre · ' +
-  'Click attack (W/A/D + click: overhead / left / right) · Right click block · ' +
+  'Click attack (W / A / D / C / Space + click: overhead / left / right / low / jump) · Right click block · ' +
   'Space jump · C duck (C + direction: roll) · Shift walk · Tab pick up / open · H health potion · I inventory · Esc release mouse';

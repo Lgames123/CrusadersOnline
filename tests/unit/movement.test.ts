@@ -143,6 +143,8 @@ describe('shared character controller', () => {
     expect(attackKindFor(INPUT.LEFT)).toBe('left');
     expect(attackKindFor(INPUT.RIGHT)).toBe('right');
     expect(attackKindFor(INPUT.BACK)).toBe('normal');
+    expect(attackKindFor(INPUT.DUCK | INPUT.FORWARD)).toBe('low');
+    expect(attackKindFor(INPUT.JUMP)).toBe('jump');
   });
 
   it('is stopped by the perimeter wall', () => {

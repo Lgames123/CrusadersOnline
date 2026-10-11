@@ -146,6 +146,9 @@ export const ANIM = {
   ROLL: 18,
   /** Ducking (C held). */
   CROUCH: 22,
+  /** C + click (ASM_CHOP_LOW) and Space + click (ASM_JUMP_ATTACK). */
+  ATTACK_LOW: 23,
+  ATTACK_JUMP: 24,
 } as const;
 
 /** Animation for a character's own movement state (roll, duck, airborne, locomotion, idle). */
@@ -157,10 +160,12 @@ export function movementAnim(flags: number, grounded: boolean, rollDir: number):
   return locomotionAnim(flags);
 }
 
-export type AttackKind = 'normal' | 'overhead' | 'left' | 'right';
+export type AttackKind = 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump';
 
 /** The original's attack selection: forward + click overhead, left/right + click side swings. */
 export function attackKindFor(flags: number): AttackKind {
+  if (flags & INPUT.DUCK) return 'low';
+  if (flags & INPUT.JUMP) return 'jump';
   if (flags & INPUT.FORWARD) return 'overhead';
   if (flags & INPUT.LEFT && !(flags & INPUT.RIGHT)) return 'left';
   if (flags & INPUT.RIGHT && !(flags & INPUT.LEFT)) return 'right';
@@ -169,11 +174,18 @@ export function attackKindFor(flags: number): AttackKind {
 
 /** Animation code of a swing. */
 export function attackAnim(kind: AttackKind, combo: number): number {
-  return kind === 'overhead' ? ANIM.ATTACK_OVERHEAD : kind === 'left' ? ANIM.ATTACK_LEFT : kind === 'right' ? ANIM.ATTACK_RIGHT : ANIM.ATTACK + combo - 1;
+  switch (kind) {
+    case 'overhead': return ANIM.ATTACK_OVERHEAD;
+    case 'left': return ANIM.ATTACK_LEFT;
+    case 'right': return ANIM.ATTACK_RIGHT;
+    case 'low': return ANIM.ATTACK_LOW;
+    case 'jump': return ANIM.ATTACK_JUMP;
+    default: return ANIM.ATTACK + combo - 1;
+  }
 }
 
 export function isAttackAnim(anim: number): boolean {
-  return (anim >= ANIM.ATTACK && anim < ANIM.ATTACK + 3) || (anim >= ANIM.ATTACK_OVERHEAD && anim <= ANIM.ATTACK_RIGHT);
+  return (anim >= ANIM.ATTACK && anim < ANIM.ATTACK + 3) || (anim >= ANIM.ATTACK_OVERHEAD && anim <= ANIM.ATTACK_RIGHT) || anim === ANIM.ATTACK_LOW || anim === ANIM.ATTACK_JUMP;
 }
 
 /**
