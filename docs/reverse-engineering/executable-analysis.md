@@ -268,3 +268,28 @@ Rolls (C + direction; `ASM_ROLL_F/B/L/R`): forward 10.73 ft in 25 frames, back 1
 The jump search (UNK-012) found the AI maneuver tables (`0x004EA268`: RANGED / RUNNING_JUMP / JUMP / MELEE and NONE … THROW_WEAPON, MANEUVER_LR/BACK) but no player jump impulse; the only `GRAVITY` string belongs to the particle system.
 
 Hit reactions: creature and player models bind `ASM_IMPACT_FRONT/LEFT/RIGHT/BACK` (`PI15`–`PI18`), `ASM_IMPACT_SEVERE` and alternates, and up to nine death clips (`ASM_HIT_POINTS_DEPLETED` + `_ALT_01..08`). The client plays the impact for the attacker's side and a death variant seeded by the entity id.
+
+---
+
+## 12. Command-Line Options and Debug Console (2026-10-11)
+
+**Command-line switches** (parsed by `0x0047AA30`, case-insensitive): `window`, `clipmouse`, `nosound`, `nocd`, `noNetworx`, `lobby`, `fullbright`, `no3dnow`, `cheatkeys` (sets `0x00542F70`), `software`, plus `-weapons` / `-damage` (set `0x004EE740` / `0x004EE741`, both also forced to 1 at start-up).
+
+**Debug console.** A typed-text line (object `0x0053C810`; key handler `0x0043B510` → `0x0043B790`, opened by `0x0043B710` from the input loop `0x00411300`; the opening key is not identified yet). On Enter, a line starting with `-` goes to the command parser `0x0043BE90`, and a line starting with `CS` goes to `0x0043C840` when `0x004ECD14` is set. Commands:
+
+| Command | Effect |
+|---|---|
+| `-DEBUG` | Toggles a debug flag (`0x006313F4`) |
+| `-BOUNDINGBOX` | Bounding-box display (`0x00422AC0`) |
+| `-EMBIGGENME` | God mode on/off |
+| `-CRAZYGUY` | Sets a mode on the player object (`0x004BD720(…, 3)`) |
+| `-WHOAH` | Toggles flag `0x00589AAD` bit 0x20 and resets something on the camera manager (case 4 of `0x0043B9B0`) |
+| `-SHOWFPS` / `-CALCFPS` | Frame-rate display / measurement |
+| `-DRAW_MODELS` | Model drawing toggle |
+| `-GOTTAGO <cap>` | Loads level `caps\<cap>.cap` |
+| `-JAHLOC x y z` / `-JAHLOC <n>` | Teleports the player to coordinates (feet) or to locator n |
+| `-UBERLOAD` | Cycles through the levels in `caps\CAPOrder.txt` with god mode |
+| `-RES +/-/<n>` | Screen-resolution step |
+| `-MOUSE` / `-INTENSITY` / `-SOUND` / `-DIALOG` / `-MUSIC <0-100>` | Mouse sensitivity (default 0.5), brightness (0.25), sound / dialogue (0.85) and music volumes |
+
+The camera-adjustment cases of `0x0043B9B0` (§10.1) are reached through `0x0043C840`.
