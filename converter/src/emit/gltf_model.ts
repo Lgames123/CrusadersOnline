@@ -13,6 +13,8 @@ export interface ModelEmitOptions {
   mirrorZ?: boolean;
   /** Animation clips (already parsed for this model's skeleton). */
   animations?: { name: string; label?: string; clip: AniClip }[];
+  /** Animation state (ASM_RUNNING...) -> clip name, kept in the root's `extras.asmStates`. */
+  states?: Record<string, string>;
 }
 
 type Quat = [number, number, number, number];
@@ -114,6 +116,7 @@ export function buildModelDocument(model: MdlModel, opts: ModelEmitOptions): Doc
     spheres: model.spheres.map((s) => ({ ...s, center: mv(s.center) })),
     lines: model.lines.map((l) => ({ ...l, rotation: mq(l.rotation), a: mv(l.a), b: mv(l.b) })),
     transforms: model.transforms,
+    ...(opts.states && Object.keys(opts.states).length ? { asmStates: opts.states } : {}),
   };
 
   if (model.nodes.length <= 1) {

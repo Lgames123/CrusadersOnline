@@ -1,4 +1,4 @@
-import { SC } from '../opcodes.ts';
+import { INPUT, SC } from '../opcodes.ts';
 import type { ItemType } from '../../game/items.ts';
 
 /** JSON control messages sent by the server. Trusted direction, so plain types (no Zod). */
@@ -130,4 +130,29 @@ export const ANIM = {
   DEAD: 8,
   /** Shield raised. */
   BLOCK: 9,
+  /** Walking backwards (ASM_RETREAT; also used for careful backward steps). */
+  RETREAT: 10,
+  /** Running sidesteps (ASM_SIDE_STEP_L / _R). */
+  STRAFE_LEFT: 11,
+  STRAFE_RIGHT: 12,
+  /** Careful sidesteps (Shift). */
+  WALK_STRAFE_LEFT: 13,
+  WALK_STRAFE_RIGHT: 14,
 } as const;
+
+/** Ground locomotion animation for held movement flags (IDLE when none). */
+export function locomotionAnim(flags: number): number {
+  const walk = (flags & INPUT.WALK) !== 0;
+  const fwd = (flags & INPUT.FORWARD ? 1 : 0) - (flags & INPUT.BACK ? 1 : 0);
+  const right = (flags & INPUT.RIGHT ? 1 : 0) - (flags & INPUT.LEFT ? 1 : 0);
+  if (fwd > 0) return walk ? ANIM.WALK : ANIM.RUN;
+  if (fwd < 0) return ANIM.RETREAT;
+  if (right > 0) return walk ? ANIM.WALK_STRAFE_RIGHT : ANIM.STRAFE_RIGHT;
+  if (right < 0) return walk ? ANIM.WALK_STRAFE_LEFT : ANIM.STRAFE_LEFT;
+  return ANIM.IDLE;
+}
+
+/** Whether an animation code is a ground locomotion cycle. */
+export function isLocomotionAnim(anim: number): boolean {
+  return anim === ANIM.RUN || anim === ANIM.WALK || (anim >= ANIM.RETREAT && anim <= ANIM.WALK_STRAFE_RIGHT);
+}

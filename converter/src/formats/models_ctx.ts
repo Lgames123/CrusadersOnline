@@ -14,6 +14,8 @@ export interface ModelBinding {
   animations: string[];
   /** Designer comment per animation file, e.g. "run forward". */
   labels: Record<string, string>;
+  /** Animation state (ASM_RUNNING...) -> animation file, from the `B` lines. */
+  states: Record<string, string>;
   flags: string[];
 }
 
@@ -28,7 +30,7 @@ export function parseModelsCtx(text: string): ModelBinding[] {
     const parts = line.split(/\s+/);
     const tag = parts[0]!;
     if (tag === 'N' && parts.length >= 3) {
-      cur = { id: Number(parts[1]), file: parts[2]!, textures: [], animations: [], labels: {}, flags: [] };
+      cur = { id: Number(parts[1]), file: parts[2]!, textures: [], animations: [], labels: {}, states: {}, flags: [] };
       out.push(cur);
       continue;
     }
@@ -41,6 +43,7 @@ export function parseModelsCtx(text: string): ModelBinding[] {
       if (!file) continue;
       cur.animations.push(file);
       const state = tag === 'B' ? parts[1]! : '';
+      if (state && !(state in cur.states)) cur.states[state] = file;
       const label = [state, comment].filter(Boolean).join(' — ');
       if (label) cur.labels[file] = label;
     } else if (/^[A-Z]{4,}$/.test(tag) && parts.length === 1) {

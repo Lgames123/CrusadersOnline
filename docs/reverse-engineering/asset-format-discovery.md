@@ -174,6 +174,8 @@ A sequence of 32-bit words processed **bone by bone, in model node order**:
 ### 4.5 Conversion
 The converter samples each channel once per original frame (30 fps) into LINEAR glTF channels, applies the same Z-mirror as the models, holds the root X/Z like the engine and stores `rootMotion`, `frames`, the designer label from `models.ctx` (e.g. "run forward") and the events in each animation's `extras`. Converted characters face **−Z**, matching the client's yaw convention; left/right is confirmed (right hand on +X when facing −Z).
 
+**Animation states.** Besides `L <file>.ani` lines (the clips a model can play), `models.ctx` binds the engine's animation states to clips with `B <ASM_STATE> <file>.ani` lines (e.g. `B ASM_RETREAT PA06_rt.ani`, `B ASM_SIDE_STEP_L PB01_w_sideleft.ani`); a `B` line without a file leaves that state unbound. Drake binds 100 states (standing, walking, running, retreat, turns, side steps, standing/running/directional jumps, hops, landings, falls, rolls, climbing and mounting, combat stance/turns/steps, block, attacks, directional and severe impacts, nine death variants, spells, gestures). The converter keeps the map (state → lower-case clip name) in the model root's `extras.asmStates`; the client picks locomotion clips from it.
+
 ## 6. Level Files (`Meshes/*.msh`, `Caps/*.cap`) — Compression and Creature Records `[CONFIRMED]`
 
 ### 6.1 Compression

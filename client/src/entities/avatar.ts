@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ANIM, PLAYER_HEIGHT, PLAYER_RADIUS } from '@crusaders/shared';
+import { ANIM, PLAYER_HEIGHT, PLAYER_RADIUS, isLocomotionAnim } from '@crusaders/shared';
 
 /**
  * Visual representation of a character, driven by the replicated animation state. Two
@@ -89,7 +89,7 @@ export class ProceduralAvatar implements Avatar {
     this.raise += (raise - this.raise) * Math.min(1, dt * 14);
     this.shield.position.set(-PLAYER_RADIUS - 0.04 + this.raise * 0.3, 1.05 + this.raise * 0.2, -0.05 - this.raise * 0.4);
     this.shield.rotation.y = this.raise * (Math.PI / 2);
-    const running = this.anim === ANIM.RUN || this.anim === ANIM.WALK;
+    const running = isLocomotionAnim(this.anim);
     this.body.position.y = running ? Math.abs(Math.sin(this.t * 10)) * 0.08 : 0;
     // Topple over when dead, stand back up on respawn.
     const target = this.anim === ANIM.DEAD ? 1 : 0;

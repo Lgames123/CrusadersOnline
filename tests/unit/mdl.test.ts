@@ -92,10 +92,10 @@ describe('.mdl parser', () => {
 
 describe('models.ctx bindings', () => {
   it('collects file, textures, animations and flags per model id', () => {
-    const b = parseModelsCtx('# comment\nN 0 drake.mdl\nT drake\t\t# tex\nL PA01_ru_f.ani # run\n\nN 21 rock01.mdl\nT Dw_ER\nSHADOWLESS\n');
+    const b = parseModelsCtx('# comment\nN 0 drake.mdl\nT drake\t\t# tex\nL PA01_ru_f.ani # run\nB ASM_RUNNING\t\tPA01_ru_f.ani\nB ASM_THROW_ITEM\n\nN 21 rock01.mdl\nT Dw_ER\nSHADOWLESS\n');
     expect(b).toEqual([
-      { id: 0, file: 'drake.mdl', textures: ['drake'], animations: ['PA01_ru_f.ani'], labels: { 'PA01_ru_f.ani': 'run' }, flags: [] },
-      { id: 21, file: 'rock01.mdl', textures: ['Dw_ER'], animations: [], labels: {}, flags: ['SHADOWLESS'] },
+      { id: 0, file: 'drake.mdl', textures: ['drake'], animations: ['PA01_ru_f.ani', 'PA01_ru_f.ani'], labels: { 'PA01_ru_f.ani': 'ASM_RUNNING' }, states: { ASM_RUNNING: 'PA01_ru_f.ani' }, flags: [] },
+      { id: 21, file: 'rock01.mdl', textures: ['Dw_ER'], animations: [], labels: {}, states: {}, flags: ['SHADOWLESS'] },
     ]);
   });
 });

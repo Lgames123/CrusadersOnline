@@ -21,6 +21,7 @@ import {
   COMBO_WINDOW_TICKS,
   DEFAULT_MOVEMENT_STATS,
   uniformMovementStats,
+  locomotionAnim,
   INPUT,
   INTEREST_RADIUS,
   MAX_INPUT_FRAMES,
@@ -735,7 +736,7 @@ export class WorldZone {
           ? ANIM.BLOCK
           : !p.character.grounded
           ? ANIM.AIRBORNE
-          : moving ? (this.frame.flags & INPUT.WALK ? ANIM.WALK : ANIM.RUN) : ANIM.IDLE;
+          : moving ? locomotionAnim(this.frame.flags) : ANIM.IDLE;
       }
     }
 

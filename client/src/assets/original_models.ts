@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { ANIM } from '@crusaders/shared';
+import { ANIM, isLocomotionAnim } from '@crusaders/shared';
 import type { Avatar, AvatarKind } from '../entities/avatar.ts';
 
 /**
@@ -22,6 +22,28 @@ interface ClipMap {
   attacks: string[];
   death: string;
   block: string;
+  /** Backwards, running and careful sidesteps; filled from the model's ASM states when omitted. */
+  retreat?: string;
+  strafeLeft?: string;
+  strafeRight?: string;
+  walkStrafeLeft?: string;
+  walkStrafeRight?: string;
+}
+
+/**
+ * Completes a clip map from the model's animation-state bindings (models.ctx `B` lines, kept by
+ * the converter as `extras.asmStates`): the clips the original plays for each state.
+ */
+function withStates(base: ClipMap, states: Record<string, string> | undefined): ClipMap {
+  const st = states ?? {};
+  return {
+    ...base,
+    retreat: base.retreat ?? st['ASM_RETREAT'] ?? base.run,
+    strafeLeft: base.strafeLeft ?? st['ASM_SIDE_STEP_L'] ?? base.run,
+    strafeRight: base.strafeRight ?? st['ASM_SIDE_STEP_R'] ?? base.run,
+    walkStrafeLeft: base.walkStrafeLeft ?? st['ASM_SIDE_STEP_L'] ?? base.walk,
+    walkStrafeRight: base.walkStrafeRight ?? st['ASM_SIDE_STEP_R'] ?? base.walk,
+  };
 }
 
 const STANDARD_CLIPS: ClipMap = { idle: 'pa21_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pa21_id_br', attacks: ['pn02_1_sw_lv', 'pn01_1_cp_lo', 'pn03_1_sw_ov'], death: 'pi03_hp', block: 'pt01_rdy_shld' };
@@ -30,7 +52,8 @@ const STANDARD_CLIPS: ClipMap = { idle: 'pa21_id_br', run: 'pa01_ru_f', walk: 'p
 const MODELS: Record<string, { file: string; texture?: string; clips: ClipMap }> = {
   self: {
     file: 'drake',
-    clips: { idle: 'pa16_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pc03_ru_fw_jmp', attacks: ['pn09_1_sw_l', 'pn10_1_sw_r', 'pn03_1_sw_ov'], death: 'pi03_hp', block: 'pt01_rdy_shld' },
+    // Drake's ASM_SIDE_STEP states use the running sidesteps; Shift uses the careful ones.
+    clips: { idle: 'pa16_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pc03_ru_fw_jmp', attacks: ['pn09_1_sw_l', 'pn10_1_sw_r', 'pn03_1_sw_ov'], death: 'pi03_hp', block: 'pt01_rdy_shld', walkStrafeLeft: 'pb02_sdstp_l', walkStrafeRight: 'pb03_sdstp_r' },
   },
   skeleton_ghost: { file: 'skeletonwarriorcollision', texture: 'walking_dead_ghost', clips: STANDARD_CLIPS },
   shadow: { file: 'skeletonwarriorcollision', texture: 'shadow', clips: STANDARD_CLIPS },
@@ -80,6 +103,11 @@ class OriginalAvatar implements Avatar {
     if (anim === ANIM.BLOCK) return { name: m.block, loop: false };
     if (anim === ANIM.RUN) return { name: m.run, loop: true };
     if (anim === ANIM.WALK) return { name: m.walk, loop: true };
+    if (anim === ANIM.RETREAT) return { name: m.retreat ?? m.run, loop: true };
+    if (anim === ANIM.STRAFE_LEFT) return { name: m.strafeLeft ?? m.run, loop: true };
+    if (anim === ANIM.STRAFE_RIGHT) return { name: m.strafeRight ?? m.run, loop: true };
+    if (anim === ANIM.WALK_STRAFE_LEFT) return { name: m.walkStrafeLeft ?? m.walk, loop: true };
+    if (anim === ANIM.WALK_STRAFE_RIGHT) return { name: m.walkStrafeRight ?? m.walk, loop: true };
     if (anim === ANIM.AIRBORNE) return { name: m.air, loop: false };
     return { name: m.idle, loop: true };
   }
@@ -88,7 +116,8 @@ class OriginalAvatar implements Avatar {
     if (anim === this.anim) return;
     this.anim = anim;
     const { name, loop } = this.clipFor(anim);
-    const clip = this.clips.get(name);
+    // Models without a direction's clip fall back to their run cycle.
+    const clip = this.clips.get(name) ?? (isLocomotionAnim(anim) ? this.clips.get(this.map.run) : undefined);
     if (!clip) return;
     const action = this.mixer.clipAction(clip);
     action.reset();
@@ -135,7 +164,9 @@ export async function loadOriginalAvatars(): Promise<AvatarFactory | null> {
         texture.colorSpace = THREE.SRGBColorSpace;
         texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
       }
-      loaded.set(kind, { gltf, clips: def.clips, ...(texture ? { texture } : {}) });
+      let states: Record<string, string> | undefined;
+      gltf.scene.traverse((o) => (states ??= (o.userData as { asmStates?: Record<string, string> }).asmStates));
+      loaded.set(kind, { gltf, clips: withStates(def.clips, states), ...(texture ? { texture } : {}) });
     }
     if (loaded.size === 0) return null;
     console.info(`[assets] using original models from your installation: ${[...loaded.keys()].join(', ')}`);

@@ -193,12 +193,16 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
     for (const b of bindings) if (!modelById.has(b.id)) modelById.set(b.id, b.file.replace(/\.mdl$/i, ''));
     const files = new Map<string, string | undefined>(); // lower-case file -> first texture
     const anims = new Map<string, Map<string, string>>(); // lower-case model file -> ani file -> label
+    const states = new Map<string, Record<string, string>>(); // lower-case model file -> ASM state -> clip
     for (const b of bindings) {
       const key = b.file.toLowerCase();
       if (!files.has(key) || (!files.get(key) && b.textures[0])) files.set(key, b.textures[0]);
       let set = anims.get(key);
       if (!set) anims.set(key, (set = new Map()));
       for (const a of b.animations) if (!set.has(a.toLowerCase())) set.set(a.toLowerCase(), b.labels[a] ?? '');
+      let st = states.get(key);
+      if (!st) states.set(key, (st = {}));
+      for (const [state, ani] of Object.entries(b.states)) if (!(state in st)) st[state] = ani.replace(/\.ani$/i, '').toLowerCase();
     }
     log(`models: ${files.size} model files referenced by ${bindingsPath}`);
     let converted = 0;
@@ -232,6 +236,7 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
         const doc = buildModelDocument(model, {
           name: base,
           animations,
+          states: states.get(file) ?? {},
           ...(textureFile ? { textureUri: `../${textureFile}` } : {}),
         });
         const out = `models/${base}.glb`;

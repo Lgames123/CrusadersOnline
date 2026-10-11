@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ANIM, INPUT, TICK_DT, dequantizeAngle, swingForWeaponSpeed, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
+import { ANIM, INPUT, TICK_DT, dequantizeAngle, locomotionAnim, swingForWeaponSpeed, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
 import type { Avatar } from './avatar.ts';
 
 const TURN_RATE = 12; // rad/s, visual only
@@ -54,7 +54,7 @@ export class LocalPlayer {
     if (moving) this.targetFacing = dequantizeAngle(input.yaw);
     this.blocking = !this.dead && (input.flags & INPUT.BLOCK) !== 0;
     if (this.blocking) this.targetFacing = dequantizeAngle(input.yaw);
-    this.moveAnim = !this.character.grounded ? ANIM.AIRBORNE : moving ? (input.flags & INPUT.WALK ? ANIM.WALK : ANIM.RUN) : ANIM.IDLE;
+    this.moveAnim = !this.character.grounded ? ANIM.AIRBORNE : moving ? locomotionAnim(input.flags) : ANIM.IDLE;
   }
 
   setWeaponSpeed(speed: number): void {
