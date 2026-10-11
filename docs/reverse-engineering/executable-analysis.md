@@ -241,3 +241,22 @@ Numpad +/− change a screen-size step: with the HUD shown the 3D view uses the 
 ### 10.5 Controls (game Readme)
 ESDF movement (E forward, D back, S/F strafe), arrows / numpad 4-6 rotate, numpad 9/7/5 look up / down / centre, mouse free look, Space jump (with a direction: directional jumps and flips), C crouch (with a direction: rolls), Shift + direction walk carefully. LMB attack (combos by repeated taps; C/Space/E/S/F + LMB select crouch, jump, overhand, left and right attacks), RMB block, Space + RMB shield rush, Tab interact, R cast, Z use item, W/T/Q cycle weapon/spell/item, A quick select, I inventory, M map, H health potion.
 CrusadersOnline moves the scheme to WASD (`client/src/input/keybindings.ts`); keys displaced by the shift go to the nearest free key (next weapon → E, quick select → X).
+
+---
+
+## 11. Player Locomotion Speeds from Root Motion (2026-10-11)
+
+`Char_RootMotionVelocity` (§7.1) advances the state's clip and turns the root's horizontal displacement into a velocity; the clip wraps at header field `+0x14` − 1 frames (`+0x14` is the loop length for the locomotion clips; one-shot clips store 34 there). The `.ani` header `+0x04` is 1/30 (frame time). Measured per loop on Drake's clips (root displacement between frame 0 and the wrap frame, 30 fps; feet):
+
+| Clip (models.ctx label) | Loop | Distance | Speed |
+|---|---|---|---|
+| `PA01_ru_f` run forward | 25 frames | 13.0 ft | **15.6 ft/s** (4.75 m/s) |
+| `PB01_w_fw` walk forward (careful) | 33 | 5.7 | **5.2 ft/s** |
+| `PA06_rt` retreat | 39 | 5.0 | **3.9 ft/s** |
+| `PB01_w_sideleft` / `sideright` sidestep, running | 22 | 7.3 / 7.8 | **9.9 / 10.6 ft/s** |
+| `PB02_sdstp_l` / `PB03_sdstp_r` sidestep, careful | 20 | 2.3 / 2.8 | **3.5 / 4.1 ft/s** |
+| `PB04/PB05_cm_stp` combat sidestep | 20 | 4.9 / 4.5 | 7.0 / 6.8 ft/s |
+| `PE03/PE06` roll forward / back | 25 | 10.7 / 11.0 | 13.4 / 13.2 ft/s |
+| `PC07/PC08` hop forward / back | 20 | 5.7 / 5.8 | 8.5 / 8.7 ft/s |
+
+The run speed agrees with the 15 units/s constant used for creatures that are not animation-driven (§7.1). The jump clips (`PC01`–`PC06`) move the root only ~0.9 ft up and hardly at all horizontally, so jump height and distance come from somewhere else (UNK-012). These speeds are used as `DEFAULT_MOVEMENT_STATS` (`shared/src/constants.ts`); the per-character speed multiplier (`+0x24C`, §7.2) is not applied yet.

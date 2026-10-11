@@ -55,9 +55,9 @@ test('player 2 sees player 1 move, fight and leave', async ({ browser }) => {
   await expect.poll(() => remotePos(p2, id1)).not.toBeNull();
   const before = (await remotePos(p2, id1))!;
 
-  // Player 1 runs forward for ~1 s.
+  // Player 1 runs forward for ~1.3 s (about 6 m at the original run speed: into aggro range).
   await p1.keyboard.down('KeyW');
-  await p1.waitForTimeout(1000);
+  await p1.waitForTimeout(1300);
   await p1.keyboard.up('KeyW');
   const moved = await selfPos(p1);
   expect(before.z - moved.z).toBeGreaterThan(3);

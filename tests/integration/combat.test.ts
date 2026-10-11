@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startServer, type RunningServer } from '@crusaders/server';
-import { ClientSession, INPUT, MOB_ARCHETYPES, createSyntheticArena, initPhysics, quantizeAngle, type InputFrame, type Rapier } from '@crusaders/shared';
+import { ClientSession, DEFAULT_MOVEMENT_STATS, INPUT, MOB_ARCHETYPES, createSyntheticArena, initPhysics, quantizeAngle, type InputFrame, type Rapier } from '@crusaders/shared';
 import { backends, type TestDatabase } from './db_backends.ts';
 
 const arena = createSyntheticArena();
@@ -44,7 +44,8 @@ describe.each(backends)('vertical-slice combat over the network on $name (M08)',
 
     const s = await play();
     const input: InputFrame = { clientTick: 0, flags: INPUT.FORWARD, yaw: quantizeAngle(0), pitch: 0 };
-    for (let i = 0; i < 20; i++) {
+    // Run 6 m towards the skeleton (into its aggro range).
+    for (let i = 0; i < Math.ceil((6 / DEFAULT_MOVEMENT_STATS.runSpeed) * 20); i++) {
       s.tick(input);
       await sleep(50);
     }

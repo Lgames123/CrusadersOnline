@@ -3,6 +3,7 @@ import { startServer, type RunningServer } from '@crusaders/server';
 import {
   CS,
   ClientSession,
+  DEFAULT_MOVEMENT_STATS,
   INPUT,
   INTERP_DELAY_TICKS,
   createSyntheticArena,
@@ -64,8 +65,8 @@ describe('authoritative multiplayer (M06)', () => {
     // Client A's prediction agrees with the server: no corrections on localhost.
     expect(a.stats.corrections).toBe(0);
     const travelled = startA.z - a.character!.position.z;
-    expect(travelled).toBeGreaterThan(5.5);
-    expect(travelled).toBeLessThan(6.5);
+    expect(travelled).toBeGreaterThan(DEFAULT_MOVEMENT_STATS.runSpeed - 0.5);
+    expect(travelled).toBeLessThan(DEFAULT_MOVEMENT_STATS.runSpeed + 0.5);
 
     // Client B sees A at A's authoritative position (A is idle now).
     const seen: RemoteSample = { x: 0, y: 0, z: 0, yaw: 0, anim: 0, hp: 0 };

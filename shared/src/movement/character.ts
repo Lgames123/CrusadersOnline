@@ -81,14 +81,13 @@ export function stepCharacter(
     const s = Math.sin(yaw);
     const co = Math.cos(yaw);
     // forward = (-sin, -cos), right = (cos, -sin)
-    let dx = -s * fwd + co * right;
-    let dz = -co * fwd - s * right;
-    const len = Math.hypot(dx, dz);
-    const speed = f & INPUT.WALK ? stats.walkSpeed : stats.runSpeed;
-    dx /= len;
-    dz /= len;
-    vx = dx * speed;
-    vz = dz * speed;
+    // Unit input direction, each axis scaled by that direction's speed (diagonals blend).
+    const len = Math.hypot(fwd, right);
+    const walk = (f & INPUT.WALK) !== 0;
+    const along = (fwd / len) * (fwd > 0 ? (walk ? stats.walkSpeed : stats.runSpeed) : (walk ? stats.walkBackSpeed : stats.backSpeed));
+    const side = (right / len) * (walk ? stats.walkStrafeSpeed : stats.strafeSpeed);
+    vx = -s * along + co * side;
+    vz = -co * along - s * side;
   }
 
   let vy = c.velocityY;

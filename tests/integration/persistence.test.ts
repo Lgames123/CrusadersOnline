@@ -176,7 +176,7 @@ describe.each(backends)('shutdown with an unresponsive client on $name (M07)', (
         child.stdout.once('data', (d: Buffer) => resolve(JSON.parse(d.toString())));
         child.once('exit', (code) => reject(new Error(`client exited ${code}`)));
       });
-      expect(pos.x).toBeGreaterThan(5);
+      expect(pos.x).toBeGreaterThan(2.5); // 1 s of sidestepping
       const started = Date.now();
       await server.close();
       expect(Date.now() - started).toBeLessThan(5000);

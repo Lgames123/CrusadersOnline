@@ -18,7 +18,7 @@ Every mechanic from the original 1999 game is tracked against our clean-room imp
 
 | Subsystem | Mechanic | Original 1999 Behavior | MMORPG Reconstruction | Status | Notes |
 |---|---|---|---|---|---|
-| **Movement** | ESDF (moved to WASD) / Strafe | Gridless free movement | Server-simulated from client inputs (shared Rapier controller) | `SPECIFIED` | No client positions accepted |
+| **Movement** | ESDF (moved to WASD) / Strafe | Root-motion driven: run 15.6 ft/s, retreat 3.9, sidestep 10.3, careful walk 5.2 / 3.8 (executable-analysis.md §11) | Shared Rapier controller with the per-direction original speeds (averaged per loop) | `IMPLEMENTED` | Jump impulse and speed multiplier pending (UNK-012) |
 | **Movement** | Jump Impulse | Upward arc with gravity | Fixed $+6.5 \text{ m/s}$ impulse at 20Hz | `SPECIFIED` | Parity with Drake height |
 | **Movement** | Ledge Clamber | Drake pulls up on ledges | Deferred to Phase 8 | `SPECIFIED` | Complex animation blend |
 | **Camera** | 3rd-Person Chase | Rig 4 ft + 2.2 ft up, 7 ft back, aim 8 ft ahead, distance-proportional smoothing, 79.6° horizontal FOV (executable-analysis.md §10) | `ClassicCamera` (default) + optional `ChaseCamera` "Modern" (player setting) | `IMPLEMENTED` | Turn/look rates provisional (UNK-011) |

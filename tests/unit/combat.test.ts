@@ -1,7 +1,9 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { WorldZone, type PersistRecord } from '@crusaders/server/simulation/world_zone';
 import {
+  DEFAULT_MOVEMENT_STATS,
   INPUT,
+  TICK_RATE,
   INPUT_PACKET_MAX_BYTES,
   MOB_ARCHETYPES,
   PLAYER_RESPAWN_TICKS,
@@ -61,6 +63,9 @@ function setup(opts: { experience?: number; inventory?: InventoryEntry[]; random
   return { zone, run, mob, me, events, stats, inventories, persisted, entityId };
 }
 
+/** Ticks of running that cover 6 m (towards the skeleton's aggro range). */
+const APPROACH = Math.ceil((6 / DEFAULT_MOVEMENT_STATS.runSpeed) * TICK_RATE);
+
 describe('melee arc', () => {
   it('accepts targets in front within reach and rejects behind or out of reach', () => {
     // yaw 0 faces -Z
@@ -77,7 +82,7 @@ describe('skeleton warrior AI', () => {
     const t = setup();
     t.run(20);
     expect(t.mob().state).toBe('idle');
-    t.run(20, INPUT.FORWARD, 0); // run towards -Z (mob at z = -15)
+    t.run(APPROACH, INPUT.FORWARD, 0); // run towards -Z (mob at z = -15)
     t.run(40);
     expect(t.mob().state).toBe('chase');
     const gap = Math.hypot(t.mob().x - t.me().x, t.mob().z - t.me().z);
@@ -86,7 +91,7 @@ describe('skeleton warrior AI', () => {
 
   it('gives up beyond its leash, walks home and stays idle', () => {
     const t = setup();
-    t.run(20, INPUT.FORWARD, 0); // aggro
+    t.run(APPROACH, INPUT.FORWARD, 0); // aggro
     t.run(10);
     expect(t.mob().state).toBe('chase');
     t.run(200, INPUT.FORWARD, Math.PI); // flee to the +Z wall, ~35 m from the mob's spawn (leash 30 m)
@@ -100,7 +105,7 @@ describe('skeleton warrior AI', () => {
 describe('authoritative melee', () => {
   it('kills the skeleton with a combo chain and rewards XP and gold (persisted immediately)', () => {
     const t = setup();
-    t.run(20, INPUT.FORWARD, 0);
+    t.run(APPROACH, INPUT.FORWARD, 0);
     t.run(30); // let the mob arrive in front of us
     // Swing whenever possible; requests during startup/active are ignored by the server.
     for (let i = 0; i < 200 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
@@ -125,7 +130,7 @@ describe('authoritative melee', () => {
 
   it('ignores attack spam: at most one hit per swing lifecycle', () => {
     const t = setup();
-    t.run(20, INPUT.FORWARD, 0);
+    t.run(APPROACH, INPUT.FORWARD, 0);
     t.run(30);
     const before = t.events().filter((e) => e.target === t.mob().id).length;
     t.run(40, 0, 0, () => {
@@ -139,7 +144,7 @@ describe('authoritative melee', () => {
 
   it('lets the skeleton kill an idle player, who respawns with full health', () => {
     const t = setup();
-    t.run(20, INPUT.FORWARD, 0);
+    t.run(APPROACH, INPUT.FORWARD, 0);
     let deadAt = -1;
     for (let i = 0; i < 1500 && deadAt < 0; i++) {
       t.run(1);
@@ -154,7 +159,7 @@ describe('authoritative melee', () => {
 
   it('levels up at the original threshold; the max-HP gain is added to current HP', () => {
     const t = setup({ experience: 470 });
-    t.run(20, INPUT.FORWARD, 0);
+    t.run(APPROACH, INPUT.FORWARD, 0);
     t.run(30);
     for (let i = 0; i < 200 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
     t.run(1);
@@ -175,7 +180,7 @@ describe('difficulty and flinch (original rules)', () => {
 
   it('interrupts the player with a flinch when a hit takes a large share of remaining HP', () => {
     const t = setup();
-    t.run(20, INPUT.FORWARD, 0);
+    t.run(APPROACH, INPUT.FORWARD, 0);
     // Wait until the skeleton has brought us low enough that 7.2 damage >= 0.7 x HP before the hit.
     let flinched = false;
     for (let i = 0; i < 1500 && t.me().alive && !flinched; i++) {
@@ -189,7 +194,7 @@ describe('difficulty and flinch (original rules)', () => {
 describe('shield block (original rule)', () => {
   it('stops every frontal hit while the shield is raised towards the attacker', () => {
     const t = setup();
-    t.run(20, INPUT.FORWARD, 0); // aggro; we face -Z, the skeleton comes from -Z
+    t.run(APPROACH, INPUT.FORWARD, 0); // aggro; we face -Z, the skeleton comes from -Z
     t.run(300, INPUT.BLOCK, 0);
     const onMe = t.events().filter((e) => e.target === t.entityId);
     expect(onMe.length).toBeGreaterThan(3);
@@ -199,7 +204,7 @@ describe('shield block (original rule)', () => {
 
   it('does not protect against hits from behind', () => {
     const t = setup();
-    t.run(20, INPUT.FORWARD, 0);
+    t.run(APPROACH, INPUT.FORWARD, 0);
     t.run(300, INPUT.BLOCK, Math.PI); // shield raised but facing away from the skeleton
     const onMe = t.events().filter((e) => e.target === t.entityId);
     expect(onMe.length).toBeGreaterThan(0);
@@ -208,7 +213,7 @@ describe('shield block (original rule)', () => {
 
   it('cannot block while swinging', () => {
     const t = setup();
-    t.run(20, INPUT.FORWARD, 0);
+    t.run(APPROACH, INPUT.FORWARD, 0);
     t.run(300, INPUT.BLOCK, 0, () => t.zone.attack(1));
     expect(t.events().some((e) => e.target === t.entityId && !e.blocked)).toBe(true);
   });
@@ -263,7 +268,7 @@ describe('inventory and equipment', () => {
     t.zone.equip(1, 2, true);
     t.zone.equip(1, 3, true);
     expect(t.inventories().at(-1)!.weaponSpeed).toBe(1);
-    t.run(20, INPUT.FORWARD, 0);
+    t.run(APPROACH, INPUT.FORWARD, 0);
     t.run(30);
     for (let i = 0; i < 200 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
     const dealt = t.events().filter((e) => e.target === t.mob().id).map((e) => e.damage);
@@ -295,8 +300,10 @@ describe('skeleton shield AI', () => {
   it('raises its shield against a frontal swing, then lowers it for a cooldown', () => {
     // 0.99 passes the 35% block roll (and skips loot); 0 (the default) never blocks.
     const t = setup({ random: () => 0.99 });
-    t.run(20, INPUT.FORWARD, 0);
+    t.run(APPROACH, INPUT.FORWARD, 0);
     t.run(30);
+    // A mob cannot block mid-swing: wait for the skeleton's own swing to end.
+    for (let i = 0; i < 40 && t.mob().swinging; i++) t.run(1);
     t.zone.attack(1);
     t.run(12);
     const first = t.events().filter((e) => e.target === t.mob().id);
@@ -314,7 +321,7 @@ describe('skeleton shield AI', () => {
 
   it('never blocks with a zero random source (deterministic combat tests)', () => {
     const t = setup();
-    t.run(20, INPUT.FORWARD, 0);
+    t.run(APPROACH, INPUT.FORWARD, 0);
     t.run(30);
     for (let i = 0; i < 200 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
     expect(t.events().some((e) => e.target === t.mob().id && e.blocked)).toBe(false);

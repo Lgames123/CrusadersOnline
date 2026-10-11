@@ -55,6 +55,24 @@ describe('shared character controller', () => {
     expect(Math.abs(c.position.x)).toBeLessThan(0.01);
   });
 
+  it('uses the original per-direction speeds (retreat, sidestep, careful walk)', () => {
+    const cases: [number, number][] = [
+      [INPUT.BACK, DEFAULT_MOVEMENT_STATS.backSpeed],
+      [INPUT.LEFT, DEFAULT_MOVEMENT_STATS.strafeSpeed],
+      [INPUT.FORWARD | INPUT.WALK, DEFAULT_MOVEMENT_STATS.walkSpeed],
+      [INPUT.RIGHT | INPUT.WALK, DEFAULT_MOVEMENT_STATS.walkStrafeSpeed],
+    ];
+    for (const [flags, speed] of cases) {
+      const { mw, c } = setup();
+      run(mw, c, 0, 0, 10);
+      const start = { ...c.position };
+      run(mw, c, flags, 0, 20);
+      expect(Math.hypot(c.position.x - start.x, c.position.z - start.z)).toBeCloseTo(speed, 1);
+    }
+    // Running is about four times faster than retreating, as in the original.
+    expect(DEFAULT_MOVEMENT_STATS.runSpeed / DEFAULT_MOVEMENT_STATS.backSpeed).toBeCloseTo(4, 0);
+  });
+
   it('does not move faster diagonally', () => {
     const { mw, c } = setup();
     run(mw, c, 0, 0, 10);
@@ -158,7 +176,7 @@ describe('regression: controller never sticks on flat ground', () => {
     for (let x = -15; x <= 15; x += 0.5) {
       if (Math.abs(Math.abs(x) - 8) < 1.3) continue; // pillar lanes
       const c = createCharacter(mw, { x, y: 0.05, z: 3 });
-      run(mw, c, INPUT.FORWARD, 0, 40);
+      run(mw, c, INPUT.FORWARD, 0, 60);
       if (c.position.z > -8.5) stuck.push(x);
     }
     expect(stuck).toEqual([]);

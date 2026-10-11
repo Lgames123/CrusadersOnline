@@ -20,6 +20,7 @@ import {
   COMBO_MULTIPLIERS,
   COMBO_WINDOW_TICKS,
   DEFAULT_MOVEMENT_STATS,
+  uniformMovementStats,
   INPUT,
   INTEREST_RADIUS,
   MAX_INPUT_FRAMES,
@@ -350,7 +351,7 @@ export class WorldZone {
       threat: new Map(),
       nextSwingTick: 0,
       input: createInputFrame(),
-      stats: { walkSpeed: archetype.speed, runSpeed: archetype.speed, jumpVelocity: 0 },
+      stats: uniformMovementStats(archetype.speed),
     };
     this.register(mob);
   }
@@ -1082,13 +1083,14 @@ export class WorldZone {
   }
 
   /** Debug/test view of every actor. */
-  inspect(): { id: number; kind: Actor['kind']; hp: number; alive: boolean; state?: Mob['state']; x: number; z: number }[] {
+  inspect(): { id: number; kind: Actor['kind']; hp: number; alive: boolean; state?: Mob['state']; swinging: boolean; x: number; z: number }[] {
     return [...this.actors.values()].map((a) => ({
       id: a.entityId,
       kind: a.kind,
       hp: a.hp,
       alive: alive(a),
       ...(a.kind === 'mob' ? { state: a.state } : {}),
+      swinging: !!a.swing,
       x: a.character.position.x,
       z: a.character.position.z,
     }));
