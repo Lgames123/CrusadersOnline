@@ -90,6 +90,20 @@ describe('.mdl parser', () => {
   });
 });
 
+describe('held items', () => {
+  it('a single-node model bakes its node transform and keeps it in extras (mounting by the node frame)', () => {
+    const model = parseMdl(buildFixture());
+    const single = { ...model, nodes: [{ ...model.nodes[1]!, parent: -1, firstVertex: 0, vertexCount: 4 }] };
+    const doc = buildModelDocument(single, { name: 'item' });
+    const node = doc.getRoot().listNodes()[0]!;
+    const t = (node.getExtras() as { nodeTransform: { rotation: number[]; translation: number[] } }).nodeTransform;
+    // Glb space mirrors Z: translation (2, 0, 0) stays, the quaternion's x / y flip sign.
+    expect(t.translation).toEqual([2, 0, -0]);
+    expect(t.rotation[1]).toBeCloseTo(-Math.SQRT1_2, 6);
+    expect(t.rotation[3]).toBeCloseTo(Math.SQRT1_2, 6);
+  });
+});
+
 describe('models.ctx bindings', () => {
   it('collects file, textures, animations and flags per model id', () => {
     const b = parseModelsCtx('# comment\nN 0 drake.mdl\nT drake\t\t# tex\nL PA01_ru_f.ani # run\nB ASM_RUNNING\t\tPA01_ru_f.ani\nB ASM_THROW_ITEM\n\nN 21 rock01.mdl\nT Dw_ER\nSHADOWLESS\n');

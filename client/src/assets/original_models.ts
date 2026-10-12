@@ -86,9 +86,21 @@ function withStates(base: ClipMap, states: Record<string, string> | undefined): 
 const STANDARD_CLIPS: ClipMap = { idle: 'pa21_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pa21_id_br', attacks: ['pn02_1_sw_lv', 'pn01_1_cp_lo', 'pn03_1_sw_ov'], death: 'pi03_hp', block: 'pt01_rdy_shld' };
 
 /** Avatar kind -> converted model, optional texture variant (models.ctx `T` lines) and clips. */
-const MODELS: Record<string, { file: string; texture?: string; clips: ClipMap }> = {
+/**
+ * Equipment models held at the character's attachment dummies ("DMY XFRM WPN RIGHT" on the
+ * right hand for the weapon, "DMY XFRM WPN LEFT" on the left forearm for the shield).
+ */
+interface Equipment {
+  right?: string;
+  left?: string;
+}
+/** Basic equipment: Long Sword and Wooden Shield (the skeletons' template equipment too). */
+const BASIC_EQUIPMENT: Equipment = { right: 'longsword', left: 'woodshield' };
+
+const MODELS: Record<string, { file: string; texture?: string; clips: ClipMap; equipment?: Equipment }> = {
   self: {
     file: 'drake',
+    equipment: BASIC_EQUIPMENT,
     // Drake's ASM_SIDE_STEP states use the running sidesteps; Shift uses the careful ones.
     // Plain clicks: Drake's combo sequence in models.ctx (COMBO 1-3). Forward + click: the
     // overhead swing; left / right + click: the side swings (game Readme).
@@ -102,11 +114,12 @@ const MODELS: Record<string, { file: string; texture?: string; clips: ClipMap }>
       walkStrafeLeft: 'pb02_sdstp_l', walkStrafeRight: 'pb03_sdstp_r',
     },
   },
-  skeleton_ghost: { file: 'skeletonwarriorcollision', texture: 'walking_dead_ghost', clips: STANDARD_CLIPS },
-  shadow: { file: 'skeletonwarriorcollision', texture: 'shadow', clips: STANDARD_CLIPS },
+  skeleton_ghost: { file: 'skeletonwarriorcollision', texture: 'walking_dead_ghost', clips: STANDARD_CLIPS, equipment: BASIC_EQUIPMENT },
+  shadow: { file: 'skeletonwarriorcollision', texture: 'shadow', clips: STANDARD_CLIPS, equipment: BASIC_EQUIPMENT },
   dark_mage: { file: 'dark_magecollision', clips: { ...STANDARD_CLIPS, idle: 'pa16_id_br' } },
   skeleton_warrior: {
     file: 'skeletonwarriorcollision',
+    equipment: BASIC_EQUIPMENT,
     clips: { idle: 'pa21_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pa21_id_br', attacks: ['pn02_1_sw_lv', 'pn01_1_cp_lo', 'pn03_1_sw_ov'], death: 'pi03_hp', block: 'pt01_rdy_shld' },
   },
 };
@@ -120,9 +133,10 @@ class OriginalAvatar implements Avatar {
   private current: THREE.AnimationAction | null = null;
   private anim = -1;
 
-  constructor(source: GLTF, map: ClipMap, texture?: THREE.Texture) {
+  constructor(source: GLTF, map: ClipMap, texture?: THREE.Texture, equipment?: { right?: THREE.Object3D; left?: THREE.Object3D }) {
     const model = cloneSkinned(source.scene);
     model.scale.setScalar(UNIT_SCALE);
+    if (equipment) attachEquipment(model, equipment);
     model.traverse((o) => {
       o.castShadow = true;
       o.frustumCulled = false; // skinned bounds do not follow animation
@@ -327,6 +341,44 @@ class OriginalAvatar implements Avatar {
   }
 }
 
+/**
+ * Hangs equipment models on the attachment dummies kept in the model's extras (raw MDL values:
+ * rotation quaternion x, y, z, w then translation, relative to the dummy's bone), converted to
+ * glTF space with the same Z mirror as the bones.
+ */
+function attachEquipment(model: THREE.Object3D, equipment: { right?: THREE.Object3D; left?: THREE.Object3D }): void {
+  let dummies: { name: string; node: number; values: number[] }[] | undefined;
+  model.traverse((o) => (dummies ??= (o.userData as { transforms?: { name: string; node: number; values: number[] }[] }).transforms));
+  if (!dummies?.length) return;
+  const bones: THREE.Bone[] = [];
+  model.traverse((o) => {
+    if ((o as THREE.SkinnedMesh).isSkinnedMesh && bones.length === 0) bones.push(...(o as THREE.SkinnedMesh).skeleton.bones);
+  });
+  for (const d of dummies) {
+    const side = d.name.endsWith('RIGHT') ? 'right' : d.name.endsWith('LEFT') ? 'left' : null;
+    const item = side ? equipment[side] : undefined;
+    const bone = bones[d.node];
+    if (!item || !bone || d.values.length < 7) continue;
+    const [x, y, z, w, tx, ty, tz] = d.values as [number, number, number, number, number, number, number];
+    const mount = new THREE.Object3D();
+    mount.name = d.name;
+    mount.quaternion.set(-x, -y, z, w).normalize();
+    mount.position.set(tx, ty, -tz);
+    const held = item.clone(true);
+    held.traverse((o) => (o.castShadow = true));
+    // Items are mounted by their node frame: undo the node transform baked into their vertices.
+    let node: { rotation: number[]; translation: number[] } | undefined;
+    held.traverse((o) => (node ??= (o.userData as { nodeTransform?: { rotation: number[]; translation: number[] } }).nodeTransform));
+    if (node) {
+      const q = new THREE.Quaternion(node.rotation[0], node.rotation[1], node.rotation[2], node.rotation[3]).normalize().invert();
+      held.quaternion.copy(q);
+      held.position.set(node.translation[0]!, node.translation[1]!, node.translation[2]!).applyQuaternion(q).negate();
+    }
+    mount.add(held);
+    bone.add(mount);
+  }
+}
+
 export type AvatarFactory = (kind: AvatarKind) => Avatar | null;
 
 /** Resolves to a factory for original-model avatars, or null when not available. */
@@ -338,7 +390,17 @@ export async function loadOriginalAvatars(): Promise<AvatarFactory | null> {
     const loader = new GLTFLoader();
     const textures = new THREE.TextureLoader();
     const gltfs = new Map<string, GLTF>();
-    const loaded = new Map<string, { gltf: GLTF; clips: ClipMap; events: Map<string, { frame: number; name: string }[]>; texture?: THREE.Texture }>();
+    const loaded = new Map<string, { gltf: GLTF; clips: ClipMap; events: Map<string, { frame: number; name: string }[]>; texture?: THREE.Texture; equipment: { right?: THREE.Object3D; left?: THREE.Object3D } }>();
+    /** Equipment model scenes by file name (textures resolve relative to the .glb). */
+    const props = new Map<string, THREE.Object3D | null>();
+    const prop = async (file: string | undefined): Promise<THREE.Object3D | undefined> => {
+      if (!file) return undefined;
+      if (!props.has(file)) {
+        const url = manifest.models[file];
+        props.set(file, url ? (await loader.loadAsync(`/generated/${url}`).catch(() => null))?.scene ?? null : null);
+      }
+      return props.get(file) ?? undefined;
+    };
     for (const [kind, def] of Object.entries(MODELS)) {
       const url = manifest.models[def.file];
       if (!url) continue;
@@ -360,14 +422,17 @@ export async function loadOriginalAvatars(): Promise<AvatarFactory | null> {
       for (const an of json.animations ?? []) {
         if (an.name && an.extras?.events?.length) events.set(an.name, an.extras.events.map((e) => ({ frame: e.frame, name: e.name.trim() })));
       }
-      loaded.set(kind, { gltf, clips: withStates(def.clips, states), events, ...(texture ? { texture } : {}) });
+      const right = await prop(def.equipment?.right);
+      const left = await prop(def.equipment?.left);
+      const equipment = { ...(right ? { right } : {}), ...(left ? { left } : {}) };
+      loaded.set(kind, { gltf, clips: withStates(def.clips, states), events, equipment, ...(texture ? { texture } : {}) });
     }
     if (loaded.size === 0) return null;
     console.info(`[assets] using original models from your installation: ${[...loaded.keys()].join(', ')}`);
     return (kind) => {
       const entry = loaded.get(kind === 'player' ? 'self' : kind);
       if (!entry) return null;
-      const avatar = new OriginalAvatar(entry.gltf, entry.clips, entry.texture);
+      const avatar = new OriginalAvatar(entry.gltf, entry.clips, entry.texture, entry.equipment);
       avatar.events = entry.events;
       return avatar;
     };

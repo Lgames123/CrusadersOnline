@@ -120,7 +120,11 @@ export function buildModelDocument(model: MdlModel, opts: ModelEmitOptions): Doc
   };
 
   if (model.nodes.length <= 1) {
-    scene.addChild(doc.createNode(opts.name).setMesh(mesh).setExtras(extras));
+    // The node's own transform is baked into the vertices; it is kept so a held item (weapon,
+    // shield) can be mounted by its node frame, as the engine attaches it.
+    const node = model.nodes[0];
+    const nodeTransform = node ? { rotation: mq(node.rotation), translation: mv(node.translation) } : undefined;
+    scene.addChild(doc.createNode(opts.name).setMesh(mesh).setExtras({ ...extras, ...(nodeTransform ? { nodeTransform } : {}) }));
     return doc;
   }
 

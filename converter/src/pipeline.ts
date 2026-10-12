@@ -63,7 +63,7 @@ export interface ConvertReport {
   warnings: string[];
 }
 
-const MANIFEST_VERSION = '1.1.0';
+const MANIFEST_VERSION = '1.2.0'; // 1.2: single-node models keep extras.nodeTransform (held items)
 /** Bump when level output changes so cached levels are rebuilt. */
 const LEVEL_EMIT_VERSION = '2';
 
