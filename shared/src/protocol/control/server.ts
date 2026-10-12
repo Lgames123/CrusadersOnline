@@ -165,11 +165,13 @@ export function movementAnim(flags: number, grounded: boolean, rollDir: number):
 
 export type AttackKind = 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump';
 
-/** The original's attack selection: forward + click overhead, left/right + click side swings. */
+/**
+ * The original's attack selection, measured in the running game (executable-analysis.md §14):
+ * forward (running) or jump + click = ASM_JUMP_ATTACK, left / right + click = side swings;
+ * a plain click, and a click while ducking, start the five-swing combo.
+ */
 export function attackKindFor(flags: number): AttackKind {
-  if (flags & INPUT.DUCK) return 'low';
-  if (flags & INPUT.JUMP) return 'jump';
-  if (flags & INPUT.FORWARD) return 'overhead';
+  if (flags & (INPUT.JUMP | INPUT.FORWARD)) return 'jump';
   if (flags & INPUT.LEFT && !(flags & INPUT.RIGHT)) return 'left';
   if (flags & INPUT.RIGHT && !(flags & INPUT.LEFT)) return 'right';
   return 'normal';

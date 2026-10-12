@@ -160,11 +160,11 @@ describe('shared character controller', () => {
 
   it('picks the attack from the movement key held with the click', () => {
     expect(attackKindFor(0)).toBe('normal');
-    expect(attackKindFor(INPUT.FORWARD | INPUT.LEFT)).toBe('overhead');
+    expect(attackKindFor(INPUT.FORWARD | INPUT.LEFT)).toBe('jump');
     expect(attackKindFor(INPUT.LEFT)).toBe('left');
     expect(attackKindFor(INPUT.RIGHT)).toBe('right');
     expect(attackKindFor(INPUT.BACK)).toBe('normal');
-    expect(attackKindFor(INPUT.DUCK | INPUT.FORWARD)).toBe('low');
+    expect(attackKindFor(INPUT.DUCK)).toBe('normal');
     expect(attackKindFor(INPUT.JUMP)).toBe('jump');
   });
 
