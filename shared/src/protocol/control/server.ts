@@ -163,16 +163,16 @@ export const ANIM = {
 
 /** Animation for a character's own movement state (roll, duck, airborne, locomotion, idle). */
 export function movementAnim(flags: number, grounded: boolean, rollDir: number): number {
+  if (rollDir === 5) return ANIM.HOP_LEFT;
+  if (rollDir === 6) return ANIM.HOP_RIGHT;
+  if (rollDir === 7) return ANIM.BLOCK; // stand after a side hop, shield still up
   if (rollDir) return ANIM.ROLL + rollDir - 1;
   if (!grounded) return ANIM.AIRBORNE;
   if (flags & INPUT.DUCK) return ANIM.CROUCH;
   if (flags & INPUT.ROOTED) return ANIM.IDLE;
   if (flags & INPUT.BLOCK) {
-    // Shield up: forward walks, back retreats, any sideways key hops to that side.
-    const right = (flags & INPUT.RIGHT ? 1 : 0) - (flags & INPUT.LEFT ? 1 : 0);
+    // Shield up: forward walks, back retreats (side hops come through rollDir above).
     const fwd = (flags & INPUT.FORWARD ? 1 : 0) - (flags & INPUT.BACK ? 1 : 0);
-    if (right > 0) return ANIM.HOP_RIGHT;
-    if (right < 0) return ANIM.HOP_LEFT;
     if (fwd > 0) return ANIM.WALK;
     if (fwd < 0) return ANIM.RETREAT;
     return ANIM.BLOCK;

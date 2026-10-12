@@ -149,7 +149,7 @@ export function decodeSnapshot(
     selfAirKind: view.getUint8(29),
   };
   if (header.selfAirKind > 2) return null;
-  if ((view.getUint8(17) & ~0b1111) !== 0 || ((view.getUint8(17) >> 1) & 7) > 4) return null;
+  if ((view.getUint8(17) & ~0b1111) !== 0) return null;
   const base = header.baselineTick === 0 ? null : baseline;
   if (header.baselineTick !== 0 && !base) return null;
 

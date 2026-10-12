@@ -94,11 +94,18 @@ export const ROLLS: readonly { ticks: number; speed: number }[] = ORIGINAL_ROLLS
 
 /**
  * With the shield up (right mouse button) the original walks forward (ASM_WALKING), retreats
- * backwards (ASM_RETREAT) and moves sideways in repeated side hops (ASM_HOP_L / ASM_HOP_R:
- * PC09 5.75 ft and PC10 4.94 ft per 20-frame hop plus a short stand), measured at ~7 / ~6 ft/s.
+ * backwards (ASM_RETREAT) and moves sideways in discrete side hops (ASM_HOP_L / ASM_HOP_R:
+ * PC09 5.75 ft and PC10 4.94 ft of root motion per 20-frame hop), each followed by a short
+ * stand (~0.2 s) before the next one while the key is held (executable-analysis §14.2).
  */
-export const SHIELD_HOP_LEFT_SPEED = (5.75 / 0.8) * FT;
-export const SHIELD_HOP_RIGHT_SPEED = (4.94 / 0.8) * FT;
+export const SHIELD_HOP_TICKS = Math.round((20 / (30 * CLIP_RATE)) * TICK_RATE);
+export const SHIELD_HOP_PAUSE_TICKS = Math.round(0.2 * TICK_RATE);
+export const SHIELD_HOP_LEFT_SPEED = (5.75 * FT) / (SHIELD_HOP_TICKS / TICK_RATE);
+export const SHIELD_HOP_RIGHT_SPEED = (4.94 * FT) / (SHIELD_HOP_TICKS / TICK_RATE);
+/** Movement action ids beyond the rolls (1-4): side hops and the stand after a hop. */
+export const ACTION_HOP_LEFT = 5;
+export const ACTION_HOP_RIGHT = 6;
+export const ACTION_HOP_PAUSE = 7;
 
 /** Same speed in every direction (creatures until their own clips are measured). */
 export function uniformMovementStats(speed: number, jumpVelocity = 0): MovementStats {

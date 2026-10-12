@@ -145,8 +145,8 @@ class OriginalAvatar implements Avatar {
     if (anim >= ANIM.ROLL && anim < ANIM.ROLL + 4) return { name: m.rolls?.[anim - ANIM.ROLL] ?? m.run, loop: false };
     if (anim === ANIM.CROUCH) return { name: m.crouch ?? m.idle, loop: false };
     if (anim === ANIM.HOP_FORWARD) return { name: m.hop ?? m.run, loop: false };
-    if (anim === ANIM.HOP_LEFT) return { name: m.hopLeft ?? m.run, loop: true };
-    if (anim === ANIM.HOP_RIGHT) return { name: m.hopRight ?? m.run, loop: true };
+    if (anim === ANIM.HOP_LEFT) return { name: m.hopLeft ?? m.run, loop: false };
+    if (anim === ANIM.HOP_RIGHT) return { name: m.hopRight ?? m.run, loop: false };
     if (anim === ANIM.ATTACK_OVERHEAD) return { name: m.attackOverhead ?? m.attacks[0]!, loop: false };
     if (anim === ANIM.ATTACK_LEFT) return { name: m.attackLeft ?? m.attacks[0]!, loop: false };
     if (anim === ANIM.ATTACK_RIGHT) return { name: m.attackRight ?? m.attacks[0]!, loop: false };

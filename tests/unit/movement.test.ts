@@ -3,8 +3,11 @@ import {
   ANIM,
   DEFAULT_MOVEMENT_STATS,
   INPUT,
-  SHIELD_HOP_LEFT_SPEED,
-  SHIELD_HOP_RIGHT_SPEED,
+  ACTION_HOP_LEFT,
+  ACTION_HOP_PAUSE,
+  ACTION_HOP_RIGHT,
+  SHIELD_HOP_PAUSE_TICKS,
+  SHIELD_HOP_TICKS,
   movementAnim,
   ROLLS,
   attackKindFor,
@@ -166,8 +169,6 @@ describe('shared character controller', () => {
     const cases: [number, number][] = [
       [INPUT.BLOCK | INPUT.FORWARD, DEFAULT_MOVEMENT_STATS.walkSpeed],
       [INPUT.BLOCK | INPUT.BACK, DEFAULT_MOVEMENT_STATS.walkBackSpeed],
-      [INPUT.BLOCK | INPUT.LEFT, SHIELD_HOP_LEFT_SPEED],
-      [INPUT.BLOCK | INPUT.RIGHT, SHIELD_HOP_RIGHT_SPEED],
     ];
     for (const [flags, speed] of cases) {
       const { mw, c } = setup();
@@ -176,9 +177,25 @@ describe('shared character controller', () => {
       run(mw, c, flags, 0, 20);
       expect(Math.hypot(c.position.x - start.x, c.position.z - start.z)).toBeCloseTo(speed, 1);
     }
+    // Sideways: one discrete hop covers the clip's root motion, then a short stand.
+    for (const [flags, feet, dir] of [[INPUT.BLOCK | INPUT.LEFT, 5.75, ACTION_HOP_LEFT], [INPUT.BLOCK | INPUT.RIGHT, 4.94, ACTION_HOP_RIGHT]] as const) {
+      const { mw, c } = setup();
+      run(mw, c, 0, 0, 10);
+      const start = { ...c.position };
+      run(mw, c, flags, 0, 1);
+      expect(c.rollDir).toBe(dir);
+      run(mw, c, flags, 0, SHIELD_HOP_TICKS - 1);
+      expect(c.rollDir).toBe(ACTION_HOP_PAUSE);
+      const hopped = Math.hypot(c.position.x - start.x, c.position.z - start.z) / 0.3048;
+      expect(hopped).toBeCloseTo(feet, 1);
+      const mid = { ...c.position };
+      run(mw, c, flags, 0, SHIELD_HOP_PAUSE_TICKS - 1);
+      expect(Math.hypot(c.position.x - mid.x, c.position.z - mid.z)).toBeLessThan(1e-3); // standing
+    }
     expect(movementAnim(INPUT.BLOCK | INPUT.FORWARD, true, 0)).toBe(ANIM.WALK);
     expect(movementAnim(INPUT.BLOCK | INPUT.BACK, true, 0)).toBe(ANIM.RETREAT);
-    expect(movementAnim(INPUT.BLOCK | INPUT.LEFT | INPUT.FORWARD, true, 0)).toBe(ANIM.HOP_LEFT);
+    expect(movementAnim(INPUT.BLOCK | INPUT.LEFT, true, ACTION_HOP_LEFT)).toBe(ANIM.HOP_LEFT);
+    expect(movementAnim(INPUT.BLOCK | INPUT.LEFT, true, ACTION_HOP_PAUSE)).toBe(ANIM.BLOCK);
     expect(movementAnim(INPUT.BLOCK, true, 0)).toBe(ANIM.BLOCK);
   });
 

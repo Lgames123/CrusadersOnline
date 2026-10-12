@@ -383,4 +383,4 @@ Implemented: chains of 1/2/3 swings (55/35/10 %); guard of 0.4–1.9 s with the 
 
 Sampled the player's ASM state and pose while holding the shield (right mouse button) and moving: forward → ASM_WALKING at 5.65 ft/s (the careful-walk speed), backward → ASM_RETREAT at 4.34 ft/s, sideways and diagonals → repeated ASM_HOP_L / ASM_HOP_R side hops (PC09 / PC10) with short stands in between, ~6–8 ft/s on average. Standing still with the shield up plays ASM_BLOCK (PE07).
 
-Implemented in the shared movement step and `movementAnim()`: shield + forward / back use the careful walk / retreat speeds and clips; shield + any sideways key hops to that side at 5.75 / 4.94 ft per 0.8 s (left / right).
+Implemented in the shared movement step and `movementAnim()`: shield + forward / back use the careful walk / retreat speeds and clips; shield + a sideways key performs discrete side hops — 12 ticks covering the clip's 5.75 / 4.94 ft (left / right), then a 0.2 s stand with the shield up — repeated while the key is held. The hop and stand are timed movement actions (ids 5–7 next to the rolls), carried in the reconciled snapshot like a roll.

@@ -1,5 +1,5 @@
 import type RAPIER from '@dimforge/rapier3d-deterministic-compat';
-import { SHIELD_HOP_LEFT_SPEED, SHIELD_HOP_RIGHT_SPEED, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
+import { ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_SPEED, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_SPEED, SHIELD_HOP_TICKS, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
 import type { Vec3 } from '../math/vec3.ts';
 import { dequantizeAngle } from '../math/quantize.ts';
 import { INPUT } from '../protocol/opcodes.ts';
@@ -17,7 +17,10 @@ export interface Character {
   position: Vec3;
   velocityY: number;
   grounded: boolean;
-  /** Roll in progress: 0 none, 1 forward, 2 back, 3 left, 4 right. */
+  /**
+   * Timed movement action in progress: 0 none, 1-4 rolls (forward, back, left, right),
+   * 5 / 6 shield side hops (left / right), 7 the stand after a side hop.
+   */
   rollDir: number;
   /** Ticks of the roll still to run. */
   rollTicks: number;
@@ -103,11 +106,17 @@ export function stepCharacter(
   let fwd = 0;
   let right = 0;
   // C + direction starts a roll (grounded, not attacking); it then runs its full length.
-  if (c.rollTicks === 0 && c.grounded && f & INPUT.ROLL && !(f & INPUT.ROOTED)) {
-    const dir = rollDirection(f);
+  // Shield + a sideways key starts a side hop (the original moves sideways in hops when
+  // blocking); each hop is followed by a short stand.
+  if (c.rollTicks === 0 && c.grounded && !(f & INPUT.ROOTED)) {
+    const dir = f & INPUT.ROLL ? rollDirection(f) : 0;
+    const side = (f & INPUT.RIGHT ? 1 : 0) - (f & INPUT.LEFT ? 1 : 0);
     if (dir) {
       c.rollDir = dir;
       c.rollTicks = ROLLS[dir - 1]!.ticks;
+    } else if (f & INPUT.BLOCK && side !== 0) {
+      c.rollDir = side > 0 ? ACTION_HOP_RIGHT : ACTION_HOP_LEFT;
+      c.rollTicks = SHIELD_HOP_TICKS;
     }
   }
   const rolling = c.rollTicks > 0;
@@ -125,9 +134,10 @@ export function stepCharacter(
     const yaw = dequantizeAngle(input.yaw);
     const s = Math.sin(yaw);
     const co = Math.cos(yaw);
-    const speed = ROLLS[c.rollDir - 1]!.speed;
+    const hop = c.rollDir === ACTION_HOP_LEFT ? -SHIELD_HOP_LEFT_SPEED : c.rollDir === ACTION_HOP_RIGHT ? SHIELD_HOP_RIGHT_SPEED : 0;
+    const speed = c.rollDir <= 4 ? ROLLS[c.rollDir - 1]!.speed : 0;
     const along = c.rollDir === 1 ? speed : c.rollDir === 2 ? -speed : 0;
-    const side = c.rollDir === 4 ? speed : c.rollDir === 3 ? -speed : 0;
+    const side = c.rollDir === 4 ? speed : c.rollDir === 3 ? -speed : hop;
     vx = -s * along + co * side;
     vz = -co * along - s * side;
   } else if (fwd !== 0 || right !== 0) {
@@ -138,24 +148,15 @@ export function stepCharacter(
     // Straight: that direction's speed. Diagonal: the body turns into the motion
     // (movementFacingOffset) and keeps the forward or backward cycle's speed.
     const len = Math.hypot(fwd, right);
-    // Shield up: walk forward, retreat back, hop sideways (original locomotion while blocking).
+    // Shield up: walk forward, retreat back (sideways keys start side hops above).
     const shield = (f & INPUT.BLOCK) !== 0;
-    if (shield && right !== 0) {
-      const speed = right > 0 ? SHIELD_HOP_RIGHT_SPEED : SHIELD_HOP_LEFT_SPEED;
-      const dirX = co * (right / len) - s * (fwd / len);
-      const dirZ = -s * (right / len) - co * (fwd / len);
-      vx = dirX * speed;
-      vz = dirZ * speed;
-    }
     const walk = (f & INPUT.WALK) !== 0 || shield;
     const lengthwise = fwd > 0 ? (walk ? stats.walkSpeed : stats.runSpeed) : (walk ? stats.walkBackSpeed : stats.backSpeed);
     const sideways = fwd !== 0 ? lengthwise : walk ? stats.walkStrafeSpeed : stats.strafeSpeed;
     const along = (fwd / len) * lengthwise;
     const side = (right / len) * sideways;
-    if (!(shield && right !== 0)) {
-      vx = -s * along + co * side;
-      vz = -co * along - s * side;
-    }
+    vx = -s * along + co * side;
+    vz = -co * along - s * side;
   }
 
   // Original vertical physics: take-off impulse, gravity, extra lift while jump is held in
@@ -216,7 +217,13 @@ export function stepCharacter(
   if (desired.y > 0 && moved.y < desired.y * 0.5) vy = 0;
   if (grounded && vy < 0) vy = 0;
 
-  const rollTicks = rolling ? c.rollTicks - 1 : 0;
+  let rollTicks = rolling ? c.rollTicks - 1 : 0;
+  let rollDir = c.rollDir;
+  // A side hop ends in a short stand before the next one can start.
+  if (rolling && rollTicks === 0 && (rollDir === ACTION_HOP_LEFT || rollDir === ACTION_HOP_RIGHT)) {
+    rollDir = ACTION_HOP_PAUSE;
+    rollTicks = SHIELD_HOP_PAUSE_TICKS;
+  }
   if (air.kind) {
     air.travel += Math.hypot(moved.x, moved.z);
     // Landing ends the jump (but not on the take-off step itself).
@@ -227,7 +234,7 @@ export function stepCharacter(
     { x: c.position.x + moved.x, y: c.position.y + moved.y, z: c.position.z + moved.z },
     vy,
     grounded,
-    c.rollDir,
+    rollDir,
     rollTicks,
     air,
   );
