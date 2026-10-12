@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { explode, DclError } from '@crusaders/converter/formats/dcl';
 import { packCollision } from '@crusaders/converter/emit/gltf_level';
-import { LEVEL_UNIT_METRES, buildLevelArena, parseLevelCollision, type LevelPlacements } from '@crusaders/shared';
+import { LEVEL_UNIT_METRES, MOB_ARCHETYPES, buildLevelArena, parseLevelCollision, type LevelPlacements } from '@crusaders/shared';
 
 describe('PKWARE DCL explode', () => {
   it('decodes the published test vector', () => {
@@ -41,13 +41,15 @@ describe('original level arenas', () => {
       mesh: 'test',
       creatures: [
         { type: 145, name: 'SkeletonWarrior1', position: [20, 100, -20], hp: 80, xp: 60, disposition: 3, resist: [0.9, 1.1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.75] },
-        { type: 145, name: 'SkeletonWarrior2', position: [10, 100, -10], hp: 1, xp: 40, disposition: 1, resist: [] }, // not hostile
+        { type: 145, name: 'SkeletonWarrior2', position: [10, 100, -10], hp: 1, xp: 40, disposition: 1, resist: [] }, // not hostile: a peaceful NPC
         { type: 999, name: 'Unknown', position: [5, 100, -5], hp: 50, xp: 10, disposition: 3, resist: [] }, // no archetype
       ],
     };
     const arena = buildLevelArena('level:test', floorCollision(), placements);
-    expect(arena.mobSpawns).toHaveLength(1);
+    expect(arena.mobSpawns).toHaveLength(2);
     expect(arena.mobSpawns[0]).toMatchObject({ archetype: 'skeleton_warrior', hp: 80, xp: 60 });
+    expect(arena.mobSpawns[1]).toMatchObject({ archetype: 'npc_145' });
+    expect(MOB_ARCHETYPES['npc_145']).toMatchObject({ passive: true, name: 'Skeleton Warrior' });
     expect(arena.mobSpawns[0]!.x).toBeCloseTo(20 * LEVEL_UNIT_METRES);
     expect(arena.spawnPoints.length).toBeGreaterThan(0);
     expect(arena.spawnPoints[0]!.y).toBeCloseTo(100 * LEVEL_UNIT_METRES + 0.1);

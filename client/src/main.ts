@@ -14,6 +14,9 @@ import {
   PLAYER_REACH,
   attackTiming,
   LEVEL_PREFIX,
+  PORTAL_OBJECT_BASE,
+  PORTAL_USE_REACH,
+  inPortal,
   attackKindFor,
   TICK_DT,
   TICK_MS,
@@ -353,6 +356,11 @@ async function main(): Promise<void> {
     if (!levelView || !session) return null;
     let best: { id: number; label: string; d: number; key?: boolean } | null = null;
     const p = local.object.position;
+    // Door exits (cell doors, inns, town gates): Tab goes through.
+    for (const portal of levelView.arena.portals ?? []) {
+      if (!portal.use || !inPortal(portal, p, PORTAL_USE_REACH)) continue;
+      best = { id: PORTAL_OBJECT_BASE + portal.id, label: `Tab — go to ${portal.target.replace(LEVEL_PREFIX, '').toUpperCase()}`, d: 0 };
+    }
     for (const [id, door] of levelView.doors) {
       const b = door.def.bounds!;
       if (door.state !== 'present' || door.def.byLever || p.y < b[1] - 2 || p.y > b[4]) continue;

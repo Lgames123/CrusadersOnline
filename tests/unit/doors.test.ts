@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { WorldZone } from '@crusaders/server/simulation/world_zone';
 import {
   BUILTIN_ITEMS,
+  PORTAL_OBJECT_BASE,
   SC,
   catalogFromItemRules,
   createMovementWorld,
@@ -88,6 +89,18 @@ describe('doors', () => {
     expect(open(500_001)).toBe(true);
     expect(open(500_000)).toBe(true);
     expect(wallDistance((z as unknown as { mw: Parameters<typeof wallDistance>[0] }).mw, { x: 0, y: 0, z: 0 }, 0, 3, 1)).toBeNull();
+  });
+
+  it('a door exit is taken with the interact key, not by walking in', () => {
+    const arena = createSyntheticArena();
+    arena.portals = [{ id: 0, target: 'level:next', x: 0, y: 0.5, z: -1, use: true }];
+    const portals: string[] = [];
+    const z = new WorldZone(rapier, 'exit', arena, { send: () => {}, portal: (_c, target) => portals.push(target) });
+    z.join(1, { name: 'Leaver', characterId: null, position: { x: 0, y: 0.5, z: 0 } });
+    for (let i = 0; i < 5; i++) z.step();
+    expect(portals).toEqual([]);
+    z.interact(1, PORTAL_OBJECT_BASE);
+    expect(portals).toEqual(['level:next']);
   });
 
   it('a locked door opens only with the use key and its key carried', () => {

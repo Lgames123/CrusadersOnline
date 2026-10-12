@@ -64,7 +64,7 @@ export interface ConvertReport {
   warnings: string[];
 }
 
-const MANIFEST_VERSION = '1.6.0'; // 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces
+const MANIFEST_VERSION = '1.7.0'; // 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits
 /** Bump when level output changes so cached levels are rebuilt. */
 const LEVEL_EMIT_VERSION = '2';
 
@@ -382,7 +382,13 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
         creatures: cap.creatures.map((c) => ({ ...c, position: [c.position[0], c.position[1], -c.position[2]] })),
         portals: cap.portals
           .filter((p) => capFiles.some((f) => f.toLowerCase() === `${p.target.toLowerCase()}.cap`))
-          .map((p) => ({ exit: p.exit, target: p.target.toLowerCase(), position: [p.position[0], p.position[1], -p.position[2]] })),
+          .map((p) => ({
+            exit: p.exit,
+            target: p.target.toLowerCase(),
+            position: [p.position[0], p.position[1], -p.position[2]],
+            ...(p.use ? { use: true } : {}),
+            ...(p.trigger ? { trigger: { polygon: p.trigger.polygon.map(([x, z]) => [x, -z]), yMin: p.trigger.yMin, yMax: p.trigger.yMax } } : {}),
+          })),
         objects: cap.objects.map((o) => {
           const model = o.kind === 'sprite' ? undefined : modelById.get(o.modelId);
           const glb = model ? manifest.models[model] : undefined;

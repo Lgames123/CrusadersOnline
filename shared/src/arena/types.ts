@@ -73,6 +73,10 @@ export interface PortalDef {
   x: number;
   y: number;
   z: number;
+  /** The original trigger volume (metres): an x/z polygon between two heights. */
+  trigger?: { polygon: [number, number][]; yMin: number; yMax: number };
+  /** Door exit: taken with the interact key instead of walking in. */
+  use?: boolean;
 }
 
 export interface ArenaDef {

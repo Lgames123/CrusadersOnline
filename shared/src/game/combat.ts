@@ -1,4 +1,5 @@
 import { LUNGE_TICKS, TICK_RATE } from '../constants.ts';
+import { CREATURE_TEMPLATES, npcArchetypeId } from './creatures.ts';
 import { originalMaxHp, type Attributes } from './original_stats.ts';
 import { ATTACK_MODE_SCALE, type DamageVector } from './ruleset.ts';
 
@@ -251,6 +252,8 @@ export interface MobArchetype {
   loot: readonly { itemId: string; chance: number }[];
   /** Ticks the corpse stays before the mob respawns. */
   respawnTicks: number;
+  /** Peaceful creature (citizens, guards, merchants): never aggressive, cannot be hit. */
+  passive?: boolean;
 }
 
 /**
@@ -294,7 +297,7 @@ const SKELETON_WARRIOR: MobArchetype = {
   respawnTicks: ticks(10_000),
 };
 
-export const MOB_ARCHETYPES: Readonly<Record<string, MobArchetype>> = {
+export const MOB_ARCHETYPES: Record<string, MobArchetype> = {
   skeleton_warrior: SKELETON_WARRIOR,
   // Skeleton Ghost: Long Sword + Wooden Shield; 40 HP, 75 XP.
   skeleton_ghost: meleeVariant(SKELETON_WARRIOR, {
@@ -352,6 +355,21 @@ export const MOB_ARCHETYPES: Readonly<Record<string, MobArchetype>> = {
     resist: [0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 1, 0],
   }),
 };
+
+/**
+ * Peaceful creatures of the original levels (placements whose disposition is not hostile), one
+ * archetype per creature type, from the creature template table: they stand at their place.
+ */
+const NPC_ARCHETYPES: Record<string, MobArchetype> = Object.fromEntries(
+  Object.entries(CREATURE_TEMPLATES).map(([type, t]) => [
+    npcArchetypeId(Number(type)),
+    meleeVariant(SKELETON_WARRIOR, {
+      id: npcArchetypeId(Number(type)), name: t.name, passive: true, maxHp: 100, xpReward: 0, goldMin: 0, goldMax: 0,
+      weapon: t.weapon ?? 'unarmed', shield: t.shield, resist: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    }),
+  ]),
+);
+Object.assign(MOB_ARCHETYPES, NPC_ARCHETYPES);
 
 export function levelForXp(xp: number): number {
   let level = 1;

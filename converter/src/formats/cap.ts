@@ -54,6 +54,10 @@ export interface CapPortal {
   target: string;
   /** Original units and axes. */
   position: [number, number, number];
+  /** Flag 8 of the record (-0x2C): a door exit, used rather than walked into (cell doors, inns, gates). */
+  use: boolean;
+  /** Trigger volume: a convex x/z polygon (original units) between two heights, when linked. */
+  trigger?: { polygon: [number, number][]; yMin: number; yMax: number };
 }
 
 export interface CapLevel {
@@ -158,9 +162,41 @@ function parsePortals(data: Uint8Array, dv: DataView): CapPortal[] {
     if (!/^[A-Za-z]{2}[A-Za-z0-9_-]{1,20}$/.test(target) || data[o + 0x20 + target.length] !== 0) continue;
     const position: [number, number, number] = [dv.getFloat32(o + 0x10, true), dv.getFloat32(o + 0x14, true), dv.getFloat32(o + 0x18, true)];
     if (!position.every((v) => Number.isFinite(v) && Math.abs(v) < 1e5)) continue;
-    out.push({ exit: dv.getUint16(o + 4, true), target, position });
+    const trigger = parseTrigger(data, dv, dv.getUint32(o - 0x30, true) - CAP_BASE);
+    const use = (dv.getUint32(o - 0x2c, true) & 8) !== 0;
+    out.push({ exit: dv.getUint16(o + 4, true), target, position, use, ...(trigger ? { trigger } : {}) });
   }
   return out;
+}
+
+/**
+ * A portal's trigger volume (pointed to from the portal record at -0x30): two horizontal
+ * planes [normal xyz][d] at +0x00 / +0x10 bounding the height, an edge list pointer at +0x20
+ * and the edge count at +0x35; each edge is [x1 z1 x2 z2][outward normal x z][length]
+ * (0x1C bytes). E.g. Du1b -> Es1a: a 240 x 24 ft rectangle from y 944 to 1216 ft.
+ */
+function parseTrigger(data: Uint8Array, dv: DataView, at: number): CapPortal['trigger'] | null {
+  if (at <= 0 || at + 0x40 > data.length) return null;
+  const f = (o: number) => dv.getFloat32(o, true);
+  const heights: number[] = [];
+  for (const p of [at, at + 0x10]) {
+    const ny = f(p + 4);
+    if (Math.abs(Math.abs(ny) - 1) > 1e-3 || Math.abs(f(p)) > 1e-3 || Math.abs(f(p + 8)) > 1e-3) return null;
+    heights.push(-f(p + 12) / ny);
+  }
+  const edges = dv.getUint32(at + 0x20, true) - CAP_BASE;
+  const count = data[at + 0x35]!;
+  if (count < 3 || count > 32 || edges <= 0 || edges + count * 0x1c > data.length) return null;
+  const polygon: [number, number][] = [];
+  for (let i = 0; i < count; i++) {
+    const e = edges + i * 0x1c;
+    const x1 = f(e), z1 = f(e + 4);
+    const prev = i ? edges + (i - 1) * 0x1c : edges + (count - 1) * 0x1c;
+    // Edges chain end to start.
+    if (Math.abs(f(prev + 8) - x1) > 0.5 || Math.abs(f(prev + 12) - z1) > 0.5) return null;
+    polygon.push([x1, z1]);
+  }
+  return { polygon, yMin: Math.min(...heights), yMax: Math.max(...heights) };
 }
 
 /**

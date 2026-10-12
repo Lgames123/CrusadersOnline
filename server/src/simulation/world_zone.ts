@@ -1,8 +1,10 @@
 import {
   ANIM,
   BUILTIN_ITEMS,
-  PORTAL_HEIGHT,
-  PORTAL_RADIUS,
+  inPortal,
+  UNARMED,
+  PORTAL_OBJECT_BASE,
+  PORTAL_USE_REACH,
   arrivalPoint,
   GOLD_ITEM,
   itemSlug,
@@ -432,7 +434,7 @@ export class WorldZone {
       ...(at.xp !== undefined ? { xpReward: at.xp } : {}),
       ...(at.resist?.length === 11 ? { resist: at.resist } : {}),
     };
-    const weapon = this.items.get(archetype.weapon);
+    const weapon = this.items.get(archetype.weapon) ?? (archetype.passive ? UNARMED : undefined);
     if (!weapon) throw new Error(`unknown weapon ${archetype.weapon} for ${archetypeId}`);
     const mob: Mob = {
       kind: 'mob',
@@ -539,7 +541,7 @@ export class WorldZone {
     this.players.set(connId, p);
     this.register(p);
     for (const portal of this.arena.portals ?? []) {
-      if (Math.hypot(portal.x - spawn.x, portal.z - spawn.z) <= PORTAL_RADIUS + 0.5 && Math.abs(portal.y - spawn.y) <= PORTAL_HEIGHT) p.inPortal.add(portal.id);
+      if (inPortal(portal, spawn, 0.5)) p.inPortal.add(portal.id);
     }
     this.sendJson(connId, {
       op: SC.WORLD_ENTER,
@@ -560,6 +562,12 @@ export class WorldZone {
    */
   interact(connId: number, id: number, key = false): void {
     const p = this.players.get(connId);
+    if (p && id >= PORTAL_OBJECT_BASE) {
+      // A door exit in reach (its trigger, widened by PORTAL_USE_REACH).
+      const portal = this.arena.portals?.find((q) => q.id === id - PORTAL_OBJECT_BASE);
+      if (portal?.use && alive(p) && inPortal(portal, p.character.position, PORTAL_USE_REACH)) this.outbox.portal?.(p.connId, portal.target);
+      return;
+    }
     const o = this.objects.get(id);
     if (!p || !o || !alive(p) || o.state !== 'present' || o.def.kind === 'breakable') return;
     if (o.def.kind === 'door' || o.def.kind === 'lever') {
@@ -873,7 +881,8 @@ export class WorldZone {
     if (!portals?.length || !alive(p)) return;
     const pos = p.character.position;
     for (const portal of portals) {
-      const inside = Math.hypot(portal.x - pos.x, portal.z - pos.z) <= PORTAL_RADIUS && Math.abs(portal.y - pos.y) <= PORTAL_HEIGHT;
+      if (portal.use) continue; // door exits: the interact key (interact)
+      const inside = inPortal(portal, pos);
       if (!inside) {
         p.inPortal.delete(portal.id);
       } else if (!p.inPortal.has(portal.id)) {
@@ -1034,6 +1043,7 @@ export class WorldZone {
     const pos = m.character.position;
     const fromSpawn = Math.hypot(pos.x - m.spawn.x, pos.z - m.spawn.z);
     m.input.flags = 0;
+    if (arch.passive) return; // peaceful: stands at its place
 
     if (m.state === 'idle') {
       let best: Player | null = null;
@@ -1243,7 +1253,7 @@ export class WorldZone {
     const pos = c.position;
     const yaw = dequantizeAngle(p.yaw);
     for (const m of this.actors.values()) {
-      if (m.kind !== 'mob' || !alive(m)) continue;
+      if (m.kind !== 'mob' || !alive(m) || m.archetype.passive) continue;
       const mp = m.character.position;
       if (!inMeleeArc(pos.x, pos.z, yaw, mp.x, mp.z, RUSH_REACH + PLAYER_RADIUS, PLAYER_ARC_DEG, PLAYER_RADIUS)) continue;
       // Logged in the original: the rushing player loses 1 HP per tick of contact (2-5 per rush).
@@ -1276,6 +1286,7 @@ export class WorldZone {
       const arc = a.kind === 'player' ? PLAYER_ARC_DEG : a.archetype.arcDeg;
       for (const target of this.actors.values()) {
         if (target === a || target.kind === a.kind || !alive(target) || s.hit.has(target.entityId)) continue;
+        if (target.kind === 'mob' && target.archetype.passive) continue;
         const tp = target.character.position;
         if (!inMeleeArc(pos.x, pos.z, yaw, tp.x, tp.z, reach, arc, PLAYER_RADIUS)) continue;
         s.hit.add(target.entityId);

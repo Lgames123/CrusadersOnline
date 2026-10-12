@@ -253,7 +253,11 @@ Portal records live outside the object list:
 | +0x10 | trigger position (3 × float32) |
 | +0x20 | NUL-terminated destination act, e.g. `Ca1a` → `Ca1b`, `Ca1c` → `Du1a`, `Cs1b-Inn` → `Cs1b` |
 
+Before the record: at −0x30 a pointer to its **trigger volume** and at −0x2C a flag word: 1 = walked into (151 exits), 8 = a door exit taken with the use key (42: cell doors, inn doors, town and catacomb gates), 16 = 8 Ci/Cs exits (meaning unknown, walked into). The trigger volume: two horizontal planes `[normal][d]` at +0x00 / +0x10 bounding its height, a pointer to its edge list at +0x20 and the edge count at +0x35; each edge is `[x1 z1 x2 z2][outward normal x z][length]` (0x1C bytes). They are boxes over whole corridor ends or doorways (Du1b → Es1a: 240 × 24 ft, y 944–1216 ft); the +0x10 position is only a point near one corner, often in empty space (162 of 192 exits link a volume).
+
 Exits come in pairs: the destination has a portal back to the source, which is where an arriving player appears. The four acts of a mesh (e.g. Ca1a/Ca2a/Ca3a) link to the matching act of their neighbours.
+
+Implemented: exits trigger on their volume (else a 1.6 m circle around the point); door exits wait for Tab. An arriving player is placed on the nearest floor outside the back exit's volume with head room (searched on the collision mesh, up to 18 m out, 8 m below to 12 m above: some exits hang at the bottom of a drop). 9 of 192 exits (Co → Du, Co1a ↔ Co8a, Gl1b → Gl2a) have no floor near them and fall back to the act's first spawn point.
 
 ### 6.2.3 Brushes (doors, gates, bridges, wheels) `[CONFIRMED: 191 brushes]`
 

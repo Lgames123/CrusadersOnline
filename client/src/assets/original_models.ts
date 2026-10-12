@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { ANIM, ORIGINAL_CLIP_FPS, isAttackAnim, isLocomotionAnim, type AttackKind } from '@crusaders/shared';
+import { ANIM, CREATURE_TEMPLATES, ORIGINAL_CLIP_FPS, isAttackAnim, isLocomotionAnim, npcArchetypeId, type AttackKind } from '@crusaders/shared';
 import type { Avatar, AvatarKind } from '../entities/avatar.ts';
 
 /**
@@ -127,7 +127,24 @@ function stateClips(st: Record<string, string>): ClipMap {
 /** Creature template equipment (executable creature table): weapon and shield models. */
 const MACE_METAL: Equipment = { right: 'standardmace', left: 'metalshield02' };
 
+/** Held models of the creatures' template items (items.ctx Model ids resolved in models.ctx). */
+const ITEM_MODELS: Record<string, string> = {
+  long_sword: 'longsword', broad_sword: 'broadsword03', mace: 'standardmace', heavy_mace: 'heavymace', morning_star: 'morningstar',
+  war_hammer: 'hammer', battle_axe: 'battleaxe', pick_axe: 'pickaxe', club: 'bluntclub', dasher_weapon: 'xucotal',
+  dasher_hand_bow: 'handbow001', metal_shield: 'metalshield02', wooden_shield: 'woodshield',
+};
+
+/** Peaceful creatures (npc_<type>): model, texture and held items from the creature template table. */
+const NPC_MODELS = Object.fromEntries(
+  Object.entries(CREATURE_TEMPLATES).map(([type, t]) => {
+    const right = t.weapon ? ITEM_MODELS[t.weapon] : undefined;
+    const left = t.shield ? ITEM_MODELS[t.shield] : undefined;
+    return [npcArchetypeId(Number(type)), { file: t.model, ...(t.texture ? { texture: t.texture } : {}), clips: null, equipment: { ...(right ? { right } : {}), ...(left ? { left } : {}) } }];
+  }),
+);
+
 const MODELS: Record<string, { file: string; texture?: string; clips: ClipMap | null; equipment?: Equipment }> = {
+  ...NPC_MODELS,
   self: {
     file: 'drake',
     equipment: BASIC_EQUIPMENT,
