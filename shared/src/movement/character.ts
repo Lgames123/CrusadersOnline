@@ -1,5 +1,5 @@
 import type RAPIER from '@dimforge/rapier3d-deterministic-compat';
-import { ACTION_ATTACK, ATTACK_CURVES, attackMotionTicks, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_TICKS, curveAtTick, ROLL_CURVES, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
+import { ACTION_ATTACK, ACTION_KNOCKDOWN, ATTACK_CURVES, KNOCKDOWN_CURVE, attackMotionTicks, hitReactionTicks, isAttackAction, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_TICKS, curveAtTick, ROLL_CURVES, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
 import type { Vec3 } from '../math/vec3.ts';
 import { dequantizeAngle } from '../math/quantize.ts';
 import { INPUT, INPUT_ATTACK_SHIFT } from '../protocol/opcodes.ts';
@@ -19,8 +19,8 @@ export interface Character {
   grounded: boolean;
   /**
    * Timed movement action in progress: 0 none, 1-4 rolls (forward, back, left, right),
-   * 5 / 6 shield side hops (left / right), 7 the stand after a side hop, 8+ an attack's
-   * root motion (ACTION_ATTACK + attack motion - 1).
+   * 5 / 6 shield side hops (left / right), 7 the stand after a side hop, 8-11 an attack's
+   * root motion (ACTION_ATTACK + attack motion - 1), 16-18 hit reactions (impact, stun, knock-down).
    */
   rollDir: number;
   /** Ticks of the roll still to run. */
@@ -109,7 +109,7 @@ export function stepCharacter(
   // An attack whose clip carries the character starts its root motion (also over the stand
   // after a hop or another attack's motion: combo steps restart it).
   const motion = (f >> INPUT_ATTACK_SHIFT) & 0xf;
-  if (motion > 0 && motion <= ATTACK_CURVES.length && c.grounded && (c.rollTicks === 0 || c.rollDir >= ACTION_HOP_PAUSE)) {
+  if (motion > 0 && motion <= ATTACK_CURVES.length && c.grounded && (c.rollTicks === 0 || c.rollDir === ACTION_HOP_PAUSE || isAttackAction(c.rollDir))) {
     c.rollDir = ACTION_ATTACK + motion - 1;
     c.rollTicks = attackMotionTicks(motion);
   }
@@ -157,12 +157,17 @@ export function stepCharacter(
       roll = (curveAtTick(curve, done + 1) - curveAtTick(curve, done)) / dt;
     }
     // Attacks move along the facing by their clip's forward root displacement.
-    if (c.rollDir >= ACTION_ATTACK) {
+    if (isAttackAction(c.rollDir)) {
       const motion = c.rollDir - ACTION_ATTACK + 1;
       const done = attackMotionTicks(motion) - c.rollTicks;
       roll = (curveAtTick(ATTACK_CURVES[motion - 1]!, done + 1) - curveAtTick(ATTACK_CURVES[motion - 1]!, done)) / dt;
     }
-    let along = c.rollDir === 1 || c.rollDir === 2 || c.rollDir >= ACTION_ATTACK ? roll : 0;
+    // A knock-down throws the character back and it gets up (PI02's root motion).
+    if (c.rollDir === ACTION_KNOCKDOWN) {
+      const done = hitReactionTicks(ACTION_KNOCKDOWN) - c.rollTicks;
+      roll = (curveAtTick(KNOCKDOWN_CURVE, done + 1) - curveAtTick(KNOCKDOWN_CURVE, done)) / dt;
+    }
+    let along = c.rollDir === 1 || c.rollDir === 2 || isAttackAction(c.rollDir) || c.rollDir === ACTION_KNOCKDOWN ? roll : 0;
     let side = c.rollDir === 3 || c.rollDir === 4 ? roll : hop;
     // Shield + a diagonal (forward / back with a side key): the side hop goes along that diagonal.
     const lengthwise = (f & INPUT.FORWARD ? 1 : 0) - (f & INPUT.BACK ? 1 : 0);
@@ -270,6 +275,12 @@ export function stepCharacter(
     rollTicks,
     air,
   );
+}
+
+/** Starts a hit reaction (ACTION_IMPACT / ACTION_STUN / ACTION_KNOCKDOWN): it replaces any timed action. */
+export function startHitReaction(c: Character, action: number): void {
+  c.rollDir = action;
+  c.rollTicks = hitReactionTicks(action);
 }
 
 /** Roll direction for held movement flags: 1 forward, 2 back, 3 left, 4 right, 0 none. */

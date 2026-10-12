@@ -4,6 +4,10 @@ import {
   DEFAULT_MOVEMENT_STATS,
   INPUT,
   ACTION_ATTACK,
+  ACTION_KNOCKDOWN,
+  ACTION_STUN,
+  hitReactionTicks,
+  startHitReaction,
   ATTACK_CURVES,
   INPUT_ATTACK_SHIFT,
   attackMotion,
@@ -145,6 +149,23 @@ describe('shared character controller', () => {
     // Swings that sway and come back (combo step 2, side swings) do not move the character.
     expect(attackMotion('normal', 2)).toBe(0);
     expect(attackMotion('left', 1)).toBe(0);
+  });
+
+  it('hit reactions hold the character; a knock-down throws it back 5.36 ft (PI02)', () => {
+    const { mw, c } = setup();
+    run(mw, c, 0, 0, 10);
+    const start = { ...c.position };
+    startHitReaction(c, ACTION_STUN);
+    // Neither movement keys nor an attack's root motion act during the reaction.
+    run(mw, c, INPUT.FORWARD | (1 << INPUT_ATTACK_SHIFT), 0, hitReactionTicks(ACTION_STUN) - 1);
+    expect(Math.hypot(c.position.x - start.x, c.position.z - start.z)).toBeLessThan(1e-3);
+    expect(c.rollDir).toBe(ACTION_STUN);
+    run(mw, c, 0, 0, 2);
+    expect(c.rollDir).toBe(0);
+    startHitReaction(c, ACTION_KNOCKDOWN);
+    run(mw, c, INPUT.FORWARD, 0, hitReactionTicks(ACTION_KNOCKDOWN));
+    expect(c.rollDir).toBe(0);
+    expect(c.position.z - start.z).toBeCloseTo(5.36 * 0.3048, 1); // yaw 0 faces -Z: thrown towards +Z
   });
 
   it('replays a roll exactly from a mid-roll snapshot (reconciliation)', () => {

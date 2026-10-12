@@ -71,6 +71,16 @@ import {
   MOB_SHIELD_TICKS,
   MOB_STANCE_TICKS,
   MOB_JUMP_ATTACK,
+  MOB_BASH,
+  MOB_BASH_CHANCE,
+  MOB_BASH_DISTANCE,
+  MOB_BASH_RANGE,
+  ACTION_IMPACT,
+  ACTION_KNOCKDOWN,
+  ACTION_STUN,
+  hitReactionTicks,
+  isHitAction,
+  startHitReaction,
   MOB_JUMP_ATTACK_CHANCE,
   MOB_JUMP_ATTACK_DISTANCE,
   MOB_RETREAT_CHANCE,
@@ -174,9 +184,6 @@ export interface WorldZoneOptions {
   reactiveBlock?: boolean;
 }
 
-/** Ticks a light flinch / heavy stagger interrupts the player (slice value). */
-const FLINCH_TICKS = 6;
-const STAGGER_TICKS = 14;
 
 /** World objects (original levels): interaction reach and respawn delays (slice values). */
 const INTERACT_RANGE = 2.5;
@@ -240,6 +247,8 @@ interface ActorBase {
   lastCombo: number;
   /** Tick at which a dead actor comes back; 0 while alive. */
   deadUntil: number;
+  /** Tick until which a hit reaction (impact, stun, knock-down) keeps the actor from acting; 0 = none. */
+  hitUntil: number;
 }
 
 interface Player extends ActorBase {
@@ -269,8 +278,6 @@ interface Player extends ActorBase {
   weapon: ItemDef;
   armor: ItemDef | null;
   damageMultiplier: number;
-  /** Tick until which a flinch/stagger keeps the player from acting; 0 = none. */
-  hitUntil: number;
   shield: ItemDef | null;
   /** Portals whose trigger the player is standing in (fires on entry only). */
   inPortal: Set<number>;
@@ -393,6 +400,7 @@ export class WorldZone {
       lastSwingEnd: -1e9,
       lastCombo: 0,
       deadUntil: 0,
+      hitUntil: 0,
       archetype,
       weapon,
       shield: archetype.shield ? this.items.get(archetype.shield) ?? null : null,
@@ -792,9 +800,8 @@ export class WorldZone {
         p.blocking = alive(p) && p.shield !== null && (this.frame.flags & INPUT.BLOCK) !== 0 && !p.swing && p.hitUntil <= tick;
         // On diagonals the body turns into the motion, except with the shield up (it faces the view).
         p.facingOffset = moving && !(this.frame.flags & INPUT.BLOCK) ? movementFacingOffset(this.frame.flags) : 0;
-        p.anim = p.hitUntil > tick
-          ? ANIM.HIT
-          : movementAnim(p.blocking ? this.frame.flags : this.frame.flags & ~INPUT.BLOCK, p.character.grounded, p.character.rollDir);
+        // Hit reactions are timed movement actions, so movementAnim() covers them too.
+        p.anim = movementAnim(p.blocking ? this.frame.flags : this.frame.flags & ~INPUT.BLOCK, p.character.grounded, p.character.rollDir);
       }
     }
 
@@ -879,6 +886,8 @@ export class WorldZone {
       if (!target || fromSpawn > arch.leashRadius) {
         m.threat.clear();
         m.state = 'return';
+      } else if (m.hitUntil > this.tick) {
+        // Hit reaction (directional impact): no action until it ends.
       } else if (m.blockUntil > this.tick) {
         // Shield up: hold position facing the target.
         const t = target.character.position;
@@ -909,6 +918,8 @@ export class WorldZone {
         } else if (dist < MOB_RETREAT_RANGE && this.random() >= 1 - MOB_RETREAT_CHANCE) {
           m.retreatUntil = this.tick + MOB_RETREAT_TICKS;
           m.input.flags = INPUT.BACK | INPUT.WALK;
+        } else if (dist <= MOB_BASH_RANGE && m.shield !== null && this.random() >= 1 - MOB_BASH_CHANCE) {
+          this.startMobSwing(m, MOB_BASH, 1); // the rare shield bash: stuns without damage
         } else if (dist <= MOB_THRUST_RANGE) {
           this.startMobSwing(m, MOB_THRUST, 1); // the close-range jab, one per stance
         } else if (dist <= MOB_HOP_RANGE) {
@@ -935,12 +946,16 @@ export class WorldZone {
 
     m.input.yaw = m.yaw;
     m.input.clientTick = this.tick;
-    // The leaping strike carries the creature forward until its impact.
-    const leaping = m.swing?.kind === 'jump' && this.tick - m.swing.start < m.swing.timing.startup;
+    // The leaping strike and the shield bash carry the creature forward until their impact.
+    const leaping = (m.swing?.kind === 'jump' || m.swing?.kind === 'bash') && this.tick - m.swing.start < m.swing.timing.startup + m.swing.timing.active;
     if (m.hopTicks > 0 || leaping) m.input.flags = INPUT.FORWARD;
-    stepCharacter(this.mw, m.character, m.input, m.hopTicks > 0 ? this.hopStats : leaping ? this.leapStats : m.stats, TICK_DT);
+    if (m.hitUntil > this.tick) m.input.flags = 0;
+    const charge = m.swing?.kind === 'bash' ? this.bashStats : this.leapStats;
+    stepCharacter(this.mw, m.character, m.input, m.hopTicks > 0 ? this.hopStats : leaping ? charge : m.stats, TICK_DT);
     this.separate(m);
-    m.anim = m.blockUntil > this.tick
+    m.anim = m.hitUntil > this.tick
+      ? ANIM.HIT
+      : m.blockUntil > this.tick
       ? ANIM.BLOCK
       : m.hopTicks > 0
       ? ANIM.HOP_FORWARD
@@ -950,7 +965,8 @@ export class WorldZone {
   }
 
   private readonly hopStats = uniformMovementStats(MOB_HOP_SPEED);
-  private readonly leapStats = uniformMovementStats(MOB_JUMP_ATTACK_DISTANCE / (clipSwingTiming(MOB_JUMP_ATTACK.clip).startup * TICK_DT));
+  private readonly leapStats = uniformMovementStats(MOB_JUMP_ATTACK_DISTANCE / ((clipSwingTiming(MOB_JUMP_ATTACK.clip).startup + clipSwingTiming(MOB_JUMP_ATTACK.clip).active) * TICK_DT));
+  private readonly bashStats = uniformMovementStats(MOB_BASH_DISTANCE / ((clipSwingTiming(MOB_BASH.clip).startup + clipSwingTiming(MOB_BASH.clip).active) * TICK_DT));
 
   /**
    * Pushes a creature out of any character it overlaps (characters are sensors for the
@@ -1043,6 +1059,15 @@ export class WorldZone {
           });
           continue;
         }
+        if (s.kind === 'bash') {
+          // The shield bash stuns without damage (ASM_IMPACT_MEDIUM).
+          if (target.kind === 'player' && target.character.grounded) this.hitReaction(target, ACTION_STUN);
+          this.broadcastNear(target, {
+            op: SC.COMBAT_EVENT,
+            d: { attacker: a.entityId, target: target.entityId, damage: 0, hp: Math.ceil(target.hp), killed: false, blocked: false },
+          });
+          continue;
+        }
         this.applyDamage(a, target, this.rollDamage(a, s.combo));
         if (!alive(a)) return;
       }
@@ -1084,6 +1109,22 @@ export class WorldZone {
     return (dx * f.x + dz * f.z) / dist > ORIGINAL_BLOCK_COS;
   }
 
+  /** Starts a hit reaction: the current swing / hop / retreat is interrupted. */
+  private hitReaction(target: Actor, action: number): void {
+    target.swing = null;
+    target.hitUntil = this.tick + hitReactionTicks(action);
+    if (target.kind === 'player') {
+      target.queuedAttack = false;
+      startHitReaction(target.character, action);
+    } else {
+      target.hopTicks = 0;
+      target.chainLeft = 0;
+      target.retreatUntil = 0;
+      target.guardUntil = target.hitUntil;
+      target.shieldFrom = Number.MAX_SAFE_INTEGER;
+    }
+  }
+
   /** Outgoing damage vector (engine: Stats_GetOutgoingDamage). */
   private rollDamage(a: Actor, combo: number): DamageVector {
     if (a.kind === 'player') {
@@ -1107,13 +1148,18 @@ export class WorldZone {
     target.hp = Math.max(0, target.hp - damage);
     const killed = target.hp <= 0;
     if (killed) target.hp = 0;
-    if (!killed && target.kind === 'player' && hpBefore > 0) {
-      const reaction = originalFlinch(damage, hpBefore, this.random());
-      if (reaction !== 'none') {
-        target.swing = null;
-        target.queuedAttack = false;
-        target.hitUntil = this.tick + (reaction === 'stagger' ? STAGGER_TICKS : FLINCH_TICKS);
+    if (!killed && hpBefore > 0 && damage > 0 && target.character.grounded) {
+      // Every landed hit interrupts with an impact (the original skips airborne targets). The
+      // player rolls for a stun or a knock-down; a hit while stunned by a shield bash knocks
+      // down (logged once). Creatures only take the directional impact.
+      let reaction = ACTION_IMPACT;
+      if (target.kind === 'player') {
+        const roll = originalFlinch(damage, hpBefore, this.random());
+        const bashed = target.character.rollDir === ACTION_STUN && target.hitUntil > this.tick;
+        reaction = bashed || roll === 'knockdown' ? ACTION_KNOCKDOWN : roll === 'stun' ? ACTION_STUN : ACTION_IMPACT;
       }
+      // A knock-down is not cut short by another hit's lighter reaction.
+      if (!(isHitAction(target.character.rollDir) && target.character.rollDir === ACTION_KNOCKDOWN && target.hitUntil > this.tick)) this.hitReaction(target, reaction);
     }
     let reward: CombatEventMsg['d']['reward'];
 
@@ -1180,6 +1226,7 @@ export class WorldZone {
     if (a.kind === 'mob') {
       a.state = 'idle';
       a.blockUntil = 0;
+      a.hitUntil = 0;
       a.threat.clear();
       setCharacterState(a.character, a.spawn, 0, false);
     } else {
@@ -1266,7 +1313,7 @@ export class WorldZone {
   }
 
   /** Debug/test view of every actor. */
-  inspect(): { id: number; kind: Actor['kind']; hp: number; alive: boolean; state?: Mob['state']; swinging: boolean; anim: number; x: number; z: number }[] {
+  inspect(): { id: number; kind: Actor['kind']; hp: number; alive: boolean; state?: Mob['state']; swinging: boolean; anim: number; shield: boolean; x: number; z: number }[] {
     return [...this.actors.values()].map((a) => ({
       id: a.entityId,
       kind: a.kind,
@@ -1275,6 +1322,7 @@ export class WorldZone {
       ...(a.kind === 'mob' ? { state: a.state } : {}),
       swinging: !!a.swing,
       anim: this.states.get(a.entityId)?.anim ?? 0,
+      shield: ((this.states.get(a.entityId)?.flags ?? 0) & 1) !== 0,
       x: a.character.position.x,
       z: a.character.position.z,
     }));

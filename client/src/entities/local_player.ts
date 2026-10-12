@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ANIM, INPUT, TICK_DT, attackAnim, attackMotion, dequantizeAngle, movementAnim, movementFacingOffset, type AttackKind, attackTiming, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
+import { ANIM, INPUT, TICK_DT, attackAnim, attackMotion, isHitAction, dequantizeAngle, movementAnim, movementFacingOffset, type AttackKind, attackTiming, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
 import type { Avatar } from './avatar.ts';
 
 /**
@@ -63,6 +63,11 @@ export class LocalPlayer {
     const p = this.character.position;
     this.prev.x = p.x; this.prev.y = p.y; this.prev.z = p.z;
     this.step(input);
+    // A hit reaction (impact, stun, knock-down) interrupts the own swing.
+    if (isHitAction(this.character.rollDir)) {
+      this.swingLeft = 0;
+      this.pendingMotion = 0;
+    }
     const moving = !this.dead && (input.flags & MOVE_MASK) !== 0 && !(input.flags & INPUT.ROOTED);
     // On diagonals the body turns into the direction of travel (as the server replicates it).
     if (moving) this.targetFacing = dequantizeAngle(input.yaw) + movementFacingOffset(input.flags);
@@ -77,7 +82,7 @@ export class LocalPlayer {
 
   /** Local swing feedback; mirrors the server's combo rule closely enough for presentation. */
   swing(cameraYaw: number, kind: AttackKind = 'normal'): boolean {
-    if (this.dead || this.swingLeft > 0) return false;
+    if (this.dead || this.swingLeft > 0 || isHitAction(this.character.rollDir)) return false;
     // Directional attacks are single hits; plain clicks chain the combo.
     this.combo = kind === 'normal' && this.kind === 'normal' && this.sinceSwing < 0.3 && this.combo < 5 ? this.combo + 1 : 1;
     this.kind = kind;

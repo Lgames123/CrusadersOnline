@@ -85,7 +85,7 @@ Server rules: at most one input applied per server tick per player (extras queue
 5       4     baselineTick (uint32) — 0 = full snapshot, otherwise delta vs this acked tick
 9       4     lastProcessedInput (uint32) — for client reconciliation
 13      4     selfVelY (int32, mm/s) — receiver's own vertical velocity (replay mid-jump)
-17      1     selfFlags (bit0 grounded, bits1-5 timed movement action: 0 none, 1-4 roll forward / back / left / right, 5/6 shield side hop left / right, 7 stand after a hop, 8-11 attack root motion; other bits must be 0)
+17      1     selfFlags (bit0 grounded, bits1-5 timed movement action: 0 none, 1-4 roll forward / back / left / right, 5/6 shield side hop left / right, 7 stand after a hop, 8-11 attack root motion, 16 impact / 17 stun / 18 knock-down; other bits must be 0)
 18      1     selfRollTicks (uint8) — ticks left of the receiver's timed action (replay mid-action)
 19      4     selfAirVelX (int32, mm/s) — receiver's horizontal jump velocity (replay mid-jump)
 23      4     selfAirVelZ (int32, mm/s)

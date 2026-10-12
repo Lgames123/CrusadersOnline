@@ -47,6 +47,10 @@ interface ClipMap {
   hopRight?: string;
   /** Hit reactions: front, left, right, back (ASM_IMPACT_*). */
   impacts?: string[];
+  /** Knock-down (ASM_IMPACT_SEVERE, PI02). */
+  knockdown?: string;
+  /** Shield bash (ASM_RAM_SHOULDER, PL01). */
+  bash?: string;
   /** Death variants (ASM_HIT_POINTS_DEPLETED and its ALT_01..08). */
   deaths?: string[];
 }
@@ -73,6 +77,8 @@ function withStates(base: ClipMap, states: Record<string, string> | undefined): 
     hopLeft: base.hopLeft ?? st['ASM_HOP_L'] ?? base.strafeLeft ?? base.run,
     hopRight: base.hopRight ?? st['ASM_HOP_R'] ?? base.strafeRight ?? base.run,
     impacts: base.impacts ?? ['FRONT', 'LEFT', 'RIGHT', 'BACK'].map((k) => st[`ASM_IMPACT_${k}`]).filter((c): c is string => !!c),
+    knockdown: base.knockdown ?? st['ASM_IMPACT_SEVERE'],
+    bash: base.bash ?? st['ASM_RAM_SHOULDER'],
     deaths: base.deaths ?? [st['ASM_HIT_POINTS_DEPLETED'] ?? base.death, ...[1, 2, 3, 4, 5, 6, 7, 8].map((i) => st[`ASM_HIT_POINTS_DEPLETED_ALT_0${i}`]).filter((c): c is string => !!c)],
     attackOverhead: base.attackOverhead ?? st['ASM_SWING_OVERHEAD'] ?? base.attacks[0]!,
     attackLeft: base.attackLeft ?? st['ASM_SWING_LEVEL'] ?? base.attacks[0]!,
@@ -177,6 +183,10 @@ class OriginalAvatar implements Avatar {
       return { name: deaths[this.deathCount % deaths.length]!, loop: false };
     }
     if (anim === ANIM.HIT) return { name: m.impacts?.[0] ?? m.idle, loop: false };
+    if (anim === ANIM.KNOCKDOWN) return { name: m.knockdown ?? m.impacts?.[0] ?? m.idle, loop: false };
+    // ASM_IMPACT_MEDIUM has no clip of its own: the front impact, held.
+    if (anim === ANIM.STUNNED) return { name: m.impacts?.[0] ?? m.idle, loop: false };
+    if (anim === ANIM.ATTACK_BASH) return { name: m.bash ?? m.attacks[0]!, loop: false };
     // Raise the shield once and hold the final pose.
     if (anim === ANIM.BLOCK) return { name: m.block, loop: false };
     if (anim === ANIM.RUN) return { name: m.run, loop: true };
@@ -205,9 +215,9 @@ class OriginalAvatar implements Avatar {
     this.deathCount = Math.abs(Math.trunc(v));
   }
 
-  /** Hit reaction from a direction (0 front, 1 left, 2 right, 3 back), over the current state. */
+  /** Hit reaction from a direction (0 front, 1 left, 2 right, 3 back), over the current state (a hit interrupts swings too). */
   react(dir: number): void {
-    if (this.anim === ANIM.DEAD || isAttackAnim(this.anim)) return;
+    if (this.anim === ANIM.DEAD || this.anim === ANIM.KNOCKDOWN) return;
     const name = this.map.impacts?.[dir] ?? this.map.impacts?.[0];
     const clip = name ? this.clips.get(name) : undefined;
     if (!clip) return;
@@ -222,8 +232,8 @@ class OriginalAvatar implements Avatar {
     if (anim === this.anim && !restart) return;
     if (this.anim === ANIM.DEAD && anim !== ANIM.DEAD) this.deathCount++;
     this.anim = anim;
-    // Swings and deaths cut a hit reaction short; anything else waits for it to finish.
-    if (this.reactLeft > 0 && !isAttackAnim(anim) && anim !== ANIM.DEAD) return;
+    // Swings, deaths, knock-downs and stuns cut a hit reaction short; anything else waits for it to finish.
+    if (this.reactLeft > 0 && !isAttackAnim(anim) && anim !== ANIM.DEAD && anim !== ANIM.KNOCKDOWN && anim !== ANIM.STUNNED) return;
     this.reactLeft = 0;
     this.apply();
   }

@@ -64,8 +64,9 @@ const DIRECTIONAL_CLIPS: Readonly<Record<'overhead' | 'left' | 'right' | 'low' |
 const CHAIN_SLACK_FRAMES = 3;
 
 /** Swing timing of an attack (kind + combo step), scaled by the weapon's Speed. */
-export function attackTiming(kind: 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump' | 'thrust', combo: number, weaponSpeed = 1): SwingTiming {
+export function attackTiming(kind: 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump' | 'thrust' | 'bash', combo: number, weaponSpeed = 1): SwingTiming {
   if (kind === 'thrust') return clipSwingTiming(MOB_THRUST.clip, weaponSpeed);
+  if (kind === 'bash') return clipSwingTiming(MOB_BASH.clip, weaponSpeed);
   const c = kind === 'normal' ? COMBO_CLIPS[Math.min(Math.max(combo, 1), COMBO_CLIPS.length) - 1]! : DIRECTIONAL_CLIPS[kind];
   return clipSwingTiming(c, weaponSpeed);
 }
@@ -96,6 +97,15 @@ export const MOB_THRUST = { kind: 'thrust' as const, clip: { swing: 6, impact: 9
  * 4.0-4.7 ft) instead of hopping in, once per stance (~1.1 s apart while the target stays).
  */
 export const MOB_THRUST_RANGE = 4.8 * 0.3048;
+/**
+ * Shield bash (ASM_RAM_SHOULDER, PL01: 24 frames, no events; the charge covers 6.5 ft by
+ * frame 11). Logged once in ~12 minutes, from the stance at 5.7 ft: the player was stunned
+ * (ASM_IMPACT_MEDIUM) without damage, and the hit that followed knocked him down.
+ */
+export const MOB_BASH = { kind: 'bash' as const, clip: { swing: 4, impact: 9, recovery: 24 } };
+export const MOB_BASH_CHANCE = 0.04;
+export const MOB_BASH_RANGE = 6 * 0.3048;
+export const MOB_BASH_DISTANCE = 6 * 0.3048;
 /** Leaping strike (ASM_JUMP_ATTACK): taken instead of the hop in ~15 % of approaches at ~7.5 ft. */
 export const MOB_JUMP_ATTACK = { kind: 'jump' as const, clip: { swing: 17, impact: 20, recovery: 24 } };
 export const MOB_JUMP_ATTACK_CHANCE = 0.15;

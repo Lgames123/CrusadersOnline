@@ -67,12 +67,15 @@ export function originalDamageTaken(
 }
 
 /**
- * Flinch roll after a non-lethal hit on the player: 0.5 x random + damage / hpBeforeHit.
- * >= 0.8 heavy stagger, >= 0.7 light flinch, otherwise none.
+ * Reaction to a non-lethal hit on the player (HP loss 0x0044CA00 + the impact state picker
+ * 0x0042B7A0): v = 0.5 x random + damage / hpBeforeHit. v >= 0.8 sets physics flag 0x80000,
+ * which picks ASM_IMPACT_MEDIUM (a stun); 0.7 <= v < 0.8 sets controller flag 0x4000000,
+ * which picks ASM_IMPACT_SEVERE (the knock-down, PI02); otherwise a directional impact.
+ * Creatures skip the roll (directional impact only).
  */
-export function originalFlinch(damage: number, hpBefore: number, random: number): 'stagger' | 'flinch' | 'none' {
+export function originalFlinch(damage: number, hpBefore: number, random: number): 'knockdown' | 'stun' | 'impact' {
   const v = random * 0.5 + damage / hpBefore;
-  return v >= 0.8 ? 'stagger' : v >= 0.7 ? 'flinch' : 'none';
+  return v >= 0.8 ? 'stun' : v >= 0.7 ? 'knockdown' : 'impact';
 }
 
 /** Shield block cone: the engine compares the facing dot product with cos(30) — 30 radians, i.e. about +/-81 degrees. */

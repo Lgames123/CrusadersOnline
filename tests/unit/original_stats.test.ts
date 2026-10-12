@@ -44,10 +44,13 @@ describe('original damage taken', () => {
     expect(originalDamageTaken(incoming, easyResist, plate, [6, 6])).toBeCloseTo(1.44); // bash fully absorbed
   });
 
-  it('rolls flinches and exposes the radians-based block cone', () => {
-    expect(originalFlinch(70, 100, 0)).toBe('flinch');
-    expect(originalFlinch(10, 100, 1)).toBe('none');
-    expect(originalFlinch(40, 100, 0.9)).toBe('stagger');
+  it('rolls hit reactions (0.7-0.8 knocks down, >= 0.8 stuns) and exposes the radians-based block cone', () => {
+    expect(originalFlinch(70, 100, 0)).toBe('knockdown');
+    expect(originalFlinch(10, 100, 1)).toBe('impact');
+    expect(originalFlinch(40, 100, 0.9)).toBe('stun');
+    // Logged: 10.1 damage at 25.1 HP knocked Drake down, 14.4 at 15 HP stunned him.
+    expect(originalFlinch(10.1, 25.1, 0.7)).toBe('knockdown');
+    expect(originalFlinch(14.4, 15, 0)).toBe('stun');
     expect(Math.acos(ORIGINAL_BLOCK_COS) * (180 / Math.PI)).toBeCloseTo(81.1, 0);
   });
 });

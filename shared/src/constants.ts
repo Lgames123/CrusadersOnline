@@ -148,6 +148,31 @@ export function attackMotion(kind: string, combo: number): number {
   return combo === 1 ? 1 : combo === 3 ? 2 : combo === 5 ? 3 : 0;
 }
 
+/**
+ * Hit reactions (executable-analysis §8.4 / §15.3), timed movement actions that keep the
+ * character from moving or acting: 16 a directional impact (ASM_IMPACT_FRONT/LEFT/RIGHT/BACK,
+ * 17-frame clips), 17 a stun (ASM_IMPACT_MEDIUM: no clip bound, ~0.9 s logged), 18 a knock-down
+ * (ASM_IMPACT_SEVERE, PI02: 48 frames, thrown ~9 ft back, then up again 5.36 ft from the start).
+ */
+export const ACTION_IMPACT = 16;
+export const ACTION_STUN = 17;
+export const ACTION_KNOCKDOWN = 18;
+/** PI02 root displacement per frame along the facing, in feet (negative = backwards). */
+export const KNOCKDOWN_CURVE: readonly number[] = [0, -1.42, -2.84, -4.26, -5.51, -6.75, -7.99, -8.18, -8.34, -8.46, -8.57, -8.59, -8.61, -8.63, -8.65, -8.67, -8.69, -8.7, -8.72, -8.74, -8.76, -8.76, -8.75, -8.76, -8.79, -8.82, -8.86, -8.9, -8.95, -9.04, -9.08, -8.33, -7.44, -6.56, -5.77, -4.97, -4.18, -4.31, -4.43, -4.56, -4.69, -4.82, -4.94, -5.01, -5.08, -5.16, -5.25, -5.3, -5.36];
+/** Ticks of each hit reaction. */
+export function hitReactionTicks(action: number): number {
+  const frames = action === ACTION_KNOCKDOWN ? KNOCKDOWN_CURVE.length - 1 : action === ACTION_STUN ? 0.9 * 30 * CLIP_RATE : 17;
+  return Math.ceil((frames / (30 * CLIP_RATE)) * TICK_RATE);
+}
+/** Whether a timed movement action is an attack's root motion. */
+export function isAttackAction(action: number): boolean {
+  return action >= ACTION_ATTACK && action < ACTION_ATTACK + ATTACK_CURVES.length;
+}
+/** Whether a timed movement action is a hit reaction (no acting until it ends). */
+export function isHitAction(action: number): boolean {
+  return action >= ACTION_IMPACT && action <= ACTION_KNOCKDOWN;
+}
+
 /** Root displacement (metres) of a curve sampled per clip frame, at `ticks` into the action. */
 export function curveAtTick(curve: readonly number[], ticks: number): number {
   const frame = (ticks / TICK_RATE) * 30 * CLIP_RATE;

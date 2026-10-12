@@ -161,6 +161,12 @@ export const ANIM = {
   HOP_RIGHT: 30,
   /** Standing still with the shield up: the normal idle; the shield is an upper-body layer. */
   SHIELD_IDLE: 31,
+  /** Knocked down (ASM_IMPACT_SEVERE, PI02). */
+  KNOCKDOWN: 32,
+  /** Stunned (ASM_IMPACT_MEDIUM: no clip of its own). */
+  STUNNED: 33,
+  /** Shield bash (ASM_RAM_SHOULDER, PL01). */
+  ATTACK_BASH: 34,
 } as const;
 
 /** Animation for a character's own movement state (roll, duck, airborne, locomotion, idle). */
@@ -169,6 +175,9 @@ export function movementAnim(flags: number, grounded: boolean, rollDir: number):
   if (rollDir === 6) return ANIM.HOP_RIGHT;
   if (rollDir === 7) return ANIM.SHIELD_IDLE; // stand after a side hop, shield still up
   if (rollDir >= 1 && rollDir <= 4) return ANIM.ROLL + rollDir - 1;
+  if (rollDir === 16) return ANIM.HIT; // directional impact (the client picks the side)
+  if (rollDir === 17) return ANIM.STUNNED;
+  if (rollDir === 18) return ANIM.KNOCKDOWN;
   // rollDir >= 8: an attack's root motion (the attack clip is chosen from the swing).
   if (!grounded) return ANIM.AIRBORNE;
   if (flags & INPUT.DUCK) return ANIM.CROUCH;
@@ -183,7 +192,7 @@ export function movementAnim(flags: number, grounded: boolean, rollDir: number):
   return locomotionAnim(flags);
 }
 
-export type AttackKind = 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump' | 'thrust';
+export type AttackKind = 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump' | 'thrust' | 'bash';
 
 /**
  * The original's attack selection, measured in the running game (executable-analysis.md §14):
@@ -206,12 +215,13 @@ export function attackAnim(kind: AttackKind, combo: number): number {
     case 'low': return ANIM.ATTACK_LOW;
     case 'jump': return ANIM.ATTACK_JUMP;
     case 'thrust': return ANIM.ATTACK_THRUST;
+    case 'bash': return ANIM.ATTACK_BASH;
     default: return combo >= 5 ? ANIM.ATTACK_COMBO5 : combo === 4 ? ANIM.ATTACK_COMBO4 : ANIM.ATTACK + combo - 1;
   }
 }
 
 export function isAttackAnim(anim: number): boolean {
-  return (anim >= ANIM.ATTACK && anim < ANIM.ATTACK + 3) || (anim >= ANIM.ATTACK_OVERHEAD && anim <= ANIM.ATTACK_RIGHT) || anim === ANIM.ATTACK_LOW || anim === ANIM.ATTACK_JUMP || anim === ANIM.ATTACK_COMBO4 || anim === ANIM.ATTACK_COMBO5 || anim === ANIM.ATTACK_THRUST;
+  return (anim >= ANIM.ATTACK && anim < ANIM.ATTACK + 3) || (anim >= ANIM.ATTACK_OVERHEAD && anim <= ANIM.ATTACK_RIGHT) || anim === ANIM.ATTACK_LOW || anim === ANIM.ATTACK_JUMP || anim === ANIM.ATTACK_COMBO4 || anim === ANIM.ATTACK_COMBO5 || anim === ANIM.ATTACK_THRUST || anim === ANIM.ATTACK_BASH;
 }
 
 /**

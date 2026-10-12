@@ -199,8 +199,7 @@ describe('authoritative melee', () => {
 describe('directional attacks (original controls)', () => {
   it('replicates the side swing and keeps it out of the combo chain', () => {
     const t = setup();
-    t.run(APPROACH, INPUT.FORWARD, 0);
-    t.run(30);
+    t.run(5); // away from the skeleton: a hit would interrupt the swing
     t.zone.attack(1, 'left');
     t.run(1);
     expect(t.me().anim).toBe(ANIM.ATTACK_LEFT);
@@ -255,7 +254,8 @@ describe('shield block (original rule)', () => {
   it('cannot block while swinging', () => {
     const t = setup();
     t.run(APPROACH, INPUT.FORWARD, 0);
-    t.run(300, INPUT.BLOCK, 0, () => t.zone.attack(1));
+    // Swinging every 2 s (back-to-back swings would keep the skeleton in its hit reactions).
+    t.run(600, INPUT.BLOCK, 0, (i) => i % 40 === 0 && t.zone.attack(1));
     expect(t.events().some((e) => e.target === t.entityId && !e.blocked)).toBe(true);
   });
 });
@@ -311,9 +311,10 @@ describe('inventory and equipment', () => {
     expect(t.inventories().at(-1)!.weaponSpeed).toBe(1);
     t.run(APPROACH, INPUT.FORWARD, 0);
     t.run(30);
-    for (let i = 0; i < 200 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
+    // One swing every 1.5 s: back-to-back swings would keep the skeleton in its hit reactions.
+    for (let i = 0; i < 600 && t.mob().alive; i++) t.run(1, 0, 0, () => i % 30 === 0 && t.zone.attack(1));
     const dealt = t.events().filter((e) => e.target === t.mob().id && !e.blocked).map((e) => e.damage);
-    expect(dealt.slice(0, 3)).toEqual([9, 9, 9]); // Long Sword 10 slash x skeleton slash 0.9
+    expect(dealt.slice(0, 2)).toEqual([9, 9]); // Long Sword 10 slash x skeleton slash 0.9
     const taken = t.events().filter((e) => e.target === t.entityId && !e.blocked).map((e) => e.damage);
     expect(taken.length).toBeGreaterThan(0);
     expect(taken.every((d) => d === 8.1)).toBe(true); // 10 x resist 0.9 x Scale Armor 0.9
@@ -366,6 +367,33 @@ describe('character spacing', () => {
   });
 });
 
+describe('hit reactions (original rules)', () => {
+  it('a landed hit puts the player in an impact and stops the creature for its impact', () => {
+    const t = setup();
+    t.run(APPROACH, INPUT.FORWARD, 0);
+    let hitMe = false;
+    for (let i = 0; i < 400 && !hitMe; i++) {
+      const n = t.events().length;
+      t.run(1);
+      hitMe = t.events().slice(n).some((e) => e.target === t.entityId && e.damage > 0 && !e.killed);
+    }
+    expect(hitMe).toBe(true);
+    t.run(1); // the player's state is replicated from its next step
+    expect(t.me().anim).toBe(ANIM.HIT);
+    // A landed hit on the skeleton stops whatever it was doing (swing, hop) for its impact.
+    let hitMob = false;
+    for (let i = 0; i < 600 && !hitMob && t.mob().alive; i++) {
+      const n = t.events().length;
+      t.run(1, 0, 0, () => i % 25 === 0 && t.zone.attack(1));
+      hitMob = t.events().slice(n).some((e) => e.target === t.mob().id && e.damage > 0 && !e.killed);
+    }
+    expect(hitMob).toBe(true);
+    t.run(1); // replicated from the creature's next update
+    expect(t.mob().swinging).toBe(false);
+    expect(t.mob().anim).toBe(ANIM.HIT);
+  });
+});
+
 describe('skeleton shield AI', () => {
   it('does not raise its shield in reaction to a swing (the logged original never did)', () => {
     const t = setup({ random: () => 0.68 });
@@ -404,7 +432,14 @@ describe('skeleton shield AI', () => {
     const t = setup({ random: () => 0.68 });
     t.run(APPROACH, INPUT.FORWARD, 0);
     t.run(30);
-    for (let i = 0; i < 300 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
+    // Swing as soon as the stance shield is up (it stays up 0.82 s); otherwise wait.
+    for (let i = 0; i < 600 && t.mob().alive; i++) {
+      const up = t.mob().shield;
+      t.run(1, 0, 0, () => up && t.zone.attack(1));
+      if (t.events().some((e) => e.target === t.mob().id && e.blocked)) break;
+    }
+    // ...then keep swinging now and then until one lands.
+    for (let i = 0; i < 600 && t.mob().alive; i++) t.run(1, 0, 0, () => i % 20 === 0 && t.zone.attack(1));
     const onMob = t.events().filter((e) => e.target === t.mob().id);
     expect(onMob.some((e) => e.blocked)).toBe(true);
     expect(onMob.some((e) => !e.blocked && e.damage > 0)).toBe(true);
