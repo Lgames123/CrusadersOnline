@@ -141,7 +141,7 @@
   - 92 tests + 2 E2E.
 
 ### Not Yet Done
-- Spells beyond Torch Light (the framework is in: spell table from default.ctx, spell books, mana and regeneration, conjuring, R / T keys, persistence): fireball, slow, freeze, stoneskin, lightning, heroism, spectral ally, revelation, holy wrath, soul drinker need live captures; creature spells / ranged attacks; the rule that raises a spell's level (assumed: another book).
+- Spells beyond Torch Light (the framework is in: spell table from default.ctx, spell books, mana and regeneration, conjuring, R / T keys, persistence): fireball, slow, freeze, stoneskin, lightning, heroism, spectral ally, revelation, holy wrath, soul drinker need live captures; creature spells / ranged attacks; mana regeneration rate (one sample).
 - Creature hit reaction IMPACT_FRONT_TWO_STEPS_BACK (PI31); the third combo step's recoil (plays backwards after its impact); combo chain 105–107 (COMBO 6–8, weapon class unknown).
 - Idle zones are never stopped; portals to acts without a converted mesh (Ws_a) answer "This way is blocked".
 - Ogre / Dasher / Dwarf / elemental archetypes, doors, levers and scripted sequences, `Ws_a.msh`, material-based footsteps, music.

@@ -177,6 +177,18 @@ Implemented as pure functions in `shared/src/game/original_stats.ts` (`originalD
 
 ---
 
+### 8.6 Hit effects (Frida, 2026-10-12)
+
+`script/effects.stg` defines the special effects: SHAPE (a sprite: texture, OUTER / CENTER / INNER colours), FLASH (one animated shape: start size, size speed and acceleration, rotation speed, attack / sustain / decay seconds, MOVE, GRAVITY, RANDOMIZE_SIZE / _MOVE, POSITION, SPAWN_MULTI trails) and MULTI (a named effect: `ADD FLASH <flash> <delay>`, one list per variant = spell level). The engine's effect names are a 91-entry table at `0x004F35F8` (0 SWORD_DAMAGE, 1 SWORD_METAL, 2 SWORD_STONE, 3 BLOOD, 4 LIGHT_CAST, 5 SPELL_WINDUP, ... 86 UNDEAD_BLOOD, 87 BUGJUICE, 88 BONE, 89 MANA_RECHARGE, 90 HEALTH_RECHARGE); `0x00481FC0(type, variant, pos*, dir*)` spawns one.
+
+Logged with Frida while fighting skeletons, blocking, breaking a barrel and striking a wall:
+- **Landed hit** (`0x0044D0xx`): the effect type comes from the victim (virtual call): skeletons BONE ×3–7, Drake (living) BLOOD ×2–3, plus the victim's particle emitter (`0x0043E310`, kind 5, speed 40); then one effect per elemental damage type present (fire → DAMAGE_FIRE, frost → DAMAGE_FROST, holy → DAMAGE_HOLY, dark → FIREBALL_PROJ_EVIL_SPAWN — the skeletons' blows carry it).
+- **Blocked blow** (Drake's or a skeleton's shield): SWORD_DAMAGE + SWORD_METAL ×3 (×1 at low detail) spaced along a line at the shield.
+- **Blade on a wall or the floor** (`0x0048CCC2`): SWORD_DAMAGE + SWORD_METAL ×3 along the surface normal.
+- **Breakable prop** (a barrel): SWORD_STONE ×6 upwards, plus a debris emitter (kind 12).
+
+Implemented: the converter writes rules/effects.json; the client renders the flashes as sprites (alpha from the textures, glows additive) and spawns these effects from combat events, prop hits and its own swings meeting a wall. The file's units are not stated: sizes are read as tenths of a foot and MOVE / GRAVITY per 30 Hz tick (calibrated by eye). The per-object particle emitters are not reproduced yet.
+
 ## 9. Creatures, Experience and Blocking Follow-up (2026-10-09)
 
 ### 9.1 Creature template table (`.data` 0x004ED058–0x004ED9B8)
@@ -420,7 +432,7 @@ The second chain (105–107, COMBO 6–8) uses melee clips (PN21 "vertical", PN1
 
 **Shield rush.** The game's Readme binds Space + RMB to a shield rush; models.ctx binds ASM_RAM_SHOULDER to PL01 (24 frames, the root charges 6.5 ft by frame 11 and settles at 5.18 ft). Implemented as a timed action of the shared step (shield + jump instead of a jump). Logged live (Frida, a dozen rushes into a skeleton): the creature requests IMPACT_BACK at once and IMPACT_SEVERE ~0.5 s later (knocked down, 1.3–1.9 s) and loses no HP, while Drake loses 1 HP per tick of contact (2–5 per rush, HP-loss routine with damage 1.0); implemented so (Drake's loss stops at 1 HP).
 
-**Spells (first capture).** Casting Torch Light: ASM_SPELL_CONJURE for 1.54 s, then ASM_SPELL_TORCH_LIGHT; mana (stats `+0x228` current / `+0x22C` max, ints; level at `+0x230`, attributes M/I/E/S at `+0x254..+0x260`, XP `+0x268`) went 30 → 29 (S0 level 1 costs 1) and back to 30 ~3.9 s later; recasting while the light was active did not spend mana. Implemented: spell books teach their spell (another book of a known spell raises it a level — an assumption), R conjures the selected spell for 1.54 s with the caster rooted, the mana is spent when it takes effect, mana regenerates one point per 3.9 s (provisional), Torch Light lights a radius of 15 / 30 / 50 ft for 80 / 120 / 180 s and is replicated in the entity flags.
+**Spells (first capture).** Casting Torch Light: ASM_SPELL_CONJURE for 1.54 s, then ASM_SPELL_TORCH_LIGHT; mana (stats `+0x228` current / `+0x22C` max, ints; level at `+0x230`, attributes M/I/E/S at `+0x254..+0x260`, XP `+0x268`) went 30 → 29 (S0 level 1 costs 1) and back to 30 ~3.9 s later; recasting while the light was active did not spend mana. Implemented: spell books teach their spell (another book of a known spell raises it a level — confirmed by the user), R conjures the selected spell for 1.54 s with the caster rooted, the mana is spent when it takes effect, mana regenerates one point per 3.9 s (provisional), Torch Light lights a radius of 15 / 30 / 50 ft for 80 / 120 / 180 s and is replicated in the entity flags.
 
 ### 14.2 Moving with the shield up (2026-10-12)
 

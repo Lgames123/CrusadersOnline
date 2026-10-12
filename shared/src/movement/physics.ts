@@ -37,9 +37,15 @@ function boxRotation(b: BoxDef): { x: number; y: number; z: number; w: number } 
 
 /** Whether level geometry lies within `distance` ahead of a character (yaw 0 faces -Z), probed at `height` above its feet. */
 export function wallAhead(mw: MovementWorld, feet: { x: number; y: number; z: number }, yaw: number, distance: number, height: number): boolean {
+  return wallDistance(mw, feet, yaw, distance, height) !== null;
+}
+
+/** Distance to level geometry ahead (within `distance`, at `height` above the feet), or null. */
+export function wallDistance(mw: MovementWorld, feet: { x: number; y: number; z: number }, yaw: number, distance: number, height: number): number | null {
   const dir = { x: -Math.sin(yaw), y: 0, z: -Math.cos(yaw) };
   const ray = new mw.rapier.Ray({ x: feet.x, y: feet.y + height, z: feet.z }, dir);
-  return mw.world.castRay(ray, distance, true, undefined, CHARACTER_GROUPS) !== null;
+  const hit = mw.world.castRay(ray, distance, true, undefined, CHARACTER_GROUPS);
+  return hit ? hit.timeOfImpact : null;
 }
 
 /** Builds the static collision world for a level. Identical on client and server. */

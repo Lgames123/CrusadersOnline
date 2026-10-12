@@ -9,6 +9,9 @@ import {
   THRUST_WALL_DISTANCE,
   THRUST_WALL_HEIGHT,
   wallAhead,
+  wallDistance,
+  PLAYER_REACH,
+  attackTiming,
   LEVEL_PREFIX,
   attackKindFor,
   TICK_DT,
@@ -38,6 +41,7 @@ import { CREATURE_SFX, SFX, SoundBank, pick } from './audio/sound_bank.ts';
 import { registerAssetServiceWorker } from './assets/game_files.ts';
 import { GameFilesPanel } from './ui/game_files_panel.ts';
 import { InputManager } from './input/input_manager.ts';
+import { Effects } from './engine/effects.ts';
 import { TORCH_LIGHT_COLOR, TORCH_LIGHT_HEIGHT, TORCH_LIGHT_INTENSITY } from './entities/torch_light.ts';
 import { connectToWorld } from './network/connect.ts';
 import { CombatUi } from './ui/combat_ui.ts';
@@ -116,6 +120,17 @@ async function main(): Promise<void> {
   const headPos = new THREE.Vector3();
   const prompt = document.getElementById('prompt')!;
   let lastStats: { level: number; dead: boolean } | null = null;
+  /** The original's special effects (sparks, blood, bone chips), when the game files are imported. */
+  let effects: Effects | null = null;
+  void Effects.load(scene).then((e) => (effects = e));
+  const fxPos = new THREE.Vector3();
+  /** Pending wall-spark checks of the local swings (seconds to the impact frame, heading). */
+  const wallChecks: { t: number; yaw: number }[] = [];
+  const fxDir = new THREE.Vector3();
+  /** Spawns `count` copies of an effect along a short line from `at` (the engine spaces them ~0.2 m apart). */
+  const fxBurst = (name: string, count: number, at: THREE.Vector3, step: THREE.Vector3, dir: THREE.Vector3 | null = null) => {
+    for (let i = 0; i < count; i++) effects?.spawn(name, fxPos.copy(at).addScaledVector(step, i), dir);
+  };
   /** The local player's Torch Light (radius from the server's stats). */
   const myTorch = new THREE.PointLight(TORCH_LIGHT_COLOR, TORCH_LIGHT_INTENSITY, 1, 1.4);
   myTorch.visible = false;
@@ -153,6 +168,22 @@ async function main(): Promise<void> {
             const from = mine ? player?.object : remotes.byId.get(e.attacker)?.avatar.object;
             const avatar = isMe ? player?.avatar : target?.avatar;
             if (from && avatar?.react && !e.blocked && !e.killed && e.damage > 0) avatar.react(impactSide(obj, from));
+            // Original hit effects (executable-analysis §8.6): a blocked blow throws sparks and an
+            // ember off the shield (x3); a landed one bone chips (skeletons, 3-7) or blood (2-3).
+            if (effects && from) {
+              const toward = fxDir.subVectors(from.position, obj.position).setY(0).normalize();
+              const at = new THREE.Vector3().copy(obj.position).addScaledVector(toward, 0.35);
+              at.y += 1.2;
+              const step = new THREE.Vector3(0, 0.2, 0).addScaledVector(toward, -0.1);
+              if (e.blocked) {
+                fxBurst('SWORD_DAMAGE', 3, at, step);
+                fxBurst('SWORD_METAL', 3, at, step);
+              } else if (e.damage > 0) {
+                const bone = !isMe && CREATURE_SFX[target?.info.archetype ?? '']?.material === 'bone';
+                if (bone) fxBurst('BONE', 3 + Math.floor(Math.random() * 5), at, step.clone().multiplyScalar(-1));
+                else fxBurst('BLOOD', 2 + Math.floor(Math.random() * 2), at, step.clone().multiplyScalar(-1));
+              }
+            }
             // Original impact / cry sounds (executable sound tables, Sound.ctx ids).
             if (sounds) {
               if (e.blocked) sounds.play(SFX.shieldBlockWood, headPos);
@@ -176,6 +207,10 @@ async function main(): Promise<void> {
               if (view.def.kind === 'chest' && o.state === 'open') sounds?.play(SFX.chestOpen, at);
               else if (view.def.kind === 'item' && o.state === 'gone' && mine) sounds?.play(SFX.click);
               else if (view.def.kind === 'prop') {
+                // Struck props throw stone-like sparks upwards (SWORD_STONE x6, logged on a barrel).
+                fxPos.copy(at);
+                fxPos.y += 0.8;
+                fxBurst('SWORD_STONE', 6, fxPos.clone(), new THREE.Vector3(0, -0.2, 0), new THREE.Vector3(0, 1, 0));
                 const glass = /bottle|glass/i.test(view.def.name);
                 const barrel = /barrel/i.test(view.def.name);
                 if (o.state === 'gone') sounds?.play(glass ? SFX.breakGlass : barrel ? SFX.breakBarrel : SFX.breakWood, at);
@@ -276,6 +311,9 @@ async function main(): Promise<void> {
     if (kind === 'normal' && wallAhead(session?.mw ?? mw, feet, input.yaw, THRUST_WALL_DISTANCE, THRUST_WALL_HEIGHT)) kind = 'thrust';
     const started = local.swing(input.yaw, kind);
     if (started) {
+      // Check for a wall at the swing's impact frame (sparks off the stone).
+      const timing = attackTiming(started, 1);
+      wallChecks.push({ t: (timing.startup + timing.active / 2) * TICK_DT, yaw: input.yaw });
       session?.attack(started);
       sounds?.play(pick(SFX.swing), local.object.position, { volume: 0.7 });
     }
@@ -365,7 +403,7 @@ async function main(): Promise<void> {
 
   if (import.meta.env.DEV) {
     // Debug/E2E hook: lets tests drive input without pointer lock.
-    (window as unknown as { __co: unknown }).__co = { input, player: local, mw, session, remotes, inventory: inventoryPanel, scene, get camera() { return chase.camera; }, cameras: { classic: chase.classic, modern: chase.modern }, rig: chase, settings, renderer, level: levelView, render: () => renderer.render(scene, chase.camera) };
+    (window as unknown as { __co: unknown }).__co = { input, player: local, mw, session, remotes, inventory: inventoryPanel, scene, get camera() { return chase.camera; }, cameras: { classic: chase.classic, modern: chase.modern }, rig: chase, settings, renderer, level: levelView, get effects() { return effects; }, render: () => renderer.render(scene, chase.camera) };
   }
 
   // Fixed-step simulation (same 20 Hz step as the server), interpolated rendering.
@@ -394,6 +432,21 @@ async function main(): Promise<void> {
     local.render(acc / TICK_MS, dt);
     if (myTorch.visible) myTorch.position.set(local.object.position.x, local.object.position.y + TORCH_LIGHT_HEIGHT, local.object.position.z);
     if (session) remotes.update(session, dt);
+    effects?.update(dt);
+    // A swing that reaches a wall throws sparks off it at its impact frame (SWORD_DAMAGE + SWORD_METAL x3).
+    for (let i = wallChecks.length - 1; i >= 0; i--) {
+      const w = wallChecks[i]!;
+      if ((w.t -= dt) > 0) continue;
+      wallChecks.splice(i, 1);
+      const feet = local.character.position;
+      const d = wallDistance(session?.mw ?? mw, feet, w.yaw, PLAYER_REACH + 0.6, 1.2);
+      if (d === null || !effects) continue;
+      const fwd = new THREE.Vector3(-Math.sin(w.yaw), 0, -Math.cos(w.yaw));
+      const at = new THREE.Vector3(feet.x, feet.y + 1.2, feet.z).addScaledVector(fwd, d - 0.05);
+      const normal = fwd.clone().negate().setY(0.6).normalize();
+      fxBurst('SWORD_DAMAGE', 3, at, normal.clone().multiplyScalar(0.2), normal);
+      fxBurst('SWORD_METAL', 3, at, normal.clone().multiplyScalar(0.2), normal);
+    }
     input.updateView(dt);
     const movingNow = Math.hypot(local.object.position.x - target.x, local.object.position.z - target.z) > 1e-4;
     target.copy(local.object.position);

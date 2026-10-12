@@ -1,4 +1,5 @@
 import { unzipSync } from 'fflate';
+import { parseEffectsStg } from './formats/effects_stg.ts';
 import { decodeTga, type DecodedImage } from './formats/tga.ts';
 import { interpretDefaultCtx, parseCtxTable } from './formats/ctx.ts';
 import { parseMdl } from './formats/mdl.ts';
@@ -162,6 +163,20 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
     await sink.writeFile(out, JSON.stringify({ drake: interpretDefaultCtx(table), raw: table.rows }, null, 2));
     manifest.rules['default'] = out;
     report.converted.push(ctxPath);
+  }
+
+  // --- Special effects: script/effects.stg -> rules/effects.json (shapes, flashes, named effects)
+  const effectsPath = 'script/effects.stg';
+  const effectsBytes = await source.readFile(effectsPath);
+  if (!effectsBytes) {
+    report.warnings.push(`${effectsPath} not found`);
+  } else {
+    manifest.inputs[effectsPath] = await sha256Hex(effectsBytes);
+    const effects = parseEffectsStg(new TextDecoder('latin1').decode(effectsBytes));
+    await sink.writeFile('rules/effects.json', JSON.stringify(effects));
+    manifest.rules['effects'] = 'rules/effects.json';
+    report.converted.push(effectsPath);
+    log(`effects: ${Object.keys(effects.multis).length} effects, ${Object.keys(effects.flashes).length} flashes`);
   }
 
   // --- Items: script/items.ctx -> rules/items.json (inheritance resolved)
