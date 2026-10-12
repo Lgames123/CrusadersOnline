@@ -56,6 +56,7 @@ import {
   createEntityState,
   createInputFrame,
   createMovementWorld,
+  setDoorOpen,
   decodeInput,
   dequantizeAngle,
   encodeSnapshot,
@@ -214,6 +215,8 @@ export interface WorldZoneOptions {
 /** World objects (original levels): interaction reach and respawn delays (slice values). */
 const INTERACT_RANGE = 2.5;
 const INTERACT_HEIGHT = 2;
+/** Doors: reach from the door's bounds (they are up to 24 ft wide). */
+const DOOR_INTERACT_RANGE = 1.8;
 /** Mobs only notice players within this height difference (slice value). */
 const AGGRO_HEIGHT = 3;
 const OBJECT_RESPAWN_TICKS = 20 * 300; // 5 min, so a persistent world refills
@@ -551,11 +554,18 @@ export class WorldZone {
     return p.entityId;
   }
 
-  /** Picks up a ground item or opens a chest (CS_INTERACT): within reach, still there, alive. */
-  interact(connId: number, id: number): void {
+  /**
+   * Picks up a ground item, opens a chest or a door (CS_INTERACT): within reach, still there,
+   * alive. A locked door opens only with `key` (the use key) and its key in the bag.
+   */
+  interact(connId: number, id: number, key = false): void {
     const p = this.players.get(connId);
     const o = this.objects.get(id);
     if (!p || !o || !alive(p) || o.state !== 'present' || o.def.kind === 'breakable') return;
+    if (o.def.kind === 'door') {
+      this.openDoor(p, o, key);
+      return;
+    }
     const pos = p.character.position;
     if (Math.hypot(o.def.x - pos.x, o.def.z - pos.z) > INTERACT_RANGE || Math.abs(o.def.y - pos.y) > INTERACT_HEIGHT) return;
     const grants = o.def.kind === 'item' ? (o.def.item ? [o.def.item] : []) : (o.def.contents ?? []);
@@ -567,6 +577,23 @@ export class WorldZone {
     this.broadcastObjects([{ id, state: o.state, by: p.entityId, loot }]);
     const record = this.persistRecord(p);
     if (record) this.outbox.persist?.([record], 'progress');
+  }
+
+  /** Opens a door in reach (its bounds); a locked one needs its key carried and the use key. Doors stay open. */
+  private openDoor(p: Player, o: WorldObject, key: boolean): void {
+    const b = o.def.bounds;
+    if (!b) return;
+    const pos = p.character.position;
+    const dx = Math.max(b[0] - pos.x, 0, pos.x - b[3]);
+    const dz = Math.max(b[2] - pos.z, 0, pos.z - b[5]);
+    if (Math.hypot(dx, dz) > DOOR_INTERACT_RANGE || pos.y < b[1] - INTERACT_HEIGHT || pos.y > b[4]) return;
+    if (o.def.lock) {
+      const keyId = itemSlug(o.def.lock);
+      if (!key || !p.inventory.some((e) => e.itemId === keyId)) return;
+    }
+    o.state = 'open';
+    setDoorOpen(this.mw, o.def.id, true);
+    this.broadcastObjects([{ id: o.def.id, state: 'open', by: p.entityId }]);
   }
 
   /** Gold goes to the purse; known items to the bag (stacking potions). False if not taken. */
@@ -706,7 +733,7 @@ export class WorldZone {
   private respawnObjects(): void {
     const back: ObjectChange[] = [];
     for (const o of this.objects.values()) {
-      if (o.state === 'present' || this.tick < o.respawnAt) continue;
+      if (o.state === 'present' || o.def.kind === 'door' || this.tick < o.respawnAt) continue;
       o.state = 'present';
       o.hp = o.def.hp ?? 0;
       o.respawnAt = 0;

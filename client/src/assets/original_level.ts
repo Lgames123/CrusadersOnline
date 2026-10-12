@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, type ArenaDef, type LevelObject, type LevelPlacements, type WorldObjectState } from '@crusaders/shared';
+import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, type ArenaDef, type LevelObject, type LevelPlacements, type WorldObjectDef, type WorldObjectState } from '@crusaders/shared';
 
 /**
  * An original level converted from the player's own installation (imported in the browser, or
@@ -29,12 +30,23 @@ export interface LevelObjectView {
   state: WorldObjectState;
 }
 
+/** A door brush: its world object and the drawn piece (slides up into the ceiling when open). */
+export interface DoorView {
+  def: WorldObjectDef;
+  mesh: THREE.Mesh;
+  state: WorldObjectState;
+  /** 0 closed .. 1 open. */
+  open: number;
+}
+
 export interface OriginalLevel {
   arena: ArenaDef;
   /** Level geometry in metres. */
   object: THREE.Object3D;
   /** Placed objects (props, items, chests) by placement index, the world-object id. */
   objects: Map<number, LevelObjectView>;
+  /** Doors by world-object id. */
+  doors: Map<number, DoorView>;
   /** Torch flame positions (metres), e.g. for ambient fire sounds. */
   torches: THREE.Vector3[];
   setObjectState(id: number, state: WorldObjectState): void;
@@ -47,6 +59,36 @@ export interface OriginalLevel {
 }
 
 const TORCH_LIGHTS = 8;
+/** Seconds a door takes to slide open. */
+const DOOR_OPEN_SECONDS = 0.9;
+/** Brush colours (their face textures are not decoded): wood, metal, stone. */
+const BRUSH_COLOURS: [RegExp, number][] = [[/metal|cell|gate|gear|wheel|crusher/i, 0x4c4c52], [/door|sign|plat|bridge|tort/i, 0x5a3c22]];
+const BRUSH_STONE = 0x5d554a;
+
+/** Convex piece with flat faces shaded by a fixed light (the level is unlit and lightmapped). */
+function brushMesh(points: Float32Array, name: string): THREE.Mesh | null {
+  const pts: THREE.Vector3[] = [];
+  for (let i = 0; i + 2 < points.length; i += 3) pts.push(new THREE.Vector3(points[i], points[i + 1], points[i + 2]));
+  let geo: THREE.BufferGeometry;
+  try {
+    geo = new ConvexGeometry(pts);
+  } catch {
+    return null;
+  }
+  const base = new THREE.Color(BRUSH_COLOURS.find(([re]) => re.test(name))?.[1] ?? BRUSH_STONE);
+  const light = new THREE.Vector3(0.4, 1, 0.3).normalize();
+  const n = geo.getAttribute('normal');
+  const colours = new Float32Array(n.count * 3);
+  const c = new THREE.Color();
+  for (let i = 0; i < n.count; i++) {
+    // Dim like the lightmapped level around it.
+    const k = 0.25 + 0.25 * Math.max(0, n.getX(i) * light.x + n.getY(i) * light.y + n.getZ(i) * light.z);
+    c.copy(base).multiplyScalar(k);
+    colours.set([c.r, c.g, c.b], i * 3);
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colours, 3));
+  return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true }));
+}
 
 function flameTexture(): THREE.Texture {
   const c = document.createElement('canvas');
@@ -175,6 +217,18 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
     objects.set(id, { def: o, object: obj, position: new THREE.Vector3(...o.position).multiplyScalar(LEVEL_UNIT_METRES), state: 'present' });
   }));
 
+  // Brushes: doors, gates, bridges, wheels... (convex pieces; doors slide up when opened).
+  const doors = new Map<number, DoorView>();
+  const doorDefs = new Map((arena.objects ?? []).filter((o) => o.kind === 'door').map((o) => [o.id, o]));
+  for (const b of arena.brushes ?? []) {
+    const mesh = brushMesh(b.points, b.name);
+    if (!mesh) continue;
+    mesh.name = b.name;
+    root.add(mesh);
+    const def = b.door !== undefined ? doorDefs.get(b.door) : undefined;
+    if (def) doors.set(def.id, { def, mesh, state: 'present', open: 0 });
+  }
+
   const lights: THREE.PointLight[] = [];
   for (let i = 0; i < TORCH_LIGHTS; i++) {
     const l = new THREE.PointLight(0xff9a40, 0, 9, 1.6);
@@ -188,8 +242,11 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
     ...(placements.music ? { music: placements.music } : {}),
     object: root,
     objects,
+    doors,
     torches,
     setObjectState(id, state) {
+      const door = doors.get(id);
+      if (door) door.state = state;
       const v = objects.get(id);
       if (!v) return;
       v.state = state;
@@ -207,6 +264,13 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
     update(camera, dt) {
       if (sky.children.length) sky.position.copy(camera.position);
       t += dt;
+      for (const d of doors.values()) {
+        const target = d.state === 'open' ? 1 : 0;
+        if (d.open === target) continue;
+        d.open = target > d.open ? Math.min(1, d.open + dt / DOOR_OPEN_SECONDS) : 0;
+        const b = d.def.bounds!;
+        d.mesh.position.y = (b[4] - b[1]) * 0.95 * d.open;
+      }
       flames.forEach((f, i) => f.scale.setScalar(1.4 + 0.25 * Math.sin(t * 13 + i * 1.7) + 0.15 * Math.sin(t * 29 + i)));
       if ((reassign -= dt) <= 0) {
         reassign = 0.5;

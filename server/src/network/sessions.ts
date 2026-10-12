@@ -204,7 +204,7 @@ export class SessionManager implements TransportHandlers {
         return;
       }
       case CS.INTERACT:
-        if (s.state === 'in_world') this.zoneOf(s)?.interact(conn.id, msg.d.object);
+        if (s.state === 'in_world') this.zoneOf(s)?.interact(conn.id, msg.d.object, msg.d.key ?? false);
         return;
       case CS.USE_ITEM:
         if (s.state === 'in_world') this.zoneOf(s)?.useItem(conn.id, msg.d.slot);

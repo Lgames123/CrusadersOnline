@@ -7,7 +7,7 @@ import { SPELL_BOOK_PARAMS, type SpellId } from './spells.ts';
  * `rules/items.json` (converter/src/formats/items_ctx.ts) can replace it with the full table via
  * catalogFromItemRules().
  */
-export type ItemType = 'weapon' | 'shield' | 'armor' | 'potion' | 'spellbook';
+export type ItemType = 'weapon' | 'shield' | 'armor' | 'potion' | 'spellbook' | 'key';
 
 export interface ItemDef {
   /** Stable slug, e.g. "long_sword" (stored in inventory_items.item_id). */
@@ -42,6 +42,7 @@ const armor = (name: string, prot: Partial<Record<DamageType, number>>, price: n
   ({ id: itemSlug(name), name, type: 'armor', protection: damageVector(prot, 1), price });
 const potion = (name: string, heal: number, price: number): ItemDef => ({ id: itemSlug(name), name, type: 'potion', heal, stackable: true, price });
 const spellBook = (name: string, spell: SpellId, price: number): ItemDef => ({ id: itemSlug(name), name, type: 'spellbook', spell, price });
+const key = (name: string, price: number): ItemDef => ({ id: itemSlug(name), name, type: 'key', price });
 
 export const BUILTIN_ITEMS: ItemCatalog = new Map(
   [
@@ -92,6 +93,9 @@ export function catalogFromItemRules(rules: { items: readonly ItemRule[] }): Ite
     } else if (type === 'POTION' && r.fields['Use'] === 'HEAL') {
       const amount = Number(r.calls?.find((c) => c.name === 'UseParameters')?.args[0] ?? 0);
       if (amount > 0) def = potion(r.name, amount, price);
+    } else if (type === 'USEABLE' && / Key$/.test(r.name)) {
+      // Door keys (Stone Key, Fain's Key, Room 2 Key...): carried, used on a locked door.
+      def = key(r.name, price);
     }
     if (def && def.id) out.set(def.id, def);
   }
@@ -184,7 +188,7 @@ export function addItem(inv: InventoryEntry[], itemId: string, quantity = 1, cat
 export function setEquipped(inv: InventoryEntry[], slot: number, equip: boolean, catalog: ItemCatalog): boolean {
   const entry = inv.find((e) => e.slot === slot);
   const def = entry && catalog.get(entry.itemId);
-  if (!entry || !def || entry.equipped === equip || def.type === 'potion' || def.type === 'spellbook') return false;
+  if (!entry || !def || entry.equipped === equip || def.type === 'potion' || def.type === 'spellbook' || def.type === 'key') return false;
   if (equip) {
     for (const e of inv) {
       if (e.equipped && catalog.get(e.itemId)?.type === def.type) e.equipped = false;
@@ -203,7 +207,7 @@ export function sanitizeInventory(inv: readonly InventoryEntry[], catalog: ItemC
     const def = catalog.get(e.itemId);
     if (!def || !Number.isInteger(e.slot) || e.slot < 0 || e.slot >= INVENTORY_SLOTS || slots.has(e.slot)) continue;
     slots.add(e.slot);
-    const eq = e.equipped && def.type !== 'potion' && def.type !== 'spellbook' && !equipped.has(def.type);
+    const eq = e.equipped && def.type !== 'potion' && def.type !== 'spellbook' && def.type !== 'key' && !equipped.has(def.type);
     if (eq) equipped.add(def.type);
     const q = Math.floor(e.quantity ?? 1);
     out.push(def.stackable && q > 1 ? { slot: e.slot, itemId: e.itemId, equipped: eq, quantity: Math.min(MAX_STACK, q) } : { slot: e.slot, itemId: e.itemId, equipped: eq });

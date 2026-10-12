@@ -58,7 +58,7 @@ export const EquipItemPacketSchema = z.object({
 export const InteractPacketSchema = z.object({
   op: z.literal(CS.INTERACT),
   seq: z.number().int().positive(),
-  d: z.object({ object: z.number().int().min(0).max(1_000_000) }),
+  d: z.object({ object: z.number().int().min(0).max(1_000_000), key: z.boolean().optional() }),
 });
 
 export const UseItemPacketSchema = z.object({

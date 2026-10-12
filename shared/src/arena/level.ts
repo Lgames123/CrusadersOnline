@@ -1,4 +1,4 @@
-import type { ArenaDef, PortalDef, TriMeshDef, WorldObjectDef } from './types.ts';
+import type { ArenaDef, BrushDef, PortalDef, TriMeshDef, WorldObjectDef } from './types.ts';
 
 /**
  * Arenas built from an original level converted from the user's own installation
@@ -48,6 +48,29 @@ export interface LevelPortal {
   position: [number, number, number];
 }
 
+/** A brush (cap class 0x31): name and vertices (original units, Z mirrored; the first is the pivot). */
+export interface LevelBrush {
+  name: string;
+  points: [number, number, number][];
+}
+
+/** Door world-object ids start here (placement indices stay below). */
+export const DOOR_OBJECT_BASE = 500_000;
+/** Brushes that are doors (open with the interact key). */
+export const DOOR_BRUSH = /door|gate/i;
+/** Brushes that block movement: doors and the walkable pieces. */
+const SOLID_BRUSH = /door|gate|bridge|plat/i;
+/**
+ * Locked doors and their keys. Not the original's door scripting (not decoded): the keys placed
+ * in the acts paired with the door they most plausibly open (Fain's Key next to the train's
+ * final door; the inn's room keys).
+ */
+export const DOOR_LOCKS: readonly { act: RegExp; brush: string; key: string }[] = [
+  { act: /^train$/, brush: 'bfinaldoor', key: "Fain's Key" },
+  { act: /^cs1b-inn$/, brush: 'bDoorE_4', key: 'Room 2 Key' },
+  { act: /^cs1b-inn$/, brush: 'bDoorE_5', key: 'Room 3 Key' },
+];
+
 export interface LevelPlacements {
   /** Lower-case mesh name, e.g. "ca_a". */
   mesh: string;
@@ -56,6 +79,7 @@ export interface LevelPlacements {
   portals?: LevelPortal[];
   /** Music track (Music/<n>.mp3, the original CD track number); absent = silence. */
   music?: number;
+  brushes?: LevelBrush[];
 }
 
 /** Horizontal radius / height of a portal trigger, metres (slice values). */
@@ -176,5 +200,34 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
     y: p.position[1] * s,
     z: p.position[2] * s,
   }));
-  return { name, boxes: [], meshes: [mesh], spawnPoints: spawnPoints(mesh, hostiles, 8), mobSpawns, objects, portals };
+  const act = name.slice(LEVEL_PREFIX.length);
+  const brushes: BrushDef[] = [];
+  (placements.brushes ?? []).forEach((b, i) => {
+    // Drop the pivot (first vertex): the rest are the piece's corners.
+    const pts = b.points.length > 4 ? b.points.slice(1) : b.points;
+    const points = new Float32Array(pts.flatMap((p) => [p[0] * s, p[1] * s, p[2] * s]));
+    const brush: BrushDef = { name: b.name, points, solid: SOLID_BRUSH.test(b.name) };
+    if (DOOR_BRUSH.test(b.name)) {
+      const min = [Infinity, Infinity, Infinity];
+      const max = [-Infinity, -Infinity, -Infinity];
+      for (let k = 0; k < points.length; k++) {
+        min[k % 3] = Math.min(min[k % 3]!, points[k]!);
+        max[k % 3] = Math.max(max[k % 3]!, points[k]!);
+      }
+      const id = DOOR_OBJECT_BASE + i;
+      const lock = DOOR_LOCKS.find((l) => l.act.test(act) && l.brush === b.name)?.key;
+      objects.push({
+        id,
+        kind: 'door',
+        x: (min[0]! + max[0]!) / 2,
+        y: min[1]!,
+        z: (min[2]! + max[2]!) / 2,
+        bounds: [min[0]!, min[1]!, min[2]!, max[0]!, max[1]!, max[2]!],
+        ...(lock ? { lock } : {}),
+      });
+      brush.door = id;
+    }
+    brushes.push(brush);
+  });
+  return { name, boxes: [], meshes: [mesh], spawnPoints: spawnPoints(mesh, hostiles, 8), mobSpawns, objects, portals, brushes };
 }

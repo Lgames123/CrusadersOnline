@@ -84,8 +84,8 @@ export class ZoneHost {
     this.post({ t: 'equip', connId, slot, equip });
   }
 
-  interact(connId: number, object: number): void {
-    this.post({ t: 'interact', connId, object });
+  interact(connId: number, object: number, key = false): void {
+    this.post({ t: 'interact', connId, object, key });
   }
 
   useItem(connId: number, slot: number): void {

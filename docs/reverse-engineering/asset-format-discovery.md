@@ -255,6 +255,12 @@ Portal records live outside the object list:
 
 Exits come in pairs: the destination has a portal back to the source, which is where an arriving player appears. The four acts of a mesh (e.g. Ca1a/Ca2a/Ca3a) link to the matching act of their neighbours.
 
+### 6.2.3 Brushes (doors, gates, bridges, wheels) `[CONFIRMED: 191 brushes]`
+
+Moving level pieces are class `0x31` records, not part of the `.msh`: `[31 00 00 00][...][3F 00 00 00][02 00 00 00]`, name pointer at +0x14 (names start with `b`: `bDoorE_2`, `bfinaldoor`, `bOuterGates`, `bLongWheel1`, `bBridgePiece4`, `bLever1_1`...). After the name: a tag dword, a 3 × 3 rotation (identity in every sample), the pivot position, 12 zero bytes, `CDCDCDCD` and five pointers; then `[vertex count u32][face count u32][pointer][0]` and the vertices (3 × float32, world units). The first vertex is the pivot (the hinge), the rest the piece's corners (8 for a slab door); faces follow as planes and index lists (not read). A door slab is e.g. 8 × 14 × 1 ft. How the engine moves them (door scripts, levers) is not decoded.
+
+Implemented (simplified, not the original's behaviour): the converter writes `brushes` (name + vertices) in each act's placements; brushes named *door* / *gate* become doors (world objects, convex-hull colliders) that open with the interact key (Tab) and slide up; doors, gates, bridges and platforms are solid, the rest are drawn only, untextured. Locked doors (a guess, keys placed in the acts): train `bfinaldoor` — Fain's Key, Cs1b-Inn `bDoorE_4` / `bDoorE_5` — Room 2 / Room 3 Key; they open with the use key (Z) while the key is carried (keys are not used up: `Permanent`).
+
 ### 6.3 `.msh` layout and geometry `[CONFIRMED on 24 of 25 levels]`
 
 **Memory images.** Both `.msh` and `.cap` files are memory images ("game DBs"). The loader decompresses them into game memory at fixed addresses, so internal pointers are absolute: the mesh DBs live at `0x06000000` and the cap DB at `0x08000000`. Each DB ends with a **per-type object table**: for every object type, a count followed by that many pointers. It is the "recyclable overhead" in the loader's messages.

@@ -30,7 +30,7 @@ export interface TriMeshDef {
  */
 export interface WorldObjectDef {
   id: number;
-  kind: 'item' | 'chest' | 'breakable';
+  kind: 'item' | 'chest' | 'breakable' | 'door';
   /** Metres. */
   x: number;
   y: number;
@@ -41,6 +41,22 @@ export interface WorldObjectDef {
   item?: { name: string; quantity: number };
   /** Chests. */
   contents?: { name: string; quantity: number }[];
+  /** Doors: bounds (metres, [min x, y, z, max x, y, z]) and the key that unlocks it, if locked. */
+  bounds?: [number, number, number, number, number, number];
+  lock?: string;
+}
+
+/**
+ * A brush of an original level (doors, gates, bridges, wheels...): a convex piece of geometry,
+ * hull points in metres (x, y, z flat). Doors are also world objects (`door` = object id): open,
+ * their collider is disabled.
+ */
+export interface BrushDef {
+  name: string;
+  points: Float32Array;
+  /** Solid for movement (doors, gates, bridges, platforms); the rest is drawn only. */
+  solid: boolean;
+  door?: number;
 }
 
 /** Level exit: walking into its trigger moves the player to another zone (arena). */
@@ -68,4 +84,6 @@ export interface ArenaDef {
   objects?: WorldObjectDef[];
   /** Exits to other zones (original levels). */
   portals?: PortalDef[];
+  /** Brushes (original levels). */
+  brushes?: BrushDef[];
 }

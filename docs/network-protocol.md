@@ -33,7 +33,7 @@ All game code talks to a `Transport` interface (`send(bytes|object)`, `onMessage
 | `0x04` | `CS_PLAYER_ATTACK` | JSON | Trigger weapon attack action; `kind` normal (combo) / overhead / left / right / low / jump / thrust (wall jab) / air, from the movement key held with the click (an unknown kind is malformed and disconnects) |
 | `0x05` | `CS_PLAYER_BLOCK` | JSON | Raise or lower shield |
 | `0x06` | `CS_CAST_SPELL` | JSON | `{}`: conjure the selected spell (server checks state and mana; 1.54 s ASM_SPELL_CONJURE, the client roots itself meanwhile) |
-| `0x07` | `CS_INTERACT` | JSON | Interact with chest, door, NPC, or item drop |
+| `0x07` | `CS_INTERACT` | JSON | Interact with chest, door, NPC, or item drop: `{ object, key? }` (`key`: unlock a locked door with the key carried) |
 | `0x08` | `CS_CHAT_MESSAGE` | JSON | Send local or global chat text |
 | `0x09` | `CS_PING` | JSON | Latency measurement heartbeat |
 | `0x0B` | `CS_USE_ITEM` | JSON | `{ slot }`, drink a potion |

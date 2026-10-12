@@ -68,6 +68,18 @@ export interface CapLevel {
    * Music/N.mp3.
    */
   music: number;
+  /** Moving level pieces ("brushes": doors, gates, levers, bridges, wheels...). */
+  brushes: CapBrush[];
+}
+
+/**
+ * A brush object (class 0x31): a named convex piece of level geometry with its own vertices
+ * (world units, not mirrored), e.g. bDoorE_2 = an 8 x 14 x 1 ft slab. The first vertex is its
+ * pivot; faces follow as planes and index lists (not read: the pieces are convex).
+ */
+export interface CapBrush {
+  name: string;
+  points: [number, number, number][];
 }
 
 /** Object class (record +0x00) -> kind. 0x2D = creature. */
@@ -122,7 +134,7 @@ export function parseCap(bytes: Uint8Array, itemNames: ReadonlySet<string> = new
     });
     a = x;
   }
-  return { mesh, creatures, objects, portals: parsePortals(data, dv), music: bytes[0x1c] ?? 0 };
+  return { mesh, creatures, objects, portals: parsePortals(data, dv), music: bytes[0x1c] ?? 0, brushes: parseBrushes(data, dv) };
 }
 
 /**
@@ -138,6 +150,39 @@ function parsePortals(data: Uint8Array, dv: DataView): CapPortal[] {
     const position: [number, number, number] = [dv.getFloat32(o + 0x10, true), dv.getFloat32(o + 0x14, true), dv.getFloat32(o + 0x18, true)];
     if (!position.every((v) => Number.isFinite(v) && Math.abs(v) < 1e5)) continue;
     out.push({ exit: dv.getUint16(o + 4, true), target, position });
+  }
+  return out;
+}
+
+/**
+ * Brush records: [0x31][...][3F 00 00 00][02 00 00 00], name pointer at +0x14; after the name a
+ * transform, then [vertex count u32][face count u32][pointer][0] and the vertex array (3 x f32 each).
+ */
+function parseBrushes(data: Uint8Array, dv: DataView): CapBrush[] {
+  const out: CapBrush[] = [];
+  for (let a = 0; a + 0x40 < data.length; a++) {
+    if (data[a] !== 0x31 || data[a + 1] !== 0 || data[a + 2] !== 0 || data[a + 3] !== 0) continue;
+    if (dv.getUint32(a + 8, true) !== 0x3f || dv.getUint32(a + 12, true) !== 2) continue;
+    const np = dv.getUint32(a + 0x14, true) - CAP_BASE;
+    if (np <= a || np >= data.length) continue;
+    const name = ascii(data, np, 40);
+    if (!/^b[A-Za-z0-9_]+$/.test(name)) continue;
+    for (let o = np + name.length; o + 12 < Math.min(data.length, np + 0x200); o++) {
+      const nv = dv.getUint32(o, true);
+      const nf = dv.getUint32(o + 4, true);
+      const ptr = dv.getUint32(o + 8, true);
+      if (nv < 4 || nv > 512 || nf < 4 || nf > 512 || ptr < CAP_BASE || ptr > CAP_BASE + data.length) continue;
+      if (dv.getUint32(o + 12, true) !== 0) continue;
+      const v0 = o + 16;
+      if (v0 + nv * 12 > data.length) continue;
+      const points: [number, number, number][] = [];
+      for (let i = 0; i < nv; i++) points.push([dv.getFloat32(v0 + i * 12, true), dv.getFloat32(v0 + i * 12 + 4, true), dv.getFloat32(v0 + i * 12 + 8, true)]);
+      const ok = points.every((p) => p.every((v) => Number.isFinite(v) && Math.abs(v) < 1e5)) &&
+        points.every((p) => Math.hypot(p[0] - points[0]![0], p[1] - points[0]![1], p[2] - points[0]![2]) < 400);
+      if (!ok) continue;
+      out.push({ name, points });
+      break;
+    }
   }
   return out;
 }

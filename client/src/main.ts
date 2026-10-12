@@ -344,25 +344,44 @@ async function main(): Promise<void> {
     input.requestLock();
   });
 
-  // Nearest item or chest within reach (the server re-checks); E picks up / opens.
+  // Nearest item, chest or door within reach (the server re-checks); Tab picks up / opens.
   const INTERACT_RANGE = 2.3;
+  const DOOR_RANGE = 1.6;
   const nearestInteractable = () => {
     if (!levelView || !session) return null;
-    let best: { id: number; label: string; d: number } | null = null;
+    let best: { id: number; label: string; d: number; key?: boolean } | null = null;
+    const p = local.object.position;
+    for (const [id, door] of levelView.doors) {
+      const b = door.def.bounds!;
+      if (door.state !== 'present' || p.y < b[1] - 2 || p.y > b[4]) continue;
+      const d = Math.hypot(Math.max(b[0] - p.x, 0, p.x - b[3]), Math.max(b[2] - p.z, 0, p.z - b[5]));
+      if (d > DOOR_RANGE || (best && best.d < d)) continue;
+      const lock = door.def.lock;
+      const hasKey = !!lock && (session.inventory?.items ?? []).some((i) => i.name === lock);
+      const label = !lock ? 'Tab — open door' : hasKey ? `Z — unlock door (${lock})` : `Locked — needs ${lock}`;
+      best = { id, label, d, ...(lock ? { key: true } : {}) };
+    }
     for (const [id, v] of levelView.objects) {
       if (v.state !== 'present' || (v.def.kind !== 'item' && v.def.kind !== 'chest')) continue;
-      const p = local.object.position;
       const d = Math.hypot(v.position.x - p.x, v.position.z - p.z);
       if (d > INTERACT_RANGE || Math.abs(v.position.y - p.y) > 2 || (best && best.d < d)) continue;
       const label = v.def.kind === 'chest' ? 'open chest' : `pick up ${v.def.item?.quantity && v.def.item.quantity > 1 ? `${v.def.item.quantity} ` : ''}${v.def.item?.name ?? v.def.name}`;
-      best = { id, label, d };
+      best = { id, label: `Tab — ${label}`, d };
     }
     return best;
   };
   input.onAction = (action) => {
     if (action === 'interact') {
       const target = nearestInteractable();
-      if (target) session?.interact(target.id);
+      if (target && !target.key) session?.interact(target.id);
+    } else if (action === 'useItem') {
+      // Z: the key on a locked door in reach, otherwise the weakest healing potion.
+      const target = nearestInteractable();
+      if (target?.key) session?.interact(target.id, true);
+      else {
+        const potion = (session?.inventory?.items ?? []).filter((i) => i.type === 'potion').sort((a, b) => (a.heal ?? 0) - (b.heal ?? 0))[0];
+        if (potion) session?.useItem(potion.slot);
+      }
     } else if (action === 'castSpell') {
       // R: conjure the selected spell (the server checks mana and state; the caster stands still).
       const st = session?.playerStats;
@@ -489,7 +508,7 @@ async function main(): Promise<void> {
     if (levelView && session) {
       const t = nearestInteractable();
       prompt.hidden = !t;
-      if (t) prompt.textContent = `Tab — ${t.label}`;
+      if (t) prompt.textContent = t.label;
     }
     renderer.render(scene, chase.camera);
     combatUi.update(dt, chase.camera, remotes, container.clientWidth, container.clientHeight);

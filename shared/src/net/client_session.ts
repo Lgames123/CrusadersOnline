@@ -6,7 +6,7 @@ import { INPUT_PACKET_MAX_BYTES, MAX_INPUT_FRAMES, createInputFrame, encodeInput
 import { decodeSnapshot, type EntityState } from '../protocol/binary/snapshot.ts';
 import type { AttackKind, CombatEventMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PlayerStatsMsg, ServerControlMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
 import type { ArenaDef } from '../arena/types.ts';
-import { createMovementWorld, disposeMovementWorld, type MovementWorld, type Rapier } from '../movement/physics.ts';
+import { createMovementWorld, disposeMovementWorld, setDoorOpen, type MovementWorld, type Rapier } from '../movement/physics.ts';
 import { createCharacter, setCharacterState, stepCharacter, type Character } from '../movement/character.ts';
 
 const INPUT_HISTORY = 64;
@@ -237,7 +237,11 @@ export class ClientSession {
         break;
       case SC.OBJECT_STATE:
         if (msg.d.full) this.objectStates.clear();
-        for (const o of msg.d.objects) this.objectStates.set(o.id, o.state);
+        if (msg.d.full) for (const id of this.mw.doors.keys()) setDoorOpen(this.mw, id, false);
+        for (const o of msg.d.objects) {
+          this.objectStates.set(o.id, o.state);
+          setDoorOpen(this.mw, o.id, o.state === 'open');
+        }
         this.events.objects?.(msg.d);
         break;
       case SC.INVENTORY_UPDATE:
@@ -270,10 +274,13 @@ export class ClientSession {
     this.sendJson({ op: CS.EQUIP_ITEM, seq: ++this.seq, d: { slot, equip } });
   }
 
-  /** Picks up an item or opens a chest (the server checks distance and state). */
-  interact(object: number): void {
+  /**
+   * Picks up an item, opens a chest or a door (the server checks distance and state); `key`
+   * unlocks a locked door with the key carried.
+   */
+  interact(object: number, key = false): void {
     if (!this.connected || this.dead) return;
-    this.sendJson({ op: CS.INTERACT, seq: ++this.seq, d: { object } });
+    this.sendJson({ op: CS.INTERACT, seq: ++this.seq, d: key ? { object, key } : { object } });
   }
 
   /** Casts the selected spell (the server checks mana, state and conjures it). */

@@ -24,6 +24,8 @@ export interface MovementWorld {
   rapier: Rapier;
   world: RAPIER.World;
   controller: RAPIER.KinematicCharacterController;
+  /** Door colliders by world-object id (disabled while open). */
+  doors: Map<number, RAPIER.Collider>;
 }
 
 function boxRotation(b: BoxDef): { x: number; y: number; z: number; w: number } {
@@ -62,6 +64,14 @@ export function createMovementWorld(rapier: Rapier, arena: ArenaDef): MovementWo
   for (const m of arena.meshes) {
     world.createCollider(rapier.ColliderDesc.trimesh(m.vertices, m.indices).setCollisionGroups(WORLD_GROUPS));
   }
+  const doors = new Map<number, RAPIER.Collider>();
+  for (const b of arena.brushes ?? []) {
+    if (!b.solid) continue;
+    const desc = rapier.ColliderDesc.convexHull(b.points);
+    if (!desc) continue;
+    const c = world.createCollider(desc.setCollisionGroups(WORLD_GROUPS));
+    if (b.door !== undefined) doors.set(b.door, c);
+  }
   // Populate the broad phase so scene queries see the static geometry.
   world.step();
 
@@ -73,7 +83,18 @@ export function createMovementWorld(rapier: Rapier, arena: ArenaDef): MovementWo
   controller.enableSnapToGround(GROUND_SNAP);
   controller.setApplyImpulsesToDynamicBodies(false);
 
-  return { rapier, world, controller };
+  return { rapier, world, controller, doors };
+}
+
+/** Opens (no collision) or closes a door; false if it is not a door of this world. */
+export function setDoorOpen(mw: MovementWorld, id: number, open: boolean): boolean {
+  const c = mw.doors.get(id);
+  if (!c) return false;
+  if (c.isEnabled() === open) {
+    c.setEnabled(!open);
+    mw.world.step(); // refresh the broad phase for scene queries
+  }
+  return true;
 }
 
 export function disposeMovementWorld(mw: MovementWorld): void {
