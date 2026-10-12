@@ -151,7 +151,7 @@
 - World unit / physics constants (UNK-007), `.msh` levels, `.cap` collision.
 - Converter: browser Web Worker host, `.mdl`/`.ani`/`.msh` parsers, `items.ctx`/`models.ctx` parsers.
 - Client: 60 FPS and camera clipping not yet verified interactively (browser pane was hidden during the session).
-- Performance figures in the docs are targets, not measurements.
+- Load: 100 bots in a real level run at p50 ~8–10 ms with a p99 of 13–24 ms (borderline for the 15 ms target) and ~29 KB/s per client (target 5 KB/s); see performance-testing.md §3.
 
 ---
 

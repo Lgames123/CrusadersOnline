@@ -8,7 +8,8 @@
     "test": "vitest run",
     "test:unit": "vitest run unit",
     "test:integration": "vitest run integration",
-    "test:e2e": "playwright test -c e2e/playwright.config.ts"
+    "test:e2e": "playwright test -c e2e/playwright.config.ts",
+    "load": "node load/bot_swarm.ts"
   },
   "devDependencies": {
     "@crusaders/converter": "workspace:*",
@@ -19,6 +20,7 @@
     "@types/pg": "^8.23.1",
     "fflate": "^0.8.3",
     "pg": "^8.23.1",
+    "pino": "^10.4.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.3"
   }

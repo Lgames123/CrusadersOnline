@@ -965,7 +965,10 @@ export class WorldZone {
     for (const a of this.actors.values()) {
       const pos = a.character.position;
       this.grid.update(a.entityId, pos.x, pos.z);
-      const s = this.states.get(a.entityId)!;
+      // A fresh state object per actor per tick: snapshots and their history share it read-only
+      // (copying it for every viewer allocated players x entities objects each tick).
+      const s = { ...this.states.get(a.entityId)! };
+      this.states.set(a.entityId, s);
       s.x = quantizePosition(pos.x);
       s.y = quantizePosition(pos.y);
       s.z = quantizePosition(pos.z);
@@ -1470,7 +1473,7 @@ export class WorldZone {
       if (!other) continue;
       const op = other.character.position;
       if (id !== p.entityId && Math.hypot(op.x - pos.x, op.z - pos.z) > INTEREST_RADIUS) continue;
-      current.set(id, { ...this.states.get(id)! });
+      current.set(id, this.states.get(id)!);
     }
 
     for (const id of current.keys()) {

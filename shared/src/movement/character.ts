@@ -27,6 +27,11 @@ export interface Character {
   rollTicks: number;
   /** Total ticks of the timed action in progress (its curve is sampled from its start). */
   actionLength: number;
+  /**
+   * At rest: the last full step had no input motion and moved under 0.5 mm, so standing still
+   * needs no collision query. Cleared by any state reset (spawn, reconciliation).
+   */
+  settled: boolean;
   /** Jump in progress: 0 none, 1 standing / back / side, 2 running (forward). */
   airKind: number;
   /** Horizontal physics velocity during a jump, m/s (world X/Z). */
@@ -62,6 +67,7 @@ export function createCharacter(mw: MovementWorld, feet: Readonly<Vec3>): Charac
     rollDir: 0,
     rollTicks: 0,
     actionLength: 0,
+    settled: false,
     airKind: 0,
     airVelX: 0,
     airVelZ: 0,
@@ -82,6 +88,7 @@ export function setCharacterState(c: Character, feet: Readonly<Vec3>, velocityY:
   c.rollDir = rollTicks > 0 ? rollDir : 0;
   c.rollTicks = c.rollDir ? rollTicks : 0;
   c.actionLength = actionTicks(c.rollDir);
+  c.settled = false;
   c.position.x = snapMm(feet.x);
   c.position.y = snapMm(feet.y);
   c.position.z = snapMm(feet.z);
@@ -246,6 +253,12 @@ export function stepCharacter(
     vz = air.velZ;
   }
 
+  // Standing still on the ground (no input motion, timed action or jump): nothing moves, so the
+  // controller's collision query is skipped - it is most of a crowded zone's tick. The ground
+  // stick would only re-confirm the contact.
+  const still = c.grounded && vx === 0 && vz === 0 && !jumping && !rolling && !air.kind;
+  if (still && c.settled) return;
+
   desired.x = vx * dt;
   desired.y = vy * dt;
   desired.z = vz * dt;
@@ -278,6 +291,7 @@ export function stepCharacter(
     rollTicks,
     air,
   );
+  c.settled = still && grounded && Math.abs(moved.x) < 0.0005 && Math.abs(moved.y) < 0.0005 && Math.abs(moved.z) < 0.0005;
 }
 
 /** Length in ticks of a timed action that follows a curve or holds the character (0 otherwise). */

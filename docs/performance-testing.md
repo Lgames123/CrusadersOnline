@@ -6,41 +6,24 @@ Provide automated load-testing tools and benchmarks to verify that the authorita
 
 ---
 
-## 2. Bot Swarm Architecture (`tools/bot_swarm.ts`)
+## 2. Tools
 
-A headless WebSocket bot generator connects multiple simulated clients that authenticate with a WS ticket and emit **binary input frames** using the shared codec — the same packets a real client sends (inputs only, no positions):
-```typescript
-import WebSocket from 'ws';
-import { encodeInput, type InputFrame } from '@crusaders/shared/protocol/binary';
+- **`tests/load/bot_swarm.ts`** — starts the server in-process (its zone runs in a worker thread) and connects N guest bots (`ClientSession`, the browser client's own code, with prediction), which run, turn, jump, block and attack at random at the 20 Hz client rate. It collects the zone's tick metrics (published every 5 s: p50 / p99 / max of the last 100 ticks, late ticks) and fails when the worst p99 reaches 15 ms (milestone 10).
+  `pnpm --filter @crusaders/tests load -- --bots 100 --seconds 60 --arena level:ca1a`
+- **`tests/load/zone_profile.ts`** — the same load on one `WorldZone` without the network, for CPU profiles (`node --cpu-prof`); it also counts the character-controller queries per tick.
 
-export async function spawnBotSwarm(count: number, serverUrl: string, getTicket: () => Promise<string>): Promise<void> {
-  for (let i = 0; i < count; i++) {
-    const ws = new WebSocket(serverUrl);
-    const buf = new DataView(new ArrayBuffer(64));
-    const frame: InputFrame = { clientTick: 0, flags: 0b0001 /* W */, yaw: 0, pitch: 0 };
-    let ackTick = 0;
+## 3. Measurements (2026-10-12, Ryzen 7 5700X, Node 24)
 
-    ws.on('open', async () => {
-      ws.send(JSON.stringify({ op: 0x01, seq: 0, d: { ticket: await getTicket() } }));
-      setInterval(() => {
-        frame.clientTick++;
-        frame.yaw = (frame.yaw + 0.05) % (Math.PI * 2); // walk in circles
-        const len = encodeInput(buf, ackTick, [frame]);
-        ws.send(new Uint8Array(buf.buffer, 0, len));
-      }, 50);
-    });
-    ws.on('message', (data, isBinary) => {
-      if (isBinary) ackTick = new DataView((data as Buffer).buffer, (data as Buffer).byteOffset).getUint32(1, true);
-    });
-  }
-}
-```
+| Scenario | p50 tick | worst p99 (5 s windows) | Late ticks | Out per client |
+|---|---|---|---|---|
+| 100 bots, synthetic arena | 1.4–3.6 ms | 8.7 ms | 0 | — |
+| 100 bots, level `ca1a` (41 k collision triangles, 28 creatures) | 7.7–9.6 ms | 12.8–24.4 ms (varies run to run) | 0 | ~29 KB/s (145 KiB per tick for 100 viewers) |
 
----
+Profile of the level case: ~77 % of the tick is the shared movement step's character-controller query (~80 queries per tick at ~0.08 ms each against the trimesh), ~9 % snapshots, ~8 % creature AI. Optimisations made: a settled character standing still skips its collision query (identical result, so prediction stays exact); entity states are built once per tick and shared by every viewer's snapshot (it copied players × entities objects per tick). The worst-window p99 is effectively the slowest of 100 ticks, so GC pauses and OS scheduling show up in it.
 
-## 3. Benchmarking Metrics & Acceptance Targets
+Open: the p99 target is met only in some runs on a real level with every bot moving at once; the per-client bandwidth with 100 mutually visible players is ~6× the target (all entities in the 64 m interest radius are sent every tick). Candidates: a smaller interest radius or lower update rates for distant entities, and cheaper controller settings for creatures far from players.
 
-Figures below are **targets**, not measurements, until the bot swarm exists.
+## 4. Acceptance Targets
 
 | Concurrency Level | Target Tick Latency | Max P99 Tick Latency | Network Out per Client |
 |---|---|---|---|
