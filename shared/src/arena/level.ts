@@ -54,6 +54,8 @@ export interface LevelPlacements {
   creatures: LevelCreature[];
   objects?: LevelObject[];
   portals?: LevelPortal[];
+  /** Music track (Music/<n>.mp3, the original CD track number); absent = silence. */
+  music?: number;
 }
 
 /** Horizontal radius / height of a portal trigger, metres (slice values). */

@@ -38,6 +38,8 @@ export interface OriginalLevel {
   /** Torch flame positions (metres), e.g. for ambient fire sounds. */
   torches: THREE.Vector3[];
   setObjectState(id: number, state: WorldObjectState): void;
+  /** Music track of the level act (Music/<n>.mp3), if any. */
+  music?: number;
   /** Dungeon atmosphere: dim ambient light, dark fog. */
   applyAtmosphere(scene: THREE.Scene): void;
   /** Call every frame: sky box, torch flicker and the torch light pool. */
@@ -183,6 +185,7 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
   let t = 0;
   return {
     arena,
+    ...(placements.music ? { music: placements.music } : {}),
     object: root,
     objects,
     torches,

@@ -64,7 +64,7 @@ export interface ConvertReport {
   warnings: string[];
 }
 
-const MANIFEST_VERSION = '1.3.0'; // 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion
+const MANIFEST_VERSION = '1.4.0'; // 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music
 /** Bump when level output changes so cached levels are rebuilt. */
 const LEVEL_EMIT_VERSION = '2';
 
@@ -300,6 +300,21 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
     copied++;
   }
   if (soundFiles.length) log(`audio: ${soundFiles.length} sound files (${copied} copied)`);
+  // Music: the GOG release's CD tracks, Music/<track>.mp3 -> music/<track>.mp3 (manifest.audio "music/<n>").
+  const musicFiles = (await source.list?.('Music'))?.filter((f) => /^\d+\.mp3$/i.test(f)) ?? [];
+  for (const file of musicFiles) {
+    const out = `music/${file.toLowerCase()}`;
+    const key = `music/${parseInt(file, 10)}`;
+    if (prev.audio[key] === out) {
+      manifest.audio[key] = out;
+      continue;
+    }
+    const bytes = await source.readFile(`Music/${file}`);
+    if (!bytes) continue;
+    await sink.writeFile(out, bytes);
+    manifest.audio[key] = out;
+  }
+  if (musicFiles.length) log(`music: ${musicFiles.length} tracks`);
 
   // --- Levels: Meshes/*.msh -> levels/<name>.glb + _lightmap atlas + .collision.bin
   manifest.inputs['levels:emit'] = LEVEL_EMIT_VERSION;
@@ -362,6 +377,7 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
       const mirrorRot = (r: number[]) => r.map((v, i) => ([2, 5, 6, 7].includes(i) ? -v : v));
       await sink.writeFile(out, JSON.stringify({
         mesh: cap.mesh.toLowerCase(),
+        ...(cap.music > 0 ? { music: cap.music + 1 } : {}),
         creatures: cap.creatures.map((c) => ({ ...c, position: [c.position[0], c.position[1], -c.position[2]] })),
         portals: cap.portals
           .filter((p) => capFiles.some((f) => f.toLowerCase() === `${p.target.toLowerCase()}.cap`))

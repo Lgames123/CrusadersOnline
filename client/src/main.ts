@@ -29,7 +29,7 @@ import {
 } from '@crusaders/shared';
 import { createRenderContext } from './engine/renderer.ts';
 import { CameraRig } from './engine/camera_rig.ts';
-import { SettingsStore } from './settings.ts';
+import { CLASSIC_SETTINGS, SettingsStore } from './settings.ts';
 import { SettingsPanel } from './ui/settings_panel.ts';
 import { CONTROLS_HELP } from './input/keybindings.ts';
 import { buildArenaMeshes } from './entities/arena.ts';
@@ -42,6 +42,7 @@ import { CREATURE_SFX, SFX, SoundBank, pick } from './audio/sound_bank.ts';
 import { registerAssetServiceWorker } from './assets/game_files.ts';
 import { GameFilesPanel } from './ui/game_files_panel.ts';
 import { InputManager } from './input/input_manager.ts';
+import { MusicPlayer } from './audio/music.ts';
 import { Effects } from './engine/effects.ts';
 import { TORCH_LIGHT_COLOR, TORCH_LIGHT_HEIGHT, TORCH_LIGHT_INTENSITY } from './entities/torch_light.ts';
 import { connectToWorld } from './network/connect.ts';
@@ -89,6 +90,8 @@ async function main(): Promise<void> {
   let levelView = null as OriginalLevel | null;
   let arenaObject: THREE.Object3D | null = null;
   /** Loads an arena into the scene, replacing the previous one. Null if it cannot be shown. */
+  /** The level act's music (the original's CD tracks, looped). */
+  const music = new MusicPlayer(CLASSIC_SETTINGS.musicVolume);
   const showArena = async (name: string): Promise<ArenaDef | null> => {
     let next: ArenaDef;
     let view: OriginalLevel | null = null;
@@ -110,6 +113,7 @@ async function main(): Promise<void> {
     scene.add(arenaObject);
     view?.applyAtmosphere(scene);
     levelView = view;
+    void music.play(view?.music);
     arena = next;
     return next;
   };
@@ -290,6 +294,8 @@ async function main(): Promise<void> {
   scene.add(local.object);
 
   const settings = new SettingsStore();
+  music.volume = settings.current.musicVolume;
+  settings.onChange((s) => (music.volume = s.musicVolume));
   // Footsteps on the original clips' own LEFT/RIGHT FOOTSTEP events, in step with the animation.
   local.avatar.onEvent = (name) => {
     if (!sounds || !name.includes('FOOTSTEP') || !local.character.grounded) return;
@@ -334,6 +340,7 @@ async function main(): Promise<void> {
 
   overlay.addEventListener('click', () => {
     sounds?.unlock();
+    music.unlock();
     input.requestLock();
   });
 

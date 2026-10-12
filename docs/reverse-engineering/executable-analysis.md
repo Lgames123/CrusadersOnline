@@ -189,6 +189,10 @@ Logged with Frida while fighting skeletons, blocking, breaking a barrel and stri
 
 Implemented: the converter writes rules/effects.json; the client renders the flashes as sprites (alpha from the textures, glows additive) and spawns these effects from combat events, prop hits and its own swings meeting a wall. The file's units are not stated: sizes are read as tenths of a foot (×0.85, by eye), MOVE as units per 30 Hz tick and GRAVITY as units per tick per second (per tick² pulled every flash straight down; blood still falls, sparks arc up). Undead blows add FIREBALL_PROJ_EVIL_SPAWN (the green dark flame) on the victim. The shield rush has no sound of its own in Sound.ctx: the client plays Drake's effort grunt at the start and the shield thud plus a blunt impact on contact (a combat event flagged `rush`). The per-object particle emitters are not reproduced yet.
 
+### 8.7 Level music (2026-10-12)
+
+Music goes through Miles' redbook (CD audio) API (`AIL_redbook_play` etc., imported); the GOG release's mss32.dll plays `Music/<track>.mp3` instead of the CD. The player object's set-track routine (`0x004336E0`) plays CD track `value + 1` (track 1 is data) and loops it (`0x00433820` restarts it when its end time passes); it is called on level entry with the byte at `[[0x0058CA04] + 0x1C]` — `0x0058CA04` points to the current act's in-memory `.cap` header, so the track is the `.cap` header byte +0x1C (0 = silence; 0 is also pushed to stop the music). Tracks used: towns 2, inns 3, castle acts 8 / 10 / 11, the rest 4–16. Implemented: the converter copies the tracks and writes `music` in each act's placements; the client loops the act's track, with a volume setting.
+
 ## 9. Creatures, Experience and Blocking Follow-up (2026-10-09)
 
 ### 9.1 Creature template table (`.data` 0x004ED058–0x004ED9B8)

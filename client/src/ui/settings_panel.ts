@@ -13,6 +13,9 @@ export class SettingsPanel {
           <input id="set-sens" type="range" min="0.25" max="4" step="0.05" value="${s.mouseSensitivity}" />
         </label>
         <label class="check"><input id="set-invert" type="checkbox"${s.invertMouseY ? ' checked' : ''} /> Invert mouse Y</label>
+        <label>Music volume
+          <input id="set-music" type="range" min="0" max="1" step="0.05" value="${s.musicVolume}" />
+        </label>
       </div>`;
     // Clicks here must not start the game (the overlay requests pointer lock on click).
     root.addEventListener('click', (e) => e.stopPropagation());
@@ -26,5 +29,7 @@ export class SettingsPanel {
     });
     sens.addEventListener('input', () => store.update({ mouseSensitivity: Number(sens.value) }));
     invert.addEventListener('change', () => store.update({ invertMouseY: invert.checked }));
+    const music = root.querySelector<HTMLInputElement>('#set-music')!;
+    music.addEventListener('input', () => store.update({ musicVolume: Number(music.value) }));
   }
 }

@@ -62,6 +62,12 @@ export interface CapLevel {
   creatures: CapCreature[];
   objects: CapObject[];
   portals: CapPortal[];
+  /**
+   * Music: header byte +0x1C (the engine's level struct is this header; its CD player plays
+   * redbook track value + 1, track 1 being data). 0 = none; the GOG release ships track N as
+   * Music/N.mp3.
+   */
+  music: number;
 }
 
 /** Object class (record +0x00) -> kind. 0x2D = creature. */
@@ -116,7 +122,7 @@ export function parseCap(bytes: Uint8Array, itemNames: ReadonlySet<string> = new
     });
     a = x;
   }
-  return { mesh, creatures, objects, portals: parsePortals(data, dv) };
+  return { mesh, creatures, objects, portals: parsePortals(data, dv), music: bytes[0x1c] ?? 0 };
 }
 
 /**

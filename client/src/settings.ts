@@ -9,9 +9,11 @@ export interface Settings {
   /** Mouse sensitivity multiplier (1 = default). */
   mouseSensitivity: number;
   invertMouseY: boolean;
+  /** Level music volume, 0-1. */
+  musicVolume: number;
 }
 
-export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false };
+export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false, musicVolume: 0.5 };
 
 const KEY = 'crusaders.settings';
 
@@ -23,6 +25,7 @@ function sanitize(raw: unknown): Settings {
     cameraZoom: typeof r.cameraZoom === 'number' && Number.isFinite(r.cameraZoom) ? Math.min(1, Math.max(0, r.cameraZoom)) : r.camera === 'modern' ? 1 : 0,
     mouseSensitivity: Math.min(4, Math.max(0.25, sens)),
     invertMouseY: r.invertMouseY === true,
+    musicVolume: typeof r.musicVolume === 'number' && Number.isFinite(r.musicVolume) ? Math.min(1, Math.max(0, r.musicVolume)) : CLASSIC_SETTINGS.musicVolume,
   };
 }
 
