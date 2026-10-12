@@ -384,3 +384,8 @@ Implemented: chains of 1/2/3 swings (55/35/10 %); guard of 0.4–1.9 s with the 
 Sampled the player's ASM state and pose while holding the shield (right mouse button) and moving: forward → ASM_WALKING at 5.65 ft/s (the careful-walk speed), backward → ASM_RETREAT at 4.34 ft/s, sideways and diagonals → repeated ASM_HOP_L / ASM_HOP_R side hops (PC09 / PC10) with short stands in between, ~6–8 ft/s on average. Standing still with the shield up plays ASM_BLOCK (PE07).
 
 Implemented in the shared movement step and `movementAnim()`: shield + forward / back use the careful walk / retreat speeds and clips; shield + a sideways key performs discrete side hops — 12 ticks covering the clip's 5.75 / 4.94 ft (left / right), then a 0.2 s stand with the shield up — repeated while the key is held. The hop and stand are timed movement actions (ids 5–7 next to the rolls), carried in the reconciled snapshot like a roll.
+
+
+### 14.3 Root-motion profiles for timed actions (2026-10-12)
+
+Side hops and rolls move by their clip's root motion, which is far from uniform (e.g. PC09: ~0.13 ft per frame for 4 frames, ~1 ft per frame over frames 4–10, settling by frame 15, still to frame 20; PE05 roll right covers 6 ft in its first 6 frames). The shared movement step now samples each clip's per-frame root displacement (`SHIELD_HOP_*_CURVE`, `ROLL_CURVES`, extracted from Drake's clips) at 1000/30 frames per second, tick by tick, instead of moving at the average speed.

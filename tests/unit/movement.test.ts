@@ -192,6 +192,18 @@ describe('shared character controller', () => {
       run(mw, c, flags, 0, SHIELD_HOP_PAUSE_TICKS - 1);
       expect(Math.hypot(c.position.x - mid.x, c.position.z - mid.z)).toBeLessThan(1e-3); // standing
     }
+    // The hop follows the clip's profile: a slow wind-up, then the quick leap.
+    {
+      const { mw, c } = setup();
+      run(mw, c, 0, 0, 10);
+      const steps: number[] = [];
+      for (let i = 0; i < 6; i++) {
+        const before = c.position.x;
+        run(mw, c, INPUT.BLOCK | INPUT.LEFT, 0, 1);
+        steps.push(Math.abs(c.position.x - before));
+      }
+      expect(steps[0]!).toBeLessThan(steps[3]! / 2);
+    }
     expect(movementAnim(INPUT.BLOCK | INPUT.FORWARD, true, 0)).toBe(ANIM.WALK);
     expect(movementAnim(INPUT.BLOCK | INPUT.BACK, true, 0)).toBe(ANIM.RETREAT);
     expect(movementAnim(INPUT.BLOCK | INPUT.LEFT, true, ACTION_HOP_LEFT)).toBe(ANIM.HOP_LEFT);

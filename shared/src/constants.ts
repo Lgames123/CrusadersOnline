@@ -102,6 +102,34 @@ export const SHIELD_HOP_TICKS = Math.round((20 / (30 * CLIP_RATE)) * TICK_RATE);
 export const SHIELD_HOP_PAUSE_TICKS = Math.round(0.2 * TICK_RATE);
 export const SHIELD_HOP_LEFT_SPEED = (5.75 * FT) / (SHIELD_HOP_TICKS / TICK_RATE);
 export const SHIELD_HOP_RIGHT_SPEED = (4.94 * FT) / (SHIELD_HOP_TICKS / TICK_RATE);
+/**
+ * Sideways root displacement of the hop clips at each of their frames 0-20, in feet (slow
+ * wind-up, quick leap, settle, then still): the hop follows this profile instead of a constant
+ * speed. Left is negative (PC09), right positive (PC10).
+ */
+export const SHIELD_HOP_LEFT_CURVE: readonly number[] = [0, -0.127, -0.254, -0.381, -0.508, -1.573, -2.638, -3.376, -4.113, -4.85, -5.312, -5.565, -5.611, -5.656, -5.702, -5.748, -5.748, -5.748, -5.748, -5.748, -5.748];
+export const SHIELD_HOP_RIGHT_CURVE: readonly number[] = [0, 0.09, 0.18, 0.42, 0.659, 1.535, 2.412, 3.243, 3.678, 4.114, 4.549, 4.821, 4.859, 4.898, 4.937, 4.937, 4.937, 4.937, 4.937, 4.937, 4.937];
+
+/**
+ * Root displacement of the roll clips per frame, in feet along their travel axis (forward PE03
+ * and back PE06 lengthwise, left PE04 and right PE05 sideways; signs as the motion): rolls follow
+ * these profiles instead of a constant speed. Index = roll direction - 1.
+ */
+export const ROLL_CURVES: readonly (readonly number[])[] = [
+  [0, 0.316, 0.633, 0.949, 1.265, 1.582, 1.898, 2.214, 2.531, 3.036, 3.541, 4.046, 4.551, 5.219, 5.832, 6.446, 7.059, 7.672, 8.027, 8.599, 9.254, 9.946, 10.249, 10.497, 10.728, 10.96],
+  [0, -0.318, -0.636, -1.014, -1.706, -2.361, -2.933, -3.288, -3.901, -4.514, -5.127, -5.741, -6.409, -6.914, -7.419, -7.924, -8.429, -8.71, -8.992, -9.273, -9.554, -9.835, -10.116, -10.398, -10.679, -10.96],
+  [0, -0.487, -0.974, -1.487, -1.999, -2.512, -3.16, -3.807, -4.455, -5.103, -5.659, -6.215, -6.476, -6.737, -6.998, -7.259, -7.597, -7.934, -8.271, -8.609, -8.946, -9.283, -9.597, -9.897, -10.196, -10.496, -10.796, -11.095],
+  [0, 0.992, 1.984, 2.977, 4.234, 5.491, 5.969, 6.447, 6.924, 7.402, 7.626, 7.743, 7.86, 7.976, 8.34, 8.703, 8.852, 9, 9.148, 9.273, 9.397, 9.516, 9.636, 9.755, 9.874, 9.993],
+];
+
+/** Root displacement (metres) of a curve sampled per clip frame, at `ticks` into the action. */
+export function curveAtTick(curve: readonly number[], ticks: number): number {
+  const frame = (ticks / TICK_RATE) * 30 * CLIP_RATE;
+  const i = Math.min(curve.length - 1, Math.max(0, Math.floor(frame)));
+  const j = Math.min(curve.length - 1, i + 1);
+  const t = Math.min(1, Math.max(0, frame - i));
+  return (curve[i]! + (curve[j]! - curve[i]!) * t) * FT;
+}
 /** Movement action ids beyond the rolls (1-4): side hops and the stand after a hop. */
 export const ACTION_HOP_LEFT = 5;
 export const ACTION_HOP_RIGHT = 6;

@@ -1,5 +1,5 @@
 import type RAPIER from '@dimforge/rapier3d-deterministic-compat';
-import { ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_SPEED, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_SPEED, SHIELD_HOP_TICKS, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
+import { ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_TICKS, curveAtTick, ROLL_CURVES, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
 import type { Vec3 } from '../math/vec3.ts';
 import { dequantizeAngle } from '../math/quantize.ts';
 import { INPUT } from '../protocol/opcodes.ts';
@@ -134,10 +134,22 @@ export function stepCharacter(
     const yaw = dequantizeAngle(input.yaw);
     const s = Math.sin(yaw);
     const co = Math.cos(yaw);
-    const hop = c.rollDir === ACTION_HOP_LEFT ? -SHIELD_HOP_LEFT_SPEED : c.rollDir === ACTION_HOP_RIGHT ? SHIELD_HOP_RIGHT_SPEED : 0;
-    const speed = c.rollDir <= 4 ? ROLLS[c.rollDir - 1]!.speed : 0;
-    const along = c.rollDir === 1 ? speed : c.rollDir === 2 ? -speed : 0;
-    const side = c.rollDir === 4 ? speed : c.rollDir === 3 ? -speed : hop;
+    // Side hops follow the clip's root-motion profile tick by tick.
+    let hop = 0;
+    if (c.rollDir === ACTION_HOP_LEFT || c.rollDir === ACTION_HOP_RIGHT) {
+      const curve = c.rollDir === ACTION_HOP_LEFT ? SHIELD_HOP_LEFT_CURVE : SHIELD_HOP_RIGHT_CURVE;
+      const done = SHIELD_HOP_TICKS - c.rollTicks;
+      hop = (curveAtTick(curve, done + 1) - curveAtTick(curve, done)) / dt;
+    }
+    // Rolls follow their clip's root-motion profile too (lengthwise forward/back, sideways left/right).
+    let roll = 0;
+    if (c.rollDir >= 1 && c.rollDir <= 4) {
+      const curve = ROLL_CURVES[c.rollDir - 1]!;
+      const done = ROLLS[c.rollDir - 1]!.ticks - c.rollTicks;
+      roll = (curveAtTick(curve, done + 1) - curveAtTick(curve, done)) / dt;
+    }
+    const along = c.rollDir === 1 || c.rollDir === 2 ? roll : 0;
+    const side = c.rollDir === 3 || c.rollDir === 4 ? roll : hop;
     vx = -s * along + co * side;
     vz = -co * along - s * side;
   } else if (fwd !== 0 || right !== 0) {
