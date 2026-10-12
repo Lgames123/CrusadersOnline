@@ -1,8 +1,8 @@
 import type RAPIER from '@dimforge/rapier3d-deterministic-compat';
-import { ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_TICKS, curveAtTick, ROLL_CURVES, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
+import { ACTION_ATTACK, ATTACK_CURVES, attackMotionTicks, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_TICKS, curveAtTick, ROLL_CURVES, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
 import type { Vec3 } from '../math/vec3.ts';
 import { dequantizeAngle } from '../math/quantize.ts';
-import { INPUT } from '../protocol/opcodes.ts';
+import { INPUT, INPUT_ATTACK_SHIFT } from '../protocol/opcodes.ts';
 import type { InputFrame } from '../protocol/binary/input.ts';
 import { CHARACTER_GROUPS, type MovementWorld } from './physics.ts';
 
@@ -19,7 +19,8 @@ export interface Character {
   grounded: boolean;
   /**
    * Timed movement action in progress: 0 none, 1-4 rolls (forward, back, left, right),
-   * 5 / 6 shield side hops (left / right), 7 the stand after a side hop.
+   * 5 / 6 shield side hops (left / right), 7 the stand after a side hop, 8+ an attack's
+   * root motion (ACTION_ATTACK + attack motion - 1).
    */
   rollDir: number;
   /** Ticks of the roll still to run. */
@@ -105,6 +106,13 @@ export function stepCharacter(
   const f = input.flags;
   let fwd = 0;
   let right = 0;
+  // An attack whose clip carries the character starts its root motion (also over the stand
+  // after a hop or another attack's motion: combo steps restart it).
+  const motion = (f >> INPUT_ATTACK_SHIFT) & 0xf;
+  if (motion > 0 && motion <= ATTACK_CURVES.length && c.grounded && (c.rollTicks === 0 || c.rollDir >= ACTION_HOP_PAUSE)) {
+    c.rollDir = ACTION_ATTACK + motion - 1;
+    c.rollTicks = attackMotionTicks(motion);
+  }
   // C + direction starts a roll (grounded, not attacking); it then runs its full length.
   // Shield + a sideways key starts a side hop (the original moves sideways in hops when
   // blocking); each hop is followed by a short stand.
@@ -148,8 +156,20 @@ export function stepCharacter(
       const done = ROLLS[c.rollDir - 1]!.ticks - c.rollTicks;
       roll = (curveAtTick(curve, done + 1) - curveAtTick(curve, done)) / dt;
     }
-    const along = c.rollDir === 1 || c.rollDir === 2 ? roll : 0;
-    const side = c.rollDir === 3 || c.rollDir === 4 ? roll : hop;
+    // Attacks move along the facing by their clip's forward root displacement.
+    if (c.rollDir >= ACTION_ATTACK) {
+      const motion = c.rollDir - ACTION_ATTACK + 1;
+      const done = attackMotionTicks(motion) - c.rollTicks;
+      roll = (curveAtTick(ATTACK_CURVES[motion - 1]!, done + 1) - curveAtTick(ATTACK_CURVES[motion - 1]!, done)) / dt;
+    }
+    let along = c.rollDir === 1 || c.rollDir === 2 || c.rollDir >= ACTION_ATTACK ? roll : 0;
+    let side = c.rollDir === 3 || c.rollDir === 4 ? roll : hop;
+    // Shield + a diagonal (forward / back with a side key): the side hop goes along that diagonal.
+    const lengthwise = (f & INPUT.FORWARD ? 1 : 0) - (f & INPUT.BACK ? 1 : 0);
+    if (hop !== 0 && lengthwise !== 0) {
+      along = Math.abs(hop) * lengthwise * Math.SQRT1_2;
+      side = hop * Math.SQRT1_2;
+    }
     vx = -s * along + co * side;
     vz = -co * along - s * side;
   } else if (fwd !== 0 || right !== 0) {

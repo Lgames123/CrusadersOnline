@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ANIM, INPUT, TICK_DT, attackAnim, dequantizeAngle, movementAnim, movementFacingOffset, type AttackKind, attackTiming, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
+import { ANIM, INPUT, TICK_DT, attackAnim, attackMotion, dequantizeAngle, movementAnim, movementFacingOffset, type AttackKind, attackTiming, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
 import type { Avatar } from './avatar.ts';
 
 /**
@@ -37,6 +37,8 @@ export class LocalPlayer {
   private moveAnim: number = ANIM.IDLE;
   private swingLeft = 0;
   private combo = 0;
+  /** Root motion of the swing just started, sent with the next input (0 = none). */
+  private pendingMotion = 0;
   private kind: AttackKind = 'normal';
   private swingCount = 0;
   private sinceSwing = 99;
@@ -81,6 +83,7 @@ export class LocalPlayer {
     this.kind = kind;
     this.swingCount++;
     this.swingTime = swingSeconds(kind, this.combo, this.weaponSpeed);
+    this.pendingMotion = attackMotion(kind, this.combo);
     this.swingLeft = this.swingTime;
     this.targetFacing = cameraYaw;
     return true;
@@ -94,6 +97,13 @@ export class LocalPlayer {
   /** Body heading following the view at the original's turn rate (classic camera yaw). */
   get bodyHeading(): number {
     return this.heading;
+  }
+
+  /** The root motion of the swing just started (once), for the next input's attack bits. */
+  takeAttackMotion(): number {
+    const m = this.pendingMotion;
+    this.pendingMotion = 0;
+    return m;
   }
 
   /** Own swing playing: the feet stay planted (sent as INPUT.ROOTED). */

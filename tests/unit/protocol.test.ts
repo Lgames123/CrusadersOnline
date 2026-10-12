@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CS,
   INPUT,
+  INPUT_ATTACK_SHIFT,
   INPUT_PACKET_MAX_BYTES,
   MAX_INPUT_FRAMES,
   createEntityState,
@@ -34,7 +35,7 @@ describe('CS_PLAYER_INPUT codec', () => {
     const view = new DataView(new ArrayBuffer(INPUT_PACKET_MAX_BYTES));
     const frames: InputFrame[] = [
       { clientTick: 10, flags: INPUT.FORWARD | INPUT.JUMP, yaw: 1234, pitch: 65000 },
-      { clientTick: 11, flags: INPUT.LEFT, yaw: 0, pitch: 1 },
+      { clientTick: 11, flags: INPUT.LEFT | (4 << INPUT_ATTACK_SHIFT), yaw: 0, pitch: 1 },
     ];
     const len = encodeInput(view, 77, frames);
     expect(len).toBe(26);
@@ -95,7 +96,7 @@ describe('SC_WORLD_SNAPSHOT codec', () => {
     lastProcessedInput: 900,
     selfVelY: -1234,
     selfGrounded: true,
-    selfRollDir: 3,
+    selfRollDir: 11, // an attack's root motion (ACTION_ATTACK + 3)
     selfRollTicks: 12,
     selfAirKind: 2,
     selfAirVelX: -4321,

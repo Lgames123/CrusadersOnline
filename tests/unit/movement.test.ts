@@ -3,6 +3,11 @@ import {
   ANIM,
   DEFAULT_MOVEMENT_STATS,
   INPUT,
+  ACTION_ATTACK,
+  ATTACK_CURVES,
+  INPUT_ATTACK_SHIFT,
+  attackMotion,
+  attackMotionTicks,
   ACTION_HOP_LEFT,
   ACTION_HOP_PAUSE,
   ACTION_HOP_RIGHT,
@@ -123,6 +128,25 @@ describe('shared character controller', () => {
     expect(start.z - c.position.z).toBeCloseTo(10.73 * 0.3048, 1);
   });
 
+  it('attacks whose clip moves the root carry the character forward by that distance', () => {
+    // Combo step 1 (PN25, +3.85 ft) and the jump attack (PN05, +6.26 ft); the feet stay planted otherwise.
+    for (const [kind, combo, feet] of [['normal', 1, 3.85], ['normal', 3, 3.43], ['normal', 5, 2.16], ['jump', 1, 6.26]] as const) {
+      const { mw, c } = setup();
+      run(mw, c, 0, 0, 10);
+      const start = { ...c.position };
+      const motion = attackMotion(kind, combo);
+      expect(ATTACK_CURVES[motion - 1]!.at(-1)).toBe(feet);
+      run(mw, c, INPUT.ROOTED | (motion << INPUT_ATTACK_SHIFT), 0, 1);
+      expect(c.rollDir).toBe(ACTION_ATTACK + motion - 1);
+      run(mw, c, INPUT.ROOTED, 0, attackMotionTicks(motion) + 5);
+      expect(c.rollDir).toBe(0);
+      expect(start.z - c.position.z).toBeCloseTo(feet * 0.3048, 1);
+    }
+    // Swings that sway and come back (combo step 2, side swings) do not move the character.
+    expect(attackMotion('normal', 2)).toBe(0);
+    expect(attackMotion('left', 1)).toBe(0);
+  });
+
   it('replays a roll exactly from a mid-roll snapshot (reconciliation)', () => {
     const a = setup();
     run(a.mw, a.c, 0, 0, 10);
@@ -191,6 +215,18 @@ describe('shared character controller', () => {
       const mid = { ...c.position };
       run(mw, c, flags, 0, SHIELD_HOP_PAUSE_TICKS - 1);
       expect(Math.hypot(c.position.x - mid.x, c.position.z - mid.z)).toBeLessThan(1e-3); // standing
+    }
+    // Diagonals (shield + forward / back + a side key) hop along the diagonal.
+    for (const [flags, sx, sz] of [[INPUT.BLOCK | INPUT.FORWARD | INPUT.RIGHT, 1, -1], [INPUT.BLOCK | INPUT.BACK | INPUT.LEFT, -1, 1]] as const) {
+      const { mw, c } = setup();
+      run(mw, c, 0, 0, 10);
+      const start = { ...c.position };
+      run(mw, c, flags, 0, SHIELD_HOP_TICKS);
+      const dx = c.position.x - start.x;
+      const dz = c.position.z - start.z;
+      expect(Math.sign(dx)).toBe(sx); // yaw 0: right = +X, forward = -Z
+      expect(Math.sign(dz)).toBe(sz);
+      expect(Math.abs(Math.abs(dx) - Math.abs(dz))).toBeLessThan(0.02);
     }
     // The hop follows the clip's profile: a slow wind-up, then the quick leap.
     {

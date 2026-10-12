@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {
   DEFAULT_MOVEMENT_STATS,
   INPUT,
+  INPUT_ATTACK_SHIFT,
   LEVEL_PREFIX,
   attackKindFor,
   TICK_DT,
@@ -353,6 +354,8 @@ async function main(): Promise<void> {
     while (acc >= TICK_MS) {
       input.sample(frame, ++tick);
       if (local.rooted) frame.flags |= INPUT.ROOTED;
+      // An attack whose clip carries Drake starts its root motion on this step (shared movement).
+      frame.flags |= local.takeAttackMotion() << INPUT_ATTACK_SHIFT;
       local.fixedStep(frame);
       acc -= TICK_MS;
     }

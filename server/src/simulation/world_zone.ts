@@ -789,8 +789,9 @@ export class WorldZone {
         if (alive(p)) p.yaw = this.frame.yaw;
         this.checkPortals(p);
         const moving = (this.frame.flags & MOVE_MASK) !== 0 && !(this.frame.flags & INPUT.ROOTED);
-        p.facingOffset = moving ? movementFacingOffset(this.frame.flags) : 0;
         p.blocking = alive(p) && p.shield !== null && (this.frame.flags & INPUT.BLOCK) !== 0 && !p.swing && p.hitUntil <= tick;
+        // On diagonals the body turns into the motion, except with the shield up (it faces the view).
+        p.facingOffset = moving && !(this.frame.flags & INPUT.BLOCK) ? movementFacingOffset(this.frame.flags) : 0;
         p.anim = p.hitUntil > tick
           ? ANIM.HIT
           : movementAnim(p.blocking ? this.frame.flags : this.frame.flags & ~INPUT.BLOCK, p.character.grounded, p.character.rollDir);

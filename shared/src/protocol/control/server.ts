@@ -168,7 +168,8 @@ export function movementAnim(flags: number, grounded: boolean, rollDir: number):
   if (rollDir === 5) return ANIM.HOP_LEFT;
   if (rollDir === 6) return ANIM.HOP_RIGHT;
   if (rollDir === 7) return ANIM.SHIELD_IDLE; // stand after a side hop, shield still up
-  if (rollDir) return ANIM.ROLL + rollDir - 1;
+  if (rollDir >= 1 && rollDir <= 4) return ANIM.ROLL + rollDir - 1;
+  // rollDir >= 8: an attack's root motion (the attack clip is chosen from the swing).
   if (!grounded) return ANIM.AIRBORNE;
   if (flags & INPUT.DUCK) return ANIM.CROUCH;
   if (flags & INPUT.ROOTED) return ANIM.IDLE;

@@ -82,7 +82,7 @@ export function encodeSnapshot(
   view.setUint32(5, baseline ? header.baselineTick >>> 0 : 0, true);
   view.setUint32(9, header.lastProcessedInput >>> 0, true);
   view.setInt32(13, header.selfVelY | 0, true);
-  view.setUint8(17, (header.selfGrounded ? 1 : 0) | ((header.selfRollDir & 7) << 1));
+  view.setUint8(17, (header.selfGrounded ? 1 : 0) | ((header.selfRollDir & 31) << 1));
   view.setUint8(18, header.selfRollTicks & 0xff);
   view.setInt32(19, header.selfAirVelX | 0, true);
   view.setInt32(23, header.selfAirVelZ | 0, true);
@@ -142,7 +142,7 @@ export function decodeSnapshot(
     lastProcessedInput: view.getUint32(9, true),
     selfVelY: view.getInt32(13, true),
     selfGrounded: (view.getUint8(17) & 1) === 1,
-    selfRollDir: (view.getUint8(17) >> 1) & 7,
+    selfRollDir: (view.getUint8(17) >> 1) & 31,
     selfRollTicks: view.getUint8(18),
     selfAirVelX: view.getInt32(19, true),
     selfAirVelZ: view.getInt32(23, true),
@@ -150,7 +150,7 @@ export function decodeSnapshot(
     selfAirKind: view.getUint8(29),
   };
   if (header.selfAirKind > 2) return null;
-  if ((view.getUint8(17) & ~0b1111) !== 0) return null;
+  if ((view.getUint8(17) & ~0b111111) !== 0) return null;
   const base = header.baselineTick === 0 ? null : baseline;
   if (header.baselineTick !== 0 && !base) return null;
 

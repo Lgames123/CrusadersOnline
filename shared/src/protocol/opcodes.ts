@@ -52,4 +52,11 @@ export const INPUT = {
   ROLL: 1 << 9,
 } as const;
 
-export const INPUT_VALID_MASK = 0b11_1111_1111;
+/**
+ * Bits 10-13: the root motion of an attack starting this step (attackMotion(), 0 = none). Sent
+ * on the swing's first step only; the shared movement step then follows the clip's curve.
+ */
+export const INPUT_ATTACK_SHIFT = 10;
+export const INPUT_ATTACK_MASK = 0xf << INPUT_ATTACK_SHIFT;
+
+export const INPUT_VALID_MASK = 0b11_1111_1111_1111;

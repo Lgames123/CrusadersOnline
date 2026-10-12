@@ -122,6 +122,32 @@ export const ROLL_CURVES: readonly (readonly number[])[] = [
   [0, 0.992, 1.984, 2.977, 4.234, 5.491, 5.969, 6.447, 6.924, 7.402, 7.626, 7.743, 7.86, 7.976, 8.34, 8.703, 8.852, 9, 9.148, 9.273, 9.397, 9.516, 9.636, 9.755, 9.874, 9.993],
 ];
 
+/**
+ * Attacks that carry the character: forward root displacement of Drake's attack clips per
+ * frame, in feet, for the clips whose root ends away from where it started (the others sway
+ * and come back, net zero, and keep the feet planted). Index = attack motion id - 1:
+ * 1 combo step 1 (PN25, +3.85 ft), 2 combo step 3 (PN15 spin, +3.43 ft), 3 combo step 5
+ * (PN17 power attack: 1.6 ft back, then +2.16 ft), 4 jump attack (PN05, run / jump + click, +6.26 ft).
+ */
+export const ATTACK_CURVES: readonly (readonly number[])[] = [
+  [0, 0, -0.01, -0.03, -0.06, -0.02, 0.02, 0.05, 0.11, 0.27, 0.55, 1, 1.6, 2.25, 2.83, 3.28, 3.59, 3.76, 3.85],
+  [0, 0.24, 0.5, 0.57, 0.65, 0.65, 0.66, 0.62, 2.06, 2.24, 2.43, 2.56, 2.7, 2.79, 2.88, 2.97, 3.07, 3.16, 3.25, 3.34, 3.43],
+  [0, -0.38, -0.76, -1.15, -1.36, -1.58, -1.61, -1.61, -1.57, -1.51, -1.4, -1.26, -1.06, -0.85, -0.58, 0.18, 1.07, 1.97, 2.06, 2.15, 2.24, 2.33, 2.32, 2.31, 2.3, 2.3, 2.27, 2.25, 2.23, 2.21, 2.18, 2.16],
+  [0, 0.05, 0.09, 0.14, 0.19, 0.26, 0.33, 0.42, 0.52, 0.72, 1.05, 1.45, 1.86, 2.34, 2.82, 3.29, 3.77, 4.24, 4.6, 4.95, 5.25, 5.43, 5.61, 5.69, 5.76, 5.81, 5.87, 5.91, 5.95, 5.98, 6.01, 6.03, 6.06, 6.07, 6.09, 6.11, 6.12, 6.14, 6.16, 6.18, 6.2, 6.23, 6.26, 6.26],
+];
+/** Movement action id of an attack's root motion (rollDir = ACTION_ATTACK + motion - 1). */
+export const ACTION_ATTACK = 8;
+/** Ticks an attack motion lasts (its clip at 1000/30 fps). */
+export function attackMotionTicks(motion: number): number {
+  return Math.ceil(((ATTACK_CURVES[motion - 1]!.length - 1) / (30 * CLIP_RATE)) * TICK_RATE);
+}
+/** Attack motion id (0 = none) of an attack kind and combo step. */
+export function attackMotion(kind: string, combo: number): number {
+  if (kind === 'jump') return 4;
+  if (kind !== 'normal') return 0;
+  return combo === 1 ? 1 : combo === 3 ? 2 : combo === 5 ? 3 : 0;
+}
+
 /** Root displacement (metres) of a curve sampled per clip frame, at `ticks` into the action. */
 export function curveAtTick(curve: readonly number[], ticks: number): number {
   const frame = (ticks / TICK_RATE) * 30 * CLIP_RATE;
