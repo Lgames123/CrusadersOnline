@@ -296,11 +296,13 @@ async function main(): Promise<void> {
   const settings = new SettingsStore();
   music.volume = settings.current.musicVolume;
   settings.onChange((s) => (music.volume = s.musicVolume));
-  // Footsteps on the original clips' own LEFT/RIGHT FOOTSTEP events, in step with the animation.
+  // Footsteps on the original clips' own LEFT/RIGHT FOOTSTEP events, in step with the animation,
+  // with the step sound of the surface underfoot.
+  const stepSounds = (): readonly number[] => SFX.footsteps[levelView?.surfaceAt(local.object.position) ?? 'stone'];
   local.avatar.onEvent = (name) => {
     if (!sounds || !name.includes('FOOTSTEP') || !local.character.grounded) return;
     const foot = name.includes('RIGHT') ? 1 : 0;
-    sounds.play(SFX.footstepStone[foot]!, local.object.position, { volume: name.includes('SOFT') ? 0.2 : 0.35 });
+    sounds.play(stepSounds()[foot]!, local.object.position, { volume: name.includes('SOFT') ? 0.2 : 0.35 });
   };
   chase = new CameraRig(mw, container.clientWidth / container.clientHeight);
   const input = new InputManager(renderer.domElement);
@@ -502,7 +504,7 @@ async function main(): Promise<void> {
       const moving = !local.avatar.hasEvents && local.character.grounded && Math.hypot(local.object.position.x - lastStep.x, local.object.position.z - lastStep.z) > 1.1;
       if (moving) {
         lastStep.copy(local.object.position);
-        sounds.play(SFX.footstepStone[stepFoot = 1 - stepFoot]!, local.object.position, { volume: 0.35 });
+        sounds.play(stepSounds()[stepFoot = 1 - stepFoot]!, local.object.position, { volume: 0.35 });
       }
     }
     if (levelView && session) {

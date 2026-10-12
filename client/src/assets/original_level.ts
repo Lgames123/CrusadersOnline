@@ -43,6 +43,42 @@ export interface DoorView {
   open: number;
 }
 
+/** Footstep surfaces (Sound.ctx has a step pair for each). */
+export type Surface = 'stone' | 'metal' | 'wood' | 'gravel' | 'grass' | 'snow' | 'squishy';
+
+/**
+ * Surface of a level texture from its material code (<set>_<code>_<n>: ST stone, ML metal, WD
+ * wood, ER earth, OG organic, LQ liquid...). Earth and organic textures mix dirt, grass and snow,
+ * so those go by the texture's average colour.
+ */
+function surfaceOf(name: string, map: THREE.Texture | null): Surface {
+  const code = /^[a-z0-9]+_([a-z]{2})_/.exec(name.toLowerCase())?.[1];
+  if (code === 'ml') return 'metal';
+  if (code === 'wd') return 'wood';
+  if (code === 'lq') return 'squishy';
+  if (code !== 'er' && code !== 'og') return 'stone';
+  const img = map?.image as CanvasImageSource | undefined;
+  if (!img) return 'gravel';
+  try {
+    const c = document.createElement('canvas');
+    c.width = c.height = 8;
+    const g = c.getContext('2d')!;
+    g.drawImage(img, 0, 0, 8, 8);
+    const d = g.getImageData(0, 0, 8, 8).data;
+    let r = 0, gr = 0, b = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      r += d[i]!;
+      gr += d[i + 1]!;
+      b += d[i + 2]!;
+    }
+    if (r > 170 * 64 && gr > 170 * 64 && b > 170 * 64) return 'snow';
+    if (gr > r * 1.08 && gr > b) return 'grass';
+  } catch {
+    /* image not ready */
+  }
+  return 'gravel';
+}
+
 export interface OriginalLevel {
   arena: ArenaDef;
   /** Level geometry in metres. */
@@ -54,6 +90,8 @@ export interface OriginalLevel {
   /** Torch flame positions (metres), e.g. for ambient fire sounds. */
   torches: THREE.Vector3[];
   setObjectState(id: number, state: WorldObjectState): void;
+  /** Surface under a point (metres), for footsteps; null off the level. */
+  surfaceAt(pos: THREE.Vector3): Surface | null;
   /** Music track of the level act (Music/<n>.mp3), if any. */
   music?: number;
   /** Dungeon atmosphere: dim ambient light, dark fog. */
@@ -340,7 +378,33 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
   }
   let reassign = 0;
   let t = 0;
+  const surfaces = new Map<THREE.Material, Surface>();
+  let matricesReady = false;
+  let lastAt: THREE.Vector3 | null = null;
+  let lastSurface: Surface | null = null;
+  const ray = new THREE.Raycaster();
+  const down = new THREE.Vector3(0, -1, 0);
+  const from = new THREE.Vector3();
   return {
+    surfaceAt(pos) {
+      if (!matricesReady) {
+        level.updateWorldMatrix(true, true); // static geometry: once, also before the first frame
+        matricesReady = true;
+      }
+      // A raycast costs a few ms on a whole level: reuse the last answer close by.
+      if (lastAt && Math.hypot(pos.x - lastAt.x, pos.z - lastAt.z) < 0.75 && Math.abs(pos.y - lastAt.y) < 0.5) return lastSurface;
+      lastAt = pos.clone();
+      lastSurface = null;
+      ray.set(from.set(pos.x, pos.y + 0.5, pos.z), down);
+      ray.far = 1.5;
+      const hit = ray.intersectObject(level, true)[0];
+      const material = hit && ((hit.object as THREE.Mesh).material as THREE.MeshBasicMaterial);
+      if (!material) return null;
+      let s = surfaces.get(material);
+      if (!s) surfaces.set(material, (s = surfaceOf(material.name, material.map)));
+      lastSurface = s;
+      return s;
+    },
     arena,
     ...(placements.music ? { music: placements.music } : {}),
     object: root,

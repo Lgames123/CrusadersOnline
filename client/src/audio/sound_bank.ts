@@ -110,6 +110,16 @@ export const SFX = {
   drakeDamage: [0, 1, 2, 3],
   drakeDeath: [4, 5, 6, 7],
   footstepStone: [16, 17],
+  /** Left / right steps per surface (Sound.ctx "Footstep on ..."). */
+  footsteps: {
+    stone: [16, 17],
+    metal: [24, 25],
+    wood: [26, 27],
+    gravel: [28, 29],
+    grass: [22, 23],
+    snow: [30, 31],
+    squishy: [18, 19],
+  },
   levelUp: 417,
   died: 418,
   click: 401,

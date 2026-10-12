@@ -143,8 +143,7 @@
 ### Not Yet Done
 - Spells beyond Torch Light (the framework is in: spell table from default.ctx, spell books, mana and regeneration, conjuring, R / T keys, persistence): fireball, slow, freeze, stoneskin, lightning, heroism, spectral ally, revelation, holy wrath, soul drinker need live captures; creature spells / ranged attacks; mana regeneration rate (one sample).
 - Creature hit reaction IMPACT_FRONT_TWO_STEPS_BACK (PI31); the third combo step's recoil (plays backwards after its impact); combo chain 105–107 (COMBO 6–8, weapon class unknown).
-- Zones stop 5 min after their last player leaves (the default arena stays); their world state (opened doors, taken items) resets then.
-- Creatures without a melee weapon (Ice / Rock / Lava Elementals, Necros: unarmed, they fight with spells), the ranged Dasher Scout (hand bow), creature-specific AI and swing timings (the new archetypes reuse the skeleton's), the Ca*a lever and platforms (lift?), the original door scripting (doors are simplified: Tab opens, Z + key unlocks, they slide up and stay open) and scripted sequences, material-based footsteps.
+- Creatures without a melee weapon (Ice / Rock / Lava Elementals, Necros: unarmed, they fight with spells), the ranged Dasher Scout (hand bow), creature-specific AI and swing timings (the new archetypes reuse the skeleton's), the Ca*a lever and platforms (lift?), the original door scripting (doors are simplified: Tab opens, Z + key unlocks, they slide up and stay open) and scripted sequences.
 - Packaging the converter for players (browser conversion into OPFS) so original levels work outside the dev server.
 - Original AI maneuver scripts.
 - First deployment on a real domain (TLS certificate), off-host backups, metrics.
