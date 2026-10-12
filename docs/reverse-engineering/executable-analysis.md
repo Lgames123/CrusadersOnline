@@ -416,7 +416,7 @@ Logged Drake's ASM states with pose and the controller's second channel:
 
 Implemented: side and air swings as layered swings (no rooting; replicated as the locomotion anim plus entity flags bits 1–3), the side-swing alternation, the air swing, and the wall jab (shared `wallAhead` ray, 5 ft at 5.5 ft height). Balance deviation: the original re-triggers side swings 0.3–0.6 s apart; here each runs its full clip (~0.5 s) so moving side swings do not outpace the rooted combo (~0.6 s per hit).
 
-The second chain (105–107, COMBO 6–8) uses melee clips (PN21 "vertical", PN17, PN16), so it presumably belongs to another melee weapon class. The community item list (Might and Magic wiki, "List of Crusaders items") gives the PC weapon classes: axes, clubs, dasher weapons (Chl'tk, Dasher Hand Bow — ranged, Dasher Weapon), halberds, hammers, maces, morning stars, pick axes and swords; the Boomer Axe is ranged too. A capture with a halberd or hammer equipped would show which class requests 105.
+The second chain (105–107, COMBO 6–8) uses melee clips (PN21 "vertical", PN17, PN16), so it presumably belongs to another melee weapon class. The community item list (Might and Magic wiki, "List of Crusaders items") gives the PC weapon classes: axes, clubs, dasher weapons (Chl'tk, Dasher Hand Bow — ranged, Dasher Weapon), halberds, hammers, maces, morning stars, pick axes and swords; the Boomer Axe is ranged too. Captured with a War Hammer and then a Halberd equipped (combo routine hooked): both played the same five-step chain 24 → 23 → 25 → 103 → 104 with the sword's clip lengths and timing, and 105 was never requested — the second chain is not tied to these classes (possibly a dasher weapon, or unused content).
 
 ### 14.2 Moving with the shield up (2026-10-12)
 
