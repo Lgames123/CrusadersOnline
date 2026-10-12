@@ -40,6 +40,8 @@ interface ClipMap {
   crouch?: string;
   /** Forward hop (ASM_HOP_F) before a creature's swing. */
   hop?: string;
+  /** Standing with the shield up (ASM_COMBAT_STANDING, the combat stance). */
+  shieldIdle?: string;
   /** Side hops (ASM_HOP_L / _R): sideways with the shield up. */
   hopLeft?: string;
   hopRight?: string;
@@ -67,6 +69,7 @@ function withStates(base: ClipMap, states: Record<string, string> | undefined): 
     // The quick shield block (ASM_BLOCK, PE07) rather than the slow ready-shield raise.
     block: st['ASM_BLOCK'] ?? base.block,
     hop: base.hop ?? st['ASM_HOP_F'] ?? base.run,
+    shieldIdle: base.shieldIdle ?? st['ASM_COMBAT_STANDING'] ?? base.idle,
     hopLeft: base.hopLeft ?? st['ASM_HOP_L'] ?? base.strafeLeft ?? base.run,
     hopRight: base.hopRight ?? st['ASM_HOP_R'] ?? base.strafeRight ?? base.run,
     impacts: base.impacts ?? ['FRONT', 'LEFT', 'RIGHT', 'BACK'].map((k) => st[`ASM_IMPACT_${k}`]).filter((c): c is string => !!c),
@@ -90,7 +93,8 @@ const MODELS: Record<string, { file: string; texture?: string; clips: ClipMap }>
     // Plain clicks: Drake's combo sequence in models.ctx (COMBO 1-3). Forward + click: the
     // overhead swing; left / right + click: the side swings (game Readme).
     clips: {
-      idle: 'pa16_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pc03_ru_fw_jmp', death: 'pi03_hp', block: 'pt01_rdy_shld',
+      // Measured in the original: Drake stands in PA21 (idle combat, 170-frame header), not PA16.
+      idle: 'pa21_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pc03_ru_fw_jmp', death: 'pi03_hp', block: 'pt01_rdy_shld',
       // The five-step combo plays models.ctx's COMBO clips in file order (damage frames captured
       // in play match their IMPACT events).
       attacks: ['pn25_combo_a', 'pn02_1_sw_lv', 'pn15_1_chn_atk_a', 'pn16_1_chn_atk_b', 'pn17_1_pwr_atk'],
@@ -145,6 +149,7 @@ class OriginalAvatar implements Avatar {
     if (anim >= ANIM.ROLL && anim < ANIM.ROLL + 4) return { name: m.rolls?.[anim - ANIM.ROLL] ?? m.run, loop: false };
     if (anim === ANIM.CROUCH) return { name: m.crouch ?? m.idle, loop: false };
     if (anim === ANIM.HOP_FORWARD) return { name: m.hop ?? m.run, loop: false };
+    if (anim === ANIM.SHIELD_IDLE) return { name: m.shieldIdle ?? m.idle, loop: true };
     if (anim === ANIM.HOP_LEFT) return { name: m.hopLeft ?? m.run, loop: false };
     if (anim === ANIM.HOP_RIGHT) return { name: m.hopRight ?? m.run, loop: false };
     if (anim === ANIM.ATTACK_OVERHEAD) return { name: m.attackOverhead ?? m.attacks[0]!, loop: false };

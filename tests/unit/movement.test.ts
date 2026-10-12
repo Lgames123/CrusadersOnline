@@ -207,8 +207,8 @@ describe('shared character controller', () => {
     expect(movementAnim(INPUT.BLOCK | INPUT.FORWARD, true, 0)).toBe(ANIM.WALK);
     expect(movementAnim(INPUT.BLOCK | INPUT.BACK, true, 0)).toBe(ANIM.RETREAT);
     expect(movementAnim(INPUT.BLOCK | INPUT.LEFT, true, ACTION_HOP_LEFT)).toBe(ANIM.HOP_LEFT);
-    expect(movementAnim(INPUT.BLOCK | INPUT.LEFT, true, ACTION_HOP_PAUSE)).toBe(ANIM.BLOCK);
-    expect(movementAnim(INPUT.BLOCK, true, 0)).toBe(ANIM.BLOCK);
+    expect(movementAnim(INPUT.BLOCK | INPUT.LEFT, true, ACTION_HOP_PAUSE)).toBe(ANIM.SHIELD_IDLE);
+    expect(movementAnim(INPUT.BLOCK, true, 0)).toBe(ANIM.SHIELD_IDLE);
   });
 
   it('picks the attack from the movement key held with the click', () => {

@@ -389,3 +389,10 @@ Implemented in the shared movement step and `movementAnim()`: shield + forward /
 ### 14.3 Root-motion profiles for timed actions (2026-10-12)
 
 Side hops and rolls move by their clip's root motion, which is far from uniform (e.g. PC09: ~0.13 ft per frame for 4 frames, ~1 ft per frame over frames 4–10, settling by frame 15, still to frame 20; PE05 roll right covers 6 ft in its first 6 frames). The shared movement step now samples each clip's per-frame root displacement (`SHIELD_HOP_*_CURVE`, `ROLL_CURVES`, extracted from Drake's clips) at 1000/30 frames per second, tick by tick, instead of moving at the average speed.
+
+
+### 14.4 Standing idle and shield stance (2026-10-12)
+
+Standing still — with or without the shield held — the player's ASM_STANDING state plays one and the same clip whose header length is 170 frames (`+0x14`). Drake's relaxed idle PA16 has 90; the 170-frame idle matching the stance is PA21_id_br ("idle combat", ASM_COMBAT_STANDING), the shield-forward combat stance. The client now uses PA21 for Drake's idle and for standing with the shield up (ANIM.SHIELD_IDLE); the quick PE07 block clip stays for creatures stopping a hit.
+
+Also observed: the third combo step (SWING_OVERHEAD) plays backwards after its impact (clip time 10.8 → ~8 within the same state) — a weapon recoil, not reproduced yet.
