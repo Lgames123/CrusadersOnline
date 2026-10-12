@@ -43,8 +43,8 @@ interface Table {
 
 /** One original unit, metres (a tenth of a foot). */
 const UNIT = 0.03048;
-/** Sprite sizes against the original, by eye (playtest: 15 % smaller). */
-const SIZE_SCALE = 0.85;
+/** Sprite sizes against the original, by eye (playtests: 15 %, then half again). */
+const SIZE_SCALE = 0.425;
 /** The engine's tick rate for MOVE / GRAVITY (per tick). */
 const ENGINE_HZ = 30;
 const MAX_LIVE = 600;
