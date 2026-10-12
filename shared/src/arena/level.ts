@@ -52,6 +52,8 @@ export interface LevelPortal {
 export interface LevelBrush {
   name: string;
   points: [number, number, number][];
+  /** Textured polygons: indices into `points`, texel coordinates (×32 texels) per vertex. */
+  faces?: { texture: string; indices: number[]; texels: number[] }[];
 }
 
 /** Door world-object ids start here (placement indices stay below). */

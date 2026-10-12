@@ -80,6 +80,15 @@ export interface CapLevel {
 export interface CapBrush {
   name: string;
   points: [number, number, number][];
+  faces: CapBrushFace[];
+}
+
+/** One textured polygon of a brush: texture, indices into `points`, texel coordinates per vertex. */
+export interface CapBrushFace {
+  texture: string;
+  indices: number[];
+  /** U.(X - P), V.(X - P) per vertex, in the level mesh's texture units (×32 texels). */
+  texels: number[];
 }
 
 /** Object class (record +0x00) -> kind. 0x2D = creature. */
@@ -180,11 +189,49 @@ function parseBrushes(data: Uint8Array, dv: DataView): CapBrush[] {
       const ok = points.every((p) => p.every((v) => Number.isFinite(v) && Math.abs(v) < 1e5)) &&
         points.every((p) => Math.hypot(p[0] - points[0]![0], p[1] - points[0]![1], p[2] - points[0]![2]) < 400);
       if (!ok) continue;
-      out.push({ name, points });
+      out.push({ name, points, faces: parseBrushFaces(data, dv, ptr - CAP_BASE, nf, points) });
       break;
     }
   }
   return out;
+}
+
+/**
+ * Brush faces, 0x68 bytes each like the level mesh's (asset-format-discovery.md §6.3): plane,
+ * texture origin P (+0x10) and axes U / V (+0x1C / +0x28), and the face as one render polygon
+ * at +0x3C: index list pointer (+0x40, u16 into the brush vertices), material (+0x48, texture
+ * name pointer at material +8) and vertex count (+0x56).
+ */
+function parseBrushFaces(data: Uint8Array, dv: DataView, at: number, count: number, points: [number, number, number][]): CapBrushFace[] {
+  const faces: CapBrushFace[] = [];
+  const f32 = (o: number) => dv.getFloat32(o, true);
+  const ptr = (o: number) => dv.getUint32(o, true) - CAP_BASE;
+  for (let k = 0; k < count; k++) {
+    const f = at + 0x68 * k;
+    if (f < 0 || f + 0x68 > data.length) break;
+    const P = [f32(f + 0x10), f32(f + 0x14), f32(f + 0x18)] as const;
+    const U = [f32(f + 0x1c), f32(f + 0x20), f32(f + 0x24)] as const;
+    const V = [f32(f + 0x28), f32(f + 0x2c), f32(f + 0x30)] as const;
+    const idx = ptr(f + 0x40);
+    const mat = ptr(f + 0x48);
+    const n = data[f + 0x56]!;
+    if (n < 3 || idx < 0 || idx + 2 * n > data.length || mat < 0 || mat + 12 > data.length) continue;
+    const namePtr = ptr(mat + 8);
+    if (namePtr < 0 || namePtr >= data.length) continue;
+    const texture = ascii(data, namePtr, 40);
+    const indices: number[] = [];
+    const texels: number[] = [];
+    for (let i = 0; i < n; i++) {
+      const vi = dv.getUint16(idx + 2 * i, true);
+      const v = points[vi];
+      if (!v) break;
+      indices.push(vi);
+      const d = [v[0] - P[0], v[1] - P[1], v[2] - P[2]];
+      texels.push(U[0] * d[0]! + U[1] * d[1]! + U[2] * d[2]!, V[0] * d[0]! + V[1] * d[1]! + V[2] * d[2]!);
+    }
+    if (indices.length === n && /^[\w-]+$/.test(texture)) faces.push({ texture: texture.toLowerCase(), indices, texels });
+  }
+  return faces;
 }
 
 const ascii = (data: Uint8Array, o: number, max = 64): string => {

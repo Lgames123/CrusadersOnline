@@ -64,7 +64,7 @@ export interface ConvertReport {
   warnings: string[];
 }
 
-const MANIFEST_VERSION = '1.5.0'; // 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors)
+const MANIFEST_VERSION = '1.6.0'; // 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces
 /** Bump when level output changes so cached levels are rebuilt. */
 const LEVEL_EMIT_VERSION = '2';
 
@@ -378,7 +378,7 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
       await sink.writeFile(out, JSON.stringify({
         mesh: cap.mesh.toLowerCase(),
         ...(cap.music > 0 ? { music: cap.music + 1 } : {}),
-        brushes: cap.brushes.map((b) => ({ name: b.name, points: b.points.map((p) => [p[0], p[1], -p[2]]) })),
+        brushes: cap.brushes.map((b) => ({ name: b.name, points: b.points.map((p) => [p[0], p[1], -p[2]]), faces: b.faces })),
         creatures: cap.creatures.map((c) => ({ ...c, position: [c.position[0], c.position[1], -c.position[2]] })),
         portals: cap.portals
           .filter((p) => capFiles.some((f) => f.toLowerCase() === `${p.target.toLowerCase()}.cap`))

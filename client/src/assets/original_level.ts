@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, type ArenaDef, type LevelObject, type LevelPlacements, type WorldObjectDef, type WorldObjectState } from '@crusaders/shared';
+import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, type ArenaDef, type LevelObject, type LevelBrush, type LevelPlacements, type WorldObjectDef, type WorldObjectState } from '@crusaders/shared';
 
 /**
  * An original level converted from the player's own installation (imported in the browser, or
@@ -13,6 +13,8 @@ import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, type ArenaDef, type L
 interface Manifest {
   levels?: Record<string, { render: string; collision: string }>;
   placements?: Record<string, string>;
+  textures?: Record<string, string>;
+  textureSizes?: Record<string, [number, number]>;
 }
 
 /**
@@ -67,7 +69,56 @@ const DOOR_OPEN_SECONDS = 0.9;
 const BRUSH_COLOURS: [RegExp, number][] = [[/metal|cell|gate|gear|wheel|crusher/i, 0x4c4c52], [/door|sign|plat|bridge|tort/i, 0x5a3c22]];
 const BRUSH_STONE = 0x5d554a;
 
-/** Convex piece with flat faces shaded by a fixed light (the level is unlit and lightmapped). */
+/**
+ * Texels per brush texture unit. Not the level mesh's ×32: brush faces span 15 units across a
+ * door picture (an 8 ft and a 14 ft door alike), so ×8 shows it once, as the sky tiles.
+ */
+const TEXELS_PER_UNIT = 8;
+/** Brushes have no lightmap: their textures are dimmed to sit in the lightmapped level. */
+const BRUSH_SHADE = 0.6;
+
+/**
+ * Textured brush from its original faces (one polygon each, texel coordinates), positions in
+ * metres; null when it has no faces or a texture is missing.
+ */
+function texturedBrushMesh(brush: LevelBrush, texture: (name: string) => { map: THREE.Texture; size: [number, number] } | null): THREE.Mesh | null {
+  const faces = brush.faces ?? [];
+  if (!faces.length) return null;
+  const s = LEVEL_UNIT_METRES;
+  const byTex = new Map<string, { pos: number[]; uv: number[] }>();
+  for (const f of faces) {
+    const tex = texture(f.texture);
+    if (!tex) return null;
+    let g = byTex.get(f.texture);
+    if (!g) byTex.set(f.texture, (g = { pos: [], uv: [] }));
+    const vert = (i: number) => {
+      const p = brush.points[f.indices[i]!]!;
+      g.pos.push(p[0] * s, p[1] * s, p[2] * s);
+      g.uv.push((f.texels[2 * i]! * TEXELS_PER_UNIT) / tex.size[0], (f.texels[2 * i + 1]! * TEXELS_PER_UNIT) / tex.size[1]);
+    };
+    for (let i = 1; i + 1 < f.indices.length; i++) {
+      vert(0);
+      vert(i);
+      vert(i + 1);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  const pos: number[] = [];
+  const uv: number[] = [];
+  const materials: THREE.Material[] = [];
+  for (const [name, g] of byTex) {
+    geo.addGroup(pos.length / 3, g.pos.length / 3, materials.length);
+    pos.push(...g.pos);
+    uv.push(...g.uv);
+    // Both sides: the mirrored Z flips the winding of some faces.
+    materials.push(new THREE.MeshBasicMaterial({ map: texture(name)!.map, color: new THREE.Color(BRUSH_SHADE, BRUSH_SHADE, BRUSH_SHADE), side: THREE.DoubleSide }));
+  }
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  return new THREE.Mesh(geo, materials);
+}
+
+/** Convex piece with flat faces shaded by a fixed light (fallback without faces or textures). */
 function brushMesh(points: Float32Array, name: string): THREE.Mesh | null {
   const pts: THREE.Vector3[] = [];
   for (let i = 0; i + 2 < points.length; i += 3) pts.push(new THREE.Vector3(points[i], points[i + 1], points[i + 2]));
@@ -248,9 +299,27 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
   // Brushes: doors, gates, bridges, wheels... (convex pieces; doors slide up when opened).
   const doors = new Map<number, DoorView>();
   const doorDefs = new Map((arena.objects ?? []).filter((o) => o.kind === 'door' || o.kind === 'lever').map((o) => [o.id, o]));
-  for (const b of arena.brushes ?? []) {
-    const mesh = brushMesh(b.points, b.name);
-    if (!mesh) continue;
+  const brushTextures = new Map<string, { map: THREE.Texture; size: [number, number] } | null>();
+  const brushTexture = (name: string) => {
+    if (!brushTextures.has(name)) {
+      const file = manifest.textures?.[name];
+      const size = manifest.textureSizes?.[name];
+      let entry: { map: THREE.Texture; size: [number, number] } | null = null;
+      if (file && size) {
+        const map = new THREE.TextureLoader().load(`/generated/${file}`);
+        map.flipY = false; // as the level's glTF textures
+        map.colorSpace = THREE.SRGBColorSpace;
+        map.wrapS = map.wrapT = THREE.RepeatWrapping;
+        entry = { map, size };
+      }
+      brushTextures.set(name, entry);
+    }
+    return brushTextures.get(name) ?? null;
+  };
+  (arena.brushes ?? []).forEach((b, i) => {
+    const source = placements.brushes?.[i];
+    const mesh = (source && texturedBrushMesh(source, brushTexture)) || brushMesh(b.points, b.name);
+    if (!mesh) return;
     mesh.name = b.name;
     root.add(mesh);
     const def = b.door !== undefined ? doorDefs.get(b.door) : undefined;
@@ -261,7 +330,7 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
       mesh.position.copy(c);
     }
     if (def) doors.set(def.id, { def, mesh, state: 'present', open: 0 });
-  }
+  });
 
   const lights: THREE.PointLight[] = [];
   for (let i = 0; i < TORCH_LIGHTS; i++) {
