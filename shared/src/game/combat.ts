@@ -120,6 +120,13 @@ export const MOB_THRUST_RANGE = 4.8 * 0.3048;
  */
 export const MOB_BASH = { kind: 'bash' as const, clip: { swing: 4, impact: 9, recovery: 24 } };
 export const MOB_BASH_CHANCE = 0.02;
+/**
+ * Drake's shield rush (Space + RMB in the game's Readme): the same PL01 charge. It interrupts a
+ * creature it meets during the charge (frames 4-14, ~6 ft ahead) with an impact; no damage value
+ * was found for it (shields have none in items.ctx), so it deals none.
+ */
+export const RUSH_CONTACT_TICKS: readonly [number, number] = [2, 8];
+export const RUSH_REACH = 3 * 0.3048;
 export const MOB_BASH_RANGE = 5.8 * 0.3048;
 /** Leaping strike (ASM_JUMP_ATTACK): taken instead of the hop in ~15 % of approaches at ~7.5 ft. */
 export const MOB_JUMP_ATTACK = { kind: 'jump' as const, clip: { swing: 17, impact: 20, recovery: 24 } };

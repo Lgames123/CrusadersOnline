@@ -10,6 +10,7 @@ import {
   startHitReaction,
   startTimedAction,
   ACTION_LUNGE,
+  ACTION_BASH,
   LUNGE_TICKS,
   ATTACK_CURVES,
   INPUT_ATTACK_SHIFT,
@@ -169,6 +170,19 @@ describe('shared character controller', () => {
     run(mw, c, INPUT.FORWARD, 0, hitReactionTicks(ACTION_KNOCKDOWN));
     expect(c.rollDir).toBe(0);
     expect(c.position.z - start.z).toBeCloseTo(5.36 * 0.3048, 1); // yaw 0 faces -Z: thrown towards +Z
+  });
+
+  it('shield + jump is the shield rush: PL01 carries Drake ~5.2 ft forward, no jump', () => {
+    const { mw, c } = setup();
+    run(mw, c, 0, 0, 10);
+    const start = { ...c.position };
+    run(mw, c, INPUT.BLOCK | INPUT.JUMP, 0, 1);
+    expect(c.rollDir).toBe(ACTION_BASH);
+    run(mw, c, INPUT.BLOCK, 0, 20);
+    expect(c.rollDir).toBe(0);
+    expect(c.position.y).toBeCloseTo(start.y, 2);
+    expect(start.z - c.position.z).toBeCloseTo(5.18 * 0.3048, 1);
+    expect(movementAnim(INPUT.BLOCK, true, ACTION_BASH)).toBe(ANIM.ATTACK_BASH);
   });
 
   it("a creature's lunge follows PC07: still at first, then 5.65 ft, then still until it ends", () => {

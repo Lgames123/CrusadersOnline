@@ -75,6 +75,8 @@ import {
   MOB_BASH,
   MOB_BASH_CHANCE,
   MOB_BASH_RANGE,
+  RUSH_CONTACT_TICKS,
+  RUSH_REACH,
   ACTION_IMPACT,
   ACTION_KNOCKDOWN,
   ACTION_STUN,
@@ -271,6 +273,8 @@ interface Player extends ActorBase {
   queuedAttack: boolean;
   /** Swings started (entity flags bit 3 flips with it, so clients restart a repeated layered swing). */
   swingSerial: number;
+  /** Creatures already met by the current shield rush. */
+  rushHit: Set<number>;
   queuedKind: AttackKind;
   /** Body yaw offset from the view yaw (diagonal movement), radians; replicated in the yaw. */
   facingOffset: number;
@@ -467,6 +471,7 @@ export class WorldZone {
       level,
       queuedAttack: false,
       swingSerial: 0,
+      rushHit: new Set(),
       queuedKind: 'normal',
       facingOffset: 0,
       statsDirty: true,
@@ -805,7 +810,8 @@ export class WorldZone {
         if (alive(p)) p.yaw = this.frame.yaw;
         this.checkPortals(p);
         const moving = (this.frame.flags & MOVE_MASK) !== 0 && !(this.frame.flags & INPUT.ROOTED);
-        p.blocking = alive(p) && p.shield !== null && (this.frame.flags & INPUT.BLOCK) !== 0 && !p.swing && p.hitUntil <= tick;
+        p.blocking = alive(p) && p.shield !== null && (this.frame.flags & INPUT.BLOCK) !== 0 && !p.swing && p.hitUntil <= tick && p.character.rollDir !== ACTION_BASH;
+        if (alive(p) && p.character.rollDir === ACTION_BASH) this.rushContact(p);
         // On diagonals the body turns into the motion, except with the shield up (it faces the view).
         p.facingOffset = moving && !(this.frame.flags & INPUT.BLOCK) ? movementFacingOffset(this.frame.flags) : 0;
         // Hit reactions are timed movement actions, so movementAnim() covers them too.
@@ -1051,6 +1057,26 @@ export class WorldZone {
     const shield = m.shield !== null && this.random() >= 1 - MOB_SHIELD_CHANCE;
     m.shieldFrom = shield ? stand : Number.MAX_SAFE_INTEGER;
     m.guardUntil = shield ? stand + MOB_SHIELD_TICKS : stand;
+  }
+
+  /** Drake's shield rush: a creature met during the charge takes an impact (no damage). */
+  private rushContact(p: Player): void {
+    const c = p.character;
+    const done = c.actionLength - c.rollTicks;
+    if (done <= 1) p.rushHit.clear();
+    if (done < RUSH_CONTACT_TICKS[0] || done > RUSH_CONTACT_TICKS[1]) return;
+    const pos = c.position;
+    const yaw = dequantizeAngle(p.yaw);
+    for (const m of this.actors.values()) {
+      if (m.kind !== 'mob' || !alive(m) || p.rushHit.has(m.entityId)) continue;
+      const mp = m.character.position;
+      if (!inMeleeArc(pos.x, pos.z, yaw, mp.x, mp.z, RUSH_REACH + PLAYER_RADIUS, PLAYER_ARC_DEG, PLAYER_RADIUS)) continue;
+      p.rushHit.add(m.entityId);
+      if (!m.character.grounded) continue;
+      this.hitReaction(m, ACTION_IMPACT);
+      if (m.state !== 'chase') m.state = 'chase';
+      m.threat.set(p.entityId, (m.threat.get(p.entityId) ?? 0) + 1);
+    }
   }
 
   private updateSwing(a: Actor): void {

@@ -226,6 +226,23 @@ describe('directional attacks (original controls)', () => {
   });
 });
 
+describe('shield rush (original controls)', () => {
+  it('a rush that meets the skeleton interrupts it without damage', () => {
+    const t = setup();
+    t.run(APPROACH, INPUT.FORWARD, 0);
+    // Wait until the skeleton stands within reach of the charge, then rush (shield + jump).
+    for (let i = 0; i < 200 && Math.hypot(t.mob().x - t.me().x, t.mob().z - t.me().z) > 1.6; i++) t.run(1);
+    const hp = t.mob().hp;
+    let hit = false;
+    for (let i = 0; i < 12 && !hit; i++) {
+      t.run(1, i === 0 ? INPUT.BLOCK | INPUT.JUMP : INPUT.BLOCK, 0);
+      hit = t.mob().anim === ANIM.HIT;
+    }
+    expect(hit).toBe(true);
+    expect(t.mob().hp).toBe(hp);
+  });
+});
+
 describe('air swing and wall jab (original controls)', () => {
   it('a click in the air is the upper-body level swing; a plain click facing a wall within 5 ft is the jab', () => {
     expect(attackKindFor(INPUT.FORWARD, false)).toBe('air');

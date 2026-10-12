@@ -418,6 +418,8 @@ Implemented: side and air swings as layered swings (no rooting; replicated as th
 
 The second chain (105–107, COMBO 6–8) uses melee clips (PN21 "vertical", PN17, PN16), so it presumably belongs to another melee weapon class. The community item list (Might and Magic wiki, "List of Crusaders items") gives the PC weapon classes: axes, clubs, dasher weapons (Chl'tk, Dasher Hand Bow — ranged, Dasher Weapon), halberds, hammers, maces, morning stars, pick axes and swords; the Boomer Axe is ranged too. Captured with a War Hammer and then a Halberd equipped (combo routine hooked): both played the same five-step chain 24 → 23 → 25 → 103 → 104 with the sword's clip lengths and timing, and 105 was never requested — the second chain is not tied to these classes (possibly a dasher weapon, or unused content).
 
+**Shield rush.** The game's Readme binds Space + RMB to a shield rush; models.ctx binds ASM_RAM_SHOULDER to PL01 (24 frames, the root charges 6.5 ft by frame 11 and settles at 5.18 ft). Implemented as a timed action of the shared step (shield + jump instead of a jump); a creature met during the charge takes an impact. Its damage, if any, was not measured (both logged rushes met nothing) — it deals none here.
+
 ### 14.2 Moving with the shield up (2026-10-12)
 
 Sampled the player's ASM state and pose while holding the shield (right mouse button) and moving: forward → ASM_WALKING at 5.65 ft/s (the careful-walk speed), backward → ASM_RETREAT at 4.34 ft/s, sideways and diagonals → repeated ASM_HOP_L / ASM_HOP_R side hops (PC09 / PC10) with short stands in between, ~6–8 ft/s on average. Standing still with the shield up plays ASM_BLOCK (PE07).

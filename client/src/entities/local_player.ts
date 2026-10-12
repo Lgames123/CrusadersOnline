@@ -155,7 +155,8 @@ export class LocalPlayer {
     this.avatar.setState(anim, this.swingTime, this.swingCount);
     // Side and air swings play on the upper body over the legs' clip.
     this.avatar.setUpperSwing?.(layered ? this.kind : null, this.swingCount);
-    this.avatar.setShield?.(this.blocking && !swinging);
+    // The rush plays its own clip (PL01), shield included.
+    this.avatar.setShield?.(this.blocking && !swinging && this.character.rollDir !== 13);
     this.avatar.update(dt);
   }
 }

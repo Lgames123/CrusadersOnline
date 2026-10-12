@@ -178,6 +178,7 @@ export function movementAnim(flags: number, grounded: boolean, rollDir: number):
   if (rollDir === 16) return ANIM.HIT; // directional impact (the client picks the side)
   if (rollDir === 17) return ANIM.STUNNED;
   if (rollDir === 18) return ANIM.KNOCKDOWN;
+  if (rollDir === 13) return ANIM.ATTACK_BASH; // shield rush
   // rollDir >= 8: an attack's root motion (the attack clip is chosen from the swing).
   if (!grounded) return ANIM.AIRBORNE;
   if (flags & INPUT.DUCK) return ANIM.CROUCH;
