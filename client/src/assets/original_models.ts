@@ -37,6 +37,8 @@ interface ClipMap {
   /** Rolls forward / back / left / right and ducking. */
   rolls?: string[];
   crouch?: string;
+  /** Forward hop (ASM_HOP_F) before a creature's swing. */
+  hop?: string;
   /** Hit reactions: front, left, right, back (ASM_IMPACT_*). */
   impacts?: string[];
   /** Death variants (ASM_HIT_POINTS_DEPLETED and its ALT_01..08). */
@@ -58,6 +60,7 @@ function withStates(base: ClipMap, states: Record<string, string> | undefined): 
     walkStrafeRight: base.walkStrafeRight ?? st['ASM_SIDE_STEP_R'] ?? base.walk,
     rolls: base.rolls ?? ['ASM_ROLL_F', 'ASM_ROLL_B', 'ASM_ROLL_L', 'ASM_ROLL_R'].map((k) => st[k] ?? base.run),
     crouch: base.crouch ?? st['ASM_CROUCHING'] ?? base.idle,
+    hop: base.hop ?? st['ASM_HOP_F'] ?? base.run,
     impacts: base.impacts ?? ['FRONT', 'LEFT', 'RIGHT', 'BACK'].map((k) => st[`ASM_IMPACT_${k}`]).filter((c): c is string => !!c),
     deaths: base.deaths ?? [st['ASM_HIT_POINTS_DEPLETED'] ?? base.death, ...[1, 2, 3, 4, 5, 6, 7, 8].map((i) => st[`ASM_HIT_POINTS_DEPLETED_ALT_0${i}`]).filter((c): c is string => !!c)],
     attackOverhead: base.attackOverhead ?? st['ASM_SWING_OVERHEAD'] ?? base.attacks[0]!,
@@ -132,6 +135,7 @@ class OriginalAvatar implements Avatar {
     if (anim === ANIM.ATTACK_COMBO4 || anim === ANIM.ATTACK_COMBO5) return { name: m.attacks[anim === ANIM.ATTACK_COMBO4 ? 3 : 4] ?? m.attacks[0]!, loop: false };
     if (anim >= ANIM.ROLL && anim < ANIM.ROLL + 4) return { name: m.rolls?.[anim - ANIM.ROLL] ?? m.run, loop: false };
     if (anim === ANIM.CROUCH) return { name: m.crouch ?? m.idle, loop: false };
+    if (anim === ANIM.HOP_FORWARD) return { name: m.hop ?? m.run, loop: false };
     if (anim === ANIM.ATTACK_OVERHEAD) return { name: m.attackOverhead ?? m.attacks[0]!, loop: false };
     if (anim === ANIM.ATTACK_LEFT) return { name: m.attackLeft ?? m.attacks[0]!, loop: false };
     if (anim === ANIM.ATTACK_RIGHT) return { name: m.attackRight ?? m.attacks[0]!, loop: false };

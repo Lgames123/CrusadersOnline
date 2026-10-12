@@ -3,6 +3,8 @@ import { WorldZone, type PersistRecord } from '@crusaders/server/simulation/worl
 import {
   ANIM,
   COMBO_MULTIPLIERS,
+  MOB_HOP_RANGE,
+  PLAYER_REACH,
   DEFAULT_MOVEMENT_STATS,
   ORIGINAL_CLIP_FPS,
   attackTiming,
@@ -105,8 +107,9 @@ describe('skeleton warrior AI', () => {
     t.run(APPROACH, INPUT.FORWARD, 0); // run towards -Z (mob at z = -15)
     t.run(40);
     expect(t.mob().state).toBe('chase');
+    // Closed in: within its lunge (forward hop) range, or already in reach.
     const gap = Math.hypot(t.mob().x - t.me().x, t.mob().z - t.me().z);
-    expect(gap).toBeLessThan(SKELETON.reach);
+    expect(gap).toBeLessThan(MOB_HOP_RANGE);
   });
 
   it('gives up beyond its leash, walks home and stays idle', () => {
@@ -331,14 +334,31 @@ describe('inventory and equipment', () => {
   });
 });
 
+describe('skeleton lunge (original behaviour)', () => {
+  it('hops forward from range and swings straight after', () => {
+    const t = setup();
+    t.run(APPROACH, INPUT.FORWARD, 0);
+    const anims: number[] = [];
+    for (let i = 0; i < 80; i++) {
+      t.run(1);
+      anims.push(t.mob().anim);
+    }
+    const hop = anims.indexOf(ANIM.HOP_FORWARD);
+    expect(hop).toBeGreaterThanOrEqual(0);
+    const after = anims.slice(hop).find((a) => a !== ANIM.HOP_FORWARD);
+    expect([ANIM.ATTACK, ANIM.ATTACK_OVERHEAD, ANIM.ATTACK_LOW]).toContain(after);
+  });
+});
+
 describe('skeleton shield AI', () => {
   it('raises its shield against a frontal swing, then lowers it for a cooldown', () => {
     // 0.99 passes the 35% block roll (and skips loot); 0 (the default) never blocks.
     const t = setup({ random: () => 0.99 });
     t.run(APPROACH, INPUT.FORWARD, 0);
     t.run(30);
-    // A mob cannot block mid-swing: wait for the skeleton's own swing to end.
-    for (let i = 0; i < 40 && t.mob().swinging; i++) t.run(1);
+    // A mob cannot block mid-swing: wait until the skeleton is in reach and not swinging.
+    const gap = () => Math.hypot(t.mob().x - t.me().x, t.mob().z - t.me().z);
+    for (let i = 0; i < 80 && (t.mob().swinging || gap() > PLAYER_REACH + 0.3); i++) t.run(1);
     t.zone.attack(1);
     t.run(12);
     const first = t.events().filter((e) => e.target === t.mob().id);

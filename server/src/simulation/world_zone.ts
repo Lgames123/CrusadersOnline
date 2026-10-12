@@ -56,6 +56,12 @@ import {
   playerMaxHp,
   playerRules,
   attackTiming,
+  clipSwingTiming,
+  pickMobAttack,
+  MOB_COMBAT_RANGE,
+  MOB_HOP_RANGE,
+  MOB_HOP_SPEED,
+  MOB_HOP_TICKS,
   quantizeAngle,
   quantizePosition,
   removeCharacter,
@@ -263,6 +269,8 @@ interface Mob extends ActorBase {
   state: 'idle' | 'chase' | 'return';
   threat: Map<number, number>;
   nextSwingTick: number;
+  /** Ticks of a forward hop still to run before the swing it leads into. */
+  hopTicks: number;
   input: InputFrame;
   stats: MovementStats;
 }
@@ -359,8 +367,10 @@ export class WorldZone {
       state: 'idle',
       threat: new Map(),
       nextSwingTick: 0,
+      hopTicks: 0,
       input: createInputFrame(),
-      stats: uniformMovementStats(archetype.speed),
+      // Creatures share the humanoid rig's root-motion speeds (run, walk); no jumping.
+      stats: { ...DEFAULT_MOVEMENT_STATS, jumpVelocity: 0 },
     };
     this.register(mob);
   }
@@ -830,14 +840,22 @@ export class WorldZone {
         // Shield up: hold position facing the target.
         const t = target.character.position;
         m.yaw = quantizeAngle(yawTowards(pos.x, pos.z, t.x, t.z));
+      } else if (m.hopTicks > 0) {
+        // Lunge: the forward hop carries the creature in, then the swing starts.
+        if (--m.hopTicks === 0) this.startMobSwing(m);
       } else if (!m.swing) {
         const t = target.character.position;
         const dist = Math.hypot(t.x - pos.x, t.z - pos.z);
         m.yaw = quantizeAngle(yawTowards(pos.x, pos.z, t.x, t.z));
-        if (dist > arch.reach * 0.85) {
-          m.input.flags = INPUT.FORWARD;
-        } else if (this.tick >= m.nextSwingTick) {
-          m.swing = { combo: 1, kind: 'normal', start: this.tick, timing: arch.swing, hit: new Set() };
+        const ready = this.tick >= m.nextSwingTick;
+        if (ready && dist <= arch.reach * 0.85) {
+          this.startMobSwing(m);
+        } else if (ready && dist <= MOB_HOP_RANGE) {
+          m.hopTicks = MOB_HOP_TICKS;
+        } else if (dist > MOB_COMBAT_RANGE) {
+          m.input.flags = INPUT.FORWARD; // run in
+        } else if (dist > arch.reach * 0.85) {
+          m.input.flags = INPUT.FORWARD | INPUT.WALK; // walk in, in guard
         }
       }
     }
@@ -855,8 +873,21 @@ export class WorldZone {
 
     m.input.yaw = m.yaw;
     m.input.clientTick = this.tick;
-    stepCharacter(this.mw, m.character, m.input, m.stats, TICK_DT);
-    m.anim = m.blockUntil > this.tick ? ANIM.BLOCK : m.input.flags & MOVE_MASK ? ANIM.RUN : ANIM.IDLE;
+    if (m.hopTicks > 0) m.input.flags = INPUT.FORWARD;
+    stepCharacter(this.mw, m.character, m.input, m.hopTicks > 0 ? this.hopStats : m.stats, TICK_DT);
+    m.anim = m.blockUntil > this.tick
+      ? ANIM.BLOCK
+      : m.hopTicks > 0
+      ? ANIM.HOP_FORWARD
+      : m.input.flags & MOVE_MASK ? (m.input.flags & INPUT.WALK ? ANIM.WALK : ANIM.RUN) : ANIM.IDLE;
+  }
+
+  private readonly hopStats = uniformMovementStats(MOB_HOP_SPEED);
+
+  /** Starts a creature swing: one of its ASM attacks, timed by that clip's events. */
+  private startMobSwing(m: Mob): void {
+    const atk = pickMobAttack(this.random());
+    m.swing = { combo: 1, kind: atk.kind, start: this.tick, timing: clipSwingTiming(atk.clip), hit: new Set() };
   }
 
   private updateSwing(a: Actor): void {

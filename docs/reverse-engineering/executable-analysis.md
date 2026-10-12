@@ -348,3 +348,20 @@ Captured with a software breakpoint on `Stats_TakeDamage` (`0x0044CBA0`, fires o
 - **Crouching.** Clicks are ignored while C is held.
 
 Implemented: `PLAYER_REACH` 6 ft and `PLAYER_ARC_DEG` 90 (±45°), skeleton reach 5.25 ft (both centre to centre, `inMeleeArc` adds the 0.4 m target radius), the combo clip order above, and no attacks while ducking. Second capture (73 swings recorded at their IMPACT frame from the player's ASM state, 16 damage events): a head-on miss at 7.6 ft (0.8° off) and a miss at 44.5° (5.3 ft), against hits up to 5.95 ft and ~40°, bracket the player's reach at **6–7.6 ft** and the arc at **±40–45°**; the implemented 6 ft / ±45° lie inside. Misses at 4–4.3 ft head-on are shield blocks (a blocked hit never reaches `Stats_TakeDamage`). Breakable props do not take damage through `Stats_TakeDamage` either (no event when they were struck).
+
+---
+
+## 15. Creature Behaviour in Combat (memory sampling, 2026-10-12)
+
+Two skeletons sampled at ~3 Hz for 150 s while the player fought them (creature found through the `Stats_TakeDamage` breakpoint, then only memory reads: transform pose and animation-controller state).
+
+- **Approach:** RUNNING beyond ~14 ft; inside it WALKING or COMBAT_STANDING (guard), facing the player within ~±30°.
+- **Lunge:** almost every attack starts with **ASM_HOP_F** (forward hop, PC07, 5.65 ft) from 2–17 ft (typically 4–10 ft), followed at once by a swing.
+- **Swings:** SWING_OVERHEAD most often, then SWING_LEVEL, CHOP_LOW, occasionally THRUST and JUMP_ATTACK.
+- **Not seen:** BLOCK, RETREAT or side steps by the creature in this sample (short block states may fall between samples).
+- **Pursuit:** a skeleton kept chasing past 75 m; creatures went idle after the player died.
+- **Reactions:** IMPACT_SEVERE, IMPACT_LEFT_ALT_01; deaths HIT_POINTS_DEPLETED_ALT_01 / _ALT_03.
+
+The AI's own maneuver tables (`0x004EA268`: RANGED / RUNNING_JUMP / JUMP / MELEE and NONE … THROW_WEAPON, MANEUVER_LR / BACK) are not decoded yet.
+
+Implemented in the server AI: root-motion run/walk speeds, guard walk inside 14 ft, forward-hop lunge from ≤ 9 ft (PC07 timing) leading straight into a swing chosen 50 / 30 / 20 % among SWING_OVERHEAD / SWING_LEVEL / CHOP_LOW with each clip's event timing, leash 80 m.

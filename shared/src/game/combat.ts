@@ -38,7 +38,7 @@ export function swingForWeaponSpeed(speed: number, base: Readonly<SwingTiming> =
  * RECOVERY events (executable-analysis.md §14). Frame numbers of Drake's clips:
  */
 export const ORIGINAL_CLIP_FPS = 1000 / 30;
-interface ClipEvents { swing: number; impact: number; recovery: number }
+export interface ClipEvents { swing: number; impact: number; recovery: number }
 /**
  * Plain clicks chain five swings (combo routine 0x0042CA20: states 24 → 23 → 25 → 103 → 104).
  * With a one-handed weapon they play models.ctx's "COMBO" clips in file order — the damage
@@ -66,6 +66,36 @@ const CHAIN_SLACK_FRAMES = 3;
 /** Swing timing of an attack (kind + combo step), scaled by the weapon's Speed. */
 export function attackTiming(kind: 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump', combo: number, weaponSpeed = 1): SwingTiming {
   const c = kind === 'normal' ? COMBO_CLIPS[Math.min(Math.max(combo, 1), COMBO_CLIPS.length) - 1]! : DIRECTIONAL_CLIPS[kind];
+  return clipSwingTiming(c, weaponSpeed);
+}
+
+/**
+ * Creature melee as observed in the running game (executable-analysis.md §15): a skeleton
+ * walks in guard inside ~14 ft, hops forward (ASM_HOP_F) from up to ~9 ft and swings at once.
+ * Swings are the clips bound to its ASM states: SWING_OVERHEAD (PN03, the most frequent),
+ * SWING_LEVEL (PN02) and CHOP_LOW (PN01).
+ */
+export const MOB_ATTACKS: readonly { kind: 'overhead' | 'normal' | 'low'; weight: number; clip: ClipEvents }[] = [
+  { kind: 'overhead', weight: 0.5, clip: { swing: 10, impact: 12, recovery: 16 } },
+  { kind: 'normal', weight: 0.3, clip: { swing: 7, impact: 8, recovery: 13 } },
+  { kind: 'low', weight: 0.2, clip: { swing: 14, impact: 16, recovery: 19 } },
+];
+/** Distance (centre to centre, m) inside which a creature walks in guard instead of running. */
+export const MOB_COMBAT_RANGE = 14 * 0.3048;
+/** Distance from which a creature lunges with a forward hop before swinging. */
+export const MOB_HOP_RANGE = 9 * 0.3048;
+/** ASM_HOP_F (PC07): 5.65 ft of root motion over 20 frames at 1000/30 fps. */
+export const MOB_HOP_TICKS = Math.round((20 / ORIGINAL_CLIP_FPS) * TICK_RATE);
+export const MOB_HOP_SPEED = (5.65 * 0.3048) / (MOB_HOP_TICKS / TICK_RATE);
+
+/** Picks a creature attack with `roll` in [0, 1). */
+export function pickMobAttack(roll: number): (typeof MOB_ATTACKS)[number] {
+  let acc = 0;
+  for (const a of MOB_ATTACKS) if (roll < (acc += a.weight)) return a;
+  return MOB_ATTACKS[0]!;
+}
+
+export function clipSwingTiming(c: Readonly<ClipEvents>, weaponSpeed = 1): SwingTiming {
   const s = weaponSpeed > 0 ? weaponSpeed : 1;
   const at = (frame: number) => Math.round((frame / ORIGINAL_CLIP_FPS / s) * TICK_RATE);
   const startup = Math.max(1, at(c.swing));
@@ -161,7 +191,8 @@ const SKELETON_WARRIOR: MobArchetype = {
   blockCooldown: ticks(1500),
   speed: 4.2,
   aggroRadius: 10,
-  leashRadius: 30,
+  // Skeletons followed the player for more than 75 m in the original.
+  leashRadius: 80,
   // Skeleton hits on the player were captured from 4.0 to 5.25 ft centre to centre.
   reach: 5.25 * 0.3048 - 0.4,
   arcDeg: 90,

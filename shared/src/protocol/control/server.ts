@@ -152,6 +152,8 @@ export const ANIM = {
   /** Fourth and fifth swings of the plain-click combo (combo states 103 / 104). */
   ATTACK_COMBO4: 25,
   ATTACK_COMBO5: 26,
+  /** Forward hop (ASM_HOP_F): creatures lunge in before swinging. */
+  HOP_FORWARD: 27,
 } as const;
 
 /** Animation for a character's own movement state (roll, duck, airborne, locomotion, idle). */
