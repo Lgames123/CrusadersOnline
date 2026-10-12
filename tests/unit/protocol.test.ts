@@ -156,6 +156,11 @@ describe('control message schemas', () => {
     expect(parseClientControl(JSON.stringify({ op: CS.AUTH_TICKET, seq: 0, d: { ticket } }))).not.toBeNull();
     expect(parseClientControl(JSON.stringify({ op: CS.AUTH_TICKET, seq: 0, d: { ticket: 'short' } }))).toBeNull();
     expect(parseClientControl(JSON.stringify({ op: CS.PLAYER_ATTACK, seq: 1, d: { comboIndex: 9, clientTick: 1 } }))).toBeNull();
+    // Every attack the client can send is accepted (an unknown one disconnects the player).
+    for (const kind of ['normal', 'overhead', 'left', 'right', 'low', 'jump', 'thrust', 'air']) {
+      expect(parseClientControl(JSON.stringify({ op: CS.PLAYER_ATTACK, seq: 1, d: { comboIndex: 1, clientTick: 1, kind } }))).not.toBeNull();
+    }
+    expect(parseClientControl(JSON.stringify({ op: CS.PLAYER_ATTACK, seq: 1, d: { comboIndex: 1, clientTick: 1, kind: 'bash' } }))).toBeNull();
     expect(parseClientControl('{not json')).toBeNull();
     expect(parseClientControl('x'.repeat(5000))).toBeNull();
   });

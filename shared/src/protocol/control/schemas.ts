@@ -26,7 +26,7 @@ export const PlayerAttackPacketSchema = z.object({
     comboIndex: z.number().int().min(1).max(3),
     clientTick: z.number().int().nonnegative(),
     /** Attack chosen by the movement key held with the click (original controls). */
-    kind: z.enum(['normal', 'overhead', 'left', 'right', 'low', 'jump']).optional(),
+    kind: z.enum(['normal', 'overhead', 'left', 'right', 'low', 'jump', 'thrust', 'air']).optional(),
   }),
 });
 
