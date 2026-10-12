@@ -32,6 +32,9 @@ export interface CharactersTable {
   max_hp: Generated<number>;
   current_mana: Generated<number>;
   max_mana: Generated<number>;
+  /** Known spells, "spell:level" comma-separated (002_spells.sql). */
+  spells: Generated<string>;
+  selected_spell: string | null;
   might: Generated<number>;
   intelligence: Generated<number>;
   endurance: Generated<number>;

@@ -40,12 +40,13 @@ export const ACTION_KEYS = {
   interact: ['Tab'],
   healthPotion: ['KeyH'],
   inventory: ['KeyI'],
+  // Original R cast / T cycle spell (unchanged by the WASD shift).
+  nextSpell: ['KeyT'],
+  castSpell: ['KeyR'],
   // Reserved (systems not implemented yet): original bindings after the WASD shift.
   useItem: ['KeyZ'],
   nextItem: ['KeyQ'],
   nextWeapon: ['KeyE'],
-  nextSpell: ['KeyT'],
-  castSpell: ['KeyR'],
   quickSelect: ['KeyX'],
   map: ['KeyM'],
 } as const;
@@ -63,4 +64,4 @@ export function actionFor(code: string): Action | null {
 export const CONTROLS_HELP =
   'WASD move · Mouse look · Wheel camera distance · ←/→ turn · Numpad 9/7/5 look up/down/centre · ' +
   'Click attack (5-hit combo; W or Space + click: leaping attack; A / D + click: side swings) · Right click block (+ Space: shield rush) · ' +
-  'Space jump · C duck (C + direction: roll) · Shift walk · Tab pick up / open · H health potion · I inventory · Esc release mouse';
+  'Space jump · C duck (C + direction: roll) · Shift walk · R cast spell · T next spell · Tab pick up / open · H health potion · I inventory · Esc release mouse';

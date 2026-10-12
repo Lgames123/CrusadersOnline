@@ -1,4 +1,5 @@
 import { damageVector, type DamageType, type DamageVector } from './ruleset.ts';
+import { SPELL_BOOK_PARAMS, type SpellId } from './spells.ts';
 
 /**
  * Equipment items. The built-in catalog holds the numbers of the items the slice uses, recorded
@@ -6,7 +7,7 @@ import { damageVector, type DamageType, type DamageVector } from './ruleset.ts';
  * `rules/items.json` (converter/src/formats/items_ctx.ts) can replace it with the full table via
  * catalogFromItemRules().
  */
-export type ItemType = 'weapon' | 'shield' | 'armor' | 'potion';
+export type ItemType = 'weapon' | 'shield' | 'armor' | 'potion' | 'spellbook';
 
 export interface ItemDef {
   /** Stable slug, e.g. "long_sword" (stored in inventory_items.item_id). */
@@ -21,6 +22,8 @@ export interface ItemDef {
   protection?: DamageVector;
   /** Potions with `Use HEAL`: hit points restored (items.ctx `UseParameters`). */
   heal?: number;
+  /** Spell books (items.ctx `Use GRANT_SPELL`): the spell learned when picked up. */
+  spell?: SpellId;
   /** Several of the same item share one inventory slot. */
   stackable?: boolean;
   price: number;
@@ -38,6 +41,7 @@ const shield = (name: string, price: number): ItemDef => ({ id: itemSlug(name), 
 const armor = (name: string, prot: Partial<Record<DamageType, number>>, price: number): ItemDef =>
   ({ id: itemSlug(name), name, type: 'armor', protection: damageVector(prot, 1), price });
 const potion = (name: string, heal: number, price: number): ItemDef => ({ id: itemSlug(name), name, type: 'potion', heal, stackable: true, price });
+const spellBook = (name: string, spell: SpellId, price: number): ItemDef => ({ id: itemSlug(name), name, type: 'spellbook', spell, price });
 
 export const BUILTIN_ITEMS: ItemCatalog = new Map(
   [
@@ -52,6 +56,7 @@ export const BUILTIN_ITEMS: ItemCatalog = new Map(
     armor('Banded Armor', { SLASH: 0.8, BASH: 0.8 }, 250),
     potion('Healing Potion', 10, 100),
     potion('Greater Healing Potion', 50, 300),
+    spellBook('Torch Light Spell Book', 'torch_light', 100),
   ].map((d) => [d.id, d]),
 );
 
@@ -80,6 +85,10 @@ export function catalogFromItemRules(rules: { items: readonly ItemRule[] }): Ite
       def = shield(r.name, price);
     } else if (type === 'ARMOR') {
       def = armor(r.name, r.protection as Partial<Record<DamageType, number>>, price);
+    } else if (type === 'SPELLBOOK' && r.fields['Use'] === 'GRANT_SPELL') {
+      // Inherited books keep the parent's Use; the spell is the book's own UseParameters.
+      const spell = SPELL_BOOK_PARAMS[String(r.calls?.find((c) => c.name === 'UseParameters')?.args[0] ?? '')];
+      if (spell) def = spellBook(r.name, spell, price);
     } else if (type === 'POTION' && r.fields['Use'] === 'HEAL') {
       const amount = Number(r.calls?.find((c) => c.name === 'UseParameters')?.args[0] ?? 0);
       if (amount > 0) def = potion(r.name, amount, price);
@@ -140,7 +149,7 @@ export function equipmentOf(inv: readonly InventoryEntry[], catalog: ItemCatalog
     const def = catalog.get(e.itemId);
     if (!def) continue;
     if (def.type === 'weapon') eq.weapon = def;
-    else if (def.type !== 'potion') eq[def.type] = def;
+    else if (def.type === 'shield' || def.type === 'armor') eq[def.type] = def;
   }
   return eq;
 }
@@ -175,7 +184,7 @@ export function addItem(inv: InventoryEntry[], itemId: string, quantity = 1, cat
 export function setEquipped(inv: InventoryEntry[], slot: number, equip: boolean, catalog: ItemCatalog): boolean {
   const entry = inv.find((e) => e.slot === slot);
   const def = entry && catalog.get(entry.itemId);
-  if (!entry || !def || entry.equipped === equip || def.type === 'potion') return false;
+  if (!entry || !def || entry.equipped === equip || def.type === 'potion' || def.type === 'spellbook') return false;
   if (equip) {
     for (const e of inv) {
       if (e.equipped && catalog.get(e.itemId)?.type === def.type) e.equipped = false;
@@ -194,7 +203,7 @@ export function sanitizeInventory(inv: readonly InventoryEntry[], catalog: ItemC
     const def = catalog.get(e.itemId);
     if (!def || !Number.isInteger(e.slot) || e.slot < 0 || e.slot >= INVENTORY_SLOTS || slots.has(e.slot)) continue;
     slots.add(e.slot);
-    const eq = e.equipped && def.type !== 'potion' && !equipped.has(def.type);
+    const eq = e.equipped && def.type !== 'potion' && def.type !== 'spellbook' && !equipped.has(def.type);
     if (eq) equipped.add(def.type);
     const q = Math.floor(e.quantity ?? 1);
     out.push(def.stackable && q > 1 ? { slot: e.slot, itemId: e.itemId, equipped: eq, quantity: Math.min(MAX_STACK, q) } : { slot: e.slot, itemId: e.itemId, equipped: eq });

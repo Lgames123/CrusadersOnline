@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CS } from '../opcodes.ts';
+import { SPELLS } from '../../game/spells.ts';
 
 /** JSON control messages (network-protocol.md §4). Hot-path messages are binary, see ../binary. */
 
@@ -66,6 +67,18 @@ export const UseItemPacketSchema = z.object({
   d: z.object({ slot: z.number().int().min(0).max(31) }),
 });
 
+export const CastSpellPacketSchema = z.object({
+  op: z.literal(CS.CAST_SPELL),
+  seq: z.number().int().positive(),
+  d: z.object({}),
+});
+
+export const SelectSpellPacketSchema = z.object({
+  op: z.literal(CS.SELECT_SPELL),
+  seq: z.number().int().positive(),
+  d: z.object({ spell: z.enum(SPELLS) }),
+});
+
 export const ZoneReadyPacketSchema = z.object({
   op: z.literal(CS.ZONE_READY),
   seq: z.number().int().positive(),
@@ -80,6 +93,8 @@ export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   InteractPacketSchema,
   UseItemPacketSchema,
   ZoneReadyPacketSchema,
+  CastSpellPacketSchema,
+  SelectSpellPacketSchema,
   ChatMessagePacketSchema,
   PingPacketSchema,
 ]);

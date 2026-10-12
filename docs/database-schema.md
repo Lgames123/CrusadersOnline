@@ -41,6 +41,7 @@ CREATE TABLE characters (
     max_hp INT NOT NULL DEFAULT 100,
     current_mana INT NOT NULL DEFAULT 50,
     max_mana INT NOT NULL DEFAULT 50,
+    -- 002_spells.sql: spells VARCHAR(512) NOT NULL DEFAULT '' ("torch_light:1,fireball:2"), selected_spell VARCHAR(32)
     might INT NOT NULL DEFAULT 20,
     intelligence INT NOT NULL DEFAULT 15,
     endurance INT NOT NULL DEFAULT 25,

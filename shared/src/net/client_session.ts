@@ -1,4 +1,5 @@
 import { TICK_DT, TICK_MS, DEFAULT_MOVEMENT_STATS } from '../constants.ts';
+import type { SpellId } from '../game/spells.ts';
 import { dequantizeAngle, dequantizePosition } from '../math/quantize.ts';
 import { CS, SC } from '../protocol/opcodes.ts';
 import { INPUT_PACKET_MAX_BYTES, MAX_INPUT_FRAMES, createInputFrame, encodeInput, type InputFrame } from '../protocol/binary/input.ts';
@@ -273,6 +274,18 @@ export class ClientSession {
   interact(object: number): void {
     if (!this.connected || this.dead) return;
     this.sendJson({ op: CS.INTERACT, seq: ++this.seq, d: { object } });
+  }
+
+  /** Casts the selected spell (the server checks mana, state and conjures it). */
+  castSpell(): void {
+    if (!this.connected || this.dead) return;
+    this.sendJson({ op: CS.CAST_SPELL, seq: ++this.seq, d: {} });
+  }
+
+  /** Selects the spell R casts. */
+  selectSpell(spell: SpellId): void {
+    if (!this.connected) return;
+    this.sendJson({ op: CS.SELECT_SPELL, seq: ++this.seq, d: { spell } });
   }
 
   /** Uses a consumable (potion) from an inventory slot. */

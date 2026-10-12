@@ -36,6 +36,8 @@ export class LocalPlayer {
   private targetHeading = 0;
   private moveAnim: number = ANIM.IDLE;
   private swingLeft = 0;
+  /** Seconds of ASM_SPELL_CONJURE left (the feet stay planted, no swings). */
+  private castLeft = 0;
   private combo = 0;
   /** Root motion of the swing just started, sent with the next input (0 = none). */
   private pendingMotion = 0;
@@ -67,6 +69,7 @@ export class LocalPlayer {
     if (isHitAction(this.character.rollDir)) {
       this.swingLeft = 0;
       this.pendingMotion = 0;
+      this.castLeft = 0;
     }
     const moving = !this.dead && (input.flags & MOVE_MASK) !== 0 && !(input.flags & INPUT.ROOTED);
     // On diagonals the body turns into the direction of travel (as the server replicates it).
@@ -85,7 +88,7 @@ export class LocalPlayer {
    * Returns the attack actually started (side swings alternate), or null.
    */
   swing(cameraYaw: number, kind: AttackKind = 'normal'): AttackKind | null {
-    if (this.dead || this.swingLeft > 0 || isHitAction(this.character.rollDir)) return null;
+    if (this.dead || this.swingLeft > 0 || this.castLeft > 0 || isHitAction(this.character.rollDir)) return null;
     // Consecutive side swings alternate sides (the first one follows the held key).
     const side = (k: AttackKind) => k === 'left' || k === 'right';
     if (side(kind) && side(this.kind) && this.sinceSwing < SIDE_SWING_CHAIN_SECONDS) kind = this.kind === 'left' ? 'right' : 'left';
@@ -110,6 +113,13 @@ export class LocalPlayer {
     return this.heading;
   }
 
+  /** Starts conjuring a spell locally (the server confirms; it roots the caster the same way). */
+  startCast(seconds: number): boolean {
+    if (this.dead || this.swingLeft > 0 || this.castLeft > 0 || !this.character.grounded || isHitAction(this.character.rollDir)) return false;
+    this.castLeft = seconds;
+    return true;
+  }
+
   /** The root motion of the swing just started (once), for the next input's attack bits. */
   takeAttackMotion(): number {
     const m = this.pendingMotion;
@@ -119,7 +129,7 @@ export class LocalPlayer {
 
   /** Own swing playing: the feet stay planted (sent as INPUT.ROOTED). */
   get rooted(): boolean {
-    return this.swingLeft > 0 && !isLayeredSwing(this.kind);
+    return (this.swingLeft > 0 && !isLayeredSwing(this.kind)) || this.castLeft > 0;
   }
 
   /** The authoritative state moved the prediction by (dx, dy, dz). */
@@ -149,9 +159,10 @@ export class LocalPlayer {
     } else {
       this.sinceSwing += dt;
     }
+    if (this.castLeft > 0) this.castLeft -= dt;
     const swinging = this.swingLeft > 0 && !this.dead;
     const layered = swinging && isLayeredSwing(this.kind);
-    const anim = this.dead ? ANIM.DEAD : swinging && !layered ? attackAnim(this.kind, this.combo) : this.moveAnim;
+    const anim = this.dead ? ANIM.DEAD : this.castLeft > 0 ? ANIM.SPELL_CONJURE : swinging && !layered ? attackAnim(this.kind, this.combo) : this.moveAnim;
     this.avatar.setState(anim, this.swingTime, this.swingCount);
     // Side and air swings play on the upper body over the legs' clip.
     this.avatar.setUpperSwing?.(layered ? this.kind : null, this.swingCount);

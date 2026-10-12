@@ -1,0 +1,13 @@
+import { BUILTIN_SPELLS } from '@crusaders/shared';
+
+/** Torch Light spell: a warm light around the caster (radius from default.ctx S0, in feet). */
+export const TORCH_LIGHT_COLOR = 0xffc070;
+export const TORCH_LIGHT_INTENSITY = 6;
+/** Above the feet, around head height. */
+export const TORCH_LIGHT_HEIGHT = 2;
+
+/** Light radius (metres) of a Torch Light level (1-3). */
+export function torchRadius(level: number): number {
+  const row = BUILTIN_SPELLS.torch_light?.[Math.min(3, Math.max(1, level)) - 1];
+  return (row?.value1 ?? 15) * 0.3048;
+}

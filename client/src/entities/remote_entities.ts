@@ -10,6 +10,7 @@ import {
 } from '@crusaders/shared';
 import { ProceduralAvatar, type Avatar, type AvatarKind } from './avatar.ts';
 import type { AvatarFactory } from '../assets/original_models.ts';
+import { TORCH_LIGHT_COLOR, TORCH_LIGHT_HEIGHT, TORCH_LIGHT_INTENSITY, torchRadius } from './torch_light.ts';
 
 export interface RemoteEntity {
   id: number;
@@ -29,9 +30,30 @@ export class RemoteEntities {
   private readonly originals: AvatarFactory | null;
   private readonly sample: RemoteSample = { x: 0, y: 0, z: 0, yaw: 0, anim: 0, animPhase: 0, hp: 0, flags: 0 };
 
+  /** Torch lights carried by other players (Torch Light spell). */
+  private readonly lights = new Map<number, THREE.PointLight>();
+
   constructor(scene: THREE.Scene, originals: AvatarFactory | null) {
     this.scene = scene;
     this.originals = originals;
+  }
+
+  private updateLight(id: number, level: number, pos: THREE.Vector3): void {
+    let light = this.lights.get(id);
+    if (!level) {
+      if (light) {
+        this.scene.remove(light);
+        this.lights.delete(id);
+      }
+      return;
+    }
+    if (!light) {
+      light = new THREE.PointLight(TORCH_LIGHT_COLOR, TORCH_LIGHT_INTENSITY, 1, 1.4);
+      this.scene.add(light);
+      this.lights.set(id, light);
+    }
+    light.distance = torchRadius(level);
+    light.position.set(pos.x, pos.y + TORCH_LIGHT_HEIGHT, pos.z);
   }
 
   get count(): number {
@@ -59,6 +81,7 @@ export class RemoteEntities {
     this.scene.remove(e.avatar.object);
     e.avatar.dispose();
     this.byId.delete(id);
+    this.updateLight(id, 0, e.avatar.object.position);
   }
 
   update(session: ClientSession, dt: number): void {
@@ -76,6 +99,7 @@ export class RemoteEntities {
       e.lastPhase = this.sample.animPhase;
       e.avatar.setState(this.sample.anim, swingSeconds, e.swingId);
       e.avatar.setShield?.((this.sample.flags & 1) !== 0);
+      this.updateLight(e.id, (this.sample.flags >> 4) & 3, e.avatar.object.position);
       const upper = (this.sample.flags >> 1) & 3;
       e.avatar.setUpperSwing?.(upper ? UPPER_SWING_CODES[upper - 1]! : null, (this.sample.flags >> 3) & 1);
       e.avatar.update(dt);

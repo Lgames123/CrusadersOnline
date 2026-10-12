@@ -1,5 +1,5 @@
 import type { Kysely } from 'kysely';
-import type { InventoryEntry } from '@crusaders/shared';
+import { decodeSpells, encodeSpells, type InventoryEntry, type KnownSpell, type SpellId } from '@crusaders/shared';
 import type { DB } from './schema.ts';
 
 /** Character state the zone needs to spawn a player. */
@@ -15,6 +15,9 @@ export interface CharacterSpawnState {
   gold: number;
   hp: number;
   inventory: InventoryEntry[];
+  mana: number;
+  spells: KnownSpell[];
+  selectedSpell: SpellId | null;
 }
 
 /** Live state flushed from a zone (periodic, on leave, after progress and on shutdown). */
@@ -29,6 +32,10 @@ export interface CharacterPersistRecord {
   gold: number;
   hp: number;
   maxHp: number;
+  mana: number;
+  maxMana: number;
+  spells: KnownSpell[];
+  selectedSpell: SpellId | null;
   /** Full inventory replacing the stored one; omitted when unchanged. */
   inventory?: InventoryEntry[];
   /** Arena the character is in. */
@@ -48,7 +55,7 @@ export class CharacterRepository {
   async loadOwned(accountId: string, characterId: string): Promise<CharacterSpawnState | null> {
     const r = await this.db
       .selectFrom('characters')
-      .select(['id', 'name', 'zone_id', 'pos_x', 'pos_y', 'pos_z', 'yaw', 'level', 'experience_points', 'gold', 'current_hp'])
+      .select(['id', 'name', 'zone_id', 'pos_x', 'pos_y', 'pos_z', 'yaw', 'level', 'experience_points', 'gold', 'current_hp', 'current_mana', 'spells', 'selected_spell'])
       .where('id', '=', characterId)
       .where('account_id', '=', accountId)
       .executeTakeFirst();
@@ -70,6 +77,9 @@ export class CharacterRepository {
       experience: Number(r.experience_points),
       gold: r.gold,
       hp: r.current_hp,
+      mana: r.current_mana,
+      spells: decodeSpells(r.spells),
+      selectedSpell: decodeSpells(r.selected_spell ? `${r.selected_spell}:1` : '')[0]?.spell ?? null,
       inventory: items.map((i) => ({ slot: i.slot_index, itemId: i.item_id, equipped: i.is_equipped, ...(i.quantity > 1 ? { quantity: i.quantity } : {}) })),
     };
   }
@@ -92,6 +102,10 @@ export class CharacterRepository {
             gold: r.gold,
             current_hp: r.hp,
             max_hp: r.maxHp,
+            current_mana: r.mana,
+            max_mana: r.maxMana,
+            spells: encodeSpells(r.spells),
+            selected_spell: r.selectedSpell,
             last_saved_at: now,
           })
           .where('id', '=', r.characterId)

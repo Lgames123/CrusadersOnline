@@ -17,3 +17,4 @@ export * from './game/combat.ts';
 export * from './game/original_stats.ts';
 export * from './game/ruleset.ts';
 export * from './game/items.ts';
+export * from './game/spells.ts';

@@ -1,4 +1,5 @@
 import { INPUT, SC } from '../opcodes.ts';
+import type { SpellId } from '../../game/spells.ts';
 import type { ItemType } from '../../game/items.ts';
 
 /** JSON control messages sent by the server. Trusted direction, so plain types (no Zod). */
@@ -34,7 +35,21 @@ export interface EntitySpawnMsg {
 /** Sent to the owning player on entry and whenever any of these values change. */
 export interface PlayerStatsMsg {
   op: typeof SC.PLAYER_STATS;
-  d: { hp: number; maxHp: number; level: number; xp: number; gold: number; dead: boolean };
+  d: {
+    hp: number;
+    maxHp: number;
+    level: number;
+    xp: number;
+    gold: number;
+    dead: boolean;
+    mana: number;
+    maxMana: number;
+    /** Known spells and their levels, and the one R casts (T cycles). */
+    spells: { spell: SpellId; level: number }[];
+    spell: SpellId | null;
+    /** Torch light around the player: radius in metres (0 = off). */
+    light: number;
+  };
 }
 
 /** Broadcast to players near the target. */
@@ -167,6 +182,8 @@ export const ANIM = {
   STUNNED: 33,
   /** Shield bash (ASM_RAM_SHOULDER, PL01). */
   ATTACK_BASH: 34,
+  /** Casting (ASM_SPELL_CONJURE, before the spell's own state). */
+  SPELL_CONJURE: 35,
 } as const;
 
 /** Animation for a character's own movement state (roll, duck, airborne, locomotion, idle). */

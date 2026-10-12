@@ -1,3 +1,4 @@
+import type { SpellId } from '@crusaders/shared';
 import type { JoinOptions, PersistReason, PersistRecord, TransferState } from '../simulation/world_zone.ts';
 import type { AttackKind } from '@crusaders/shared';
 
@@ -8,6 +9,8 @@ export type ToZone =
   | { t: 'leave'; connId: number }
   | { t: 'input'; connId: number; data: ArrayBuffer }
   | { t: 'attack'; connId: number; kind: AttackKind }
+  | { t: 'cast'; connId: number }
+  | { t: 'selectSpell'; connId: number; spell: SpellId }
   | { t: 'equip'; connId: number; slot: number; equip: boolean }
   | { t: 'interact'; connId: number; object: number }
   | { t: 'use'; connId: number; slot: number }

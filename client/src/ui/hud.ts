@@ -1,5 +1,5 @@
 import type { Character, ClientSession, PlayerStats } from '@crusaders/shared';
-import { xpForLevel } from '@crusaders/shared';
+import { SPELL_NAMES, xpForLevel } from '@crusaders/shared';
 
 /** Debug line plus the player panel (HP, level/XP, gold) and the death notice. */
 export class Hud {
@@ -26,6 +26,8 @@ export class Hud {
     this.panel.innerHTML = `
       <div class="row"><span>HP</span><div class="track hp"><div class="fill" style="width:${hpPct.toFixed(0)}%"></div></div><span>${s.hp}/${s.maxHp}</span></div>
       <div class="row"><span>Lv ${s.level}</span><div class="track xp"><div class="fill" style="width:${Math.min(100, (100 * xpInto) / span).toFixed(0)}%"></div></div><span>${xpInto}/${span}</span></div>
+      <div class="row"><span>MP</span><div class="track mp"><div class="fill" style="width:${(s.maxMana > 0 ? (100 * s.mana) / s.maxMana : 0).toFixed(0)}%"></div></div><span>${s.mana}/${s.maxMana}</span></div>
+      ${s.spell ? `<div class="row spell">${SPELL_NAMES[s.spell]} ${s.spells.find((k) => k.spell === s.spell)?.level ?? 1}</div>` : ''}
       <div class="row gold">${s.gold} gold</div>`;
     this.death.hidden = !s.dead;
   }

@@ -51,6 +51,8 @@ interface ClipMap {
   knockdown?: string;
   /** Shield bash (ASM_RAM_SHOULDER, PL01). */
   bash?: string;
+  /** Spell wind-up (ASM_SPELL_CONJURE). */
+  conjure?: string;
   /** Death variants (ASM_HIT_POINTS_DEPLETED and its ALT_01..08). */
   deaths?: string[];
 }
@@ -79,6 +81,7 @@ function withStates(base: ClipMap, states: Record<string, string> | undefined): 
     impacts: base.impacts ?? ['FRONT', 'LEFT', 'RIGHT', 'BACK'].map((k) => st[`ASM_IMPACT_${k}`]).filter((c): c is string => !!c),
     knockdown: base.knockdown ?? st['ASM_IMPACT_SEVERE'],
     bash: base.bash ?? st['ASM_RAM_SHOULDER'],
+    conjure: base.conjure ?? st['ASM_SPELL_CONJURE'],
     deaths: base.deaths ?? [st['ASM_HIT_POINTS_DEPLETED'] ?? base.death, ...[1, 2, 3, 4, 5, 6, 7, 8].map((i) => st[`ASM_HIT_POINTS_DEPLETED_ALT_0${i}`]).filter((c): c is string => !!c)],
     attackOverhead: base.attackOverhead ?? st['ASM_SWING_OVERHEAD'] ?? base.attacks[0]!,
     attackLeft: base.attackLeft ?? st['ASM_SWING_LEVEL'] ?? base.attacks[0]!,
@@ -187,6 +190,7 @@ class OriginalAvatar implements Avatar {
     // ASM_IMPACT_MEDIUM has no clip of its own: the front impact, held.
     if (anim === ANIM.STUNNED) return { name: m.impacts?.[0] ?? m.idle, loop: false };
     if (anim === ANIM.ATTACK_BASH) return { name: m.bash ?? m.attacks[0]!, loop: false };
+    if (anim === ANIM.SPELL_CONJURE) return { name: m.conjure ?? m.idle, loop: false };
     // Raise the shield once and hold the final pose.
     if (anim === ANIM.BLOCK) return { name: m.block, loop: false };
     if (anim === ANIM.RUN) return { name: m.run, loop: true };

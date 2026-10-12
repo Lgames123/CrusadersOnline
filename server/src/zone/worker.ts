@@ -1,8 +1,8 @@
 import { parentPort, workerData } from 'node:worker_threads';
 import { performance } from 'node:perf_hooks';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { BUILTIN_ITEMS, LEVEL_PREFIX, buildLevelArena, catalogFromItemRules, createSyntheticArena, initPhysics, type ArenaDef, type ItemCatalog, type LevelPlacements } from '@crusaders/shared';
+import { BUILTIN_ITEMS, LEVEL_PREFIX, buildLevelArena, catalogFromItemRules, createSyntheticArena, initPhysics, spellTableFromRules, type ArenaDef, type ItemCatalog, type LevelPlacements, type SpellTable } from '@crusaders/shared';
 import { SimulationClock, TickStats } from '../simulation/clock.ts';
 import { WorldZone } from '../simulation/world_zone.ts';
 import type { FromZone, ToZone, ZoneWorkerData } from './messages.ts';
@@ -16,6 +16,14 @@ const { zone: zoneName, arena: arenaName, difficulty, itemRulesPath, generatedDi
 function loadItems(file: string | null): ItemCatalog {
   if (!file) return BUILTIN_ITEMS;
   return catalogFromItemRules(JSON.parse(readFileSync(file, 'utf8')) as Parameters<typeof catalogFromItemRules>[0]);
+}
+
+/** Drake's spell table from the converted default.ctx (rules/default.json), when present. */
+function loadSpells(dir: string): SpellTable | undefined {
+  const file = path.join(dir, 'rules', 'default.json');
+  if (!existsSync(file)) return undefined;
+  const rules = JSON.parse(readFileSync(file, 'utf8')) as { drake?: { spells?: Record<string, number[][]> } };
+  return rules.drake?.spells ? spellTableFromRules(rules.drake.spells) : undefined;
 }
 
 function loadArena(name: string): ArenaDef {
@@ -51,7 +59,7 @@ const zone = new WorldZone(rapier, zoneName, loadArena(arenaName), {
   portal(connId, target) {
     post({ t: 'portal', connId, target });
   },
-}, { difficulty, items: loadItems(itemRulesPath) });
+}, { difficulty, items: loadItems(itemRulesPath), spells: loadSpells(generatedDir) });
 
 const flush = () => {
   if (batch.length === 0) return;
@@ -77,6 +85,13 @@ port.on('message', (msg: ToZone) => {
       break;
     case 'attack':
       zone.attack(msg.connId, msg.kind);
+      break;
+    case 'cast':
+      zone.castSpell(msg.connId);
+      break;
+    case 'selectSpell':
+      zone.selectSpell(msg.connId, msg.spell);
+      flush();
       break;
     case 'equip':
       zone.equip(msg.connId, msg.slot, msg.equip);

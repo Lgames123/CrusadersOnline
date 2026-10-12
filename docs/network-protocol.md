@@ -30,14 +30,15 @@ All game code talks to a `Transport` interface (`send(bytes|object)`, `onMessage
 | `0x01` | `CS_AUTH_TICKET` | JSON | Redeem single-use WebSocket ticket (ADR-008) |
 | `0x02` | `CS_SELECT_CHARACTER`| JSON | Select character to enter the world |
 | `0x03` | `CS_PLAYER_INPUT` | **Binary** | Input frame(s): flags, yaw, pitch, client tick — **no positions** (ADR-006) |
-| `0x04` | `CS_PLAYER_ATTACK` | JSON | Trigger weapon attack action; `kind` normal (combo) / overhead / left / right from the movement key held with the click |
+| `0x04` | `CS_PLAYER_ATTACK` | JSON | Trigger weapon attack action; `kind` normal (combo) / overhead / left / right / low / jump / thrust (wall jab) / air, from the movement key held with the click (an unknown kind is malformed and disconnects) |
 | `0x05` | `CS_PLAYER_BLOCK` | JSON | Raise or lower shield |
-| `0x06` | `CS_CAST_SPELL` | JSON | Trigger spellcast with aim direction |
+| `0x06` | `CS_CAST_SPELL` | JSON | `{}`: conjure the selected spell (server checks state and mana; 1.54 s ASM_SPELL_CONJURE, the client roots itself meanwhile) |
 | `0x07` | `CS_INTERACT` | JSON | Interact with chest, door, NPC, or item drop |
 | `0x08` | `CS_CHAT_MESSAGE` | JSON | Send local or global chat text |
 | `0x09` | `CS_PING` | JSON | Latency measurement heartbeat |
 | `0x0B` | `CS_USE_ITEM` | JSON | `{ slot }`, drink a potion |
 | `0x0C` | `CS_ZONE_READY` | JSON | `{ arena }`, the arena announced by SC_ZONE_CHANGE is loaded |
+| `0x0D` | `CS_SELECT_SPELL` | JSON | `{ spell }`, a known spell becomes the one CS_CAST_SPELL casts |
 | `0x0A` | `CS_EQUIP_ITEM` | JSON | `{ slot: 0..31, equip: boolean }` — equip or unequip an inventory slot (deferred to the end of a swing in progress) |
 
 ### Server to Client (S -> C: `0x40` - `0x7F`)
@@ -49,6 +50,7 @@ All game code talks to a `Transport` interface (`send(bytes|object)`, `onMessage
 | `0x43` | `SC_ENTITY_SPAWN` | JSON | New player, mob, or drop entered interest area (static data: model, name) |
 | `0x44` | `SC_ENTITY_DESPAWN`| JSON | Entity exited interest area or died |
 | `0x45` | `SC_COMBAT_EVENT` | JSON | Damage dealt, missed, flinch, or death trigger |
+| `0x49` | `SC_PLAYER_STATS` | JSON | Own HP, level, XP, gold, death; mana / max mana, known spells (level), the selected spell, the torch light radius (m, 0 = off) |
 | `0x4A` | `SC_OBJECT_STATE` | JSON | World object states (items, chests, breakables): full list on entry, then changes |
 | `0x4B` | `SC_ZONE_CHANGE` | JSON | `{ arena }`: load this arena, answer CS_ZONE_READY; SC_WORLD_ENTER follows (login and every portal) |
 | `0x46` | `SC_INVENTORY_UPDATE`| JSON | Full inventory of the owner: `{ items: [{ slot, itemId, name, type, equipped, damage?, speed?, protection? }], slots, weaponSpeed }`, on entry and after every change |
@@ -95,6 +97,7 @@ Server rules: at most one input applied per server tick per player (extras queue
 --- per entity ---
 +0      4     entityId (uint32)
 +4      1     changedMask (bit0 pos, bit1 yaw, bit2 anim, bit3 hp, bit4 flags)
+              flags: bit0 shield up; bits1-2 upper-body swing (1 left, 2 right, 3 air); bit3 swing parity; bits4-5 torch light level (0 off)
 +...          pos: 3 × int32 (millimetres) | yaw: uint16 | anim: uint8 state + uint8 phase | hp: uint16 | flags: uint8
 --- trailer ---
 +0      2     removedCount (uint16)

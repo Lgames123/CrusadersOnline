@@ -212,6 +212,12 @@ export class SessionManager implements TransportHandlers {
       case CS.EQUIP_ITEM:
         if (s.state === 'in_world') this.zoneOf(s)?.equip(conn.id, msg.d.slot, msg.d.equip);
         return;
+      case CS.CAST_SPELL:
+        if (s.state === 'in_world') this.zoneOf(s)?.castSpell(conn.id);
+        return;
+      case CS.SELECT_SPELL:
+        if (s.state === 'in_world') this.zoneOf(s)?.selectSpell(conn.id, msg.d.spell);
+        return;
       case CS.PLAYER_ATTACK:
         if (s.state === 'in_world') this.zoneOf(s)?.attack(conn.id, msg.d.kind ?? 'normal');
         return;
@@ -245,6 +251,9 @@ export class SessionManager implements TransportHandlers {
           gold: saved.gold,
           hp: saved.hp,
           inventory: saved.inventory,
+          mana: saved.mana,
+          spells: saved.spells,
+          selectedSpell: saved.selectedSpell,
         });
       }
       this.log.info({ conn: s.conn.id, character: name, zone: s.zone, guest: account.guest }, 'entering world');

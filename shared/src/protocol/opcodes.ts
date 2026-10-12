@@ -12,6 +12,7 @@ export const CS = {
   EQUIP_ITEM: 0x0a,
   USE_ITEM: 0x0b,
   ZONE_READY: 0x0c,
+  SELECT_SPELL: 0x0d,
 } as const;
 
 /** Server -> client opcodes. */

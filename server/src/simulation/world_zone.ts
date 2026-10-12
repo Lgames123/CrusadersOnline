@@ -25,6 +25,16 @@ import {
   movementAnim,
   movementFacingOffset,
   attackAnim,
+  BUILTIN_SPELLS,
+  TICK_RATE,
+  CASTABLE_SPELLS,
+  MANA_REGEN_TICKS,
+  MAX_SPELL_LEVEL,
+  SPELL_CONJURE_TICKS,
+  originalMaxMana,
+  type KnownSpell,
+  type SpellId,
+  type SpellTable,
   isLayeredSwing,
   UPPER_SWING_CODES,
   type AttackKind,
@@ -149,6 +159,10 @@ export interface JoinOptions {
   hp?: number;
   /** Saved inventory; absent or empty => the starting kit. */
   inventory?: InventoryEntry[];
+  mana?: number;
+  /** Known spells (levels) and the selected one. */
+  spells?: KnownSpell[];
+  selectedSpell?: SpellId | null;
   /** Arriving through a portal from this arena: placed at the portal leading back there. */
   arrivingFrom?: string;
 }
@@ -168,6 +182,10 @@ export interface PersistRecord {
   gold: number;
   hp: number;
   maxHp: number;
+  mana: number;
+  maxMana: number;
+  spells: KnownSpell[];
+  selectedSpell: SpellId | null;
   /** Full inventory, present only when it changed since the previous record. */
   inventory?: InventoryEntry[];
   /** Arena the character is in (characters.zone_id). */
@@ -188,6 +206,8 @@ export interface WorldZoneOptions {
    * reaction to a player's swing (archetype blockChance / blockTicks / blockCooldown).
    */
   reactiveBlock?: boolean;
+  /** Drake's spell table (default.ctx S rows; default: the slice values). */
+  spells?: SpellTable;
 }
 
 
@@ -275,6 +295,16 @@ interface Player extends ActorBase {
   swingSerial: number;
   /** Creatures already met by the current shield rush. */
   rushHit: Set<number>;
+  mana: number;
+  maxMana: number;
+  spells: KnownSpell[];
+  selectedSpell: SpellId | null;
+  /** Spell being conjured (ASM_SPELL_CONJURE) until `end`. */
+  cast: { spell: SpellId; level: number; end: number } | null;
+  /** Tick of the next mana point while below the maximum. */
+  manaRegenAt: number;
+  /** Torch light around the player (radius in metres) until `until`. */
+  light: { radius: number; level: number; until: number } | null;
   queuedKind: AttackKind;
   /** Body yaw offset from the view yaw (diagonal movement), radians; replicated in the yaw. */
   facingOffset: number;
@@ -346,6 +376,7 @@ export class WorldZone {
   private readonly random: () => number;
   private readonly difficulty: Difficulty;
   private readonly reactiveBlock: boolean;
+  private readonly spells: SpellTable;
   private readonly items: ItemCatalog;
   private readonly grid = new SpatialHashGrid(32);
   private readonly players = new Map<number, Player>(); // by connId
@@ -366,6 +397,7 @@ export class WorldZone {
     this.random = opts.random ?? Math.random;
     this.difficulty = opts.difficulty ?? 'medium';
     this.reactiveBlock = opts.reactiveBlock ?? false;
+    this.spells = opts.spells ?? BUILTIN_SPELLS;
     this.items = opts.items ?? BUILTIN_ITEMS;
     this.mw = createMovementWorld(rapier, arena);
     for (const s of arena.mobSpawns) this.spawnMob(s.archetype, s);
@@ -448,6 +480,9 @@ export class WorldZone {
     const saved = sanitizeInventory(opts.inventory ?? [], this.items);
     const inventory = saved.length > 0 ? saved : startingInventory();
     const eq = equipmentOf(inventory, this.items);
+    const maxMana = originalMaxMana(rules.attributes, level);
+    const spells = (opts.spells ?? []).map((s) => ({ ...s }));
+    const selectedSpell = opts.selectedSpell && spells.some((s) => s.spell === opts.selectedSpell) ? opts.selectedSpell : spells[0]?.spell ?? null;
     const p: Player = {
       kind: 'player',
       connId,
@@ -475,6 +510,13 @@ export class WorldZone {
       queuedAttack: false,
       swingSerial: 0,
       rushHit: new Set(),
+      mana: Math.min(maxMana, Math.max(0, Math.floor(opts.mana ?? maxMana))),
+      maxMana,
+      spells,
+      selectedSpell,
+      cast: null,
+      manaRegenAt: 0,
+      light: null,
       queuedKind: 'normal',
       facingOffset: 0,
       statsDirty: true,
@@ -536,6 +578,8 @@ export class WorldZone {
     }
     const def = this.items.get(itemSlug(name));
     if (!def) return false;
+    // A spell book is used as soon as it is touched (items.ctx): the spell is learned.
+    if (def.type === 'spellbook' && def.spell) return this.learnSpell(p, def.spell);
     let added = false;
     for (let i = 0; i < Math.max(1, def.stackable ? 1 : quantity); i++) {
       if (addItem(p.inventory, def.id, def.stackable ? Math.max(1, quantity) : 1, this.items) === null) break;
@@ -546,6 +590,80 @@ export class WorldZone {
       this.sendInventory(p);
     }
     return added;
+  }
+
+  /**
+   * Learns a spell (level 1), or raises a known one by a level (assumption: the original's
+   * level rule is not measured yet). False when already at the top level.
+   */
+  private learnSpell(p: Player, spell: SpellId): boolean {
+    const known = p.spells.find((s) => s.spell === spell);
+    if (known) {
+      if (known.level >= MAX_SPELL_LEVEL) return false;
+      known.level++;
+    } else {
+      p.spells.push({ spell, level: 1 });
+      p.selectedSpell ??= spell;
+    }
+    p.statsDirty = true;
+    return true;
+  }
+
+  /** Selects the spell the cast key casts (CS_SELECT_SPELL). */
+  selectSpell(connId: number, spell: SpellId): void {
+    const p = this.players.get(connId);
+    if (!p || !p.spells.some((s) => s.spell === spell)) return;
+    p.selectedSpell = spell;
+    p.statsDirty = true;
+  }
+
+  /**
+   * Casts the selected spell (CS_CAST_SPELL): standing, not swinging or reeling, with the mana
+   * for its level. Conjures for 1.54 s (ASM_SPELL_CONJURE), then takes effect (finishCast).
+   */
+  castSpell(connId: number): void {
+    const p = this.players.get(connId);
+    if (!p || !alive(p) || p.cast || p.swing || p.hitUntil > this.tick || !p.character.grounded) return;
+    const spell = p.selectedSpell;
+    const known = spell && p.spells.find((s) => s.spell === spell);
+    if (!spell || !known || !CASTABLE_SPELLS.has(spell)) return;
+    const values = this.spells[spell]?.[known.level - 1];
+    if (!values || p.mana < values.mana) return;
+    p.cast = { spell, level: known.level, end: this.tick + SPELL_CONJURE_TICKS };
+    p.blocking = false;
+  }
+
+  /** The conjured spell takes effect. Torch light: a light around the caster for its duration. */
+  private finishCast(p: Player): void {
+    const c = p.cast!;
+    p.cast = null;
+    const values = this.spells[c.spell]?.[c.level - 1];
+    if (!values) return;
+    if (c.spell === 'torch_light') {
+      // Recasting while the light is on spent no mana in the original (logged).
+      if (p.light && p.light.until > this.tick) return;
+      if (p.mana < values.mana) return;
+      p.mana -= values.mana;
+      p.light = { radius: values.value1 * 0.3048, level: c.level, until: this.tick + Math.round(values.duration * TICK_RATE) };
+      p.statsDirty = true;
+    }
+  }
+
+  /** Per-tick spell state: conjuring, mana regeneration, light expiry. */
+  private updateMagic(p: Player): void {
+    if (p.cast && this.tick >= p.cast.end) this.finishCast(p);
+    if (p.mana < p.maxMana) {
+      if (p.manaRegenAt === 0) p.manaRegenAt = this.tick + MANA_REGEN_TICKS;
+      else if (this.tick >= p.manaRegenAt) {
+        p.mana++;
+        p.manaRegenAt = p.mana < p.maxMana ? this.tick + MANA_REGEN_TICKS : 0;
+        p.statsDirty = true;
+      }
+    } else p.manaRegenAt = 0;
+    if (p.light && this.tick >= p.light.until) {
+      p.light = null;
+      p.statsDirty = true;
+    }
   }
 
   /** Drinks a potion from an inventory slot (CS_USE_ITEM). */
@@ -666,6 +784,10 @@ export class WorldZone {
       gold: p.gold,
       hp: Math.ceil(p.hp),
       maxHp: p.maxHp,
+      mana: p.mana,
+      maxMana: p.maxMana,
+      spells: p.spells.map((s) => ({ ...s })),
+      selectedSpell: p.selectedSpell,
       zone: this.arena.name,
       ...(this.takeInventoryChange(p)),
     };
@@ -703,6 +825,9 @@ export class WorldZone {
       gold: p.gold,
       hp: Math.max(1, Math.ceil(p.hp)),
       inventory: p.inventory.map((e) => ({ ...e })),
+      mana: p.mana,
+      spells: p.spells.map((s) => ({ ...s })),
+      selectedSpell: p.selectedSpell,
     };
     const record = this.leave(connId);
     return { record, state };
@@ -758,7 +883,7 @@ export class WorldZone {
    */
   attack(connId: number, kind: AttackKind = 'normal'): void {
     const p = this.players.get(connId);
-    if (!p || !alive(p) || p.hitUntil > this.tick) return;
+    if (!p || !alive(p) || p.hitUntil > this.tick || p.cast) return;
     p.blocking = false; // swinging lowers the shield until the next input re-raises it
     if (p.swing) {
       const t = p.swing.timing;
@@ -819,7 +944,9 @@ export class WorldZone {
         p.facingOffset = moving && !(this.frame.flags & INPUT.BLOCK) ? movementFacingOffset(this.frame.flags) : 0;
         // Hit reactions are timed movement actions, so movementAnim() covers them too.
         p.anim = movementAnim(p.blocking ? this.frame.flags : this.frame.flags & ~INPUT.BLOCK, p.character.grounded, p.character.rollDir);
+        if (p.cast) p.anim = ANIM.SPELL_CONJURE;
       }
+      if (alive(p)) this.updateMagic(p);
     }
 
     // 2. Mobs think and move.
@@ -853,6 +980,7 @@ export class WorldZone {
         ? a.blocking
         : a.shield !== null && !a.swing && (a.blockUntil > tick || (a.shieldFrom <= tick && a.guardUntil > tick));
       s.flags = alive(a) && shieldUp ? 1 : 0;
+      if (alive(a) && a.kind === 'player' && a.light) s.flags |= (a.light.level & 3) << 4;
       if (alive(a) && layered && a.kind === 'player') s.flags |= ((UPPER_SWING_CODES.indexOf(a.swing!.kind) + 1) << 1) | ((a.swingSerial & 1) << 3);
     }
 
@@ -1178,6 +1306,7 @@ export class WorldZone {
     startHitReaction(target.character, action);
     if (target.kind === 'player') {
       target.queuedAttack = false;
+      target.cast = null;
     } else {
       target.hopTicks = 0;
       target.chainLeft = 0;
@@ -1235,6 +1364,7 @@ export class WorldZone {
       target.swing = null;
       // The death clip carries the body itself (client side); no timed action keeps moving it.
       startTimedAction(target.character, 0);
+      if (target.kind === 'player') target.cast = null;
       if (target.kind === 'mob') {
         target.deadUntil = this.tick + target.archetype.respawnTicks;
         target.threat.clear();
@@ -1262,6 +1392,7 @@ export class WorldZone {
       const before = p.maxHp;
       p.level = level;
       p.maxHp = playerMaxHp(p.attributes, level);
+      p.maxMana = originalMaxMana(p.attributes, level);
       p.damageMultiplier = originalDamageMultiplier(p.attributes, level);
       p.hp = Math.min(p.maxHp, p.hp + (p.maxHp - before));
     }
@@ -1312,7 +1443,19 @@ export class WorldZone {
     p.statsDirty = false;
     this.sendJson(p.connId, {
       op: SC.PLAYER_STATS,
-      d: { hp: Math.ceil(p.hp), maxHp: p.maxHp, level: p.level, xp: p.xp, gold: p.gold, dead: !alive(p) },
+      d: {
+        hp: Math.ceil(p.hp),
+        maxHp: p.maxHp,
+        level: p.level,
+        xp: p.xp,
+        gold: p.gold,
+        dead: !alive(p),
+        mana: p.mana,
+        maxMana: p.maxMana,
+        spells: p.spells.map((s) => ({ ...s })),
+        spell: p.selectedSpell,
+        light: p.light ? p.light.radius : 0,
+      },
     });
   }
 

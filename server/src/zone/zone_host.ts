@@ -1,4 +1,5 @@
 import { Worker } from 'node:worker_threads';
+import type { SpellId } from '@crusaders/shared';
 import type { JoinOptions, PersistReason, PersistRecord, TransferState } from '../simulation/world_zone.ts';
 import type { AttackKind } from '@crusaders/shared';
 import type { FromZone, ToZone, ZoneMetrics, ZoneWorkerData } from './messages.ts';
@@ -69,6 +70,14 @@ export class ZoneHost {
 
   attack(connId: number, kind: AttackKind = 'normal'): void {
     this.post({ t: 'attack', connId, kind });
+  }
+
+  castSpell(connId: number): void {
+    this.post({ t: 'cast', connId });
+  }
+
+  selectSpell(connId: number, spell: SpellId): void {
+    this.post({ t: 'selectSpell', connId, spell });
   }
 
   equip(connId: number, slot: number, equip: boolean): void {

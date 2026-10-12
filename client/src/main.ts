@@ -3,6 +3,9 @@ import {
   DEFAULT_MOVEMENT_STATS,
   INPUT,
   INPUT_ATTACK_SHIFT,
+  BUILTIN_SPELLS,
+  CASTABLE_SPELLS,
+  SPELL_CONJURE_TICKS,
   THRUST_WALL_DISTANCE,
   THRUST_WALL_HEIGHT,
   wallAhead,
@@ -35,6 +38,7 @@ import { CREATURE_SFX, SFX, SoundBank, pick } from './audio/sound_bank.ts';
 import { registerAssetServiceWorker } from './assets/game_files.ts';
 import { GameFilesPanel } from './ui/game_files_panel.ts';
 import { InputManager } from './input/input_manager.ts';
+import { TORCH_LIGHT_COLOR, TORCH_LIGHT_HEIGHT, TORCH_LIGHT_INTENSITY } from './entities/torch_light.ts';
 import { connectToWorld } from './network/connect.ts';
 import { CombatUi } from './ui/combat_ui.ts';
 import { Hud } from './ui/hud.ts';
@@ -112,6 +116,10 @@ async function main(): Promise<void> {
   const headPos = new THREE.Vector3();
   const prompt = document.getElementById('prompt')!;
   let lastStats: { level: number; dead: boolean } | null = null;
+  /** The local player's Torch Light (radius from the server's stats). */
+  const myTorch = new THREE.PointLight(TORCH_LIGHT_COLOR, TORCH_LIGHT_INTENSITY, 1, 1.4);
+  myTorch.visible = false;
+  scene.add(myTorch);
   /** Edge of the local player's weapon, for impact sounds (stronger of slash / bash). */
   let myEdge: 'sharp' | 'blunt' = 'blunt';
   /** Set as soon as the session exists: zone / enter events fire before connectToWorld resolves. */
@@ -125,6 +133,8 @@ async function main(): Promise<void> {
           correction: (dx, dy, dz) => player?.correct(dx, dy, dz),
           stats: (s) => {
             hud.stats(s);
+            myTorch.distance = s.light;
+            myTorch.visible = s.light > 0;
             if (player) player.dead = s.dead;
             if (lastStats && s.level > lastStats.level) sounds?.play(SFX.levelUp);
             if (lastStats && s.dead && !lastStats.dead) sounds?.play(SFX.died);
@@ -295,6 +305,19 @@ async function main(): Promise<void> {
     if (action === 'interact') {
       const target = nearestInteractable();
       if (target) session?.interact(target.id);
+    } else if (action === 'castSpell') {
+      // R: conjure the selected spell (the server checks mana and state; the caster stands still).
+      const st = session?.playerStats;
+      const known = st?.spells.find((k) => k.spell === st.spell);
+      const cost = known && st?.spell ? BUILTIN_SPELLS[st.spell]?.[known.level - 1]?.mana ?? 0 : 0;
+      if (st?.spell && CASTABLE_SPELLS.has(st.spell) && st.mana >= cost && local.startCast(SPELL_CONJURE_TICKS * TICK_DT)) session?.castSpell();
+    } else if (action === 'nextSpell') {
+      // T: the next known spell.
+      const st = session?.playerStats;
+      if (st && st.spells.length) {
+        const i = st.spells.findIndex((k) => k.spell === st.spell);
+        session?.selectSpell(st.spells[(i + 1) % st.spells.length]!.spell);
+      }
     } else if (action === 'healthPotion') {
       // H: drink the weakest healing potion carried (the original's quick potion key).
       const potions = (session?.inventory?.items ?? []).filter((i) => i.type === 'potion');
@@ -369,6 +392,7 @@ async function main(): Promise<void> {
     const dt = frameMs / 1000;
     local.viewHeading = input.yaw;
     local.render(acc / TICK_MS, dt);
+    if (myTorch.visible) myTorch.position.set(local.object.position.x, local.object.position.y + TORCH_LIGHT_HEIGHT, local.object.position.z);
     if (session) remotes.update(session, dt);
     input.updateView(dt);
     const movingNow = Math.hypot(local.object.position.x - target.x, local.object.position.z - target.z) > 1e-4;
