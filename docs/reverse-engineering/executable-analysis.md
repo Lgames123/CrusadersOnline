@@ -208,6 +208,16 @@ Examples (facts only):
 | Dark Mage / Dark Master | Mace / Heavy Mace | Metal Shield | hostile (casters) |
 | Ogre Outlaw | Battle Axe | — | hostile |
 | High Guard / Old Guard | Long Sword | Metal Shield | guard |
+| Greater Black Knight | Broad Sword | Metal Shield | hostile |
+| Dwarf Ironpick Rebel / Zealot | War Hammer / Battle Axe | Metal Shield | hostile |
+| Dasher Brute / Dasher Scout | Dasher Weapon / Dasher Hand Bow | — | hostile / guard |
+| Ice Titan | Club | — | hostile |
+| Deceiver | Mace | — | hostile (caster) |
+| Ice / Rock / Lava Elemental, Necros | — | — | hostile (casters, unarmed) |
+
+The appearance word indexes models.ctx: low byte = model id (`N` line), next byte = which `T` texture of that model, e.g. 0x0223 = model 0x23 `Male02.mdl`, texture 2 `Male02Ogre`; 0x0129 = `M37Tamris.mdl` texture 1 `DasherBrute256`. The sound table at 0x004EEA88 (16 bytes per type, same order) holds an impact material (0 bone, 1 flesh, 2–4 other: metal / ice / rock by the types using them), a constant 2, the damage cry and the death cry (Sound.ctx ids).
+
+Implemented: every armed hostile type is a level archetype (Dasher Brute, Ogre Outlaw, both Ironpick dwarves, Ice Titan, Dark Master, Greater Black Knight, Deceiver beside the skeletons and the Dark Mage) with its template loadout, model, texture, held equipment and cries; their AI and swing timings are the skeleton's (not measured per creature).
 
 ### 9.2 Creature stats
 - Creature stats share the player's damage pipeline (§8) except vtable slot 45, which is empty for creatures: **creatures do not apply the Might multiplier or the stronger-of-slash/bash rule** — they deal the weapon's whole damage vector (unarmed `DD` row + weapon), × attack mode, + bonus, × multipliers. Skeleton Warrior with a Long Sword therefore hits for 10 slash (9 after the medium resist).

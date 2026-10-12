@@ -51,6 +51,12 @@ export const BUILTIN_ITEMS: ItemCatalog = new Map(
     weapon('Mace', { BASH: 10 }, 1.1, 100),
     weapon('Heavy Mace', { BASH: 14 }, 1, 150),
     weapon('Morning Star', { SLASH: 5, BASH: 10 }, 0.98, 200),
+    // The creatures' template weapons (items.ctx values).
+    weapon('Battle Axe', { SLASH: 8, BASH: 5 }, 1, 150),
+    weapon('War Hammer', { BASH: 16 }, 0.95, 200),
+    weapon('Broad Sword', { SLASH: 10, BASH: 5 }, 0.95, 150),
+    weapon('Dasher Weapon', { SLASH: 6, BASH: 6 }, 1.1, 220),
+    weapon('Club', { BASH: 8 }, 1.05, 50),
     shield('Wooden Shield', 30),
     shield('Metal Shield', 50),
     armor('Scale Armor', { SLASH: 0.9, BASH: 0.9 }, 150),

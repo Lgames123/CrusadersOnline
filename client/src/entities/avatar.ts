@@ -47,6 +47,14 @@ const COLORS: Record<string, { body: number; trim: number }> = {
   skeleton_ghost: { body: 0xa8c0c8, trim: 0x40505a },
   shadow: { body: 0x3a3a44, trim: 0x18181e },
   dark_mage: { body: 0x4a2a5a, trim: 0x2a1030 },
+  dark_master: { body: 0x3a1a4a, trim: 0x1a0820 },
+  dasher_brute: { body: 0x6a7a4a, trim: 0x3a4a2a },
+  ogre_outlaw: { body: 0x7a6a4a, trim: 0x4a3a2a },
+  dwarf_rebel: { body: 0x8a6a4a, trim: 0x5a4a3a },
+  dwarf_zealot: { body: 0x8a5a3a, trim: 0x5a3a2a },
+  ice_titan: { body: 0xb0c8d8, trim: 0x607888 },
+  black_knight: { body: 0x2a2a2e, trim: 0x101012 },
+  deceiver: { body: 0x5a4a6a, trim: 0x2a1a3a },
 };
 
 /** Procedural mannequin with a sword whose swing and death pose follow the state. */

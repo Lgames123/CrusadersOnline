@@ -133,6 +133,15 @@ export const CREATURE_SFX: Readonly<Record<string, { material: 'bone' | 'flesh';
   skeleton_ghost: { material: 'bone', damage: 167, death: 171 },
   shadow: { material: 'bone', damage: 162, death: 170 },
   dark_mage: { material: 'flesh', damage: 192, death: 195 },
+  dark_master: { material: 'flesh', damage: 191, death: 194 },
+  dasher_brute: { material: 'flesh', damage: 158, death: 159 },
+  ogre_outlaw: { material: 'flesh', damage: 186, death: 190 },
+  dwarf_rebel: { material: 'flesh', damage: 139, death: 137 },
+  dwarf_zealot: { material: 'flesh', damage: 133, death: 143 },
+  // Material 3 (ice) in the table; no ice impact sound mapped yet.
+  ice_titan: { material: 'bone', damage: 185, death: 189 },
+  black_knight: { material: 'flesh', damage: 208, death: 208 },
+  deceiver: { material: 'flesh', damage: 167, death: 165 },
 };
 
 export const pick = <T>(list: readonly T[]): T => list[Math.floor(Math.random() * list.length)]!;

@@ -106,7 +106,28 @@ interface Equipment {
 /** Basic equipment: Long Sword and Wooden Shield (the skeletons' template equipment too). */
 const BASIC_EQUIPMENT: Equipment = { right: 'longsword', left: 'woodshield' };
 
-const MODELS: Record<string, { file: string; texture?: string; clips: ClipMap; equipment?: Equipment }> = {
+/**
+ * Clips from the model's animation-state bindings alone (creatures whose skeletons are not the
+ * human one): stance, locomotion, the three swings and death.
+ */
+function stateClips(st: Record<string, string>): ClipMap {
+  const idle = st['ASM_COMBAT_STANDING'] ?? st['ASM_STANDING'] ?? '';
+  const swings = [st['ASM_SWING_LEVEL'], st['ASM_CHOP_LOW'], st['ASM_SWING_OVERHEAD']].filter((c): c is string => !!c);
+  return {
+    idle,
+    run: st['ASM_RUNNING'] ?? idle,
+    walk: st['ASM_WALKING'] ?? st['ASM_RUNNING'] ?? idle,
+    air: st['ASM_FALL_SHORT'] ?? idle,
+    attacks: swings.length ? swings : [idle],
+    death: st['ASM_HIT_POINTS_DEPLETED'] ?? idle,
+    block: st['ASM_BLOCK'] ?? st['ASM_READY_SHIELD'] ?? idle,
+  };
+}
+
+/** Creature template equipment (executable creature table): weapon and shield models. */
+const MACE_METAL: Equipment = { right: 'standardmace', left: 'metalshield02' };
+
+const MODELS: Record<string, { file: string; texture?: string; clips: ClipMap | null; equipment?: Equipment }> = {
   self: {
     file: 'drake',
     equipment: BASIC_EQUIPMENT,
@@ -125,7 +146,16 @@ const MODELS: Record<string, { file: string; texture?: string; clips: ClipMap; e
   },
   skeleton_ghost: { file: 'skeletonwarriorcollision', texture: 'walking_dead_ghost', clips: STANDARD_CLIPS, equipment: BASIC_EQUIPMENT },
   shadow: { file: 'skeletonwarriorcollision', texture: 'shadow', clips: STANDARD_CLIPS, equipment: BASIC_EQUIPMENT },
-  dark_mage: { file: 'dark_magecollision', clips: { ...STANDARD_CLIPS, idle: 'pa16_id_br' } },
+  dark_mage: { file: 'dark_magecollision', clips: { ...STANDARD_CLIPS, idle: 'pa16_id_br' }, equipment: MACE_METAL },
+  // Creature template table: model index + texture variant (models.ctx), weapon and shield.
+  dark_master: { file: 'dark_mastercollision', clips: null, equipment: { right: 'heavymace', left: 'metalshield02' } },
+  dasher_brute: { file: 'm37tamris', texture: 'dasherbrute256', clips: null, equipment: { right: 'xucotal' } },
+  ogre_outlaw: { file: 'male02', texture: 'male02ogre', clips: null, equipment: { right: 'battleaxe' } },
+  dwarf_rebel: { file: 'm28_dwarf03average', texture: 'dwarf03ironpick', clips: null, equipment: { right: 'hammer', left: 'metalshield02' } },
+  dwarf_zealot: { file: 'm28_dwarf02skinny', texture: 'dwarf02zealot', clips: null, equipment: { right: 'battleaxe', left: 'metalshield02' } },
+  ice_titan: { file: 'male02', texture: 'male02icetitan', clips: null, equipment: { right: 'bluntclub' } },
+  black_knight: { file: 'male01b', texture: 'male01bblackknight', clips: null, equipment: { right: 'broadsword03', left: 'metalshield02' } },
+  deceiver: { file: 'deceiver', clips: null, equipment: { right: 'standardmace' } },
   skeleton_warrior: {
     file: 'skeletonwarriorcollision',
     equipment: BASIC_EQUIPMENT,
@@ -486,7 +516,9 @@ export async function loadOriginalAvatars(): Promise<AvatarFactory | null> {
       const right = await prop(def.equipment?.right);
       const left = await prop(def.equipment?.left);
       const equipment = { ...(right ? { right } : {}), ...(left ? { left } : {}) };
-      loaded.set(kind, { gltf, clips: withStates(def.clips, states), events, equipment, ...(texture ? { texture } : {}) });
+      const base = def.clips ?? (states ? stateClips(states) : null);
+      if (!base || !base.idle) continue;
+      loaded.set(kind, { gltf, clips: withStates(base, states), events, equipment, ...(texture ? { texture } : {}) });
     }
     if (loaded.size === 0) return null;
     console.info(`[assets] using original models from your installation: ${[...loaded.keys()].join(', ')}`);

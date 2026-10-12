@@ -109,7 +109,20 @@ export function arrivalPoint(arena: ArenaDef, fromArena: string | undefined): { 
 }
 
 /** Creature type ids (creature template table) that the slice can spawn, by archetype. */
-export const LEVEL_ARCHETYPES: Readonly<Record<number, string>> = { 143: 'dark_mage', 145: 'skeleton_warrior', 146: 'skeleton_ghost', 147: 'shadow' };
+export const LEVEL_ARCHETYPES: Readonly<Record<number, string>> = {
+  116: 'black_knight',
+  124: 'dwarf_rebel',
+  125: 'dwarf_zealot',
+  131: 'ogre_outlaw',
+  133: 'dasher_brute',
+  134: 'deceiver',
+  135: 'ice_titan',
+  143: 'dark_mage',
+  144: 'dark_master',
+  145: 'skeleton_warrior',
+  146: 'skeleton_ghost',
+  147: 'shadow',
+};
 
 /** Hostile disposition in the placement records. */
 const HOSTILE = 3;

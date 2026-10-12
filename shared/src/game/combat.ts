@@ -311,6 +311,46 @@ export const MOB_ARCHETYPES: Readonly<Record<string, MobArchetype>> = {
     id: 'dark_mage', name: 'Dark Mage', maxHp: 45, xpReward: 60, weapon: 'mace', shield: 'metal_shield',
     resist: [1, 1, 0.75, 0.75, 0.75, 0.75, 1, 1, 1, 1.25, 0.5],
   }),
+  // Dark Master: Heavy Mace + Metal Shield (a caster; spells not implemented); 80 HP, 125 XP.
+  dark_master: meleeVariant(SKELETON_WARRIOR, {
+    id: 'dark_master', name: 'Dark Master', maxHp: 80, xpReward: 125, weapon: 'heavy_mace', shield: 'metal_shield',
+    resist: [1, 1, 1, 0.5, 0.5, 0.5, 0.5, 1, 1, 1.35, 0.25],
+  }),
+  // Dasher Brute: Dasher Weapon; 30 HP, 50 XP (201 of 273 placements).
+  dasher_brute: meleeVariant(SKELETON_WARRIOR, {
+    id: 'dasher_brute', name: 'Dasher Brute', maxHp: 30, xpReward: 50, weapon: 'dasher_weapon', shield: null,
+    resist: [0.8, 1.2, 1, 1, 1, 1, 0.75, 1, 0.75, 0, 0],
+  }),
+  // Ogre Outlaw: Battle Axe; 100 HP, 75 XP.
+  ogre_outlaw: meleeVariant(SKELETON_WARRIOR, {
+    id: 'ogre_outlaw', name: 'Ogre Outlaw', maxHp: 100, xpReward: 75, weapon: 'battle_axe', shield: null,
+    resist: [1, 1, 1, 1, 1, 1, 1.25, 1, 0.75, 0, 0],
+  }),
+  // Dwarf Ironpick Rebel: War Hammer + Metal Shield; 40 HP, 60 XP.
+  dwarf_rebel: meleeVariant(SKELETON_WARRIOR, {
+    id: 'dwarf_rebel', name: 'Dwarf Ironpick Rebel', maxHp: 40, xpReward: 60, weapon: 'war_hammer', shield: 'metal_shield',
+    resist: [0.9, 0.8, 1, 1, 0.5, 1, 0.8, 1, 0.8, 0, 0],
+  }),
+  // Dwarf Ironpick Zealot: Battle Axe + Metal Shield; 60 HP, 100 XP.
+  dwarf_zealot: meleeVariant(SKELETON_WARRIOR, {
+    id: 'dwarf_zealot', name: 'Dwarf Ironpick Zealot', maxHp: 60, xpReward: 100, weapon: 'battle_axe', shield: 'metal_shield',
+    resist: [0.75, 0.5, 1, 1, 0.5, 1, 0.5, 1, 0.5, 0, 0],
+  }),
+  // Ice Titan: Club; 125 HP, 150 XP.
+  ice_titan: meleeVariant(SKELETON_WARRIOR, {
+    id: 'ice_titan', name: 'Ice Titan', maxHp: 125, xpReward: 150, weapon: 'club', shield: null,
+    resist: [1, 1, 1.25, 1, 1, 0.5, 1, 1, 1, 0, 0],
+  }),
+  // Greater Black Knight: Broad Sword + Metal Shield; 100 HP, 180 XP.
+  black_knight: meleeVariant(SKELETON_WARRIOR, {
+    id: 'black_knight', name: 'Greater Black Knight', maxHp: 100, xpReward: 180, weapon: 'broad_sword', shield: 'metal_shield',
+    resist: [0.5, 0.5, 0.2, 0.5, 0.2, 0.2, 0, 0, 0, 0, 0],
+  }),
+  // Deceiver: Mace (a caster; spells not implemented); 201 HP, 250 XP.
+  deceiver: meleeVariant(SKELETON_WARRIOR, {
+    id: 'deceiver', name: 'Deceiver', maxHp: 201, xpReward: 250, weapon: 'mace', shield: null,
+    resist: [0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 1, 0],
+  }),
 };
 
 export function levelForXp(xp: number): number {
