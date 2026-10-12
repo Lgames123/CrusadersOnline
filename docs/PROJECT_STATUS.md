@@ -130,9 +130,21 @@
   - 87 tests + 2 E2E.
   - Open: turn and look rates (UNK-011); jump impulse and clip playback rate (UNK-012).
 
+- [x] Session 16 (2026-10-11 → 10-12): **the original's combat, measured live (x32dbg, then Frida).**
+  - Physics and controls from x32dbg: gravity 78.4 ft/s², jump 50.45 ft/s with hold-lift and rising drag, air control and travel limits, turn rates (ground 270°/s, air 80°/s, arrows 200°/s, numpad look 150°/s), clip rate 1000/30 fps (executable-analysis §13–14).
+  - Melee: clip-event timing, reach and arc, attack keys, the five-step combo (routine 0x0042CA20 decoded), side swings and the air swing on the upper body, the wall jab, attacks that carry Drake by root motion (combo steps 1/3/5, jump attack).
+  - Shield: upper-body layer over the legs, walk / retreat / side hops with root-motion curves, diagonal hops.
+  - Hit reactions from the HP-loss rule (v = 0.5·rand + damage/HP: 0.7–0.8 knock-down PI02, ≥ 0.8 stun), confirmed live; every landed hit interrupts the target.
+  - Skeleton AI from four Frida logs of its SetNextState requests (0x004C8900): distance bands, lunge, direct swings, jab, retreat to 8 ft, stance shield 0.82 s, chains and bursts, rare shield bash. Reactive block kept as an option.
+  - Equipment rendered at the models' attachment dummies (w-first quaternions); death clips keep their root motion.
+  - Tools: Frida runner for non-pausing hooks and hardware watchpoints (memory note `frida-runtime-capture`).
+  - 92 tests + 2 E2E.
+
 ### Not Yet Done
+- Drake's shield rush (Space + RMB, RAM_SHOULDER), spells (default.ctx S0–S10: torch light, fireball, slow, freeze, stoneskin, lightning, heroism, spectral ally, revelation, holy wrath, soul drinker), creature spells / ranged attacks.
+- Creature hit reaction IMPACT_FRONT_TWO_STEPS_BACK (PI31); the third combo step's recoil (plays backwards after its impact); combo chain 105–107 (COMBO 6–8, weapon class unknown).
 - Idle zones are never stopped; portals to acts without a converted mesh (Ws_a) answer "This way is blocked".
-- Spells and ranged attacks (Dark Mage, Ghost fireball), Ogre / Dasher / Dwarf / elemental archetypes, doors, levers and scripted sequences, `Ws_a.msh`, material-based footsteps, music.
+- Ogre / Dasher / Dwarf / elemental archetypes, doors, levers and scripted sequences, `Ws_a.msh`, material-based footsteps, music.
 - Packaging the converter for players (browser conversion into OPFS) so original levels work outside the dev server.
 - Original AI maneuver scripts.
 - First deployment on a real domain (TLS certificate), off-host backups, metrics.
