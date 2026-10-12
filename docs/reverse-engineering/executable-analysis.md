@@ -365,3 +365,15 @@ Two skeletons sampled at ~3 Hz for 150 s while the player fought them (creature 
 The AI's own maneuver tables (`0x004EA268`: RANGED / RUNNING_JUMP / JUMP / MELEE and NONE … THROW_WEAPON, MANEUVER_LR / BACK) are not decoded yet.
 
 Implemented in the server AI: root-motion run/walk speeds, guard walk inside 14 ft, forward-hop lunge from ≤ 9 ft (PC07 timing) leading straight into a swing chosen 50 / 30 / 20 % among SWING_OVERHEAD / SWING_LEVEL / CHOP_LOW with each clip's event timing, leash 80 m.
+
+
+### 15.1 Attack rhythm, guard and jab (second capture, 2026-10-12)
+
+One skeleton sampled at ~9 Hz (only its animation-controller state, plus the distance every sixth sample) for ~50 s of fighting, re-acquired through `Stats_TakeDamage` after each death:
+
+- **Chains then guard.** 1 swing (most often), sometimes 2, rarely 3 back to back, then **COMBAT_STANDING for 0.4–1.9 s** (~1.2 s on average) before the next action. Player hits that landed during that guard came from the side or behind (IMPACT_RIGHT / IMPACT_BACK), consistent with the shield covering the front.
+- **Close jab.** At ~4 ft with the player standing still: short THRUST jabs alternating with ~1.4 s of guard; occasionally RAM_SHOULDER (shield bash) followed by a jab.
+- **From range.** HOP_F then one or two swings, as in §15.
+- **Step back.** The user also sees skeletons step back about two steps with the shield up and come in again (not caught in this sample).
+
+Implemented: chains of 1/2/3 swings (55/35/10 %); guard of 0.4–1.9 s with the shield up that stops 50 % of frontal hits (within the original ±81° block cone); a 25 % chance to step back ~0.8 s in guard after a chain; the jab (THRUST, PP02 timing) preferred within 5 ft. Not yet: RAM_SHOULDER (needs knock-back).

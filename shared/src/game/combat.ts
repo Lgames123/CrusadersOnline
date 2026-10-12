@@ -64,7 +64,8 @@ const DIRECTIONAL_CLIPS: Readonly<Record<'overhead' | 'left' | 'right' | 'low' |
 const CHAIN_SLACK_FRAMES = 3;
 
 /** Swing timing of an attack (kind + combo step), scaled by the weapon's Speed. */
-export function attackTiming(kind: 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump', combo: number, weaponSpeed = 1): SwingTiming {
+export function attackTiming(kind: 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump' | 'thrust', combo: number, weaponSpeed = 1): SwingTiming {
+  if (kind === 'thrust') return clipSwingTiming(MOB_THRUST.clip, weaponSpeed);
   const c = kind === 'normal' ? COMBO_CLIPS[Math.min(Math.max(combo, 1), COMBO_CLIPS.length) - 1]! : DIRECTIONAL_CLIPS[kind];
   return clipSwingTiming(c, weaponSpeed);
 }
@@ -80,6 +81,23 @@ export const MOB_ATTACKS: readonly { kind: 'overhead' | 'normal' | 'low'; weight
   { kind: 'normal', weight: 0.3, clip: { swing: 7, impact: 8, recovery: 13 } },
   { kind: 'low', weight: 0.2, clip: { swing: 14, impact: 16, recovery: 19 } },
 ];
+/** Close-range jab (ASM_THRUST, PP02: SWING 6, RECOVERY 17; no IMPACT event, hit on frame 9). */
+export const MOB_THRUST = { kind: 'thrust' as const, clip: { swing: 6, impact: 9, recovery: 17 } };
+/** Distance under which creatures prefer the jab (observed at ~4 ft). */
+export const MOB_THRUST_RANGE = 5 * 0.3048;
+/**
+ * Attack rhythm observed in the original: chains of 1 (55 %), 2 (35 %) or 3 (10 %) swings,
+ * then a guard of 0.4-1.9 s with the shield up (frontal hits are blocked); after about one
+ * chain in four the creature first steps back ~2 steps in guard, then comes in again.
+ */
+export const MOB_CHAIN_WEIGHTS = [0.55, 0.35, 0.1] as const;
+export const MOB_GUARD_MIN_TICKS = Math.round(0.4 * TICK_RATE);
+export const MOB_GUARD_MAX_TICKS = Math.round(1.9 * TICK_RATE);
+export const MOB_RETREAT_CHANCE = 0.25;
+/** Share of frontal hits the guard stops (the original's skeletons die quickly to frontal attacks too). */
+export const MOB_GUARD_BLOCK_CHANCE = 0.5;
+export const MOB_RETREAT_TICKS = Math.round(0.8 * TICK_RATE);
+
 /** Distance (centre to centre, m) inside which a creature walks in guard instead of running. */
 export const MOB_COMBAT_RANGE = 14 * 0.3048;
 /** Distance from which a creature lunges with a forward hop before swinging. */

@@ -133,7 +133,8 @@ describe('authoritative melee', () => {
     // Swing whenever possible; requests during startup/active are ignored by the server.
     for (let i = 0; i < 200 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
     expect(t.mob().alive).toBe(false);
-    const hits = t.events().filter((e) => e.target === t.mob().id);
+    // Hits the skeleton's guard stopped (frontal, between its attack chains) deal nothing.
+    const hits = t.events().filter((e) => e.target === t.mob().id && !e.blocked);
     // Axe 5/5 (tie -> bash) x Might multiplier 1.0 x attack mode 1.0 (every combo step)
     // x the skeleton's original bash multiplier 1.1
     expect(hits.map((e) => e.damage).slice(0, 3)).toEqual([5.5, 5.5, 5.5]);
@@ -309,7 +310,7 @@ describe('inventory and equipment', () => {
     t.run(APPROACH, INPUT.FORWARD, 0);
     t.run(30);
     for (let i = 0; i < 200 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
-    const dealt = t.events().filter((e) => e.target === t.mob().id).map((e) => e.damage);
+    const dealt = t.events().filter((e) => e.target === t.mob().id && !e.blocked).map((e) => e.damage);
     expect(dealt.slice(0, 3)).toEqual([9, 9, 9]); // Long Sword 10 slash x skeleton slash 0.9
     const taken = t.events().filter((e) => e.target === t.entityId && !e.blocked).map((e) => e.damage);
     expect(taken.length).toBeGreaterThan(0);
@@ -374,12 +375,15 @@ describe('skeleton shield AI', () => {
     expect(second[1]!.damage).toBeGreaterThan(0);
   });
 
-  it('never blocks with a zero random source (deterministic combat tests)', () => {
-    const t = setup();
+  it('guards between attack chains: frontal hits then are blocked, others land', () => {
+    // 0.99 passes the block rolls (guard and reactive shield) and the step-back roll.
+    const t = setup({ random: () => 0.99 });
     t.run(APPROACH, INPUT.FORWARD, 0);
     t.run(30);
     for (let i = 0; i < 200 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
-    expect(t.events().some((e) => e.target === t.mob().id && e.blocked)).toBe(false);
+    const onMob = t.events().filter((e) => e.target === t.mob().id);
+    expect(onMob.some((e) => e.blocked)).toBe(true);
+    expect(onMob.some((e) => !e.blocked && e.damage > 0)).toBe(true);
   });
 });
 

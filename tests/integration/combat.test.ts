@@ -54,7 +54,8 @@ describe.each(backends)('vertical-slice combat over the network on $name (M08)',
     expect(mobId).toBeDefined();
 
     let killed = false;
-    for (let i = 0; i < 200 && !killed; i++) {
+    // The skeleton guards (blocks frontal hits) between its attack chains: allow 20 s.
+    for (let i = 0; i < 400 && !killed; i++) {
       s.tick(input);
       if (i % 4 === 0) s.attack();
       await sleep(50);

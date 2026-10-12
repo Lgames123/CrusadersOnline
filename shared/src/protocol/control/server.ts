@@ -154,6 +154,8 @@ export const ANIM = {
   ATTACK_COMBO5: 26,
   /** Forward hop (ASM_HOP_F): creatures lunge in before swinging. */
   HOP_FORWARD: 27,
+  /** Creature jab (ASM_THRUST). */
+  ATTACK_THRUST: 28,
 } as const;
 
 /** Animation for a character's own movement state (roll, duck, airborne, locomotion, idle). */
@@ -165,7 +167,7 @@ export function movementAnim(flags: number, grounded: boolean, rollDir: number):
   return locomotionAnim(flags);
 }
 
-export type AttackKind = 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump';
+export type AttackKind = 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump' | 'thrust';
 
 /**
  * The original's attack selection, measured in the running game (executable-analysis.md §14):
@@ -187,12 +189,13 @@ export function attackAnim(kind: AttackKind, combo: number): number {
     case 'right': return ANIM.ATTACK_RIGHT;
     case 'low': return ANIM.ATTACK_LOW;
     case 'jump': return ANIM.ATTACK_JUMP;
+    case 'thrust': return ANIM.ATTACK_THRUST;
     default: return combo >= 5 ? ANIM.ATTACK_COMBO5 : combo === 4 ? ANIM.ATTACK_COMBO4 : ANIM.ATTACK + combo - 1;
   }
 }
 
 export function isAttackAnim(anim: number): boolean {
-  return (anim >= ANIM.ATTACK && anim < ANIM.ATTACK + 3) || (anim >= ANIM.ATTACK_OVERHEAD && anim <= ANIM.ATTACK_RIGHT) || anim === ANIM.ATTACK_LOW || anim === ANIM.ATTACK_JUMP || anim === ANIM.ATTACK_COMBO4 || anim === ANIM.ATTACK_COMBO5;
+  return (anim >= ANIM.ATTACK && anim < ANIM.ATTACK + 3) || (anim >= ANIM.ATTACK_OVERHEAD && anim <= ANIM.ATTACK_RIGHT) || anim === ANIM.ATTACK_LOW || anim === ANIM.ATTACK_JUMP || anim === ANIM.ATTACK_COMBO4 || anim === ANIM.ATTACK_COMBO5 || anim === ANIM.ATTACK_THRUST;
 }
 
 /**

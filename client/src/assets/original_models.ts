@@ -34,6 +34,7 @@ interface ClipMap {
   attackRight?: string;
   attackLow?: string;
   attackJump?: string;
+  attackThrust?: string;
   /** Rolls forward / back / left / right and ducking. */
   rolls?: string[];
   crouch?: string;
@@ -67,6 +68,7 @@ function withStates(base: ClipMap, states: Record<string, string> | undefined): 
     attackLeft: base.attackLeft ?? st['ASM_SWING_LEVEL'] ?? base.attacks[0]!,
     attackLow: base.attackLow ?? st['ASM_CHOP_LOW'] ?? base.attacks[0]!,
     attackJump: base.attackJump ?? st['ASM_JUMP_ATTACK'] ?? base.attacks[0]!,
+    attackThrust: base.attackThrust ?? st['ASM_THRUST'] ?? base.attacks[0]!,
     attackRight: base.attackRight ?? st['ASM_SWING_LEVEL'] ?? base.attacks[0]!,
   };
 }
@@ -141,6 +143,7 @@ class OriginalAvatar implements Avatar {
     if (anim === ANIM.ATTACK_RIGHT) return { name: m.attackRight ?? m.attacks[0]!, loop: false };
     if (anim === ANIM.ATTACK_LOW) return { name: m.attackLow ?? m.attacks[0]!, loop: false };
     if (anim === ANIM.ATTACK_JUMP) return { name: m.attackJump ?? m.attacks[0]!, loop: false };
+    if (anim === ANIM.ATTACK_THRUST) return { name: m.attackThrust ?? m.attacks[0]!, loop: false };
     if (anim === ANIM.DEAD) {
       const deaths = m.deaths?.length ? m.deaths : [m.death];
       return { name: deaths[this.deathCount % deaths.length]!, loop: false };
