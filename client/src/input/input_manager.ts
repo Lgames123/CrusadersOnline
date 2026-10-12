@@ -2,11 +2,15 @@ import { INPUT, quantizeAngle, quantizePitch, type InputFrame } from '@crusaders
 import { DEFAULT_BINDINGS, VIEW_KEYS, actionFor, type Action } from './keybindings.ts';
 
 const MOUSE_SENSITIVITY = 0.0022;
-const PITCH_MIN = -1.2;
-const PITCH_MAX = 0.6;
-/** Keyboard turn and look rates, radians/s (provisional: the original's are not recovered yet). */
-const TURN_RATE = 2.5;
-const LOOK_RATE = 1.2;
+/**
+ * The original's view limits and keyboard rates, measured in the running game
+ * (executable-analysis.md §13): pitch ±80°, arrows turn 200°/s, numpad looks 150°/s.
+ */
+const DEG = Math.PI / 180;
+const PITCH_MIN = -80 * DEG;
+const PITCH_MAX = 80 * DEG;
+const TURN_RATE = 200 * DEG;
+const LOOK_RATE = 150 * DEG;
 
 /**
  * Samples keyboard/mouse into fixed-step input frames. Key presses shorter than one
