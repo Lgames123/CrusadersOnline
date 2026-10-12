@@ -64,6 +64,8 @@ export interface CombatEventMsg {
     killed: boolean;
     /** The target's raised shield stopped the hit (damage 0). */
     blocked?: boolean;
+    /** A shield rush met the target (no damage; it reels and is knocked down). */
+    rush?: boolean;
     /** Present when the attacker is a player who got rewarded for the kill (loot = item names added). */
     reward?: { xp: number; gold: number; loot?: string[] };
   };

@@ -187,7 +187,7 @@ Logged with Frida while fighting skeletons, blocking, breaking a barrel and stri
 - **Blade on a wall or the floor** (`0x0048CCC2`): SWORD_DAMAGE + SWORD_METAL ×3 along the surface normal.
 - **Breakable prop** (a barrel): SWORD_STONE ×6 upwards, plus a debris emitter (kind 12).
 
-Implemented: the converter writes rules/effects.json; the client renders the flashes as sprites (alpha from the textures, glows additive) and spawns these effects from combat events, prop hits and its own swings meeting a wall. The file's units are not stated: sizes are read as tenths of a foot and MOVE / GRAVITY per 30 Hz tick (calibrated by eye). The per-object particle emitters are not reproduced yet.
+Implemented: the converter writes rules/effects.json; the client renders the flashes as sprites (alpha from the textures, glows additive) and spawns these effects from combat events, prop hits and its own swings meeting a wall. The file's units are not stated: sizes are read as tenths of a foot (×0.85, by eye), MOVE as units per 30 Hz tick and GRAVITY as units per tick per second (per tick² pulled every flash straight down; blood still falls, sparks arc up). Undead blows add FIREBALL_PROJ_EVIL_SPAWN (the green dark flame) on the victim. The shield rush has no sound of its own in Sound.ctx: the client plays Drake's effort grunt at the start and the shield thud plus a blunt impact on contact (a combat event flagged `rush`). The per-object particle emitters are not reproduced yet.
 
 ## 9. Creatures, Experience and Blocking Follow-up (2026-10-09)
 

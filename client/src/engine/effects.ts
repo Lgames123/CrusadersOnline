@@ -6,8 +6,9 @@ import * as THREE from 'three';
  * shrink, spin, fade in / hold / fade out and fly with gravity. The engine spawns them on hits
  * and blocks (executable-analysis §8.6); here the client spawns them from combat events.
  *
- * Units are not stated in the file; the sizes read as tenths of a foot and the motion as units
- * per 30 Hz engine tick (a spark ~1.7 ft flying ~7 m/s, a bone chip ~0.6 ft).
+ * Units are not stated in the file; the sizes read as tenths of a foot (85 %, by eye against the
+ * original), MOVE as units per 30 Hz engine tick and GRAVITY as units per tick per second (a
+ * spark flies ~7 m/s and arcs gently; per tick squared pulled everything straight down).
  */
 
 interface Shape {
@@ -42,6 +43,8 @@ interface Table {
 
 /** One original unit, metres (a tenth of a foot). */
 const UNIT = 0.03048;
+/** Sprite sizes against the original, by eye (playtest: 15 % smaller). */
+const SIZE_SCALE = 0.85;
 /** The engine's tick rate for MOVE / GRAVITY (per tick). */
 const ENGINE_HZ = 30;
 const MAX_LIVE = 600;
@@ -139,6 +142,8 @@ export class Effects {
       color: new THREE.Color(c[0] / 255, c[1] / 255, c[2] / 255),
       transparent: true,
       depthWrite: false,
+      // Some sprites (spark00) keep a faint alpha over the whole quad: drop it.
+      alphaTest: 0.05,
       blending: texName && OPAQUE.test(texName) ? THREE.NormalBlending : THREE.AdditiveBlending,
     });
     const sprite = new THREE.Sprite(material);
@@ -156,12 +161,12 @@ export class Effects {
       age: 0,
       life: life > 0 ? life : 0.1,
       alpha: c[3] / 255,
-      h: (flash.startHeight + size) * UNIT,
-      w: (flash.startWidth + size) * UNIT,
-      vh: flash.deltaHeight * UNIT,
-      vw: flash.deltaWidth * UNIT,
+      h: (flash.startHeight + size) * UNIT * SIZE_SCALE,
+      w: (flash.startWidth + size) * UNIT * SIZE_SCALE,
+      vh: flash.deltaHeight * UNIT * SIZE_SCALE,
+      vw: flash.deltaWidth * UNIT * SIZE_SCALE,
       vel: local(flash.move, flash.randomizeMove).multiplyScalar(UNIT * ENGINE_HZ),
-      grav: new THREE.Vector3(...flash.gravity).multiplyScalar(UNIT * ENGINE_HZ * ENGINE_HZ),
+      grav: new THREE.Vector3(...flash.gravity).multiplyScalar(UNIT * ENGINE_HZ),
       spin: flash.rotating ? (flash.rotationSpeed * Math.PI) / 180 : 0,
       nextSpawn: flash.spawnMulti?.interval ?? 0,
     });
@@ -189,8 +194,8 @@ export class Effects {
       // Alpha envelope: attack (fade in), sustain, decay (fade out).
       const a = p.age < f.attack ? p.age / f.attack : p.age < f.attack + f.sustain ? 1 : f.decay > 0 ? 1 - (p.age - f.attack - f.sustain) / f.decay : 1;
       p.sprite.material.opacity = Math.max(0, Math.min(1, a)) * p.alpha;
-      p.vh += f.heightAcceleration * UNIT * dt;
-      p.vw += f.widthAcceleration * UNIT * dt;
+      p.vh += f.heightAcceleration * UNIT * SIZE_SCALE * dt;
+      p.vw += f.widthAcceleration * UNIT * SIZE_SCALE * dt;
       p.h = Math.max(0.001, p.h + p.vh * dt);
       p.w = Math.max(0.001, p.w + p.vw * dt);
       p.sprite.scale.set(p.w, p.h, 1);

@@ -23,6 +23,7 @@ export class CombatUi {
 
   /** `targetPos` is the target's head position (world), `mine` = the local player is involved. */
   damage(event: CombatEvent, targetPos: THREE.Vector3, kind: 'dealt' | 'taken' | 'other'): void {
+    if (event.rush) return; // a shield rush deals no damage: no number
     const el = document.createElement('div');
     el.className = `floater ${kind}`;
     el.textContent = event.blocked ? 'Blocked' : event.killed ? `${event.damage}!` : String(event.damage);

@@ -10,6 +10,7 @@ import {
   THRUST_WALL_HEIGHT,
   wallAhead,
   wallDistance,
+  ACTION_BASH,
   PLAYER_REACH,
   attackTiming,
   LEVEL_PREFIX,
@@ -126,6 +127,8 @@ async function main(): Promise<void> {
   const fxPos = new THREE.Vector3();
   /** Pending wall-spark checks of the local swings (seconds to the impact frame, heading). */
   const wallChecks: { t: number; yaw: number }[] = [];
+  /** The local character's timed action on the previous step (to catch a rush starting). */
+  let lastAction = 0;
   const fxDir = new THREE.Vector3();
   /** Spawns `count` copies of an effect along a short line from `at` (the engine spaces them ~0.2 m apart). */
   const fxBurst = (name: string, count: number, at: THREE.Vector3, step: THREE.Vector3, dir: THREE.Vector3 | null = null) => {
@@ -168,6 +171,13 @@ async function main(): Promise<void> {
             const from = mine ? player?.object : remotes.byId.get(e.attacker)?.avatar.object;
             const avatar = isMe ? player?.avatar : target?.avatar;
             if (from && avatar?.react && !e.blocked && !e.killed && e.damage > 0) avatar.react(impactSide(obj, from));
+            if (e.rush) {
+              // Shield rush contact: the shield's thud and a blunt impact on the target's material.
+              const sfx = CREATURE_SFX[target?.info.archetype ?? ''];
+              sounds?.play(SFX.shieldBlockWood, headPos);
+              sounds?.play(SFX.impact[sfx?.material ?? 'flesh'].blunt, headPos);
+              return;
+            }
             // Original hit effects (executable-analysis §8.6): a blocked blow throws sparks and an
             // ember off the shield (x3); a landed one bone chips (skeletons, 3-7) or blood (2-3).
             if (effects && from) {
@@ -180,6 +190,9 @@ async function main(): Promise<void> {
                 fxBurst('SWORD_METAL', 3, at, step);
               } else if (e.damage > 0) {
                 const bone = !isMe && CREATURE_SFX[target?.info.archetype ?? '']?.material === 'bone';
+                // Undead blows carry dark damage: the original adds its green flame on the victim.
+                const undeadAttacker = !mine && CREATURE_SFX[remotes.byId.get(e.attacker)?.info.archetype ?? '']?.material === 'bone';
+                if (undeadAttacker) effects.spawn('FIREBALL_PROJ_EVIL_SPAWN', at);
                 if (bone) fxBurst('BONE', 3 + Math.floor(Math.random() * 5), at, step.clone().multiplyScalar(-1));
                 else fxBurst('BLOOD', 2 + Math.floor(Math.random() * 2), at, step.clone().multiplyScalar(-1));
               }
@@ -425,6 +438,10 @@ async function main(): Promise<void> {
       // An attack whose clip carries Drake starts its root motion on this step (shared movement).
       frame.flags |= local.takeAttackMotion() << INPUT_ATTACK_SHIFT;
       local.fixedStep(frame);
+      // The shield rush starts with Drake's effort grunt.
+      const action = local.character.rollDir;
+      if (action === ACTION_BASH && lastAction !== ACTION_BASH) sounds?.play(SFX.swingGrunt, local.object.position);
+      lastAction = action;
       acc -= TICK_MS;
     }
     const dt = frameMs / 1000;

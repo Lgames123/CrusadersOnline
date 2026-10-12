@@ -1218,6 +1218,7 @@ export class WorldZone {
       if (!m.character.grounded) continue;
       // The creature reels back (IMPACT_BACK) and is knocked down (IMPACT_SEVERE) - no damage.
       this.hitReaction(m, ACTION_IMPACT);
+      this.broadcastNear(m, { op: SC.COMBAT_EVENT, d: { attacker: p.entityId, target: m.entityId, damage: 0, hp: Math.ceil(m.hp), killed: false, rush: true } });
       m.knockdownAt = this.tick + hitReactionTicks(ACTION_IMPACT);
       m.hitUntil = m.knockdownAt + hitReactionTicks(ACTION_KNOCKDOWN);
       m.guardUntil = m.hitUntil;
