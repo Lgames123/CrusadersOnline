@@ -248,6 +248,8 @@ async function main(): Promise<void> {
   }, { passive: false });
   input.onAttack = () => {
     // The movement key held with the click picks the attack (original controls).
+    // Holding C (ducked) ignores clicks, as in the original.
+    if (input.heldFlags & INPUT.DUCK) return;
     const kind = attackKindFor(input.heldFlags);
     if (local.swing(input.yaw, kind)) {
       session?.attack(kind);

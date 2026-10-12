@@ -79,8 +79,9 @@ const MODELS: Record<string, { file: string; texture?: string; clips: ClipMap }>
     // overhead swing; left / right + click: the side swings (game Readme).
     clips: {
       idle: 'pa16_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pc03_ru_fw_jmp', death: 'pi03_hp', block: 'pt01_rdy_shld',
-      // The ASM combo chain (routine 0x0042CA20): SWING_LEVEL, CHOP_LOW, SWING_OVERHEAD, 103, 104.
-      attacks: ['pn02_1_sw_lv', 'pn01_1_cp_lo', 'pn03_1_sw_ov', 'pn16_1_chn_atk_b', 'pn17_1_pwr_atk'],
+      // The five-step combo plays models.ctx's COMBO clips in file order (damage frames captured
+      // in play match their IMPACT events).
+      attacks: ['pn25_combo_a', 'pn02_1_sw_lv', 'pn15_1_chn_atk_a', 'pn16_1_chn_atk_b', 'pn17_1_pwr_atk'],
       attackOverhead: 'pn03_1_sw_ov', attackLeft: 'pn09_1_sw_l', attackRight: 'pn10_1_sw_r',
       walkStrafeLeft: 'pb02_sdstp_l', walkStrafeRight: 'pb03_sdstp_r',
     },

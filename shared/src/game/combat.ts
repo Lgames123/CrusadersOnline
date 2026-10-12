@@ -40,13 +40,15 @@ export function swingForWeaponSpeed(speed: number, base: Readonly<SwingTiming> =
 export const ORIGINAL_CLIP_FPS = 1000 / 30;
 interface ClipEvents { swing: number; impact: number; recovery: number }
 /**
- * Plain clicks chain five swings (combo routine 0x0042CA20): ASM_SWING_LEVEL (PN02) →
- * ASM_CHOP_LOW (PN01) → ASM_SWING_OVERHEAD (PN03) → combo state 103 (PN16) → 104 (PN17).
+ * Plain clicks chain five swings (combo routine 0x0042CA20: states 24 → 23 → 25 → 103 → 104).
+ * With a one-handed weapon they play models.ctx's "COMBO" clips in file order — the damage
+ * frames captured in play match their IMPACT events: PN25_combo_a, PN02_1_sw_lv,
+ * PN15_1_chn_atk_a, PN16_1_chn_atk_b, PN17_1_pwr_atk.
  */
 const COMBO_CLIPS: readonly ClipEvents[] = [
+  { swing: 11, impact: 13, recovery: 18 },
   { swing: 7, impact: 8, recovery: 13 },
-  { swing: 14, impact: 16, recovery: 19 },
-  { swing: 10, impact: 12, recovery: 16 },
+  { swing: 7, impact: 9, recovery: 15 },
   { swing: 5, impact: 10, recovery: 17 },
   { swing: 11, impact: 12, recovery: 23 },
 ];
@@ -76,8 +78,13 @@ export function attackTiming(kind: 'normal' | 'overhead' | 'left' | 'right' | 'l
 export const COMBO_WINDOW_TICKS = ticks(300);
 /** Five-hit combo; every step uses the normal attack mode (the 1.25 mode is a difficulty setting). */
 export const COMBO_MULTIPLIERS = [1, 1, 1, 1, 1].map(() => ATTACK_MODE_SCALE.normal);
-export const PLAYER_REACH = 2.2;
-export const PLAYER_ARC_DEG = 110;
+/**
+ * Melee reach beyond the target's radius and arc, from 18 hits captured in the running game
+ * (executable-analysis.md §14): hits landed up to 5.95 ft centre to centre and up to ~40° off
+ * the attacker's heading. These are lower bounds (few attempts at longer range).
+ */
+export const PLAYER_REACH = 6 * 0.3048 - 0.4;
+export const PLAYER_ARC_DEG = 90;
 
 export const PLAYER_RESPAWN_TICKS = ticks(5000);
 export const MAX_LEVEL = 50;
@@ -155,7 +162,8 @@ const SKELETON_WARRIOR: MobArchetype = {
   speed: 4.2,
   aggroRadius: 10,
   leashRadius: 30,
-  reach: 2.0,
+  // Skeleton hits on the player were captured from 4.0 to 5.25 ft centre to centre.
+  reach: 5.25 * 0.3048 - 0.4,
   arcDeg: 90,
   swing: { startup: ticks(400), active: ticks(150), recovery: ticks(500) },
   cooldown: ticks(300),

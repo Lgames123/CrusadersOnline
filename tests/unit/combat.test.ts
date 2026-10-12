@@ -72,9 +72,10 @@ const APPROACH = Math.ceil((6 / DEFAULT_MOVEMENT_STATS.runSpeed) * TICK_RATE);
 
 describe('original swing timing', () => {
   it('hits on each clip IMPACT frame at 1000/30 fps and chains five plain swings', () => {
-    // SWING_LEVEL: SWING 7, IMPACT 8, RECOVERY 13 -> active window ends on tick round(8 / 33.3 × 20) = 5.
+    // First combo step PN25: SWING 11, IMPACT 13, RECOVERY 18 -> active window ends on tick
+    // round(13 / 33.3 × 20) = 8 (damage was captured on frame ~13.6 in the original).
     const first = attackTiming('normal', 1);
-    expect(first.startup + first.active - 1).toBe(Math.round((8 / ORIGINAL_CLIP_FPS) * TICK_RATE));
+    expect(first.startup + first.active - 1).toBe(Math.round((13 / ORIGINAL_CLIP_FPS) * TICK_RATE));
     expect(COMBO_MULTIPLIERS).toHaveLength(5);
     // Heavier steps take longer (PN17 power attack recovers at frame 23).
     const last = attackTiming('normal', 5);

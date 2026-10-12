@@ -336,3 +336,15 @@ Implemented in `shared/src/constants.ts` / `movement/character.ts`: gravity, imp
 **Combo chain** (`0x0042CA20`): a click after 10 % of the current swing queues the next one: SWING_LEVEL (24) → CHOP_LOW (23) → SWING_OVERHEAD (25) → 103 → 104, then the chain ends (a second chain 105 → 106 → … exists). By clip length, 103 and 104 play PN16_1_chn_atk_b and PN17_1_pwr_atk (models.ctx "COMBO 4" / "COMBO 5"). The 1.25 attack-mode scale of §8.2 is set per difficulty (`0x0044CDD0`), not per combo step.
 
 Implemented: `attackTiming()` in `shared/src/game/combat.ts` (hit window ends on the IMPACT frame at 1000/30 fps, scaled by weapon Speed), a five-step combo with equal attack mode, the ×10/9 speeds and roll timings, and original avatars playing every clip at 1000/30 frames per second. **Attack keys** (measured, one key per capture): a plain click starts the five-swing combo; W + click while running and Space + click give ASM_JUMP_ATTACK (PN05, the leaping attack); A / D + click give the side swings (states 87 / 88, which use the two adjacent clip objects PN09 "Swing Left" / PN10 "Swing right"); C + click leaves the crouch and starts the normal combo (no separate crouch attack). The Readme's "E + LMB overhand" does not match the engine's behaviour; THRUST (89) was not reproduced on purpose and is left unbound.
+
+
+### 14.1 Hits, reach and arc (2026-10-12)
+
+Captured with a software breakpoint on `Stats_TakeDamage` (`0x0044CBA0`, fires only on damage; the stats component holds its owner at `+0x04` and HP / max HP at `+0x08` / `+0x0C`), reading attacker and victim poses at each hit. The transform yaw (`+0x34`, degrees) equals `atan2(dx, dz)` of the facing direction.
+
+- **Damage frame.** Hits land on the clip's IMPACT event: frame ≈ 13.6 in SWING_LEVEL, ≈ 8.0 in CHOP_LOW, ≈ 8.5 in SWING_OVERHEAD, ≈ 21 in JUMP_ATTACK. With the starting one-handed weapon the combo states therefore play models.ctx's "COMBO" clips in file order (PN25 IMPACT 13, PN02 IMPACT 8, PN15 IMPACT 9, then PN16, PN17), not the clips bound to those state names.
+- **Player reach / arc.** 18 hits: centre-to-centre distance 3.9–4.7 ft (one at 5.95 ft), angle to the target up to ~40° off the heading (most within 10°). Lower bounds only.
+- **Skeleton reach.** 7 hits on the player: 4.0–5.25 ft centre to centre.
+- **Crouching.** Clicks are ignored while C is held.
+
+Implemented: `PLAYER_REACH` 6 ft and `PLAYER_ARC_DEG` 90 (±45°), skeleton reach 5.25 ft (both centre to centre, `inMeleeArc` adds the 0.4 m target radius), the combo clip order above, and no attacks while ducking. UNK-003 is narrowed to the true maxima (need deliberate misses at range).
