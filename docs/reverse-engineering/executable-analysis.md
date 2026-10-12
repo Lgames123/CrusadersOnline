@@ -377,3 +377,10 @@ One skeleton sampled at ~9 Hz (only its animation-controller state, plus the dis
 - **Step back.** The user also sees skeletons step back about two steps with the shield up and come in again (not caught in this sample).
 
 Implemented: chains of 1/2/3 swings (55/35/10 %); guard of 0.4–1.9 s with the shield up that stops 50 % of frontal hits (within the original ±81° block cone); a 25 % chance to step back ~0.8 s in guard after a chain; the jab (THRUST, PP02 timing) preferred within 5 ft. Not yet: RAM_SHOULDER (needs knock-back).
+
+
+### 14.2 Moving with the shield up (2026-10-12)
+
+Sampled the player's ASM state and pose while holding the shield (right mouse button) and moving: forward → ASM_WALKING at 5.65 ft/s (the careful-walk speed), backward → ASM_RETREAT at 4.34 ft/s, sideways and diagonals → repeated ASM_HOP_L / ASM_HOP_R side hops (PC09 / PC10) with short stands in between, ~6–8 ft/s on average. Standing still with the shield up plays ASM_BLOCK (PE07).
+
+Implemented in the shared movement step and `movementAnim()`: shield + forward / back use the careful walk / retreat speeds and clips; shield + any sideways key hops to that side at 5.75 / 4.94 ft per 0.8 s (left / right).

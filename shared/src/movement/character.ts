@@ -1,5 +1,5 @@
 import type RAPIER from '@dimforge/rapier3d-deterministic-compat';
-import { AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
+import { SHIELD_HOP_LEFT_SPEED, SHIELD_HOP_RIGHT_SPEED, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
 import type { Vec3 } from '../math/vec3.ts';
 import { dequantizeAngle } from '../math/quantize.ts';
 import { INPUT } from '../protocol/opcodes.ts';
@@ -138,13 +138,24 @@ export function stepCharacter(
     // Straight: that direction's speed. Diagonal: the body turns into the motion
     // (movementFacingOffset) and keeps the forward or backward cycle's speed.
     const len = Math.hypot(fwd, right);
-    const walk = (f & INPUT.WALK) !== 0;
+    // Shield up: walk forward, retreat back, hop sideways (original locomotion while blocking).
+    const shield = (f & INPUT.BLOCK) !== 0;
+    if (shield && right !== 0) {
+      const speed = right > 0 ? SHIELD_HOP_RIGHT_SPEED : SHIELD_HOP_LEFT_SPEED;
+      const dirX = co * (right / len) - s * (fwd / len);
+      const dirZ = -s * (right / len) - co * (fwd / len);
+      vx = dirX * speed;
+      vz = dirZ * speed;
+    }
+    const walk = (f & INPUT.WALK) !== 0 || shield;
     const lengthwise = fwd > 0 ? (walk ? stats.walkSpeed : stats.runSpeed) : (walk ? stats.walkBackSpeed : stats.backSpeed);
     const sideways = fwd !== 0 ? lengthwise : walk ? stats.walkStrafeSpeed : stats.strafeSpeed;
     const along = (fwd / len) * lengthwise;
     const side = (right / len) * sideways;
-    vx = -s * along + co * side;
-    vz = -co * along - s * side;
+    if (!(shield && right !== 0)) {
+      vx = -s * along + co * side;
+      vz = -co * along - s * side;
+    }
   }
 
   // Original vertical physics: take-off impulse, gravity, extra lift while jump is held in

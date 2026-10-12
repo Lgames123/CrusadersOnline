@@ -1,7 +1,11 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
+  ANIM,
   DEFAULT_MOVEMENT_STATS,
   INPUT,
+  SHIELD_HOP_LEFT_SPEED,
+  SHIELD_HOP_RIGHT_SPEED,
+  movementAnim,
   ROLLS,
   attackKindFor,
   movementFacingOffset,
@@ -156,6 +160,26 @@ describe('shared character controller', () => {
     expect(side).toBeGreaterThan(13.9 * 0.85);
     expect(side).toBeLessThan(13.9 * 1.15);
     expect(jumpDistance(0)).toBeLessThan(0.05);
+  });
+
+  it('moves like the original with the shield up: walk, retreat, side hops', () => {
+    const cases: [number, number][] = [
+      [INPUT.BLOCK | INPUT.FORWARD, DEFAULT_MOVEMENT_STATS.walkSpeed],
+      [INPUT.BLOCK | INPUT.BACK, DEFAULT_MOVEMENT_STATS.walkBackSpeed],
+      [INPUT.BLOCK | INPUT.LEFT, SHIELD_HOP_LEFT_SPEED],
+      [INPUT.BLOCK | INPUT.RIGHT, SHIELD_HOP_RIGHT_SPEED],
+    ];
+    for (const [flags, speed] of cases) {
+      const { mw, c } = setup();
+      run(mw, c, 0, 0, 10);
+      const start = { ...c.position };
+      run(mw, c, flags, 0, 20);
+      expect(Math.hypot(c.position.x - start.x, c.position.z - start.z)).toBeCloseTo(speed, 1);
+    }
+    expect(movementAnim(INPUT.BLOCK | INPUT.FORWARD, true, 0)).toBe(ANIM.WALK);
+    expect(movementAnim(INPUT.BLOCK | INPUT.BACK, true, 0)).toBe(ANIM.RETREAT);
+    expect(movementAnim(INPUT.BLOCK | INPUT.LEFT | INPUT.FORWARD, true, 0)).toBe(ANIM.HOP_LEFT);
+    expect(movementAnim(INPUT.BLOCK, true, 0)).toBe(ANIM.BLOCK);
   });
 
   it('picks the attack from the movement key held with the click', () => {

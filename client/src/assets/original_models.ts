@@ -40,6 +40,9 @@ interface ClipMap {
   crouch?: string;
   /** Forward hop (ASM_HOP_F) before a creature's swing. */
   hop?: string;
+  /** Side hops (ASM_HOP_L / _R): sideways with the shield up. */
+  hopLeft?: string;
+  hopRight?: string;
   /** Hit reactions: front, left, right, back (ASM_IMPACT_*). */
   impacts?: string[];
   /** Death variants (ASM_HIT_POINTS_DEPLETED and its ALT_01..08). */
@@ -64,6 +67,8 @@ function withStates(base: ClipMap, states: Record<string, string> | undefined): 
     // The quick shield block (ASM_BLOCK, PE07) rather than the slow ready-shield raise.
     block: st['ASM_BLOCK'] ?? base.block,
     hop: base.hop ?? st['ASM_HOP_F'] ?? base.run,
+    hopLeft: base.hopLeft ?? st['ASM_HOP_L'] ?? base.strafeLeft ?? base.run,
+    hopRight: base.hopRight ?? st['ASM_HOP_R'] ?? base.strafeRight ?? base.run,
     impacts: base.impacts ?? ['FRONT', 'LEFT', 'RIGHT', 'BACK'].map((k) => st[`ASM_IMPACT_${k}`]).filter((c): c is string => !!c),
     deaths: base.deaths ?? [st['ASM_HIT_POINTS_DEPLETED'] ?? base.death, ...[1, 2, 3, 4, 5, 6, 7, 8].map((i) => st[`ASM_HIT_POINTS_DEPLETED_ALT_0${i}`]).filter((c): c is string => !!c)],
     attackOverhead: base.attackOverhead ?? st['ASM_SWING_OVERHEAD'] ?? base.attacks[0]!,
@@ -140,6 +145,8 @@ class OriginalAvatar implements Avatar {
     if (anim >= ANIM.ROLL && anim < ANIM.ROLL + 4) return { name: m.rolls?.[anim - ANIM.ROLL] ?? m.run, loop: false };
     if (anim === ANIM.CROUCH) return { name: m.crouch ?? m.idle, loop: false };
     if (anim === ANIM.HOP_FORWARD) return { name: m.hop ?? m.run, loop: false };
+    if (anim === ANIM.HOP_LEFT) return { name: m.hopLeft ?? m.run, loop: true };
+    if (anim === ANIM.HOP_RIGHT) return { name: m.hopRight ?? m.run, loop: true };
     if (anim === ANIM.ATTACK_OVERHEAD) return { name: m.attackOverhead ?? m.attacks[0]!, loop: false };
     if (anim === ANIM.ATTACK_LEFT) return { name: m.attackLeft ?? m.attacks[0]!, loop: false };
     if (anim === ANIM.ATTACK_RIGHT) return { name: m.attackRight ?? m.attacks[0]!, loop: false };

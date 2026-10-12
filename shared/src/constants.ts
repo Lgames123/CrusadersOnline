@@ -92,6 +92,14 @@ export const ROLLS: readonly { ticks: number; speed: number }[] = ORIGINAL_ROLLS
   return { ticks, speed: (r.distanceFt * FT) / (ticks / TICK_RATE) };
 });
 
+/**
+ * With the shield up (right mouse button) the original walks forward (ASM_WALKING), retreats
+ * backwards (ASM_RETREAT) and moves sideways in repeated side hops (ASM_HOP_L / ASM_HOP_R:
+ * PC09 5.75 ft and PC10 4.94 ft per 20-frame hop plus a short stand), measured at ~7 / ~6 ft/s.
+ */
+export const SHIELD_HOP_LEFT_SPEED = (5.75 / 0.8) * FT;
+export const SHIELD_HOP_RIGHT_SPEED = (4.94 / 0.8) * FT;
+
 /** Same speed in every direction (creatures until their own clips are measured). */
 export function uniformMovementStats(speed: number, jumpVelocity = 0): MovementStats {
   return { runSpeed: speed, backSpeed: speed, strafeSpeed: speed, walkSpeed: speed, walkBackSpeed: speed, walkStrafeSpeed: speed, jumpVelocity };

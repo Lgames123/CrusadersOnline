@@ -156,6 +156,9 @@ export const ANIM = {
   HOP_FORWARD: 27,
   /** Creature jab (ASM_THRUST). */
   ATTACK_THRUST: 28,
+  /** Side hops (ASM_HOP_L / _R): sideways movement with the shield up. */
+  HOP_LEFT: 29,
+  HOP_RIGHT: 30,
 } as const;
 
 /** Animation for a character's own movement state (roll, duck, airborne, locomotion, idle). */
@@ -164,6 +167,16 @@ export function movementAnim(flags: number, grounded: boolean, rollDir: number):
   if (!grounded) return ANIM.AIRBORNE;
   if (flags & INPUT.DUCK) return ANIM.CROUCH;
   if (flags & INPUT.ROOTED) return ANIM.IDLE;
+  if (flags & INPUT.BLOCK) {
+    // Shield up: forward walks, back retreats, any sideways key hops to that side.
+    const right = (flags & INPUT.RIGHT ? 1 : 0) - (flags & INPUT.LEFT ? 1 : 0);
+    const fwd = (flags & INPUT.FORWARD ? 1 : 0) - (flags & INPUT.BACK ? 1 : 0);
+    if (right > 0) return ANIM.HOP_RIGHT;
+    if (right < 0) return ANIM.HOP_LEFT;
+    if (fwd > 0) return ANIM.WALK;
+    if (fwd < 0) return ANIM.RETREAT;
+    return ANIM.BLOCK;
+  }
   return locomotionAnim(flags);
 }
 
@@ -224,5 +237,5 @@ export function locomotionAnim(flags: number): number {
 
 /** Whether an animation code is a ground locomotion cycle. */
 export function isLocomotionAnim(anim: number): boolean {
-  return anim === ANIM.RUN || anim === ANIM.WALK || (anim >= ANIM.RETREAT && anim <= ANIM.WALK_STRAFE_RIGHT);
+  return anim === ANIM.RUN || anim === ANIM.WALK || (anim >= ANIM.RETREAT && anim <= ANIM.WALK_STRAFE_RIGHT) || anim === ANIM.HOP_LEFT || anim === ANIM.HOP_RIGHT;
 }

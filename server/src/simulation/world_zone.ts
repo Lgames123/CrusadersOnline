@@ -779,9 +779,7 @@ export class WorldZone {
         p.blocking = alive(p) && p.shield !== null && (this.frame.flags & INPUT.BLOCK) !== 0 && !p.swing && p.hitUntil <= tick;
         p.anim = p.hitUntil > tick
           ? ANIM.HIT
-          : p.blocking
-          ? ANIM.BLOCK
-          : movementAnim(this.frame.flags, p.character.grounded, p.character.rollDir);
+          : movementAnim(p.blocking ? this.frame.flags : this.frame.flags & ~INPUT.BLOCK, p.character.grounded, p.character.rollDir);
       }
     }
 

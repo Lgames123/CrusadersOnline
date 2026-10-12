@@ -128,7 +128,7 @@ export class LocalPlayer {
     } else {
       this.sinceSwing += dt;
     }
-    const anim = this.dead ? ANIM.DEAD : this.swingLeft > 0 ? attackAnim(this.kind, this.combo) : this.blocking ? ANIM.BLOCK : this.moveAnim;
+    const anim = this.dead ? ANIM.DEAD : this.swingLeft > 0 ? attackAnim(this.kind, this.combo) : this.moveAnim;
     this.avatar.setState(anim, this.swingTime, this.swingCount);
     this.avatar.update(dt);
   }
