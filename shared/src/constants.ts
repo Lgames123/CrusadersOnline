@@ -164,6 +164,31 @@ export function hitReactionTicks(action: number): number {
   const frames = action === ACTION_KNOCKDOWN ? KNOCKDOWN_CURVE.length - 1 : action === ACTION_STUN ? 0.9 * 30 * CLIP_RATE : 17;
   return Math.ceil((frames / (30 * CLIP_RATE)) * TICK_RATE);
 }
+/**
+ * Creature actions that move by their clip's forward root curve (feet per frame): 12 the
+ * forward hop before a swing (ASM_HOP_F, PC07: still for 4 frames, 5.74 ft by frame 12, then
+ * still; the action lasts LUNGE_TICKS, standing after the clip), 13 the shield bash
+ * (ASM_RAM_SHOULDER, PL01: 6.54 ft by frame 11, settling to 5.18 ft).
+ */
+export const ACTION_LUNGE = 12;
+export const ACTION_BASH = 13;
+/** The lunge lasts 1.0 s: the next request was logged 0.9-1.06 s after the hop. */
+export const LUNGE_TICKS = Math.round(1.0 * TICK_RATE);
+export const LUNGE_CURVE: readonly number[] = [0, 0, 0, 0, 0, 0.54, 1.16, 1.86, 2.59, 3.32, 4.01, 4.7, 5.22, 5.74, 5.72, 5.71, 5.69, 5.67, 5.65, 5.65, 5.65];
+export const BASH_CURVE: readonly number[] = [0, 0.08, 0.17, 0.25, 0.94, 1.63, 2.46, 3.36, 4.37, 5.37, 5.96, 6.54, 6.44, 6.33, 6.23, 6.12, 6.02, 5.91, 5.81, 5.71, 5.6, 5.5, 5.39, 5.29, 5.18];
+/** Ticks a clip curve lasts at 1000/30 fps. */
+export function curveTicks(curve: readonly number[]): number {
+  return Math.ceil(((curve.length - 1) / (30 * CLIP_RATE)) * TICK_RATE);
+}
+/** Forward root curve of a timed action (attacks, knock-down, lunge, bash), or null. */
+export function actionCurve(action: number): readonly number[] | null {
+  if (action >= ACTION_ATTACK && action < ACTION_ATTACK + ATTACK_CURVES.length) return ATTACK_CURVES[action - ACTION_ATTACK]!;
+  if (action === ACTION_KNOCKDOWN) return KNOCKDOWN_CURVE;
+  if (action === ACTION_LUNGE) return LUNGE_CURVE;
+  if (action === ACTION_BASH) return BASH_CURVE;
+  return null;
+}
+
 /** Whether a timed movement action is an attack's root motion. */
 export function isAttackAction(action: number): boolean {
   return action >= ACTION_ATTACK && action < ACTION_ATTACK + ATTACK_CURVES.length;

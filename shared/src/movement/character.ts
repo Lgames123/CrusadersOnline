@@ -1,5 +1,5 @@
 import type RAPIER from '@dimforge/rapier3d-deterministic-compat';
-import { ACTION_ATTACK, ACTION_KNOCKDOWN, ATTACK_CURVES, KNOCKDOWN_CURVE, attackMotionTicks, hitReactionTicks, isAttackAction, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_TICKS, curveAtTick, ROLL_CURVES, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
+import { ACTION_ATTACK, ACTION_LUNGE, LUNGE_TICKS, ATTACK_CURVES, actionCurve, attackMotionTicks, curveTicks, hitReactionTicks, isAttackAction, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_TICKS, curveAtTick, ROLL_CURVES, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
 import type { Vec3 } from '../math/vec3.ts';
 import { dequantizeAngle } from '../math/quantize.ts';
 import { INPUT, INPUT_ATTACK_SHIFT } from '../protocol/opcodes.ts';
@@ -25,6 +25,8 @@ export interface Character {
   rollDir: number;
   /** Ticks of the roll still to run. */
   rollTicks: number;
+  /** Total ticks of the timed action in progress (its curve is sampled from its start). */
+  actionLength: number;
   /** Jump in progress: 0 none, 1 standing / back / side, 2 running (forward). */
   airKind: number;
   /** Horizontal physics velocity during a jump, m/s (world X/Z). */
@@ -59,6 +61,7 @@ export function createCharacter(mw: MovementWorld, feet: Readonly<Vec3>): Charac
     grounded: false,
     rollDir: 0,
     rollTicks: 0,
+    actionLength: 0,
     airKind: 0,
     airVelX: 0,
     airVelZ: 0,
@@ -78,6 +81,7 @@ export function setCharacterState(c: Character, feet: Readonly<Vec3>, velocityY:
   c.airTravel = c.airKind ? snapMm(air!.travel) : 0;
   c.rollDir = rollTicks > 0 ? rollDir : 0;
   c.rollTicks = c.rollDir ? rollTicks : 0;
+  c.actionLength = actionTicks(c.rollDir);
   c.position.x = snapMm(feet.x);
   c.position.y = snapMm(feet.y);
   c.position.z = snapMm(feet.z);
@@ -110,8 +114,7 @@ export function stepCharacter(
   // after a hop or another attack's motion: combo steps restart it).
   const motion = (f >> INPUT_ATTACK_SHIFT) & 0xf;
   if (motion > 0 && motion <= ATTACK_CURVES.length && c.grounded && (c.rollTicks === 0 || c.rollDir === ACTION_HOP_PAUSE || isAttackAction(c.rollDir))) {
-    c.rollDir = ACTION_ATTACK + motion - 1;
-    c.rollTicks = attackMotionTicks(motion);
+    startTimedAction(c, ACTION_ATTACK + motion - 1);
   }
   // C + direction starts a roll (grounded, not attacking); it then runs its full length.
   // Shield + a sideways key starts a side hop (the original moves sideways in hops when
@@ -157,17 +160,14 @@ export function stepCharacter(
       roll = (curveAtTick(curve, done + 1) - curveAtTick(curve, done)) / dt;
     }
     // Attacks move along the facing by their clip's forward root displacement.
-    if (isAttackAction(c.rollDir)) {
-      const motion = c.rollDir - ACTION_ATTACK + 1;
-      const done = attackMotionTicks(motion) - c.rollTicks;
-      roll = (curveAtTick(ATTACK_CURVES[motion - 1]!, done + 1) - curveAtTick(ATTACK_CURVES[motion - 1]!, done)) / dt;
+    // Attacks, the knock-down (thrown back, PI02) and creature lunges / bashes follow their
+    // clip's forward root curve; c.rollTicks counts down from the action's length.
+    const curve = actionCurve(c.rollDir);
+    if (curve) {
+      const done = c.actionLength - c.rollTicks;
+      roll = (curveAtTick(curve, done + 1) - curveAtTick(curve, done)) / dt;
     }
-    // A knock-down throws the character back and it gets up (PI02's root motion).
-    if (c.rollDir === ACTION_KNOCKDOWN) {
-      const done = hitReactionTicks(ACTION_KNOCKDOWN) - c.rollTicks;
-      roll = (curveAtTick(KNOCKDOWN_CURVE, done + 1) - curveAtTick(KNOCKDOWN_CURVE, done)) / dt;
-    }
-    let along = c.rollDir === 1 || c.rollDir === 2 || isAttackAction(c.rollDir) || c.rollDir === ACTION_KNOCKDOWN ? roll : 0;
+    let along = c.rollDir === 1 || c.rollDir === 2 || curve ? roll : 0;
     let side = c.rollDir === 3 || c.rollDir === 4 ? roll : hop;
     // Shield + a diagonal (forward / back with a side key): the side hop goes along that diagonal.
     const lengthwise = (f & INPUT.FORWARD ? 1 : 0) - (f & INPUT.BACK ? 1 : 0);
@@ -277,10 +277,25 @@ export function stepCharacter(
   );
 }
 
+/** Length in ticks of a timed action that follows a curve or holds the character (0 otherwise). */
+function actionTicks(action: number): number {
+  if (isAttackAction(action)) return attackMotionTicks(action - ACTION_ATTACK + 1);
+  if (action >= 16 && action <= 18) return hitReactionTicks(action);
+  if (action === ACTION_LUNGE) return LUNGE_TICKS;
+  const curve = actionCurve(action);
+  return curve ? curveTicks(curve) : 0;
+}
+
+/** Starts a timed action (attack motion, hit reaction, creature lunge / bash), replacing any other. */
+export function startTimedAction(c: Character, action: number): void {
+  c.rollDir = action;
+  c.rollTicks = actionTicks(action);
+  c.actionLength = c.rollTicks;
+}
+
 /** Starts a hit reaction (ACTION_IMPACT / ACTION_STUN / ACTION_KNOCKDOWN): it replaces any timed action. */
 export function startHitReaction(c: Character, action: number): void {
-  c.rollDir = action;
-  c.rollTicks = hitReactionTicks(action);
+  startTimedAction(c, action);
 }
 
 /** Roll direction for held movement flags: 1 forward, 2 back, 3 left, 4 right, 0 none. */

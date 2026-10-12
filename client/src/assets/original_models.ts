@@ -353,8 +353,8 @@ class OriginalAvatar implements Avatar {
 
 /**
  * Hangs equipment models on the attachment dummies kept in the model's extras (raw MDL values:
- * rotation quaternion x, y, z, w then translation, relative to the dummy's bone), converted to
- * glTF space with the same Z mirror as the bones.
+ * rotation quaternion w, x, y, z — w first, unlike the bones — then translation, relative to
+ * the dummy's bone), converted to glTF space with the same Z mirror as the bones.
  */
 function attachEquipment(model: THREE.Object3D, equipment: { right?: THREE.Object3D; left?: THREE.Object3D }): void {
   let dummies: { name: string; node: number; values: number[] }[] | undefined;
@@ -369,7 +369,7 @@ function attachEquipment(model: THREE.Object3D, equipment: { right?: THREE.Objec
     const item = side ? equipment[side] : undefined;
     const bone = bones[d.node];
     if (!item || !bone || d.values.length < 7) continue;
-    const [x, y, z, w, tx, ty, tz] = d.values as [number, number, number, number, number, number, number];
+    const [w, x, y, z, tx, ty, tz] = d.values as [number, number, number, number, number, number, number];
     const mount = new THREE.Object3D();
     mount.name = d.name;
     mount.quaternion.set(-x, -y, z, w).normalize();

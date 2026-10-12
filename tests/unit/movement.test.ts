@@ -8,6 +8,9 @@ import {
   ACTION_STUN,
   hitReactionTicks,
   startHitReaction,
+  startTimedAction,
+  ACTION_LUNGE,
+  LUNGE_TICKS,
   ATTACK_CURVES,
   INPUT_ATTACK_SHIFT,
   attackMotion,
@@ -166,6 +169,18 @@ describe('shared character controller', () => {
     run(mw, c, INPUT.FORWARD, 0, hitReactionTicks(ACTION_KNOCKDOWN));
     expect(c.rollDir).toBe(0);
     expect(c.position.z - start.z).toBeCloseTo(5.36 * 0.3048, 1); // yaw 0 faces -Z: thrown towards +Z
+  });
+
+  it("a creature's lunge follows PC07: still at first, then 5.65 ft, then still until it ends", () => {
+    const { mw, c } = setup();
+    run(mw, c, 0, 0, 10);
+    const start = { ...c.position };
+    startTimedAction(c, ACTION_LUNGE);
+    run(mw, c, 0, 0, 2);
+    expect(Math.abs(c.position.z - start.z)).toBeLessThan(0.01); // wind-up (frames 0-4)
+    run(mw, c, 0, 0, LUNGE_TICKS - 2);
+    expect(c.rollDir).toBe(0);
+    expect(start.z - c.position.z).toBeCloseTo(5.65 * 0.3048, 1);
   });
 
   it('replays a roll exactly from a mid-roll snapshot (reconciliation)', () => {

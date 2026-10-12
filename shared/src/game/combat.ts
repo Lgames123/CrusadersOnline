@@ -1,4 +1,4 @@
-import { TICK_RATE } from '../constants.ts';
+import { LUNGE_TICKS, TICK_RATE } from '../constants.ts';
 import { originalMaxHp, type Attributes } from './original_stats.ts';
 import { ATTACK_MODE_SCALE, type DamageVector } from './ruleset.ts';
 
@@ -105,12 +105,9 @@ export const MOB_THRUST_RANGE = 4.8 * 0.3048;
 export const MOB_BASH = { kind: 'bash' as const, clip: { swing: 4, impact: 9, recovery: 24 } };
 export const MOB_BASH_CHANCE = 0.04;
 export const MOB_BASH_RANGE = 6 * 0.3048;
-export const MOB_BASH_DISTANCE = 6 * 0.3048;
 /** Leaping strike (ASM_JUMP_ATTACK): taken instead of the hop in ~15 % of approaches at ~7.5 ft. */
 export const MOB_JUMP_ATTACK = { kind: 'jump' as const, clip: { swing: 17, impact: 20, recovery: 24 } };
 export const MOB_JUMP_ATTACK_CHANCE = 0.15;
-/** ASM_JUMP_ATTACK covers about 3.5 ft before its impact. */
-export const MOB_JUMP_ATTACK_DISTANCE = 3.5 * 0.3048;
 /**
  * Attack rhythm logged in the original: chains of 1 (74 %) or 2 (26 %) swings. After each
  * action the creature stands 0.5 s in combat stance; in about half the stances it then raises
@@ -136,8 +133,7 @@ export const MOB_COMBAT_RANGE = 12 * 0.3048;
 /** Distance from which a creature lunges with a forward hop before swinging (logged 7.5-8 ft). */
 export const MOB_HOP_RANGE = 8 * 0.3048;
 /** ASM_HOP_F (PC07): 5.65 ft of root motion; the swing was requested 0.9-1.06 s after the hop. */
-export const MOB_HOP_TICKS = Math.round(1.0 * TICK_RATE);
-export const MOB_HOP_SPEED = (5.65 * 0.3048) / (MOB_HOP_TICKS / TICK_RATE);
+export const MOB_HOP_TICKS = LUNGE_TICKS;
 /** Share of hops that end in the combat stance without a swing (logged 11 of 43). */
 export const MOB_HOP_NO_SWING_CHANCE = 0.25;
 

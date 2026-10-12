@@ -413,6 +413,8 @@ Implemented in the shared movement step and `movementAnim()`: shield + forward /
 
 Side hops and rolls move by their clip's root motion, which is far from uniform (e.g. PC09: ~0.13 ft per frame for 4 frames, ~1 ft per frame over frames 4–10, settling by frame 15, still to frame 20; PE05 roll right covers 6 ft in its first 6 frames). The shared movement step now samples each clip's per-frame root displacement (`SHIELD_HOP_*_CURVE`, `ROLL_CURVES`, extracted from Drake's clips) at 1000/30 frames per second, tick by tick, instead of moving at the average speed.
 
+Creatures too (2026-10-12): the skeleton's forward hop follows PC07 (still for 4 frames, 5.74 ft by frame 12, then standing until the 1.0 s lunge ends), the leaping strike PN05 and the shield bash PL01 (6.54 ft by frame 11, settling to 5.18 ft) — they slid at a constant speed before. Death clips (models.ctx `ASM_HIT_POINTS_DEPLETED*`) keep their root motion in the converted clips (PI03 ends 7.5 ft to the side), so the body falls where the clip takes it; a death also ends any timed action.
+
 
 ### 14.4 Standing idle and shield stance (2026-10-12)
 

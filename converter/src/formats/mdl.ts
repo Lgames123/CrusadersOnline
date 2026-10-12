@@ -39,7 +39,7 @@ export interface MdlLine {
 export interface MdlTransformDummy {
   name: string;
   node: number;
-  /** Rotation quaternion (x, y, z, w) then translation, relative to `node` (UNK-006). */
+  /** Rotation quaternion (w, x, y, z — w first) then translation, relative to `node` (UNK-006). */
   values: number[];
 }
 

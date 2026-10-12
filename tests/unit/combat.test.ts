@@ -311,8 +311,9 @@ describe('inventory and equipment', () => {
     expect(t.inventories().at(-1)!.weaponSpeed).toBe(1);
     t.run(APPROACH, INPUT.FORWARD, 0);
     t.run(30);
-    // One swing every 1.5 s: back-to-back swings would keep the skeleton in its hit reactions.
-    for (let i = 0; i < 600 && t.mob().alive; i++) t.run(1, 0, 0, () => i % 30 === 0 && t.zone.attack(1));
+    // Let the skeleton land a hit first, then click every 0.5 s (landed hits interrupt it).
+    for (let i = 0; i < 200 && !t.events().some((e) => e.target === t.entityId && !e.blocked); i++) t.run(1);
+    for (let i = 0; i < 600 && t.mob().alive; i++) t.run(1, 0, 0, () => i % 10 === 0 && t.zone.attack(1));
     const dealt = t.events().filter((e) => e.target === t.mob().id && !e.blocked).map((e) => e.damage);
     expect(dealt.slice(0, 2)).toEqual([9, 9]); // Long Sword 10 slash x skeleton slash 0.9
     const taken = t.events().filter((e) => e.target === t.entityId && !e.blocked).map((e) => e.damage);

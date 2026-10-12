@@ -63,7 +63,6 @@ import {
   nextMobAttack,
   MOB_COMBAT_RANGE,
   MOB_HOP_RANGE,
-  MOB_HOP_SPEED,
   MOB_HOP_TICKS,
   MOB_HOP_NO_SWING_CHANCE,
   MOB_CHAIN_WEIGHTS,
@@ -73,7 +72,6 @@ import {
   MOB_JUMP_ATTACK,
   MOB_BASH,
   MOB_BASH_CHANCE,
-  MOB_BASH_DISTANCE,
   MOB_BASH_RANGE,
   ACTION_IMPACT,
   ACTION_KNOCKDOWN,
@@ -81,8 +79,11 @@ import {
   hitReactionTicks,
   isHitAction,
   startHitReaction,
+  startTimedAction,
+  ACTION_ATTACK,
+  ACTION_BASH,
+  ACTION_LUNGE,
   MOB_JUMP_ATTACK_CHANCE,
-  MOB_JUMP_ATTACK_DISTANCE,
   MOB_RETREAT_CHANCE,
   MOB_RETREAT_RANGE,
   MOB_RETREAT_TICKS,
@@ -924,7 +925,10 @@ export class WorldZone {
           this.startMobSwing(m, MOB_THRUST, 1); // the close-range jab, one per stance
         } else if (dist <= MOB_HOP_RANGE) {
           if (this.random() >= 1 - MOB_JUMP_ATTACK_CHANCE) this.startMobSwing(m, MOB_JUMP_ATTACK, 1);
-          else m.hopTicks = MOB_HOP_TICKS;
+          else {
+            m.hopTicks = MOB_HOP_TICKS;
+            startTimedAction(m.character, ACTION_LUNGE); // PC07's root motion, then still
+          }
         } else if (dist > MOB_COMBAT_RANGE) {
           m.input.flags = INPUT.FORWARD; // run in
         } else {
@@ -946,12 +950,10 @@ export class WorldZone {
 
     m.input.yaw = m.yaw;
     m.input.clientTick = this.tick;
-    // The leaping strike and the shield bash carry the creature forward until their impact.
-    const leaping = (m.swing?.kind === 'jump' || m.swing?.kind === 'bash') && this.tick - m.swing.start < m.swing.timing.startup + m.swing.timing.active;
-    if (m.hopTicks > 0 || leaping) m.input.flags = INPUT.FORWARD;
+    // Lunges, leaping strikes, bashes and hit reactions are timed actions of the shared step
+    // (their clips' root motion); other input is ignored meanwhile.
     if (m.hitUntil > this.tick) m.input.flags = 0;
-    const charge = m.swing?.kind === 'bash' ? this.bashStats : this.leapStats;
-    stepCharacter(this.mw, m.character, m.input, m.hopTicks > 0 ? this.hopStats : leaping ? charge : m.stats, TICK_DT);
+    stepCharacter(this.mw, m.character, m.input, m.stats, TICK_DT);
     this.separate(m);
     m.anim = m.hitUntil > this.tick
       ? ANIM.HIT
@@ -964,9 +966,6 @@ export class WorldZone {
       : m.input.flags & MOVE_MASK ? (m.input.flags & INPUT.WALK ? ANIM.WALK : ANIM.RUN) : ANIM.IDLE;
   }
 
-  private readonly hopStats = uniformMovementStats(MOB_HOP_SPEED);
-  private readonly leapStats = uniformMovementStats(MOB_JUMP_ATTACK_DISTANCE / ((clipSwingTiming(MOB_JUMP_ATTACK.clip).startup + clipSwingTiming(MOB_JUMP_ATTACK.clip).active) * TICK_DT));
-  private readonly bashStats = uniformMovementStats(MOB_BASH_DISTANCE / ((clipSwingTiming(MOB_BASH.clip).startup + clipSwingTiming(MOB_BASH.clip).active) * TICK_DT));
 
   /**
    * Pushes a creature out of any character it overlaps (characters are sensors for the
@@ -1006,6 +1005,9 @@ export class WorldZone {
   private startMobSwing(m: Mob, atk: { kind: AttackKind; clip: Parameters<typeof clipSwingTiming>[0] }, chain: number): void {
     m.chainLeft = chain;
     m.swing = { combo: 1, kind: atk.kind, start: this.tick, timing: clipSwingTiming(atk.clip), hit: new Set() };
+    // The leaping strike (PN05) and the shield bash (PL01) carry the creature by their root motion.
+    if (atk.kind === 'jump') startTimedAction(m.character, ACTION_ATTACK + 3);
+    else if (atk.kind === 'bash') startTimedAction(m.character, ACTION_BASH);
   }
 
   /**
@@ -1113,9 +1115,9 @@ export class WorldZone {
   private hitReaction(target: Actor, action: number): void {
     target.swing = null;
     target.hitUntil = this.tick + hitReactionTicks(action);
+    startHitReaction(target.character, action);
     if (target.kind === 'player') {
       target.queuedAttack = false;
-      startHitReaction(target.character, action);
     } else {
       target.hopTicks = 0;
       target.chainLeft = 0;
@@ -1172,6 +1174,8 @@ export class WorldZone {
 
     if (killed) {
       target.swing = null;
+      // The death clip carries the body itself (client side); no timed action keeps moving it.
+      startTimedAction(target.character, 0);
       if (target.kind === 'mob') {
         target.deadUntil = this.tick + target.archetype.respawnTicks;
         target.threat.clear();

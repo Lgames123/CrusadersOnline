@@ -63,7 +63,7 @@ export interface ConvertReport {
   warnings: string[];
 }
 
-const MANIFEST_VERSION = '1.2.0'; // 1.2: single-node models keep extras.nodeTransform (held items)
+const MANIFEST_VERSION = '1.3.0'; // 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion
 /** Bump when level output changes so cached levels are rebuilt. */
 const LEVEL_EMIT_VERSION = '2';
 
