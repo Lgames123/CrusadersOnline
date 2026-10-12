@@ -1,5 +1,5 @@
 import type RAPIER from '@dimforge/rapier3d-deterministic-compat';
-import { GRAVITY, PLAYER_HALF_SEGMENT, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
+import { GRAVITY, JUMP_HOLD_LIFT, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
 import type { Vec3 } from '../math/vec3.ts';
 import { dequantizeAngle } from '../math/quantize.ts';
 import { INPUT } from '../protocol/opcodes.ts';
@@ -60,6 +60,8 @@ export function setCharacterState(c: Character, feet: Readonly<Vec3>, velocityY:
 }
 
 const desired = { x: 0, y: 0, z: 0 };
+/** Downward speed while grounded, m/s. */
+const GROUND_STICK = -0.5;
 
 /**
  * Advances one character by one fixed step. This function is the single source of movement
@@ -122,9 +124,24 @@ export function stepCharacter(
     vz = -co * along - s * side;
   }
 
+  // Original vertical physics: take-off impulse, gravity, extra lift while jump is held in
+  // the air, and quadratic drag while rising.
   let vy = c.velocityY;
-  if (c.grounded && f & INPUT.JUMP && !rolling && !(f & INPUT.DUCK)) vy = stats.jumpVelocity;
-  vy += GRAVITY * dt;
+  let ay = GRAVITY;
+  if (c.grounded && f & INPUT.JUMP && !rolling && !(f & INPUT.DUCK)) {
+    vy = stats.jumpVelocity + ay * dt;
+  } else if (c.grounded) {
+    // On the ground the original holds a constant downward stick speed instead of
+    // accumulating gravity; a small one keeps the controller glued to slopes and steps.
+    vy = GROUND_STICK;
+  } else {
+    if (f & INPUT.JUMP) ay += JUMP_HOLD_LIFT;
+    vy += ay * dt;
+  }
+  if (vy > 0) {
+    const drag = RISE_DRAG * vy * vy * dt;
+    vy = drag > vy ? 0 : vy - drag;
+  }
 
   desired.x = vx * dt;
   desired.y = vy * dt;

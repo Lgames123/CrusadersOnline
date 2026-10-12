@@ -78,7 +78,7 @@ Every unknown item is assigned a priority and a concrete validation experiment t
 - **Verification Experiment:** Find the player input handler that writes the character's heading and pitch (callers of the orientation component setters used by the camera rig) and read its constants.
 
 ### UNK-012: Jump Impulse and Clip Playback Rate
-- **Status:** Open | **Priority:** Medium
+- **Status:** Partly resolved (2026-10-11): jump impulse, gravity and drag recovered with x32dbg (executable-analysis.md §13); running/directional jump kinds and the clip playback rate remain open. | **Priority:** Medium
 - **Description:** Locomotion speeds come from root motion (executable-analysis.md §11), but the jump clips barely move the root, so the jump's vertical speed and the directional jump/flip distances are not known (the slice keeps 6.5 m/s). Also, `Char_RootMotionVelocity` advances clips by `dt × 1000 × (1/30)`: if `dt` is in seconds, clips would play at 33.3 frames/s and every speed would be 11% higher than the 30 fps figures used. The unit of `dt` at the caller is unconfirmed.
 - **Verification Experiment:** Follow the `JUMP LEAVEGROUND` animation event handler to the code that sets the character's vertical velocity; trace the time argument of `Char_RootMotionVelocity` back to the frame timer (`0x004FDFA4`, integer ms).
 

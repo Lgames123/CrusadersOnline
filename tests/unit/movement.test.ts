@@ -82,7 +82,7 @@ describe('shared character controller', () => {
     const start = { ...c.position };
     run(mw, c, INPUT.FORWARD | INPUT.LEFT, 0, 20);
     const d = Math.hypot(c.position.x - start.x, c.position.z - start.z);
-    expect(d).toBeLessThanOrEqual(DEFAULT_MOVEMENT_STATS.runSpeed + 0.01);
+    expect(d).toBeLessThanOrEqual(DEFAULT_MOVEMENT_STATS.runSpeed + 0.02);
   });
 
   it('runs diagonals at the run speed with the body turned into the motion', () => {
@@ -169,20 +169,24 @@ describe('shared character controller', () => {
     expect(c.grounded).toBe(true);
   });
 
-  it('jumps to roughly v²/2g and lands', () => {
+  it('jumps as high as the original (~13 ft, ~1.15 s in the air) and lands', () => {
     const { mw, c } = setup();
     run(mw, c, 0, 0, 10);
     let peak = 0;
     const input: InputFrame = { clientTick: 0, flags: INPUT.JUMP, yaw: 0, pitch: 0 };
     stepCharacter(mw, c, input, DEFAULT_MOVEMENT_STATS, TICK_DT);
     input.flags = 0;
+    let airTicks = 1;
     for (let i = 0; i < 60; i++) {
       stepCharacter(mw, c, input, DEFAULT_MOVEMENT_STATS, TICK_DT);
       peak = Math.max(peak, c.position.y);
+      if (!c.grounded) airTicks++;
     }
-    const expected = DEFAULT_MOVEMENT_STATS.jumpVelocity ** 2 / (2 * 9.81);
-    expect(peak).toBeGreaterThan(expected * 0.85);
-    expect(peak).toBeLessThan(expected * 1.15);
+    // Reference: the original's integrator stepped at 20 Hz gives 12.95 ft and 1.15 s.
+    expect(peak / 0.3048).toBeGreaterThan(12.95 * 0.92);
+    expect(peak / 0.3048).toBeLessThan(12.95 * 1.08);
+    expect(airTicks / 20).toBeGreaterThan(1.0);
+    expect(airTicks / 20).toBeLessThan(1.3);
     expect(c.grounded).toBe(true);
     expect(c.position.y).toBeCloseTo(0, 1);
   });

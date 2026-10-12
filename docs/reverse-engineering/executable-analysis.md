@@ -293,3 +293,24 @@ Hit reactions: creature and player models bind `ASM_IMPACT_FRONT/LEFT/RIGHT/BACK
 | `-MOUSE` / `-INTENSITY` / `-SOUND` / `-DIALOG` / `-MUSIC <0-100>` | Mouse sensitivity (default 0.5), brightness (0.25), sound / dialogue (0.85) and music volumes |
 
 The camera-adjustment cases of `0x0043B9B0` (§10.1) are reached through `0x0043C840`.
+
+---
+
+## 13. Character Physics and the Jump (x32dbg + Ghidra, 2026-10-11)
+
+Recovered by debugging the running game (x32dbg with the MCP plugin): hardware write breakpoints on the player's physics component, conditional on an upward vertical velocity, while the user jumped. Behaviour only.
+
+**Objects.** The player character (global `0x00542FB0`) has a transform at `+0x40` (position at `+0x28/+0x2C/+0x30`, feet) and a physics component at `+0x4C` (vtable `0x004E26DC`): flags `+0x60` (bit 0 grounded, `0x10000` airborne, `0x8000` jump requested, `0x40`/`0x2000` other contact states), local velocity `+0x78/+0x7C/+0x80`, world velocity `+0x84/+0x88/+0x8C`, acceleration `+0x90/+0x94/+0x98`, gravity scale `+0x9C` (1.0), in-air travel accumulators `+0x170..+0x17C` and travel limits `+0x164..+0x16C`.
+
+**Update** (`0x004920A0`, physics vtable `+0x34`, called by the character update `0x00458500` with the frame time in milliseconds × 0.001):
+1. Acceleration (`0x00492B70`): grounded → vertical velocity held at **−5 ft/s**, no vertical acceleration; airborne → vertical acceleration = **−78.4 ft/s²** × gravity scale × global `0x004ECBB8` (1.0), halved while staggered (`0x80000`).
+2. **Jump** (flag `0x8000`, cleared on use; sets airborne): vertical acceleration += 78.4 / dt × 0.033 × 15 × 1.3 for that frame, i.e. a take-off impulse of **Δv = 50.45 ft/s** independent of the frame rate (`0x004ECD6C` = 1.3 is a global jump/physics scale). It also sets the in-air travel limits to 1.3 × 4 = 5.2 ft per axis, scaled by the jump kind (argument: 10 → ×2.5 horizontal, 9 → ×1.5 horizontal, 8 → ×2.3 vertical; the standing jump observed was kind 8).
+3. While jump is held in the air: vertical acceleration += 78.4 / dt × 0.033 × 1.3 × 0.06, a lift of ~0.2 ft/s per frame (frame-rate dependent in the original; 6.05 ft/s² at 30 fps).
+4. Velocity integration and drag (`0x004923E0`): v += a·dt, then per world axis v −= k·v·|v|·dt with k = 0.02 horizontally in the air and 0.01 vertically while rising (0 while falling). Once the in-air travel on an axis exceeds its limit, k becomes 0.05 horizontally / 0.1 vertically. On the ground k is a friction term (0.9 / 2, ×2.5 or ×3.5 per state). Speeds under 2.5 ft/s with no acceleration snap to 0.
+5. Position += world velocity × dt; collision against the level follows.
+
+Measured: the first frame after take-off reads 45.45 ft/s (50.45 minus that frame's gravity), and the sampled trajectory matches a simulation of these rules within frame-rate noise. Standing jump: **peak ≈ 13.2 ft (4.0 m), ≈ 1.17 s in the air** at 30 fps (≈ 14 ft holding jump).
+
+**Developer fly mode.** Flag `0x00589AAD` bit `0x20` (console command `-WHOAH`, §12) switches the player to free flight at 30 ft/s, adjustable in steps of 15 / 5.
+
+Implemented in `shared/src/constants.ts` / `movement/character.ts` (gravity, impulse, rising drag, hold lift; the in-air travel limit changes the standing jump by < 0.15 ft and is not modelled). Open: running and directional jump kinds (horizontal speeds and limits), the turn rate (UNK-011).
