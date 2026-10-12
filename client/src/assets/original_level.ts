@@ -32,7 +32,7 @@ export interface LevelObjectView {
   state: WorldObjectState;
 }
 
-/** A door brush: its world object and the drawn piece (slides up into the ceiling when open). */
+/** A door or lever brush: its world object and the drawn piece (doors slide up, levers tip over). */
 export interface DoorView {
   def: WorldObjectDef;
   mesh: THREE.Mesh;
@@ -247,13 +247,19 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
 
   // Brushes: doors, gates, bridges, wheels... (convex pieces; doors slide up when opened).
   const doors = new Map<number, DoorView>();
-  const doorDefs = new Map((arena.objects ?? []).filter((o) => o.kind === 'door').map((o) => [o.id, o]));
+  const doorDefs = new Map((arena.objects ?? []).filter((o) => o.kind === 'door' || o.kind === 'lever').map((o) => [o.id, o]));
   for (const b of arena.brushes ?? []) {
     const mesh = brushMesh(b.points, b.name);
     if (!mesh) continue;
     mesh.name = b.name;
     root.add(mesh);
     const def = b.door !== undefined ? doorDefs.get(b.door) : undefined;
+    if (def?.kind === 'lever') {
+      // Pivot at its centre so it can tip over when pulled.
+      const c = new THREE.Box3().setFromObject(mesh).getCenter(new THREE.Vector3());
+      mesh.geometry.translate(-c.x, -c.y, -c.z);
+      mesh.position.copy(c);
+    }
     if (def) doors.set(def.id, { def, mesh, state: 'present', open: 0 });
   }
 
@@ -297,7 +303,8 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
         if (d.open === target) continue;
         d.open = target > d.open ? Math.min(1, d.open + dt / DOOR_OPEN_SECONDS) : 0;
         const b = d.def.bounds!;
-        d.mesh.position.y = (b[4] - b[1]) * 0.95 * d.open;
+        if (d.def.kind === 'lever') d.mesh.rotation.z = (-Math.PI / 3) * d.open;
+        else d.mesh.position.y = (b[4] - b[1]) * 0.95 * d.open;
       }
       flames.forEach((f, i) => f.scale.setScalar(1.4 + 0.25 * Math.sin(t * 13 + i * 1.7) + 0.15 * Math.sin(t * 29 + i)));
       if ((reassign -= dt) <= 0) {

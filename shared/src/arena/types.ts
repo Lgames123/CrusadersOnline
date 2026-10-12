@@ -30,7 +30,7 @@ export interface TriMeshDef {
  */
 export interface WorldObjectDef {
   id: number;
-  kind: 'item' | 'chest' | 'breakable' | 'door';
+  kind: 'item' | 'chest' | 'breakable' | 'door' | 'lever';
   /** Metres. */
   x: number;
   y: number;
@@ -44,6 +44,10 @@ export interface WorldObjectDef {
   /** Doors: bounds (metres, [min x, y, z, max x, y, z]) and the key that unlocks it, if locked. */
   bounds?: [number, number, number, number, number, number];
   lock?: string;
+  /** Doors opened by a lever only (not by hand). */
+  byLever?: boolean;
+  /** Levers: the doors (object ids) pulling it opens. */
+  opens?: number[];
 }
 
 /**
@@ -56,6 +60,7 @@ export interface BrushDef {
   points: Float32Array;
   /** Solid for movement (doors, gates, bridges, platforms); the rest is drawn only. */
   solid: boolean;
+  /** World object id when the brush is a door or a lever. */
   door?: number;
 }
 

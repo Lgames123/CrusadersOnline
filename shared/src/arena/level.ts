@@ -58,6 +58,9 @@ export interface LevelBrush {
 export const DOOR_OBJECT_BASE = 500_000;
 /** Brushes that are doors (open with the interact key). */
 export const DOOR_BRUSH = /door|gate/i;
+/** Levers (Tab pulls them); in an act with levers its gates open by lever only (Ws1a/5a/9a). */
+const LEVER_BRUSH = /lever/i;
+const LEVER_GATE = /gate/i;
 /** Brushes that block movement: doors and the walkable pieces. */
 const SOLID_BRUSH = /door|gate|bridge|plat/i;
 /**
@@ -220,7 +223,8 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
     const pts = b.points.length > 4 ? b.points.slice(1) : b.points;
     const points = new Float32Array(pts.flatMap((p) => [p[0] * s, p[1] * s, p[2] * s]));
     const brush: BrushDef = { name: b.name, points, solid: SOLID_BRUSH.test(b.name) };
-    if (DOOR_BRUSH.test(b.name)) {
+    const lever = LEVER_BRUSH.test(b.name);
+    if (DOOR_BRUSH.test(b.name) || lever) {
       const min = [Infinity, Infinity, Infinity];
       const max = [-Infinity, -Infinity, -Infinity];
       for (let k = 0; k < points.length; k++) {
@@ -231,7 +235,7 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
       const lock = DOOR_LOCKS.find((l) => l.act.test(act) && l.brush === b.name)?.key;
       objects.push({
         id,
-        kind: 'door',
+        kind: lever ? 'lever' : 'door',
         x: (min[0]! + max[0]!) / 2,
         y: min[1]!,
         z: (min[2]! + max[2]!) / 2,
@@ -242,5 +246,12 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
     }
     brushes.push(brush);
   });
+  // Levers open the act's gates (the original's lever scripting is not decoded: all of them).
+  const levers = objects.filter((o) => o.kind === 'lever');
+  if (levers.length) {
+    const gates = objects.filter((o) => o.kind === 'door' && LEVER_GATE.test(brushes.find((b) => b.door === o.id)?.name ?? ''));
+    for (const g of gates) g.byLever = true;
+    for (const l of levers) l.opens = gates.map((g) => g.id);
+  }
   return { name, boxes: [], meshes: [mesh], spawnPoints: spawnPoints(mesh, hostiles, 8), mobSpawns, objects, portals, brushes };
 }

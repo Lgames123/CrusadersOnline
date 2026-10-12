@@ -562,7 +562,7 @@ export class WorldZone {
     const p = this.players.get(connId);
     const o = this.objects.get(id);
     if (!p || !o || !alive(p) || o.state !== 'present' || o.def.kind === 'breakable') return;
-    if (o.def.kind === 'door') {
+    if (o.def.kind === 'door' || o.def.kind === 'lever') {
       this.openDoor(p, o, key);
       return;
     }
@@ -579,10 +579,13 @@ export class WorldZone {
     if (record) this.outbox.persist?.([record], 'progress');
   }
 
-  /** Opens a door in reach (its bounds); a locked one needs its key carried and the use key. Doors stay open. */
+  /**
+   * Opens a door in reach (its bounds); a locked one needs its key carried and the use key, a
+   * lever-operated one its lever. Pulling a lever opens its doors. Doors stay open.
+   */
   private openDoor(p: Player, o: WorldObject, key: boolean): void {
     const b = o.def.bounds;
-    if (!b) return;
+    if (!b || o.def.byLever) return;
     const pos = p.character.position;
     const dx = Math.max(b[0] - pos.x, 0, pos.x - b[3]);
     const dz = Math.max(b[2] - pos.z, 0, pos.z - b[5]);
@@ -591,9 +594,14 @@ export class WorldZone {
       const keyId = itemSlug(o.def.lock);
       if (!key || !p.inventory.some((e) => e.itemId === keyId)) return;
     }
-    o.state = 'open';
-    setDoorOpen(this.mw, o.def.id, true);
-    this.broadcastObjects([{ id: o.def.id, state: 'open', by: p.entityId }]);
+    const changes: ObjectChange[] = [];
+    for (const target of [o, ...(o.def.opens ?? []).map((id) => this.objects.get(id))]) {
+      if (!target || target.state === 'open') continue;
+      target.state = 'open';
+      setDoorOpen(this.mw, target.def.id, true);
+      changes.push({ id: target.def.id, state: 'open', by: p.entityId });
+    }
+    this.broadcastObjects(changes);
   }
 
   /** Gold goes to the purse; known items to the bag (stacking potions). False if not taken. */
@@ -733,7 +741,7 @@ export class WorldZone {
   private respawnObjects(): void {
     const back: ObjectChange[] = [];
     for (const o of this.objects.values()) {
-      if (o.state === 'present' || o.def.kind === 'door' || this.tick < o.respawnAt) continue;
+      if (o.state === 'present' || o.def.kind === 'door' || o.def.kind === 'lever' || this.tick < o.respawnAt) continue;
       o.state = 'present';
       o.hp = o.def.hp ?? 0;
       o.respawnAt = 0;

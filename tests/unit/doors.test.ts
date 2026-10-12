@@ -72,6 +72,24 @@ describe('doors', () => {
     expect(t.blocked()).toBe(false);
   });
 
+  it('a lever-operated gate ignores the interact key; pulling its lever opens it', () => {
+    const arena = doorArena();
+    arena.objects![0]!.byLever = true;
+    arena.objects!.push({ id: 500_001, kind: 'lever', x: 1, y: 0, z: 0, bounds: [1, 0, -0.1, 1.2, 1.2, 0.1], opens: [500_000] });
+    const messages: ServerControlMsg[] = [];
+    const z = new WorldZone(rapier, 'lever', arena, {
+      send: (_c, data) => { if (typeof data === 'string') messages.push(JSON.parse(data) as ServerControlMsg); },
+    });
+    z.join(1, { name: 'Puller', characterId: null, position: { x: 0, y: 0.5, z: 0 } });
+    const open = (id: number) => messages.some((m) => m.op === SC.OBJECT_STATE && m.d.objects.some((o) => o.id === id && o.state === 'open'));
+    z.interact(1, 500_000);
+    expect(open(500_000)).toBe(false);
+    z.interact(1, 500_001);
+    expect(open(500_001)).toBe(true);
+    expect(open(500_000)).toBe(true);
+    expect(wallDistance((z as unknown as { mw: Parameters<typeof wallDistance>[0] }).mw, { x: 0, y: 0, z: 0 }, 0, 3, 1)).toBeNull();
+  });
+
   it('a locked door opens only with the use key and its key carried', () => {
     const without = zone('Room 2 Key');
     without.z.interact(1, 500_000, true);

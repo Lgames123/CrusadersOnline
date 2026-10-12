@@ -353,12 +353,12 @@ async function main(): Promise<void> {
     const p = local.object.position;
     for (const [id, door] of levelView.doors) {
       const b = door.def.bounds!;
-      if (door.state !== 'present' || p.y < b[1] - 2 || p.y > b[4]) continue;
+      if (door.state !== 'present' || door.def.byLever || p.y < b[1] - 2 || p.y > b[4]) continue;
       const d = Math.hypot(Math.max(b[0] - p.x, 0, p.x - b[3]), Math.max(b[2] - p.z, 0, p.z - b[5]));
       if (d > DOOR_RANGE || (best && best.d < d)) continue;
       const lock = door.def.lock;
       const hasKey = !!lock && (session.inventory?.items ?? []).some((i) => i.name === lock);
-      const label = !lock ? 'Tab — open door' : hasKey ? `Z — unlock door (${lock})` : `Locked — needs ${lock}`;
+      const label = door.def.kind === 'lever' ? 'Tab — pull lever' : !lock ? 'Tab — open door' : hasKey ? `Z — unlock door (${lock})` : `Locked — needs ${lock}`;
       best = { id, label, d, ...(lock ? { key: true } : {}) };
     }
     for (const [id, v] of levelView.objects) {
