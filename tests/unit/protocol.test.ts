@@ -97,6 +97,10 @@ describe('SC_WORLD_SNAPSHOT codec', () => {
     selfGrounded: true,
     selfRollDir: 3,
     selfRollTicks: 12,
+    selfAirKind: 2,
+    selfAirVelX: -4321,
+    selfAirVelZ: 1234,
+    selfAirTravel: 2500,
   });
 
   const state = (id: number, x: number, hp = 100): EntityState => ({ ...createEntityState(id), x, y: 50, z: -x, yaw: 300, hp });

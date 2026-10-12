@@ -73,7 +73,7 @@ Every unknown item is assigned a priority and a concrete validation experiment t
 - **Description:** `Ws_a.msh` sets header flag 2 and its lightmap block is not a DCL stream (probably stored uncompressed). The modulation factor between texture and lightmap (×2 assumed) is unverified.
 
 ### UNK-011: Keyboard Turn Rate, Look Rate and Pitch Limits
-- **Status:** Open | **Priority:** Medium
+- **Status:** Partly resolved (2026-10-11): the body follows the view heading at ≤ 270°/s (80°/s airborne), pitch clamp ±90° (executable-analysis.md §13). The arrow-key and numpad rates that move the view heading itself are still provisional. | **Priority:** Low
 - **Description:** The camera rig is recovered (executable-analysis.md §10), but the keyboard rotation speed (arrows), the numpad look speed, the mouse look sensitivity and the pitch limits are not. The client uses provisional values (2.5 rad/s turn, 1.2 rad/s look, pitch −1.2..0.6 rad). Rotation may be animation-driven (`ASM_TURN_L/R`).
 - **Verification Experiment:** Find the player input handler that writes the character's heading and pitch (callers of the orientation component setters used by the camera rig) and read its constants.
 

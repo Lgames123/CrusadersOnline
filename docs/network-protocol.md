@@ -88,7 +88,11 @@ Server rules: at most one input applied per server tick per player (extras queue
 13      4     selfVelY (int32, mm/s) — receiver's own vertical velocity (replay mid-jump)
 17      1     selfFlags (bit0 grounded, bits1-3 roll direction 0 none / 1 forward / 2 back / 3 left / 4 right; other bits must be 0)
 18      1     selfRollTicks (uint8) — ticks left of the receiver's roll (replay mid-roll)
-19      2     entityCount (uint16)
+19      4     selfAirVelX (int32, mm/s) — receiver's horizontal jump velocity (replay mid-jump)
+23      4     selfAirVelZ (int32, mm/s)
+27      2     selfAirTravel (uint16, mm) — horizontal distance since take-off
+29      1     selfAirKind (0 none, 1 jump, 2 running jump)
+30      2     entityCount (uint16)
 --- per entity ---
 +0      4     entityId (uint32)
 +4      1     changedMask (bit0 pos, bit1 yaw, bit2 anim, bit3 hp, bit4 flags)

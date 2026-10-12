@@ -35,10 +35,15 @@ export interface SnapshotHeader {
   /** Receiver's roll in progress (0 = none): direction 1-4 (ROLL_DIRS + 1) and ticks left. */
   selfRollDir: number;
   selfRollTicks: number;
+  /** Receiver's jump: kind (0 none, 1 normal, 2 running), horizontal velocity (mm/s), distance (mm). */
+  selfAirKind: number;
+  selfAirVelX: number;
+  selfAirVelZ: number;
+  selfAirTravel: number;
 }
 
-const HEADER_BYTES = 21;
-const ENTITY_COUNT_AT = 19;
+const HEADER_BYTES = 32;
+const ENTITY_COUNT_AT = 30;
 const ENTITY_MAX_BYTES = 4 + 1 + 12 + 2 + 2 + 2 + 1;
 
 export function snapshotMaxBytes(entities: number, removed: number): number {
@@ -78,6 +83,10 @@ export function encodeSnapshot(
   view.setInt32(13, header.selfVelY | 0, true);
   view.setUint8(17, (header.selfGrounded ? 1 : 0) | ((header.selfRollDir & 7) << 1));
   view.setUint8(18, header.selfRollTicks & 0xff);
+  view.setInt32(19, header.selfAirVelX | 0, true);
+  view.setInt32(23, header.selfAirVelZ | 0, true);
+  view.setUint16(27, Math.min(0xffff, Math.max(0, header.selfAirTravel | 0)), true);
+  view.setUint8(29, header.selfAirKind & 0xff);
   let o = HEADER_BYTES;
   let count = 0;
   for (const e of current.values()) {
@@ -134,7 +143,12 @@ export function decodeSnapshot(
     selfGrounded: (view.getUint8(17) & 1) === 1,
     selfRollDir: (view.getUint8(17) >> 1) & 7,
     selfRollTicks: view.getUint8(18),
+    selfAirVelX: view.getInt32(19, true),
+    selfAirVelZ: view.getInt32(23, true),
+    selfAirTravel: view.getUint16(27, true),
+    selfAirKind: view.getUint8(29),
   };
+  if (header.selfAirKind > 2) return null;
   if ((view.getUint8(17) & ~0b1111) !== 0 || ((view.getUint8(17) >> 1) & 7) > 4) return null;
   const base = header.baselineTick === 0 ? null : baseline;
   if (header.baselineTick !== 0 && !base) return null;

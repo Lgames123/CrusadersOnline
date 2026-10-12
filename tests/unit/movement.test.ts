@@ -137,6 +137,27 @@ describe('shared character controller', () => {
     expect(Math.hypot(c.position.x - start.x, c.position.z - start.z)).toBeLessThan(1e-3);
   });
 
+  it('jumps carry no run speed; held directions push in the air (original air control)', () => {
+    // Reference distances from the original's rules stepped at 20 Hz (executable-analysis §13):
+    // running jump (forward held) 25.3 ft, side jump 13.9 ft, standing jump 0.
+    const jumpDistance = (flags: number) => {
+      const { mw, c } = setup();
+      run(mw, c, 0, 0, 10);
+      const start = { ...c.position };
+      run(mw, c, flags | INPUT.JUMP, 0, 1);
+      expect(c.airKind).toBeGreaterThan(0);
+      for (let i = 0; i < 40 && !(c.grounded && c.airKind === 0); i++) run(mw, c, flags, 0, 1);
+      return Math.hypot(c.position.x - start.x, c.position.z - start.z) / 0.3048;
+    };
+    const running = jumpDistance(INPUT.FORWARD);
+    expect(running).toBeGreaterThan(25.3 * 0.85);
+    expect(running).toBeLessThan(25.3 * 1.15);
+    const side = jumpDistance(INPUT.RIGHT);
+    expect(side).toBeGreaterThan(13.9 * 0.85);
+    expect(side).toBeLessThan(13.9 * 1.15);
+    expect(jumpDistance(0)).toBeLessThan(0.05);
+  });
+
   it('picks the attack from the movement key held with the click', () => {
     expect(attackKindFor(0)).toBe('normal');
     expect(attackKindFor(INPUT.FORWARD | INPUT.LEFT)).toBe('overhead');
@@ -224,14 +245,19 @@ describe('determinism & reconciliation', () => {
     const server = setup();
     const client = setup();
     // Server runs everything; snapshot taken at tick 400.
-    let snap = { pos: { ...server.c.position }, vy: 0, grounded: false };
+    // The snapshot carries the full movement state (position, vertical speed, roll, jump).
+    const take = (c: typeof server.c) => ({
+      pos: { ...c.position }, vy: c.velocityY, grounded: c.grounded, rollDir: c.rollDir, rollTicks: c.rollTicks,
+      air: { kind: c.airKind, velX: c.airVelX, velZ: c.airVelZ, travel: c.airTravel },
+    });
+    let snap = take(server.c);
     inputs.forEach((inp, i) => {
       stepCharacter(server.mw, server.c, inp, DEFAULT_MOVEMENT_STATS, TICK_DT);
-      if (i === 400) snap = { pos: { ...server.c.position }, vy: server.c.velocityY, grounded: server.c.grounded };
+      if (i === 400) snap = take(server.c);
     });
     // Client was mispredicting, then receives the tick-400 snapshot and replays 401..599.
     run(client.mw, client.c, INPUT.FORWARD, 1, 300);
-    setCharacterState(client.c, snap.pos, snap.vy, snap.grounded);
+    setCharacterState(client.c, snap.pos, snap.vy, snap.grounded, snap.rollDir, snap.rollTicks, snap.air);
     for (const inp of inputs.slice(401)) stepCharacter(client.mw, client.c, inp, DEFAULT_MOVEMENT_STATS, TICK_DT);
     expect(client.c.position).toEqual(server.c.position);
   });

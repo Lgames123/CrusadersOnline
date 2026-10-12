@@ -10,6 +10,18 @@ export const TICK_DT = 1 / TICK_RATE;
  */
 export const GRAVITY = -78.4 * 0.3048;
 export const RISE_DRAG = 0.01 / 0.3048;
+/**
+ * Jumps carry no run speed (running is root motion, not physics): in the air, each held
+ * direction accelerates 156.8 × 1.3 × 0.16 = 32.6 ft/s² along that body axis (twice
+ * forward in a running jump), against a horizontal drag of 0.02 per foot. Once the
+ * horizontal distance travelled in the air passes the jump's limit (5.2 ft; 13 ft for a
+ * running jump) the push stops and the drag rises to 0.05 per foot (executable-analysis §13).
+ */
+export const AIR_ACCEL = 156.8 * 1.3 * 0.16 * 0.3048; // the per-frame 0.033 and 1/0.033 cancel: 32.6 ft/s²
+export const AIR_DRAG = 0.02 / 0.3048;
+export const AIR_DRAG_SPENT = 0.05 / 0.3048;
+export const AIR_LIMIT = 5.2 * 0.3048;
+export const AIR_LIMIT_RUNNING = 13 * 0.3048;
 export const JUMP_HOLD_LIFT = (78.4 * 0.033 * 1.3 * 0.06 / 0.0333) * 0.3048;
 
 /** Player capsule (gameplay-specification.md §3.1). Height includes both hemispheres. */

@@ -349,12 +349,13 @@ async function main(): Promise<void> {
       acc -= TICK_MS;
     }
     const dt = frameMs / 1000;
+    local.viewHeading = input.yaw;
     local.render(acc / TICK_MS, dt);
     if (session) remotes.update(session, dt);
     input.updateView(dt);
     const movingNow = Math.hypot(local.object.position.x - target.x, local.object.position.z - target.z) > 1e-4;
     target.copy(local.object.position);
-    chase.update(target, input.yaw, input.pitch, dt, movingNow);
+    chase.update(target, input.yaw, local.bodyHeading, input.pitch, dt, movingNow);
     levelView?.update(chase.camera, dt);
     if (sounds) {
       sounds.setListener(chase.camera);

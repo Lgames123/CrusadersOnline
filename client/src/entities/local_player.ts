@@ -2,7 +2,12 @@ import * as THREE from 'three';
 import { ANIM, INPUT, TICK_DT, attackAnim, dequantizeAngle, movementAnim, movementFacingOffset, type AttackKind, swingForWeaponSpeed, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
 import type { Avatar } from './avatar.ts';
 
-const TURN_RATE = 12; // rad/s, visual only
+/**
+ * The original turns the body towards the view heading at most 270°/s on the ground and 80°/s
+ * in the air (executable-analysis §13); the classic camera hangs off the body heading.
+ */
+const TURN_RATE_GROUND = (270 * Math.PI) / 180;
+const TURN_RATE_AIR = (80 * Math.PI) / 180;
 const SMOOTH_RATE = 10; // 1/s decay of visual correction offset
 const SNAP_DISTANCE = 2; // corrections larger than this are shown immediately
 const MOVE_MASK = INPUT.FORWARD | INPUT.BACK | INPUT.LEFT | INPUT.RIGHT;
@@ -26,6 +31,9 @@ export class LocalPlayer {
   private readonly offset = new THREE.Vector3();
   private facing = 0;
   private targetFacing = 0;
+  /** Rate-limited view heading (no diagonal offset), for the classic camera. */
+  private heading = 0;
+  private targetHeading = 0;
   private moveAnim: number = ANIM.IDLE;
   private swingLeft = 0;
   private combo = 0;
@@ -76,6 +84,16 @@ export class LocalPlayer {
     return true;
   }
 
+  /** Latest view heading (mouse / keys), set every rendered frame. */
+  set viewHeading(yaw: number) {
+    if (!this.dead) this.targetHeading = yaw;
+  }
+
+  /** Body heading following the view at the original's turn rate (classic camera yaw). */
+  get bodyHeading(): number {
+    return this.heading;
+  }
+
   /** Own swing playing: the feet stay planted (sent as INPUT.ROOTED). */
   get rooted(): boolean {
     return this.swingLeft > 0;
@@ -97,9 +115,9 @@ export class LocalPlayer {
       this.prev.y + (p.y - this.prev.y) * alpha + this.offset.y,
       this.prev.z + (p.z - this.prev.z) * alpha + this.offset.z,
     );
-    let delta = this.targetFacing - this.facing;
-    delta = Math.atan2(Math.sin(delta), Math.cos(delta));
-    this.facing += delta * Math.min(1, TURN_RATE * dt);
+    const maxTurn = (this.character.grounded ? TURN_RATE_GROUND : TURN_RATE_AIR) * dt;
+    this.facing = turnTowards(this.facing, this.targetFacing, maxTurn);
+    this.heading = turnTowards(this.heading, this.targetHeading, maxTurn);
     this.object.rotation.y = this.facing;
 
     if (this.swingLeft > 0) {
@@ -112,4 +130,10 @@ export class LocalPlayer {
     this.avatar.setState(anim, this.swingTime, this.swingCount);
     this.avatar.update(dt);
   }
+}
+
+/** Moves angle `from` towards `to` by at most `maxStep` radians (shortest way round). */
+function turnTowards(from: number, to: number, maxStep: number): number {
+  const delta = Math.atan2(Math.sin(to - from), Math.cos(to - from));
+  return from + Math.max(-maxStep, Math.min(maxStep, delta));
 }

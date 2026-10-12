@@ -38,10 +38,14 @@ export class CameraRig {
     this.modern.snap();
   }
 
-  update(target: THREE.Vector3, yaw: number, pitch: number, dt: number, moving: boolean): void {
+  /**
+   * @param viewYaw the mouse / keyboard heading (modern camera)
+   * @param bodyYaw the body heading following it at the original turn rate (classic camera)
+   */
+  update(target: THREE.Vector3, viewYaw: number, bodyYaw: number, pitch: number, dt: number, moving: boolean): void {
     // Both rigs always run, so their smoothing state is current whenever the zoom changes.
-    this.classic.update(target, yaw, pitch, dt, moving);
-    this.modern.update(target, yaw, pitch, dt, moving);
+    this.classic.update(target, bodyYaw, pitch, dt, moving);
+    this.modern.update(target, viewYaw, pitch, dt, moving);
     this.blend();
   }
 

@@ -1,5 +1,5 @@
 import type RAPIER from '@dimforge/rapier3d-deterministic-compat';
-import { GRAVITY, JUMP_HOLD_LIFT, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
+import { AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
 import type { Vec3 } from '../math/vec3.ts';
 import { dequantizeAngle } from '../math/quantize.ts';
 import { INPUT } from '../protocol/opcodes.ts';
@@ -21,6 +21,21 @@ export interface Character {
   rollDir: number;
   /** Ticks of the roll still to run. */
   rollTicks: number;
+  /** Jump in progress: 0 none, 1 standing / back / side, 2 running (forward). */
+  airKind: number;
+  /** Horizontal physics velocity during a jump, m/s (world X/Z). */
+  airVelX: number;
+  airVelZ: number;
+  /** Horizontal distance travelled since take-off, metres. */
+  airTravel: number;
+}
+
+/** Jump state carried in reconciliation snapshots. */
+export interface AirState {
+  kind: number;
+  velX: number;
+  velZ: number;
+  travel: number;
 }
 
 const HALF_HEIGHT = PLAYER_HEIGHT / 2;
@@ -40,6 +55,10 @@ export function createCharacter(mw: MovementWorld, feet: Readonly<Vec3>): Charac
     grounded: false,
     rollDir: 0,
     rollTicks: 0,
+    airKind: 0,
+    airVelX: 0,
+    airVelZ: 0,
+    airTravel: 0,
   };
 }
 
@@ -48,7 +67,11 @@ export function removeCharacter(mw: MovementWorld, c: Character): void {
 }
 
 /** Hard-sets the character state (spawn, teleport, reconciliation). Values are snapped to wire resolution. */
-export function setCharacterState(c: Character, feet: Readonly<Vec3>, velocityY: number, grounded: boolean, rollDir = 0, rollTicks = 0): void {
+export function setCharacterState(c: Character, feet: Readonly<Vec3>, velocityY: number, grounded: boolean, rollDir = 0, rollTicks = 0, air?: Readonly<AirState>): void {
+  c.airKind = air?.kind ?? 0;
+  c.airVelX = c.airKind ? snapMm(air!.velX) : 0;
+  c.airVelZ = c.airKind ? snapMm(air!.velZ) : 0;
+  c.airTravel = c.airKind ? snapMm(air!.travel) : 0;
   c.rollDir = rollTicks > 0 ? rollDir : 0;
   c.rollTicks = c.rollDir ? rollTicks : 0;
   c.position.x = snapMm(feet.x);
@@ -128,8 +151,13 @@ export function stepCharacter(
   // the air, and quadratic drag while rising.
   let vy = c.velocityY;
   let ay = GRAVITY;
-  if (c.grounded && f & INPUT.JUMP && !rolling && !(f & INPUT.DUCK)) {
+  const air: AirState = { kind: c.airKind, velX: c.airVelX, velZ: c.airVelZ, travel: c.airTravel };
+  const jumping = c.grounded && (f & INPUT.JUMP) !== 0 && !rolling && !(f & INPUT.DUCK) && stats.jumpVelocity > 0;
+  if (jumping) {
     vy = stats.jumpVelocity + ay * dt;
+    // Take-off: no horizontal speed carries over; holding forward makes a running jump.
+    air.kind = f & INPUT.FORWARD && !(f & INPUT.BACK) ? 2 : 1;
+    air.velX = air.velZ = air.travel = 0;
   } else if (c.grounded) {
     // On the ground the original holds a constant downward stick speed instead of
     // accumulating gravity; a small one keeps the controller glued to slopes and steps.
@@ -141,6 +169,29 @@ export function stepCharacter(
   if (vy > 0) {
     const drag = RISE_DRAG * vy * vy * dt;
     vy = drag > vy ? 0 : vy - drag;
+  }
+
+  if (air.kind && !rolling) {
+    // Jump: horizontal physics (air control, drag, distance limit) replaces ground motion.
+    const yaw = dequantizeAngle(input.yaw);
+    const s = Math.sin(yaw);
+    const co = Math.cos(yaw);
+    const spent = air.travel > (air.kind === 2 ? AIR_LIMIT_RUNNING : AIR_LIMIT);
+    let along = 0;
+    let side = 0;
+    if (!spent && !(f & INPUT.ROOTED)) {
+      along = ((f & INPUT.FORWARD ? 1 : 0) - (f & INPUT.BACK ? 1 : 0) + (air.kind === 2 ? 1 : 0)) * AIR_ACCEL;
+      side = ((f & INPUT.RIGHT ? 1 : 0) - (f & INPUT.LEFT ? 1 : 0)) * AIR_ACCEL;
+    }
+    air.velX += (-s * along + co * side) * dt;
+    air.velZ += (-co * along - s * side) * dt;
+    const k = spent ? AIR_DRAG_SPENT : AIR_DRAG;
+    const dragX = k * air.velX * Math.abs(air.velX) * dt;
+    const dragZ = k * air.velZ * Math.abs(air.velZ) * dt;
+    air.velX = Math.abs(dragX) > Math.abs(air.velX) ? 0 : air.velX - dragX;
+    air.velZ = Math.abs(dragZ) > Math.abs(air.velZ) ? 0 : air.velZ - dragZ;
+    vx = air.velX;
+    vz = air.velZ;
   }
 
   desired.x = vx * dt;
@@ -155,6 +206,11 @@ export function stepCharacter(
   if (grounded && vy < 0) vy = 0;
 
   const rollTicks = rolling ? c.rollTicks - 1 : 0;
+  if (air.kind) {
+    air.travel += Math.hypot(moved.x, moved.z);
+    // Landing ends the jump (but not on the take-off step itself).
+    if (grounded && !jumping) air.kind = 0;
+  }
   setCharacterState(
     c,
     { x: c.position.x + moved.x, y: c.position.y + moved.y, z: c.position.z + moved.z },
@@ -162,6 +218,7 @@ export function stepCharacter(
     grounded,
     c.rollDir,
     rollTicks,
+    air,
   );
 }
 
