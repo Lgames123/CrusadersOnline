@@ -99,15 +99,21 @@ export const MOB_THRUST = { kind: 'thrust' as const, clip: { swing: 6, impact: 9
 export const MOB_THRUST_RANGE = 4.8 * 0.3048;
 /**
  * Shield bash (ASM_RAM_SHOULDER, PL01: 24 frames, no events; the charge covers 6.5 ft by
- * frame 11). Logged once in ~12 minutes, from the stance at 5.7 ft: the player was stunned
- * (ASM_IMPACT_MEDIUM) without damage, and the hit that followed knocked him down.
+ * frame 11). Logged twice in ~90 stance decisions within 8 ft (4-5.7 ft): the player was
+ * stunned (ASM_IMPACT_MEDIUM) without damage.
  */
 export const MOB_BASH = { kind: 'bash' as const, clip: { swing: 4, impact: 9, recovery: 24 } };
-export const MOB_BASH_CHANCE = 0.04;
-export const MOB_BASH_RANGE = 6 * 0.3048;
+export const MOB_BASH_CHANCE = 0.02;
+export const MOB_BASH_RANGE = 5.8 * 0.3048;
 /** Leaping strike (ASM_JUMP_ATTACK): taken instead of the hop in ~15 % of approaches at ~7.5 ft. */
 export const MOB_JUMP_ATTACK = { kind: 'jump' as const, clip: { swing: 17, impact: 20, recovery: 24 } };
-export const MOB_JUMP_ATTACK_CHANCE = 0.15;
+export const MOB_JUMP_ATTACK_CHANCE = 0.12;
+/**
+ * From the stance at 5-7 ft a creature swings straight away (no hop): SWING_OVERHEAD, SWING_LEVEL
+ * and CHOP_LOW were requested 12 / 9 / 8 times at 5.0-7.0 ft in three logs (~32 % of the stance
+ * decisions); beyond that it hops in first.
+ */
+export const MOB_SWING_RANGE = 7 * 0.3048;
 /**
  * Attack rhythm logged in the original: chains of 1 (74 %) or 2 (26 %) swings. After each
  * action the creature stands 0.5 s in combat stance; in about half the stances it then raises
@@ -123,7 +129,7 @@ export const MOB_SHIELD_CHANCE = 0.55;
  * attacking, and keeps retreating until it is 8 ft away (logged: every retreat ended at
  * 8.0-8.2 ft), then walks in and hops again.
  */
-export const MOB_RETREAT_CHANCE = 0.3;
+export const MOB_RETREAT_CHANCE = 0.12;
 export const MOB_RETREAT_RANGE = 8 * 0.3048;
 /** Upper bound of a retreat (it stops at 8 ft; this only stops it against a wall). */
 export const MOB_RETREAT_TICKS = Math.round(1.5 * TICK_RATE);

@@ -439,8 +439,9 @@ describe('skeleton shield AI', () => {
       t.run(1, 0, 0, () => up && t.zone.attack(1));
       if (t.events().some((e) => e.target === t.mob().id && e.blocked)) break;
     }
-    // ...then keep swinging now and then until one lands.
-    for (let i = 0; i < 600 && t.mob().alive; i++) t.run(1, 0, 0, () => i % 20 === 0 && t.zone.attack(1));
+    // ...then keep swinging until one lands.
+    const landed = () => t.events().some((e) => e.target === t.mob().id && !e.blocked && e.damage > 0);
+    for (let i = 0; i < 600 && t.mob().alive && !landed(); i++) t.run(1, 0, 0, () => i % 5 === 0 && t.zone.attack(1));
     const onMob = t.events().filter((e) => e.target === t.mob().id);
     expect(onMob.some((e) => e.blocked)).toBe(true);
     expect(onMob.some((e) => !e.blocked && e.damage > 0)).toBe(true);

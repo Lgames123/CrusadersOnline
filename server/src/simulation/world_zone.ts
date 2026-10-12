@@ -84,6 +84,7 @@ import {
   ACTION_BASH,
   ACTION_LUNGE,
   MOB_JUMP_ATTACK_CHANCE,
+  MOB_SWING_RANGE,
   MOB_RETREAT_CHANCE,
   MOB_RETREAT_RANGE,
   MOB_RETREAT_TICKS,
@@ -923,9 +924,12 @@ export class WorldZone {
           this.startMobSwing(m, MOB_BASH, 1); // the rare shield bash: stuns without damage
         } else if (dist <= MOB_THRUST_RANGE) {
           this.startMobSwing(m, MOB_THRUST, 1); // the close-range jab, one per stance
+        } else if (dist <= MOB_HOP_RANGE && this.random() >= 1 - MOB_JUMP_ATTACK_CHANCE) {
+          this.startMobSwing(m, MOB_JUMP_ATTACK, 1); // the leaping strike
+        } else if (dist <= MOB_SWING_RANGE) {
+          this.startMobSwing(m, pickMobAttack(this.random()), this.chainLength()); // swings straight from the stance
         } else if (dist <= MOB_HOP_RANGE) {
-          if (this.random() >= 1 - MOB_JUMP_ATTACK_CHANCE) this.startMobSwing(m, MOB_JUMP_ATTACK, 1);
-          else {
+          {
             m.hopTicks = MOB_HOP_TICKS;
             startTimedAction(m.character, ACTION_LUNGE); // PC07's root motion, then still
           }
@@ -1152,13 +1156,12 @@ export class WorldZone {
     if (killed) target.hp = 0;
     if (!killed && hpBefore > 0 && damage > 0 && target.character.grounded) {
       // Every landed hit interrupts with an impact (the original skips airborne targets). The
-      // player rolls for a stun or a knock-down; a hit while stunned by a shield bash knocks
-      // down (logged once). Creatures only take the directional impact.
+      // player rolls for a stun or a knock-down (confirmed live: v = 0.771 knocked Drake down,
+      // 0.845 and 1.145 stunned him). Creatures only take the directional impact.
       let reaction = ACTION_IMPACT;
       if (target.kind === 'player') {
         const roll = originalFlinch(damage, hpBefore, this.random());
-        const bashed = target.character.rollDir === ACTION_STUN && target.hitUntil > this.tick;
-        reaction = bashed || roll === 'knockdown' ? ACTION_KNOCKDOWN : roll === 'stun' ? ACTION_STUN : ACTION_IMPACT;
+        reaction = roll === 'knockdown' ? ACTION_KNOCKDOWN : roll === 'stun' ? ACTION_STUN : ACTION_IMPACT;
       }
       // A knock-down is not cut short by another hit's lighter reaction.
       if (!(isHitAction(target.character.rollDir) && target.character.rollDir === ACTION_KNOCKDOWN && target.hitUntil > this.tick)) this.hitReaction(target, reaction);
