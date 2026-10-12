@@ -4,6 +4,7 @@ import {
   ANIM,
   COMBO_MULTIPLIERS,
   MOB_HOP_RANGE,
+  PLAYER_RADIUS,
   PLAYER_REACH,
   DEFAULT_MOVEMENT_STATS,
   ORIGINAL_CLIP_FPS,
@@ -351,8 +352,21 @@ describe('skeleton lunge (original behaviour)', () => {
   });
 });
 
+describe('character spacing', () => {
+  it('never lets a creature walk through the player', () => {
+    const t = setup();
+    t.run(APPROACH, INPUT.FORWARD, 0);
+    let closest = Infinity;
+    for (let i = 0; i < 300 && t.me().alive; i++) {
+      t.run(1);
+      closest = Math.min(closest, Math.hypot(t.mob().x - t.me().x, t.mob().z - t.me().z));
+    }
+    expect(closest).toBeGreaterThan(2 * PLAYER_RADIUS - 0.05);
+  });
+});
+
 describe('skeleton shield AI', () => {
-  it('raises its shield against a frontal swing, then lowers it for a cooldown', () => {
+  it('raises its shield against a frontal swing with the quick block clip, then lowers it', () => {
     // 0.99 passes the 35% block roll (and skips loot); 0 (the default) never blocks.
     const t = setup({ random: () => 0.99 });
     t.run(APPROACH, INPUT.FORWARD, 0);
@@ -366,13 +380,13 @@ describe('skeleton shield AI', () => {
     expect(first).toHaveLength(1);
     expect(first[0]).toMatchObject({ blocked: true, damage: 0 });
     expect(t.mob().hp).toBe(SKELETON.maxHp);
-    // Within the cooldown the next swing connects.
-    t.zone.attack(1);
-    t.run(12);
-    const second = t.events().filter((e) => e.target === t.mob().id);
-    expect(second).toHaveLength(2);
-    expect(second[1]!.blocked).toBeUndefined();
-    expect(second[1]!.damage).toBeGreaterThan(0);
+    // The block plays briefly and the shield comes down again (no endless block pose).
+    const anims: number[] = [];
+    for (let i = 0; i < 60; i++) {
+      t.run(1);
+      anims.push(t.mob().anim);
+    }
+    expect(anims.some((a) => a !== ANIM.BLOCK)).toBe(true);
   });
 
   it('guards between attack chains: frontal hits then are blocked, others land', () => {

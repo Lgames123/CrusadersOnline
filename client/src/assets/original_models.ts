@@ -61,6 +61,8 @@ function withStates(base: ClipMap, states: Record<string, string> | undefined): 
     walkStrafeRight: base.walkStrafeRight ?? st['ASM_SIDE_STEP_R'] ?? base.walk,
     rolls: base.rolls ?? ['ASM_ROLL_F', 'ASM_ROLL_B', 'ASM_ROLL_L', 'ASM_ROLL_R'].map((k) => st[k] ?? base.run),
     crouch: base.crouch ?? st['ASM_CROUCHING'] ?? base.idle,
+    // The quick shield block (ASM_BLOCK, PE07) rather than the slow ready-shield raise.
+    block: st['ASM_BLOCK'] ?? base.block,
     hop: base.hop ?? st['ASM_HOP_F'] ?? base.run,
     impacts: base.impacts ?? ['FRONT', 'LEFT', 'RIGHT', 'BACK'].map((k) => st[`ASM_IMPACT_${k}`]).filter((c): c is string => !!c),
     deaths: base.deaths ?? [st['ASM_HIT_POINTS_DEPLETED'] ?? base.death, ...[1, 2, 3, 4, 5, 6, 7, 8].map((i) => st[`ASM_HIT_POINTS_DEPLETED_ALT_0${i}`]).filter((c): c is string => !!c)],

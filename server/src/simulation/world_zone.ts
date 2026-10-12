@@ -32,7 +32,9 @@ import {
   MOB_ARCHETYPES,
   PLAYER_ARC_DEG,
   ORIGINAL_BLOCK_COS,
+  PLAYER_HEIGHT,
   PLAYER_RADIUS,
+  CHARACTER_GROUPS,
   PLAYER_REACH,
   PLAYER_RESPAWN_TICKS,
   SC,
@@ -292,6 +294,10 @@ interface Mob extends ActorBase {
 type Actor = Player | Mob;
 
 const alive = (a: Actor) => a.deadUntil === 0;
+/** Minimum distance between two characters' centres (two capsule radii). */
+const CHARACTER_SPACING = 2 * PLAYER_RADIUS;
+/** Quick shield block clip (PE07, 20 frames at 1000/30 fps). */
+const MOB_BLOCK_ANIM_TICKS = Math.round((20 / (1000 / 30)) * 20);
 
 /**
  * One authoritative world zone: shared collision world, player characters driven only by
@@ -897,7 +903,8 @@ export class WorldZone {
     m.input.clientTick = this.tick;
     if (m.hopTicks > 0) m.input.flags = INPUT.FORWARD;
     stepCharacter(this.mw, m.character, m.input, m.hopTicks > 0 ? this.hopStats : m.stats, TICK_DT);
-    m.anim = m.blockUntil > this.tick || (m.shield !== null && m.guardUntil > this.tick)
+    this.separate(m);
+    m.anim = m.blockUntil > this.tick
       ? ANIM.BLOCK
       : m.hopTicks > 0
       ? ANIM.HOP_FORWARD
@@ -905,6 +912,35 @@ export class WorldZone {
   }
 
   private readonly hopStats = uniformMovementStats(MOB_HOP_SPEED);
+
+  /**
+   * Pushes a creature out of any character it overlaps (characters are sensors for the
+   * controller, which only collides with the level). The push itself is collision-checked.
+   */
+  private separate(m: Mob): void {
+    const pos = m.character.position;
+    let px = 0;
+    let pz = 0;
+    for (const o of this.actors.values()) {
+      if (o === m || !alive(o)) continue;
+      const op = o.character.position;
+      if (Math.abs(op.y - pos.y) > PLAYER_HEIGHT) continue;
+      const dx = pos.x - op.x;
+      const dz = pos.z - op.z;
+      const d = Math.hypot(dx, dz);
+      if (d >= CHARACTER_SPACING) continue;
+      // Exactly on top: push straight back along the creature's heading.
+      const nx = d > 1e-4 ? dx / d : -forwardXZ(dequantizeAngle(m.yaw)).x;
+      const nz = d > 1e-4 ? dz / d : -forwardXZ(dequantizeAngle(m.yaw)).z;
+      px += nx * (CHARACTER_SPACING - d);
+      pz += nz * (CHARACTER_SPACING - d);
+    }
+    if (px === 0 && pz === 0) return;
+    const push = { x: px, y: 0, z: pz };
+    this.mw.controller.computeColliderMovement(m.character.collider, push, undefined, CHARACTER_GROUPS);
+    const moved = this.mw.controller.computedMovement();
+    setCharacterState(m.character, { x: pos.x + moved.x, y: pos.y, z: pos.z + moved.z }, m.character.velocityY, m.character.grounded);
+  }
 
   /**
    * Starts a creature swing (one of its ASM attacks, timed by that clip's events). A new chain
@@ -956,6 +992,8 @@ export class WorldZone {
         if (!inMeleeArc(pos.x, pos.z, yaw, tp.x, tp.z, reach, arc, PLAYER_RADIUS)) continue;
         s.hit.add(target.entityId);
         if (this.blocks(target, a)) {
+          // A creature's stopped hit plays its quick block (PE07: 20 frames at 1000/30 fps).
+          if (target.kind === 'mob') target.blockUntil = Math.max(target.blockUntil, this.tick + MOB_BLOCK_ANIM_TICKS);
           this.broadcastNear(target, {
             op: SC.COMBAT_EVENT,
             d: { attacker: a.entityId, target: target.entityId, damage: 0, hp: Math.ceil(target.hp), killed: false, blocked: true },
