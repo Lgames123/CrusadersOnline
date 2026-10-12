@@ -19,6 +19,13 @@ export interface Avatar {
   react?(dir: number): void;
   /** Death-variant seed (entity id), so all clients pick the same death animation. */
   seed?: number;
+  /**
+   * Called when the playing clip passes one of its authored events (e.g. "SOUND LEFTFOOTSTEP").
+   * Original models only; when unset or unsupported, callers fall back to their own timing.
+   */
+  onEvent?: (name: string) => void;
+  /** Whether this avatar reports clip events through onEvent. */
+  readonly hasEvents?: boolean;
   update(dt: number): void;
   dispose(): void;
 }

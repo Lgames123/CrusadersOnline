@@ -166,6 +166,10 @@ class OriginalAvatar implements Avatar {
 
   private swingId = 0;
   private swingSeconds = 0;
+  onEvent?: (name: string) => void;
+  readonly hasEvents = true;
+  /** Clip time of the current action at the previous update (event crossing detection). */
+  private lastTime = 0;
   /** Picks the death variant; seeded per entity so every client shows the same one. */
   private deathCount = 0;
   /** Seconds left of a hit reaction overriding the current state. */
@@ -218,6 +222,7 @@ class OriginalAvatar implements Avatar {
     if (this.current && this.current !== action) action.crossFadeFrom(this.current, FADE, false);
     action.play();
     this.current = action;
+    this.lastTime = action.time;
   }
 
   update(dt: number): void {
@@ -225,8 +230,27 @@ class OriginalAvatar implements Avatar {
       this.reactLeft = 0;
       this.apply(); // back to the current state
     }
+    const before = this.current;
+    const prev = this.lastTime;
     this.mixer.update(dt);
+    const cur = this.current;
+    if (!cur) return;
+    const now = cur.time;
+    // Authored clip events (times in the clip's 30 fps frames), including loop wrap-around.
+    const events = this.events.get(cur.getClip().name);
+    if (events && this.onEvent && cur === before) {
+      const dur = cur.getClip().duration;
+      for (const e of events) {
+        const t = e.frame / 30;
+        const crossed = now >= prev ? t > prev && t <= now : t > prev || t <= now;
+        if (crossed && t <= dur) this.onEvent(e.name);
+      }
+    }
+    this.lastTime = now;
   }
+
+  /** Clip name -> authored events (converter extras). */
+  events = new Map<string, { frame: number; name: string }[]>();
 
   dispose(): void {
     this.mixer.stopAllAction();
@@ -244,7 +268,7 @@ export async function loadOriginalAvatars(): Promise<AvatarFactory | null> {
     const loader = new GLTFLoader();
     const textures = new THREE.TextureLoader();
     const gltfs = new Map<string, GLTF>();
-    const loaded = new Map<string, { gltf: GLTF; clips: ClipMap; texture?: THREE.Texture }>();
+    const loaded = new Map<string, { gltf: GLTF; clips: ClipMap; events: Map<string, { frame: number; name: string }[]>; texture?: THREE.Texture }>();
     for (const [kind, def] of Object.entries(MODELS)) {
       const url = manifest.models[def.file];
       if (!url) continue;
@@ -260,13 +284,22 @@ export async function loadOriginalAvatars(): Promise<AvatarFactory | null> {
       }
       let states: Record<string, string> | undefined;
       gltf.scene.traverse((o) => (states ??= (o.userData as { asmStates?: Record<string, string> }).asmStates));
-      loaded.set(kind, { gltf, clips: withStates(def.clips, states), ...(texture ? { texture } : {}) });
+      // Clip events (footsteps, swing, impact...) are kept in each animation's glTF extras.
+      const events = new Map<string, { frame: number; name: string }[]>();
+      const json = (gltf.parser as unknown as { json: { animations?: { name?: string; extras?: { events?: { frame: number; name: string }[] } }[] } }).json;
+      for (const an of json.animations ?? []) {
+        if (an.name && an.extras?.events?.length) events.set(an.name, an.extras.events.map((e) => ({ frame: e.frame, name: e.name.trim() })));
+      }
+      loaded.set(kind, { gltf, clips: withStates(def.clips, states), events, ...(texture ? { texture } : {}) });
     }
     if (loaded.size === 0) return null;
     console.info(`[assets] using original models from your installation: ${[...loaded.keys()].join(', ')}`);
     return (kind) => {
       const entry = loaded.get(kind === 'player' ? 'self' : kind);
-      return entry ? new OriginalAvatar(entry.gltf, entry.clips, entry.texture) : null;
+      if (!entry) return null;
+      const avatar = new OriginalAvatar(entry.gltf, entry.clips, entry.texture);
+      avatar.events = entry.events;
+      return avatar;
     };
   } catch (err) {
     console.warn('[assets] original models unavailable:', err);

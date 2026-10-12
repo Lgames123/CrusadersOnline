@@ -97,6 +97,9 @@ export const MOB_RETREAT_CHANCE = 0.25;
 /** Share of frontal hits the guard stops (the original's skeletons die quickly to frontal attacks too). */
 export const MOB_GUARD_BLOCK_CHANCE = 0.5;
 export const MOB_RETREAT_TICKS = Math.round(0.8 * TICK_RATE);
+/** Guard held after stepping back before coming in again: 0.5-1.0 s (playtest feedback). */
+export const MOB_POST_RETREAT_MIN_TICKS = Math.round(0.5 * TICK_RATE);
+export const MOB_POST_RETREAT_SPAN_TICKS = Math.round(0.5 * TICK_RATE);
 
 /** Distance (centre to centre, m) inside which a creature walks in guard instead of running. */
 export const MOB_COMBAT_RANGE = 14 * 0.3048;

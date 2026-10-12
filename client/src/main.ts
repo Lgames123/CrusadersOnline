@@ -228,6 +228,12 @@ async function main(): Promise<void> {
   scene.add(local.object);
 
   const settings = new SettingsStore();
+  // Footsteps on the original clips' own LEFT/RIGHT FOOTSTEP events, in step with the animation.
+  local.avatar.onEvent = (name) => {
+    if (!sounds || !name.includes('FOOTSTEP') || !local.character.grounded) return;
+    const foot = name.includes('RIGHT') ? 1 : 0;
+    sounds.play(SFX.footstepStone[foot]!, local.object.position, { volume: name.includes('SOFT') ? 0.2 : 0.35 });
+  };
   chase = new CameraRig(mw, container.clientWidth / container.clientHeight);
   const input = new InputManager(renderer.domElement);
   const applySettings = () => {
@@ -362,7 +368,8 @@ async function main(): Promise<void> {
     if (sounds) {
       sounds.setListener(chase.camera);
       // Footsteps on stone while running on the ground (catacomb floors are ST materials).
-      const moving = local.character.grounded && Math.hypot(local.object.position.x - lastStep.x, local.object.position.z - lastStep.z) > 1.1;
+      // Placeholder avatars have no clip events: approximate steps by distance.
+      const moving = !local.avatar.hasEvents && local.character.grounded && Math.hypot(local.object.position.x - lastStep.x, local.object.position.z - lastStep.z) > 1.1;
       if (moving) {
         lastStep.copy(local.object.position);
         sounds.play(SFX.footstepStone[stepFoot = 1 - stepFoot]!, local.object.position, { volume: 0.35 });

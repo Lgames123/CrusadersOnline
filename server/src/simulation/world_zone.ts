@@ -70,6 +70,8 @@ import {
   MOB_GUARD_MIN_TICKS,
   MOB_RETREAT_CHANCE,
   MOB_RETREAT_TICKS,
+  MOB_POST_RETREAT_MIN_TICKS,
+  MOB_POST_RETREAT_SPAN_TICKS,
   MOB_THRUST,
   MOB_THRUST_RANGE,
   quantizeAngle,
@@ -974,7 +976,11 @@ export class WorldZone {
     m.chainLeft = 0;
     const span = MOB_GUARD_MAX_TICKS - MOB_GUARD_MIN_TICKS;
     m.guardUntil = this.tick + MOB_GUARD_MIN_TICKS + Math.floor(this.random() * (span + 1));
-    if (this.random() >= 1 - MOB_RETREAT_CHANCE) m.retreatUntil = this.tick + MOB_RETREAT_TICKS;
+    if (this.random() >= 1 - MOB_RETREAT_CHANCE) {
+      m.retreatUntil = this.tick + MOB_RETREAT_TICKS;
+      // After stepping back it holds its guard a moment before advancing again.
+      m.guardUntil = Math.max(m.guardUntil, m.retreatUntil + MOB_POST_RETREAT_MIN_TICKS + Math.floor(this.random() * (MOB_POST_RETREAT_SPAN_TICKS + 1)));
+    }
   }
 
   private updateSwing(a: Actor): void {
