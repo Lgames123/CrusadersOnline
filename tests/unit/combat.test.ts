@@ -2,6 +2,12 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { WorldZone, type PersistRecord } from '@crusaders/server/simulation/world_zone';
 import {
   ANIM,
+  SIDE_SWING_RECHAIN_TICKS,
+  THRUST_WALL_DISTANCE,
+  THRUST_WALL_HEIGHT,
+  attackKindFor,
+  createMovementWorld,
+  wallAhead,
   COMBO_MULTIPLIERS,
   MOB_HOP_RANGE,
   PLAYER_RADIUS,
@@ -197,16 +203,39 @@ describe('authoritative melee', () => {
 });
 
 describe('directional attacks (original controls)', () => {
-  it('replicates the side swing and keeps it out of the combo chain', () => {
+  it('plays side swings on the upper body (legs keep moving), re-triggers them 0.3 s in, keeps them out of the combo', () => {
     const t = setup();
     t.run(5); // away from the skeleton: a hit would interrupt the swing
     t.zone.attack(1, 'left');
+    t.run(1, INPUT.LEFT, 0);
+    // Replicated as the legs' clip (side-stepping) plus the upper-body swing in the entity flags.
+    expect(t.me().anim).toBe(ANIM.STRAFE_LEFT);
+    expect((t.me().flags >> 1) & 3).toBe(1);
+    const parity = (t.me().flags >> 3) & 1;
+    t.zone.attack(1, 'right'); // too early: ignored (queued for after the swing)
+    t.run(SIDE_SWING_RECHAIN_TICKS);
+    t.zone.attack(1, 'right'); // 0.3 s in: the next side swing starts at once
     t.run(1);
-    expect(t.me().anim).toBe(ANIM.ATTACK_LEFT);
-    t.run(30);
+    expect((t.me().flags >> 1) & 3).toBe(2);
+    expect((t.me().flags >> 3) & 1).not.toBe(parity);
+    t.run(40);
     t.zone.attack(1); // a plain click right after starts the combo at hit 1
     t.run(1);
     expect(t.me().anim).toBe(ANIM.ATTACK);
+  });
+});
+
+describe('air swing and wall jab (original controls)', () => {
+  it('a click in the air is the upper-body level swing; a plain click facing a wall within 5 ft is the jab', () => {
+    expect(attackKindFor(INPUT.FORWARD, false)).toBe('air');
+    expect(attackKindFor(INPUT.FORWARD, true)).toBe('jump');
+    const mw = createMovementWorld(rapier, createSyntheticArena());
+    // Walk towards the synthetic arena's +Z wall until it is within 5 ft ahead.
+    let z = 0;
+    for (; z < 30 && !wallAhead(mw, { x: 0, y: 0.5, z }, Math.PI, THRUST_WALL_DISTANCE, THRUST_WALL_HEIGHT); z += 0.1);
+    expect(z).toBeGreaterThan(10);
+    expect(z).toBeLessThan(30);
+    expect(wallAhead(mw, { x: 0, y: 0.5, z }, 0, THRUST_WALL_DISTANCE, THRUST_WALL_HEIGHT)).toBe(false); // facing away
   });
 });
 

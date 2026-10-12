@@ -192,14 +192,27 @@ export function movementAnim(flags: number, grounded: boolean, rollDir: number):
   return locomotionAnim(flags);
 }
 
-export type AttackKind = 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump' | 'thrust' | 'bash';
+export type AttackKind = 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump' | 'thrust' | 'bash' | 'air';
+
+/**
+ * Swings the original plays on the upper body only (animation controller layer state 2) while
+ * the legs keep their own clip: the side swings (ASM ids 87 / 88, the character keeps moving
+ * with the held key) and a click in the air (SWING_LEVEL over the jump / fall). Logged live.
+ */
+export function isLayeredSwing(kind: AttackKind): boolean {
+  return kind === 'left' || kind === 'right' || kind === 'air';
+}
+/** Entity flags bits 1-2: the layered swing playing (1 left, 2 right, 3 air); bit 3 flips per swing. */
+export const UPPER_SWING_CODES: readonly AttackKind[] = ['left', 'right', 'air'];
 
 /**
  * The original's attack selection, measured in the running game (executable-analysis.md §14):
  * forward (running) or jump + click = ASM_JUMP_ATTACK, left / right + click = side swings;
  * a plain click, and a click while ducking, start the five-swing combo.
  */
-export function attackKindFor(flags: number): AttackKind {
+export function attackKindFor(flags: number, grounded = true): AttackKind {
+  // Already in the air: the level swing over the jump (the take-off click is the jump attack).
+  if (!grounded) return 'air';
   if (flags & (INPUT.JUMP | INPUT.FORWARD)) return 'jump';
   if (flags & INPUT.LEFT && !(flags & INPUT.RIGHT)) return 'left';
   if (flags & INPUT.RIGHT && !(flags & INPUT.LEFT)) return 'right';
@@ -216,6 +229,7 @@ export function attackAnim(kind: AttackKind, combo: number): number {
     case 'jump': return ANIM.ATTACK_JUMP;
     case 'thrust': return ANIM.ATTACK_THRUST;
     case 'bash': return ANIM.ATTACK_BASH;
+    case 'air': return ANIM.ATTACK + 1;
     default: return combo >= 5 ? ANIM.ATTACK_COMBO5 : combo === 4 ? ANIM.ATTACK_COMBO4 : ANIM.ATTACK + combo - 1;
   }
 }

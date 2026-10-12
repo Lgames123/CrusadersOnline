@@ -3,6 +3,7 @@ import {
   INTERP_DELAY_TICKS,
   MOB_ARCHETYPES,
   TICK_DT,
+  UPPER_SWING_CODES,
   type ClientSession,
   type EntityInfo,
   type RemoteSample,
@@ -75,6 +76,8 @@ export class RemoteEntities {
       e.lastPhase = this.sample.animPhase;
       e.avatar.setState(this.sample.anim, swingSeconds, e.swingId);
       e.avatar.setShield?.((this.sample.flags & 1) !== 0);
+      const upper = (this.sample.flags >> 1) & 3;
+      e.avatar.setUpperSwing?.(upper ? UPPER_SWING_CODES[upper - 1]! : null, (this.sample.flags >> 3) & 1);
       e.avatar.update(dt);
     }
   }

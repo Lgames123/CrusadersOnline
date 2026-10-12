@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ANIM, PLAYER_HEIGHT, PLAYER_RADIUS, isAttackAnim, isLocomotionAnim } from '@crusaders/shared';
+import { ANIM, PLAYER_HEIGHT, PLAYER_RADIUS, isAttackAnim, isLocomotionAnim, type AttackKind } from '@crusaders/shared';
 
 /**
  * Visual representation of a character, driven by the replicated animation state. Two
@@ -29,6 +29,8 @@ export interface Avatar {
    * its end) while the legs keep their own clip (idle, walk, retreat, hops).
    */
   setShield?(up: boolean): void;
+  /** Upper-body swing over the legs' clip (side swings, air swing); `id` changes per swing. */
+  setUpperSwing?(kind: AttackKind | null, id: number): void;
   /** Whether this avatar reports clip events through onEvent. */
   readonly hasEvents?: boolean;
   update(dt: number): void;

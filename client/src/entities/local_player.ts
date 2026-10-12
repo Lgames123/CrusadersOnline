@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ANIM, INPUT, TICK_DT, attackAnim, attackMotion, isHitAction, dequantizeAngle, movementAnim, movementFacingOffset, type AttackKind, attackTiming, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
+import { ANIM, INPUT, TICK_DT, SIDE_SWING_RECHAIN_TICKS, attackAnim, attackMotion, isHitAction, isLayeredSwing, dequantizeAngle, movementAnim, movementFacingOffset, type AttackKind, attackTiming, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
 import type { Avatar } from './avatar.ts';
 
 /**
@@ -80,9 +80,19 @@ export class LocalPlayer {
     this.weaponSpeed = speed;
   }
 
-  /** Local swing feedback; mirrors the server's combo rule closely enough for presentation. */
-  swing(cameraYaw: number, kind: AttackKind = 'normal'): boolean {
-    if (this.dead || this.swingLeft > 0 || isHitAction(this.character.rollDir)) return false;
+  /**
+   * Local swing feedback; mirrors the server's combo rule closely enough for presentation.
+   * Returns the attack actually started (side swings alternate), or null.
+   */
+  swing(cameraYaw: number, kind: AttackKind = 'normal'): AttackKind | null {
+    if (this.dead || isHitAction(this.character.rollDir)) return null;
+    const side = (k: AttackKind) => k === 'left' || k === 'right';
+    if (this.swingLeft > 0) {
+      // Only a side swing re-triggers mid-swing, 0.3 s into the previous side swing.
+      if (!(side(kind) && side(this.kind) && this.swingTime - this.swingLeft >= SIDE_SWING_RECHAIN_TICKS * TICK_DT)) return null;
+    }
+    // Consecutive side swings alternate sides (the first one follows the held key).
+    if (side(kind) && side(this.kind) && (this.swingLeft > 0 || this.sinceSwing < 0.3)) kind = this.kind === 'left' ? 'right' : 'left';
     // Directional attacks are single hits; plain clicks chain the combo.
     this.combo = kind === 'normal' && this.kind === 'normal' && this.sinceSwing < 0.3 && this.combo < 5 ? this.combo + 1 : 1;
     this.kind = kind;
@@ -90,8 +100,8 @@ export class LocalPlayer {
     this.swingTime = swingSeconds(kind, this.combo, this.weaponSpeed);
     this.pendingMotion = attackMotion(kind, this.combo);
     this.swingLeft = this.swingTime;
-    this.targetFacing = cameraYaw;
-    return true;
+    if (!isLayeredSwing(kind)) this.targetFacing = cameraYaw;
+    return kind;
   }
 
   /** Latest view heading (mouse / keys), set every rendered frame. */
@@ -113,7 +123,7 @@ export class LocalPlayer {
 
   /** Own swing playing: the feet stay planted (sent as INPUT.ROOTED). */
   get rooted(): boolean {
-    return this.swingLeft > 0;
+    return this.swingLeft > 0 && !isLayeredSwing(this.kind);
   }
 
   /** The authoritative state moved the prediction by (dx, dy, dz). */
@@ -143,9 +153,13 @@ export class LocalPlayer {
     } else {
       this.sinceSwing += dt;
     }
-    const anim = this.dead ? ANIM.DEAD : this.swingLeft > 0 ? attackAnim(this.kind, this.combo) : this.moveAnim;
+    const swinging = this.swingLeft > 0 && !this.dead;
+    const layered = swinging && isLayeredSwing(this.kind);
+    const anim = this.dead ? ANIM.DEAD : swinging && !layered ? attackAnim(this.kind, this.combo) : this.moveAnim;
     this.avatar.setState(anim, this.swingTime, this.swingCount);
-    this.avatar.setShield?.(this.blocking && this.swingLeft <= 0 && !this.dead);
+    // Side and air swings play on the upper body over the legs' clip.
+    this.avatar.setUpperSwing?.(layered ? this.kind : null, this.swingCount);
+    this.avatar.setShield?.(this.blocking && !swinging);
     this.avatar.update(dt);
   }
 }

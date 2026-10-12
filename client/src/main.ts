@@ -3,6 +3,9 @@ import {
   DEFAULT_MOVEMENT_STATS,
   INPUT,
   INPUT_ATTACK_SHIFT,
+  THRUST_WALL_DISTANCE,
+  THRUST_WALL_HEIGHT,
+  wallAhead,
   LEVEL_PREFIX,
   attackKindFor,
   TICK_DT,
@@ -257,9 +260,13 @@ async function main(): Promise<void> {
     // The movement key held with the click picks the attack (original controls).
     // Holding C (ducked) ignores clicks, as in the original.
     if (input.heldFlags & INPUT.DUCK) return;
-    const kind = attackKindFor(input.heldFlags);
-    if (local.swing(input.yaw, kind)) {
-      session?.attack(kind);
+    let kind = attackKindFor(input.heldFlags, local.character.grounded);
+    // A plain click with a wall within 5 ft ahead plays the jab instead (combo routine).
+    const feet = local.character.position;
+    if (kind === 'normal' && wallAhead(session?.mw ?? mw, feet, input.yaw, THRUST_WALL_DISTANCE, THRUST_WALL_HEIGHT)) kind = 'thrust';
+    const started = local.swing(input.yaw, kind);
+    if (started) {
+      session?.attack(started);
       sounds?.play(pick(SFX.swing), local.object.position, { volume: 0.7 });
     }
   };

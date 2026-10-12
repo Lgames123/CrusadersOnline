@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { ANIM, ORIGINAL_CLIP_FPS, isAttackAnim, isLocomotionAnim } from '@crusaders/shared';
+import { ANIM, ORIGINAL_CLIP_FPS, isAttackAnim, isLocomotionAnim, type AttackKind } from '@crusaders/shared';
 import type { Avatar, AvatarKind } from '../entities/avatar.ts';
 
 /**
@@ -254,6 +254,10 @@ class OriginalAvatar implements Avatar {
   private shieldUp = false;
   private shieldAction: THREE.AnimationAction | null = null;
   private readonly lowerClips = new Map<string, THREE.AnimationClip>();
+  private readonly upperClips = new Map<string, THREE.AnimationClip>();
+  /** Upper-body swing in progress (side / air swings) and the seconds it has left. */
+  private upperSwing: { action: THREE.AnimationAction; left: number } | null = null;
+  private upperSwingKey = '';
   private baseClip: THREE.AnimationClip | null = null;
   private baseLoop = true;
   private baseScale = 1;
@@ -277,10 +281,48 @@ class OriginalAvatar implements Avatar {
     return c;
   }
 
+  /** The clip's upper-body tracks only (Bip01 Spine and below), cached. */
+  private upperOf(clip: THREE.AnimationClip): THREE.AnimationClip {
+    let c = this.upperClips.get(clip.name);
+    if (!c) {
+      const ub = this.upper();
+      c = new THREE.AnimationClip(`${clip.name}#upper`, clip.duration, clip.tracks.filter((t) => ub.has(t.name.split('.')[0]!)));
+      this.upperClips.set(clip.name, c);
+    }
+    return c;
+  }
+
+  /** Whether an upper-body layer (shield, side / air swing) overrides the base clip's upper body. */
+  private get layered(): boolean {
+    return this.shieldUp || this.upperSwing !== null;
+  }
+
+  setUpperSwing(kind: AttackKind | null, id: number): void {
+    const key = kind ? `${kind}:${id}` : '';
+    if (key === this.upperSwingKey) return;
+    this.upperSwingKey = key;
+    if (!kind || this.anim === ANIM.DEAD) return; // a swing ends with its clip
+    const m = this.map;
+    const name = kind === 'left' ? m.attackLeft : kind === 'right' ? m.attackRight : (m.attacks[1] ?? m.attacks[0]);
+    const clip = name ? this.clips.get(name) : undefined;
+    if (!clip) return;
+    const was = this.layered;
+    this.upperSwing?.action.stop();
+    const action = this.mixer.clipAction(this.upperOf(clip));
+    action.reset();
+    action.setLoop(THREE.LoopOnce, 1);
+    action.clampWhenFinished = false;
+    action.timeScale = ORIGINAL_CLIP_FPS / 30;
+    action.fadeIn(0.05).play();
+    this.upperSwing = { action, left: clip.duration / action.timeScale };
+    if (!was && this.baseClip) this.play(this.baseClip, this.baseLoop, this.baseScale);
+  }
+
   setShield(up: boolean): void {
     if (up === this.shieldUp) return;
     const block = this.clips.get(this.map.block);
     if (!block || this.anim === ANIM.DEAD) return;
+    const was = this.layered;
     this.shieldUp = up;
     if (up) {
       if (!this.shieldAction) {
@@ -297,14 +339,14 @@ class OriginalAvatar implements Avatar {
       this.shieldAction?.fadeOut(0.15);
     }
     // The legs keep their clip; swap between the full and the legs-only version of it.
-    if (this.baseClip) this.play(this.baseClip, this.baseLoop, this.baseScale);
+    if (was !== this.layered && this.baseClip) this.play(this.baseClip, this.baseLoop, this.baseScale);
   }
 
   private play(clip: THREE.AnimationClip, loop: boolean, timeScale: number): void {
     this.baseClip = clip;
     this.baseLoop = loop;
     this.baseScale = timeScale;
-    const playing = this.shieldUp ? this.lowerOf(clip) : clip;
+    const playing = this.layered ? this.lowerOf(clip) : clip;
     const keepTime = this.current && (this.current.getClip().name.split('#')[0] === clip.name) ? this.current.time : null;
     const action = this.mixer.clipAction(playing);
     action.reset();
@@ -320,6 +362,11 @@ class OriginalAvatar implements Avatar {
   }
 
   update(dt: number): void {
+    if (this.upperSwing && (this.upperSwing.left -= dt) <= 0) {
+      this.upperSwing.action.fadeOut(0.1);
+      this.upperSwing = null;
+      if (!this.layered && this.baseClip) this.play(this.baseClip, this.baseLoop, this.baseScale);
+    }
     if (this.reactLeft > 0 && (this.reactLeft -= dt) <= 0) {
       this.reactLeft = 0;
       this.apply(); // back to the current state

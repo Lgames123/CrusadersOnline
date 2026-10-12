@@ -25,6 +25,9 @@ import {
   movementAnim,
   movementFacingOffset,
   attackAnim,
+  isLayeredSwing,
+  UPPER_SWING_CODES,
+  SIDE_SWING_RECHAIN_TICKS,
   type AttackKind,
   INPUT,
   INTEREST_RADIUS,
@@ -267,6 +270,8 @@ interface Player extends ActorBase {
   gold: number;
   level: number;
   queuedAttack: boolean;
+  /** Swings started (entity flags bit 3 flips with it, so clients restart a repeated layered swing). */
+  swingSerial: number;
   queuedKind: AttackKind;
   /** Body yaw offset from the view yaw (diagonal movement), radians; replicated in the yaw. */
   facingOffset: number;
@@ -462,6 +467,7 @@ export class WorldZone {
       gold: Math.max(0, Math.floor(opts.gold ?? 0)),
       level,
       queuedAttack: false,
+      swingSerial: 0,
       queuedKind: 'normal',
       facingOffset: 0,
       statsDirty: true,
@@ -748,6 +754,12 @@ export class WorldZone {
     if (!p || !alive(p) || p.hitUntil > this.tick) return;
     p.blocking = false; // swinging lowers the shield until the next input re-raises it
     if (p.swing) {
+      // Side swings re-trigger 0.3 s into the previous one (the client alternates the side).
+      const side = (k: AttackKind) => k === 'left' || k === 'right';
+      if (side(p.swing.kind) && side(kind) && this.tick - p.swing.start >= SIDE_SWING_RECHAIN_TICKS) {
+        this.startPlayerSwing(p, kind);
+        return;
+      }
       const t = p.swing.timing;
       if (this.tick - p.swing.start >= t.startup + t.active) {
         p.queuedAttack = true;
@@ -762,6 +774,7 @@ export class WorldZone {
     const chained = kind === 'normal' && this.tick - p.lastSwingEnd <= COMBO_WINDOW_TICKS && p.lastCombo < COMBO_MULTIPLIERS.length;
     const combo = chained ? p.lastCombo + 1 : 1;
     p.swing = { combo, kind, start: this.tick, timing: attackTiming(kind, combo, p.weapon.speed ?? 1), hit: new Set() };
+    p.swingSerial++;
     p.queuedAttack = false;
     if (this.reactiveBlock) this.mobsReactToSwing(p);
   }
@@ -828,7 +841,9 @@ export class WorldZone {
       s.y = quantizePosition(pos.y);
       s.z = quantizePosition(pos.z);
       s.yaw = a.kind === 'player' && a.facingOffset ? quantizeAngle(dequantizeAngle(a.yaw) + a.facingOffset) : a.yaw;
-      s.anim = !alive(a) ? ANIM.DEAD : a.swing ? attackAnim(a.swing.kind, a.swing.combo) : a.anim;
+      // Layered swings (side, air) play over the legs' own clip: the anim stays the locomotion one.
+      const layered = a.swing !== null && isLayeredSwing(a.swing.kind);
+      s.anim = !alive(a) ? ANIM.DEAD : a.swing && !layered ? attackAnim(a.swing.kind, a.swing.combo) : a.anim;
       s.animPhase = a.swing ? Math.min(255, tick - a.swing.start) : 0;
       s.hp = Math.ceil(a.hp);
       // Shield layer (upper body): a player holding block, a creature in guard or blocking.
@@ -836,6 +851,7 @@ export class WorldZone {
         ? a.blocking
         : a.shield !== null && !a.swing && (a.blockUntil > tick || (a.shieldFrom <= tick && a.guardUntil > tick));
       s.flags = alive(a) && shieldUp ? 1 : 0;
+      if (alive(a) && layered && a.kind === 'player') s.flags |= ((UPPER_SWING_CODES.indexOf(a.swing!.kind) + 1) << 1) | ((a.swingSerial & 1) << 3);
     }
 
     // 6. Per-client stats + interest + delta snapshot.
@@ -1322,7 +1338,7 @@ export class WorldZone {
   }
 
   /** Debug/test view of every actor. */
-  inspect(): { id: number; kind: Actor['kind']; hp: number; alive: boolean; state?: Mob['state']; swinging: boolean; anim: number; shield: boolean; x: number; z: number }[] {
+  inspect(): { id: number; kind: Actor['kind']; hp: number; alive: boolean; state?: Mob['state']; swinging: boolean; anim: number; shield: boolean; flags: number; x: number; z: number }[] {
     return [...this.actors.values()].map((a) => ({
       id: a.entityId,
       kind: a.kind,
@@ -1332,6 +1348,7 @@ export class WorldZone {
       swinging: !!a.swing,
       anim: this.states.get(a.entityId)?.anim ?? 0,
       shield: ((this.states.get(a.entityId)?.flags ?? 0) & 1) !== 0,
+      flags: this.states.get(a.entityId)?.flags ?? 0,
       x: a.character.position.x,
       z: a.character.position.z,
     }));

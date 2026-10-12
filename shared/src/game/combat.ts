@@ -60,13 +60,27 @@ const DIRECTIONAL_CLIPS: Readonly<Record<'overhead' | 'left' | 'right' | 'low' |
   low: { swing: 14, impact: 16, recovery: 19 },
   jump: { swing: 17, impact: 20, recovery: 24 },
 };
+/**
+ * Side swings re-trigger 0.3 s into the previous one, alternating sides (logged: holding D and
+ * clicking played 88, 87, 88, 87 about 0.3-0.6 s apart while Drake kept side-stepping).
+ */
+export const SIDE_SWING_RECHAIN_TICKS = Math.round(0.3 * TICK_RATE);
+/**
+ * A plain click with level geometry within 5 ft ahead (probed 5.5 ft above the feet, routine
+ * 0x00437BE0 called from the combo routine 0x0042CA20) plays the jab (ASM_THRUST, PP02) instead
+ * of the combo swing, and resets the combo.
+ */
+export const THRUST_WALL_DISTANCE = 5 * 0.3048;
+export const THRUST_WALL_HEIGHT = 5.5 * 0.3048;
 /** Frames after RECOVERY before the next swing can start (observed chain hand-over). */
 const CHAIN_SLACK_FRAMES = 3;
 
 /** Swing timing of an attack (kind + combo step), scaled by the weapon's Speed. */
-export function attackTiming(kind: 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump' | 'thrust' | 'bash', combo: number, weaponSpeed = 1): SwingTiming {
+export function attackTiming(kind: 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump' | 'thrust' | 'bash' | 'air', combo: number, weaponSpeed = 1): SwingTiming {
   if (kind === 'thrust') return clipSwingTiming(MOB_THRUST.clip, weaponSpeed);
   if (kind === 'bash') return clipSwingTiming(MOB_BASH.clip, weaponSpeed);
+  // The air swing is SWING_LEVEL (PN02), the second combo clip.
+  if (kind === 'air') return clipSwingTiming(COMBO_CLIPS[1]!, weaponSpeed);
   const c = kind === 'normal' ? COMBO_CLIPS[Math.min(Math.max(combo, 1), COMBO_CLIPS.length) - 1]! : DIRECTIONAL_CLIPS[kind];
   return clipSwingTiming(c, weaponSpeed);
 }

@@ -35,6 +35,13 @@ function boxRotation(b: BoxDef): { x: number; y: number; z: number; w: number } 
   return { x: cy * sx, y: sy * cx, z: -sy * sx, w: cy * cx };
 }
 
+/** Whether level geometry lies within `distance` ahead of a character (yaw 0 faces -Z), probed at `height` above its feet. */
+export function wallAhead(mw: MovementWorld, feet: { x: number; y: number; z: number }, yaw: number, distance: number, height: number): boolean {
+  const dir = { x: -Math.sin(yaw), y: 0, z: -Math.cos(yaw) };
+  const ray = new mw.rapier.Ray({ x: feet.x, y: feet.y + height, z: feet.z }, dir);
+  return mw.world.castRay(ray, distance, true, undefined, CHARACTER_GROUPS) !== null;
+}
+
 /** Builds the static collision world for a level. Identical on client and server. */
 export function createMovementWorld(rapier: Rapier, arena: ArenaDef): MovementWorld {
   const world = new rapier.World({ x: 0, y: 0, z: 0 }); // gravity is applied by the controller, not the solver

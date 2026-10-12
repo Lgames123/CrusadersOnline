@@ -12,7 +12,7 @@ export interface EntityState {
   anim: number;
   animPhase: number;
   hp: number;
-  /** bit 0: shield up (upper-body shield layer). */
+  /** bit 0: shield up (upper-body shield layer); bits 1-2: layered swing (1 left, 2 right, 3 air); bit 3: swing parity. */
   flags: number;
 }
 

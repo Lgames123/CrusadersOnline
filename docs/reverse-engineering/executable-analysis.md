@@ -406,6 +406,16 @@ Player hits on creatures always produced an IMPACT_* request unless they killed 
 Implemented in the server AI (`world_zone.ts`, constants in `combat.ts`): the distance bands, the 1.0 s hop with 25 % no-swing, the leaping strike, the jab at ≤ 4.8 ft, retreat until 8 ft (30 %), chains 1/2 with the cycle order, the 0.5 s stance with a 55 % 0.82 s shield that blocks frontal hits, and no reactive block (kept as an optional, non-original feature: `WorldZoneOptions.reactiveBlock`, off by default, using the archetype's `blockChance` / `blockTicks` / `blockCooldown`).
 
 
+### 14.1b Side swings, air swing, wall jab and the combo table (Frida, 2026-10-12)
+
+Logged Drake's ASM states with pose and the controller's second channel:
+
+- **Side swings (ids 87 left / 88 right)** play on the upper-body layer (layer state 2) while the legs keep the held movement: holding D and clicking, Drake kept side-stepping at ~11–13 ft/s through 88 → 87 → 88 → 87, each click 0.3–0.6 s after the previous — consecutive side swings alternate sides and re-trigger mid-swing.
+- **Click in the air**: the main state stays the jump / fall while SWING_LEVEL plays on the upper-body layer; the jump's physics is untouched.
+- **Combo routine `0x0042CA20`** (decoded): per current state, a click queues the next step — none → 24, 24 → 23, 23 → 25, 25 → 103, 103 → 104, 104 → end; a separate chain 105 → 106 → 107 (models.ctx COMBO 6–8: PN21_1_vt, PN17, PN16) is never requested with the sword (another weapon class). The queued step needs the current clip ≥ 10 % played. Then `0x00437BE0(position + 5.5 ft up, 5 ft, owner)` tests level geometry ahead: if hit, the request becomes **ASM_THRUST (89)** and the queue is cleared — the jab a plain click plays against a wall.
+
+Implemented: side and air swings as layered swings (no rooting; replicated as the locomotion anim plus entity flags bits 1–3), the side-swing alternation and 0.3 s re-trigger, the air swing, and the wall jab (shared `wallAhead` ray, 5 ft at 5.5 ft height).
+
 ### 14.2 Moving with the shield up (2026-10-12)
 
 Sampled the player's ASM state and pose while holding the shield (right mouse button) and moving: forward → ASM_WALKING at 5.65 ft/s (the careful-walk speed), backward → ASM_RETREAT at 4.34 ft/s, sideways and diagonals → repeated ASM_HOP_L / ASM_HOP_R side hops (PC09 / PC10) with short stands in between, ~6–8 ft/s on average. Standing still with the shield up plays ASM_BLOCK (PE07).
