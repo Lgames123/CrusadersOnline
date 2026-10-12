@@ -1,5 +1,5 @@
 import type RAPIER from '@dimforge/rapier3d-deterministic-compat';
-import { ACTION_ATTACK, ACTION_BASH, ACTION_LUNGE, LUNGE_TICKS, ATTACK_CURVES, actionCurve, attackMotionTicks, curveTicks, hitReactionTicks, isAttackAction, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_TICKS, curveAtTick, ROLL_CURVES, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
+import { ACTION_ATTACK, ACTION_BASH, ACTION_LUNGE, LUNGE_TICKS, ATTACK_CURVES, actionCurve, attackMotionTicks, curveTicks, hitReactionTicks, isAttackAction, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_TICKS, curveAtTick, ROLL_CURVES, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, MAX_SLOPE_DEG, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
 import type { Vec3 } from '../math/vec3.ts';
 import { dequantizeAngle } from '../math/quantize.ts';
 import { INPUT, INPUT_ATTACK_SHIFT } from '../protocol/opcodes.ts';
@@ -264,7 +264,10 @@ export function stepCharacter(
   desired.z = vz * dt;
   mw.controller.computeColliderMovement(c.collider, desired, undefined, CHARACTER_GROUPS);
   const moved = mw.controller.computedMovement();
-  const grounded = mw.controller.computedGrounded();
+  // The controller reports ground on any contact below, steep or not; only a walkable surface
+  // holds the character (on a steeper one it keeps falling and slides off). Without this one
+  // could stand on 70° rock and be stepped up canyon walls, out of the level.
+  const grounded = mw.controller.computedGrounded() && touchesWalkable(mw);
 
   // Hit a ceiling while rising: stop vertical motion.
   if (desired.y > 0 && moved.y < desired.y * 0.5) vy = 0;
@@ -292,6 +295,20 @@ export function stepCharacter(
     air,
   );
   c.settled = still && grounded && Math.abs(moved.x) < 0.0005 && Math.abs(moved.y) < 0.0005 && Math.abs(moved.z) < 0.0005;
+}
+
+/** Cosine of the steepest surface that still counts as ground (the climb limit, with a margin for faceted floors). */
+const GROUND_MIN_NORMAL_Y = Math.cos(((MAX_SLOPE_DEG + 5) * Math.PI) / 180);
+
+/** Whether the last controller move touched a walkable surface (normal close enough to up). */
+function touchesWalkable(mw: MovementWorld): boolean {
+  const n = mw.controller.numComputedCollisions();
+  for (let i = 0; i < n; i++) {
+    const hit = mw.controller.computedCollision(i);
+    if (hit && hit.normal1.y >= GROUND_MIN_NORMAL_Y) return true;
+  }
+  // No contact this step: the controller's own snap-to-ground decided (flat ground stands).
+  return n === 0;
 }
 
 /** Length in ticks of a timed action that follows a curve or holds the character (0 otherwise). */

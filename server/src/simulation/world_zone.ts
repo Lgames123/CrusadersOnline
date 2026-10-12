@@ -246,6 +246,9 @@ interface ObjectChange {
   hp?: number;
 }
 
+/** Metres below the lowest level geometry at which a falling player is caught. */
+const FALL_MARGIN = 20;
+
 /** Saved positions outside these bounds are discarded (fell out of the world, corrupt data). */
 const MIN_VALID_Y = -50;
 const MAX_VALID_COORD = 10_000;
@@ -394,6 +397,8 @@ export class WorldZone {
   private readonly scratchFrames: InputFrame[] = Array.from({ length: MAX_INPUT_FRAMES }, createInputFrame);
   private readonly frame = createInputFrame();
   private readonly objects = new Map<number, WorldObject>();
+  /** Height below which a player has fallen out of the level (catchFall). */
+  private readonly fallLimit: number;
 
   constructor(rapier: Rapier, name: string, arena: ArenaDef, outbox: ZoneOutbox, opts: WorldZoneOptions = {}) {
     this.name = name;
@@ -405,6 +410,11 @@ export class WorldZone {
     this.spells = opts.spells ?? BUILTIN_SPELLS;
     this.items = opts.items ?? BUILTIN_ITEMS;
     this.mw = createMovementWorld(rapier, arena);
+    // Lowest level geometry (mesh or boxes) less a margin: below it, a player has fallen out.
+    let lowest = Infinity;
+    for (const m of arena.meshes) for (let i = 1; i < m.vertices.length; i += 3) lowest = Math.min(lowest, m.vertices[i]!);
+    for (const b of arena.boxes) lowest = Math.min(lowest, b.y - b.hy);
+    this.fallLimit = (Number.isFinite(lowest) ? lowest : 0) - FALL_MARGIN;
     for (const s of arena.mobSpawns) this.spawnMob(s.archetype, s);
     for (const def of arena.objects ?? []) this.objects.set(def.id, { def, state: 'present', hp: def.hp ?? 0, respawnAt: 0 });
   }
@@ -811,6 +821,18 @@ export class WorldZone {
     this.sendJson(p.connId, { op: SC.INVENTORY_UPDATE, d: { items, slots: INVENTORY_SLOTS, weaponSpeed: p.weapon.speed ?? 1 } });
   }
 
+  /**
+   * A player below the level (fell off an open edge the edge walls missed) is put back at the
+   * nearest spawn point.
+   */
+  private catchFall(p: Player): void {
+    const pos = p.character.position;
+    if (pos.y >= this.fallLimit) return;
+    let best = this.arena.spawnPoints[0] ?? { x: 0, y: 1, z: 0 };
+    for (const s of this.arena.spawnPoints) if (Math.hypot(s.x - pos.x, s.z - pos.z) < Math.hypot(best.x - pos.x, best.z - pos.z)) best = s;
+    setCharacterState(p.character, best, 0, false);
+  }
+
   private nextSpawnPoint(): { x: number; y: number; z: number } {
     return this.arena.spawnPoints[this.spawnIndex++ % this.arena.spawnPoints.length]!;
   }
@@ -981,6 +1003,7 @@ export class WorldZone {
         p.lastProcessedInput = this.frame.clientTick;
         if (alive(p)) p.yaw = this.frame.yaw;
         this.checkPortals(p);
+        this.catchFall(p);
         const moving = (this.frame.flags & MOVE_MASK) !== 0 && !(this.frame.flags & INPUT.ROOTED);
         p.blocking = alive(p) && p.shield !== null && (this.frame.flags & INPUT.BLOCK) !== 0 && !p.swing && p.hitUntil <= tick && p.character.rollDir !== ACTION_BASH;
         if (alive(p) && p.character.rollDir === ACTION_BASH) this.rushContact(p);
