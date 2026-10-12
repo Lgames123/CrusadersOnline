@@ -18,6 +18,10 @@ export class ZoneHost {
   readonly zone: string;
   /** Latest tick reported by the worker. */
   tick = 0;
+  /** Connections in this zone (joined, not yet left or transferred out). */
+  readonly members = new Set<number>();
+  /** Last join / leave / transfer, ms (Date.now): idle zones are stopped (ZoneManager). */
+  lastActive = Date.now();
   private readonly worker: Worker;
   private readonly ready: Promise<void>;
 
@@ -65,6 +69,8 @@ export class ZoneHost {
   }
 
   join(connId: number, opts: JoinOptions): void {
+    this.members.add(connId);
+    this.lastActive = Date.now();
     this.post({ t: 'join', connId, opts });
   }
 
@@ -93,10 +99,14 @@ export class ZoneHost {
   }
 
   transfer(connId: number): void {
+    this.members.delete(connId);
+    this.lastActive = Date.now();
     this.post({ t: 'transfer', connId });
   }
 
   leave(connId: number): void {
+    this.members.delete(connId);
+    this.lastActive = Date.now();
     this.post({ t: 'leave', connId });
   }
 

@@ -14,20 +14,50 @@ export interface ZoneManagerEvents {
   error?(arena: string, err: Error): void;
 }
 
+export interface ZoneManagerOptions {
+  /** A zone without players for this long is stopped (its world state resets). Default 5 min. */
+  idleStopMs?: number;
+  /** How often idle zones are looked for. Default 30 s. */
+  sweepMs?: number;
+}
+
 /**
- * One zone worker per arena, started on first use (players enter through login or portals).
- * Zones are named after their arena ("synthetic-arena", "level:ca1a"...).
+ * One zone worker per arena, started on first use (players enter through login or portals) and
+ * stopped after it stays empty (except the kept ones, e.g. the default arena). Zones are named
+ * after their arena ("synthetic-arena", "level:ca1a"...).
  */
 export class ZoneManager {
   private readonly zones = new Map<string, Promise<ZoneHost>>();
   private readonly ready = new Map<string, ZoneHost>();
   private readonly base: Omit<ZoneWorkerData, 'zone' | 'arena'>;
   private readonly events: ZoneManagerEvents;
+  private readonly kept = new Set<string>();
+  private readonly idleStopMs: number;
+  private readonly sweeper: ReturnType<typeof setInterval>;
   private stopping = false;
 
-  constructor(base: Omit<ZoneWorkerData, 'zone' | 'arena'>, events: ZoneManagerEvents) {
+  constructor(base: Omit<ZoneWorkerData, 'zone' | 'arena'>, events: ZoneManagerEvents, opts: ZoneManagerOptions = {}) {
     this.base = base;
     this.events = events;
+    this.idleStopMs = opts.idleStopMs ?? 5 * 60_000;
+    this.sweeper = setInterval(() => void this.stopIdle(), opts.sweepMs ?? 30_000);
+    this.sweeper.unref();
+  }
+
+  /** Never stops this arena's zone when idle. */
+  keep(arena: string): void {
+    this.kept.add(arena);
+  }
+
+  /** Stops the zones that have had no players for idleStopMs; resolves with their names. */
+  async stopIdle(now = Date.now()): Promise<string[]> {
+    const idle = [...this.ready.values()].filter((h) => !this.kept.has(h.zone) && h.members.size === 0 && now - h.lastActive >= this.idleStopMs);
+    for (const h of idle) {
+      this.ready.delete(h.zone);
+      this.zones.delete(h.zone);
+    }
+    await Promise.all(idle.map((h) => h.stop()));
+    return idle.map((h) => h.zone);
   }
 
   /** Whether an arena can be run: the synthetic arena, or a level act converted in generatedDir. */
@@ -68,6 +98,7 @@ export class ZoneManager {
         },
       );
       p = host.whenReady().then(() => {
+        host.lastActive = Date.now();
         this.ready.set(arena, host);
         return host;
       });
@@ -84,6 +115,7 @@ export class ZoneManager {
   /** Stops every zone; each flushes its characters (persist 'shutdown') before stopping. */
   async stopAll(): Promise<void> {
     this.stopping = true;
+    clearInterval(this.sweeper);
     const hosts = await Promise.allSettled([...this.zones.values()]);
     await Promise.all(hosts.map((h) => (h.status === 'fulfilled' ? h.value.stop() : undefined)));
   }
