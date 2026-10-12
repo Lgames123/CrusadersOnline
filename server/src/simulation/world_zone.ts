@@ -25,6 +25,7 @@ import {
   uniformMovementStats,
   locomotionAnim,
   movementAnim,
+  looksGrounded,
   movementFacingOffset,
   attackAnim,
   BUILTIN_SPELLS,
@@ -246,6 +247,12 @@ interface ObjectChange {
   hp?: number;
 }
 
+/** Citizens' strolls: radius around their place (m), longest walk and the pause between walks. */
+const STROLL_RADIUS = 4;
+const STROLL_MAX_TICKS = 20 * 8;
+const STROLL_PAUSE_MIN = 20 * 4;
+const STROLL_PAUSE_SPREAD = 20 * 8;
+
 /** Metres below the lowest level geometry at which a falling player is caught. */
 const FALL_MARGIN = 20;
 
@@ -357,6 +364,11 @@ interface Mob extends ActorBase {
   knockdownAt: number;
   /** Stepping back in guard (until 8 ft away, at most until this tick). */
   retreatUntil: number;
+  /** Peaceful creatures: strolls about its place (citizens), the current stroll target and the next start. */
+  wanders: boolean;
+  strollTo: { x: number; z: number } | null;
+  strollAt: number;
+  strollUntil: number;
   input: InputFrame;
   stats: MovementStats;
 }
@@ -475,6 +487,10 @@ export class WorldZone {
       shieldFrom: 0,
       retreatUntil: 0,
       knockdownAt: 0,
+      wanders: !!at.wander,
+      strollTo: null,
+      strollAt: 0,
+      strollUntil: 0,
       input: createInputFrame(),
       // Creatures share the humanoid rig's root-motion speeds (run, walk); no jumping.
       stats: { ...DEFAULT_MOVEMENT_STATS, jumpVelocity: 0 },
@@ -1010,7 +1026,7 @@ export class WorldZone {
         // On diagonals the body turns into the motion, except with the shield up (it faces the view).
         p.facingOffset = moving && !(this.frame.flags & INPUT.BLOCK) ? movementFacingOffset(this.frame.flags) : 0;
         // Hit reactions are timed movement actions, so movementAnim() covers them too.
-        p.anim = movementAnim(p.blocking ? this.frame.flags : this.frame.flags & ~INPUT.BLOCK, p.character.grounded, p.character.rollDir);
+        p.anim = movementAnim(p.blocking ? this.frame.flags : this.frame.flags & ~INPUT.BLOCK, looksGrounded(p.character), p.character.rollDir);
         if (p.cast) p.anim = ANIM.SPELL_CONJURE;
       }
       if (alive(p)) this.updateMagic(p);
@@ -1066,9 +1082,10 @@ export class WorldZone {
     const pos = m.character.position;
     const fromSpawn = Math.hypot(pos.x - m.spawn.x, pos.z - m.spawn.z);
     m.input.flags = 0;
-    if (arch.passive) return; // peaceful: stands at its place
+    // Peaceful creatures stand (or stroll) until hit; armed ones then fight like any creature.
+    if (arch.passive && m.state === 'idle') this.stroll(m);
 
-    if (m.state === 'idle') {
+    if (m.state === 'idle' && !arch.passive) {
       let best: Player | null = null;
       let bestDist = arch.aggroRadius;
       for (const p of this.players.values()) {
@@ -1194,6 +1211,27 @@ export class WorldZone {
   }
 
 
+  /** A citizen's stroll: now and then a short walk to a point near its place, then a pause. */
+  private stroll(m: Mob): void {
+    if (!m.wanders) return;
+    const pos = m.character.position;
+    if (!m.strollTo) {
+      if (this.tick < m.strollAt) return;
+      const ang = this.random() * Math.PI * 2;
+      const r = 1 + this.random() * (STROLL_RADIUS - 1);
+      m.strollTo = { x: m.spawn.x + Math.cos(ang) * r, z: m.spawn.z + Math.sin(ang) * r };
+      m.strollUntil = this.tick + STROLL_MAX_TICKS;
+    }
+    const d = Math.hypot(m.strollTo.x - pos.x, m.strollTo.z - pos.z);
+    if (d < 0.4 || this.tick >= m.strollUntil) {
+      m.strollTo = null;
+      m.strollAt = this.tick + STROLL_PAUSE_MIN + Math.floor(this.random() * STROLL_PAUSE_SPREAD);
+      return;
+    }
+    m.yaw = quantizeAngle(yawTowards(pos.x, pos.z, m.strollTo.x, m.strollTo.z));
+    m.input.flags = INPUT.FORWARD | INPUT.WALK;
+  }
+
   /**
    * Pushes a creature out of any character it overlaps (characters are sensors for the
    * controller, which only collides with the level). The push itself is collision-checked.
@@ -1276,7 +1314,7 @@ export class WorldZone {
     const pos = c.position;
     const yaw = dequantizeAngle(p.yaw);
     for (const m of this.actors.values()) {
-      if (m.kind !== 'mob' || !alive(m) || m.archetype.passive) continue;
+      if (m.kind !== 'mob' || !alive(m)) continue;
       const mp = m.character.position;
       if (!inMeleeArc(pos.x, pos.z, yaw, mp.x, mp.z, RUSH_REACH + PLAYER_RADIUS, PLAYER_ARC_DEG, PLAYER_RADIUS)) continue;
       // Logged in the original: the rushing player loses 1 HP per tick of contact (2-5 per rush).
@@ -1309,7 +1347,6 @@ export class WorldZone {
       const arc = a.kind === 'player' ? PLAYER_ARC_DEG : a.archetype.arcDeg;
       for (const target of this.actors.values()) {
         if (target === a || target.kind === a.kind || !alive(target) || s.hit.has(target.entityId)) continue;
-        if (target.kind === 'mob' && target.archetype.passive) continue;
         const tp = target.character.position;
         if (!inMeleeArc(pos.x, pos.z, yaw, tp.x, tp.z, reach, arc, PLAYER_RADIUS)) continue;
         s.hit.add(target.entityId);
@@ -1428,7 +1465,9 @@ export class WorldZone {
 
     if (target.kind === 'mob') {
       target.threat.set(attacker.entityId, (target.threat.get(attacker.entityId) ?? 0) + damage);
-      if (target.state !== 'chase') target.state = 'chase';
+      // Unarmed peaceful creatures (citizens) take the blows; armed ones (guards) fight back.
+      const fightsBack = !target.archetype.passive || target.weapon.id !== UNARMED.id;
+      if (target.state !== 'chase' && fightsBack) target.state = 'chase';
     } else {
       target.statsDirty = true;
     }

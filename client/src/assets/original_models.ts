@@ -55,6 +55,8 @@ interface ClipMap {
   conjure?: string;
   /** Death variants (ASM_HIT_POINTS_DEPLETED and its ALT_01..08). */
   deaths?: string[];
+  /** Idle variations played now and then while standing (peaceful creatures: gestures, ALT stands). */
+  gestures?: string[];
 }
 
 /**
@@ -110,8 +112,12 @@ const BASIC_EQUIPMENT: Equipment = { right: 'longsword', left: 'woodshield' };
  * Clips from the model's animation-state bindings alone (creatures whose skeletons are not the
  * human one): stance, locomotion, the three swings and death.
  */
-function stateClips(st: Record<string, string>): ClipMap {
-  const idle = st['ASM_COMBAT_STANDING'] ?? st['ASM_STANDING'] ?? '';
+function stateClips(st: Record<string, string>, relaxed = false): ClipMap {
+  const idle = (relaxed ? st['ASM_STANDING'] ?? st['ASM_COMBAT_STANDING'] : st['ASM_COMBAT_STANDING'] ?? st['ASM_STANDING']) ?? '';
+  // Peaceful creatures: the relaxed stand, with the gestures and alternative stands now and then.
+  const gestures = relaxed
+    ? Object.entries(st).filter(([k, v]) => v && (/^ASM_STANDING_ALT_\d+$/.test(k) || (/^ASM_GESTURE_/.test(k) && !/ANGRY|APPEASE/.test(k)))).map(([, v]) => v)
+    : [];
   const swings = [st['ASM_SWING_LEVEL'], st['ASM_CHOP_LOW'], st['ASM_SWING_OVERHEAD']].filter((c): c is string => !!c);
   return {
     idle,
@@ -121,6 +127,7 @@ function stateClips(st: Record<string, string>): ClipMap {
     attacks: swings.length ? swings : [idle],
     death: st['ASM_HIT_POINTS_DEPLETED'] ?? idle,
     block: st['ASM_BLOCK'] ?? st['ASM_READY_SHIELD'] ?? idle,
+    ...(gestures.length ? { gestures: [...new Set(gestures)].filter((g) => g !== idle) } : {}),
   };
 }
 
@@ -139,11 +146,11 @@ const NPC_MODELS = Object.fromEntries(
   Object.entries(CREATURE_TEMPLATES).map(([type, t]) => {
     const right = t.weapon ? ITEM_MODELS[t.weapon] : undefined;
     const left = t.shield ? ITEM_MODELS[t.shield] : undefined;
-    return [npcArchetypeId(Number(type)), { file: t.model, ...(t.texture ? { texture: t.texture } : {}), clips: null, equipment: { ...(right ? { right } : {}), ...(left ? { left } : {}) } }];
+    return [npcArchetypeId(Number(type)), { file: t.model, ...(t.texture ? { texture: t.texture } : {}), clips: null, relaxed: true, equipment: { ...(right ? { right } : {}), ...(left ? { left } : {}) } }];
   }),
 );
 
-const MODELS: Record<string, { file: string; texture?: string; clips: ClipMap | null; equipment?: Equipment }> = {
+const MODELS: Record<string, { file: string; texture?: string; clips: ClipMap | null; relaxed?: boolean; equipment?: Equipment }> = {
   ...NPC_MODELS,
   self: {
     file: 'drake',
@@ -261,6 +268,9 @@ class OriginalAvatar implements Avatar {
   private deathCount = 0;
   /** Seconds left of a hit reaction overriding the current state. */
   private reactLeft = 0;
+  /** Standing: seconds until the next idle gesture, and seconds left of the one playing. */
+  private gestureIn = 6 + Math.random() * 10;
+  private gestureLeft = 0;
 
   set seed(v: number) {
     this.deathCount = Math.abs(Math.trunc(v));
@@ -283,6 +293,7 @@ class OriginalAvatar implements Avatar {
     if (anim === this.anim && !restart) return;
     if (this.anim === ANIM.DEAD && anim !== ANIM.DEAD) this.deathCount++;
     this.anim = anim;
+    this.gestureLeft = 0; // a state change ends an idle gesture
     // Swings, deaths, knock-downs and stuns cut a hit reaction short; anything else waits for it to finish.
     if (this.reactLeft > 0 && !isAttackAnim(anim) && anim !== ANIM.DEAD && anim !== ANIM.KNOCKDOWN && anim !== ANIM.STUNNED) return;
     this.reactLeft = 0;
@@ -422,6 +433,23 @@ class OriginalAvatar implements Avatar {
       this.reactLeft = 0;
       this.apply(); // back to the current state
     }
+    // Peaceful creatures standing about: a gesture or alternative stand now and then.
+    const gestures = this.map.gestures;
+    if (gestures?.length && this.anim === ANIM.IDLE && this.reactLeft <= 0) {
+      if (this.gestureLeft > 0) {
+        if ((this.gestureLeft -= dt) <= 0) {
+          this.gestureLeft = 0;
+          this.gestureIn = 8 + Math.random() * 14;
+          this.apply();
+        }
+      } else if ((this.gestureIn -= dt) <= 0) {
+        const clip = this.clips.get(gestures[Math.floor(Math.random() * gestures.length)]!);
+        if (clip) {
+          this.play(clip, false, ORIGINAL_CLIP_FPS / 30);
+          this.gestureLeft = clip.duration / (ORIGINAL_CLIP_FPS / 30);
+        } else this.gestureIn = 8;
+      }
+    }
     const before = this.current;
     const prev = this.lastTime;
     this.mixer.update(dt);
@@ -533,7 +561,7 @@ export async function loadOriginalAvatars(): Promise<AvatarFactory | null> {
       const right = await prop(def.equipment?.right);
       const left = await prop(def.equipment?.left);
       const equipment = { ...(right ? { right } : {}), ...(left ? { left } : {}) };
-      const base = def.clips ?? (states ? stateClips(states) : null);
+      const base = def.clips ?? (states ? stateClips(states, def.relaxed) : null);
       if (!base || !base.idle) continue;
       loaded.set(kind, { gltf, clips: withStates(base, states), events, equipment, ...(texture ? { texture } : {}) });
     }

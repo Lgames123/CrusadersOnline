@@ -364,7 +364,7 @@ const NPC_ARCHETYPES: Record<string, MobArchetype> = Object.fromEntries(
   Object.entries(CREATURE_TEMPLATES).map(([type, t]) => [
     npcArchetypeId(Number(type)),
     meleeVariant(SKELETON_WARRIOR, {
-      id: npcArchetypeId(Number(type)), name: t.name, passive: true, maxHp: 100, xpReward: 0, goldMin: 0, goldMax: 0,
+      id: npcArchetypeId(Number(type)), name: t.name, passive: true, maxHp: 100, xpReward: 0, goldMin: 0, goldMax: 0, respawnTicks: ticks(60_000),
       weapon: t.weapon ?? 'unarmed', shield: t.shield, resist: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
     }),
   ]),

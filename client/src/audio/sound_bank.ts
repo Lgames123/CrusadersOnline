@@ -21,6 +21,24 @@ export class SoundBank {
   private readonly urls: Record<string, string>;
   /** Master volume 0..1. */
   volume = 0.8;
+  /** Dialogue lines (Sound.ctx is_dialog): file, on-screen text and length. */
+  readonly lines = new Map<number, { file: string; text: string; ms: number }>();
+
+  /**
+   * Voice lines of a role (file names <speaker>_<role>_<nn>.mp3, e.g. CA_TM_01 for Casper the
+   * townsman): one list of line ids per speaker, in order (the first is the greeting).
+   */
+  speakers(role: string): number[][] {
+    const by = new Map<string, { n: number; id: number }[]>();
+    for (const [id, l] of this.lines) {
+      const m = /^([a-z0-9]+)_([a-z]+)_(\d+)\.mp3$/.exec(l.file);
+      if (!m || m[2] !== role || !this.urls[l.file]) continue;
+      let list = by.get(m[1]!);
+      if (!list) by.set(m[1]!, (list = []));
+      list.push({ n: Number(m[3]), id });
+    }
+    return [...by.keys()].sort().map((k) => by.get(k)!.sort((a, b) => a.n - b.n).filter((x) => x.n < 80).map((x) => x.id)).filter((l) => l.length);
+  }
 
   private constructor(files: Map<number, string>, urls: Record<string, string>) {
     this.files = files;
@@ -32,9 +50,11 @@ export class SoundBank {
       const manifest = (await (await fetch('/generated/manifest.json')).json()) as Manifest;
       const rules = manifest.rules?.['sounds'];
       if (!rules || !manifest.audio) return null;
-      const { sounds } = (await (await fetch(`/generated/${rules}`)).json()) as { sounds: { id: number; file: string }[] };
+      const { sounds } = (await (await fetch(`/generated/${rules}`)).json()) as { sounds: { id: number; file: string; dialog?: boolean; description?: string; lengthMs?: number }[] };
       const files = new Map(sounds.map((s) => [s.id, s.file.toLowerCase()]));
-      return new SoundBank(files, manifest.audio);
+      const bank = new SoundBank(files, manifest.audio);
+      for (const s of sounds) if (s.dialog) bank.lines.set(s.id, { file: s.file.toLowerCase(), text: s.description ?? '', ms: s.lengthMs ?? 3000 });
+      return bank;
     } catch {
       return null;
     }

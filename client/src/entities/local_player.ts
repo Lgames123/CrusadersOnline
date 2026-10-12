@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ANIM, INPUT, TICK_DT, SIDE_SWING_CHAIN_SECONDS, attackAnim, attackMotion, isHitAction, isLayeredSwing, dequantizeAngle, movementAnim, movementFacingOffset, type AttackKind, attackTiming, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
+import { ANIM, INPUT, TICK_DT, SIDE_SWING_CHAIN_SECONDS, attackAnim, attackMotion, isHitAction, isLayeredSwing, dequantizeAngle, movementAnim, looksGrounded, movementFacingOffset, type AttackKind, attackTiming, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
 import type { Avatar } from './avatar.ts';
 
 /**
@@ -76,7 +76,7 @@ export class LocalPlayer {
     if (moving) this.targetFacing = dequantizeAngle(input.yaw) + movementFacingOffset(input.flags);
     this.blocking = !this.dead && (input.flags & INPUT.BLOCK) !== 0;
     if (this.blocking) this.targetFacing = dequantizeAngle(input.yaw);
-    this.moveAnim = this.dead ? ANIM.IDLE : movementAnim(input.flags, this.character.grounded, this.character.rollDir);
+    this.moveAnim = this.dead ? ANIM.IDLE : movementAnim(input.flags, looksGrounded(this.character), this.character.rollDir);
   }
 
   setWeaponSpeed(speed: number): void {

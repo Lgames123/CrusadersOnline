@@ -14,6 +14,7 @@ import {
   PLAYER_REACH,
   attackTiming,
   LEVEL_PREFIX,
+  NPC_VOICES,
   PORTAL_OBJECT_BASE,
   PORTAL_USE_REACH,
   inPortal,
@@ -349,6 +350,34 @@ async function main(): Promise<void> {
     input.requestLock();
   });
 
+  // Talking (provisional): the original links each NPC to its lines in the acts' sequence scripts
+  // (not decoded). Here a peaceful creature gets a speaker of its voice role (Sound.ctx files
+  // <speaker>_<role>_nn: townsman TM, townswoman TF, guards HG / OG, dwarves DM / DF, dashers DU):
+  // the greeting first, then the speaker's other lines in turn, with the text on screen.
+  const TALK_RANGE = 2.5;
+  const subtitle = document.getElementById('subtitle')!;
+  let subtitleTimer = 0;
+  const talked = new Map<number, number>();
+  const npcVoice = (archetype: string): string | null => NPC_VOICES[Number(archetype.slice(4))] ?? null;
+  const talk = (entityId: number) => {
+    const e = remotes.byId.get(entityId);
+    const role = e?.info.archetype ? npcVoice(e.info.archetype) : null;
+    if (!e || !role || !sounds) return;
+    const speakers = sounds.speakers(role);
+    if (!speakers.length) return;
+    const lines = speakers[entityId % speakers.length]!;
+    const n = talked.get(entityId) ?? 0;
+    talked.set(entityId, n + 1);
+    const id = n === 0 ? lines[0]! : lines[1 + ((n - 1) % Math.max(1, lines.length - 1))] ?? lines[0]!;
+    const line = sounds.lines.get(id);
+    if (!line) return;
+    sounds.play(id, e.avatar.object.position, { volume: 1 });
+    subtitle.replaceChildren(Object.assign(document.createElement('span'), { className: 'who', textContent: `${e.info.name}:` }), document.createTextNode(line.text));
+    subtitle.hidden = false;
+    clearTimeout(subtitleTimer);
+    subtitleTimer = window.setTimeout(() => (subtitle.hidden = true), Math.max(2500, line.ms + 600));
+  };
+
   // Nearest item, chest or door within reach (the server re-checks); Tab picks up / opens.
   const INTERACT_RANGE = 2.3;
   const DOOR_RANGE = 1.6;
@@ -356,6 +385,14 @@ async function main(): Promise<void> {
     if (!levelView || !session) return null;
     let best: { id: number; label: string; d: number; key?: boolean } | null = null;
     const p = local.object.position;
+    // Peaceful creatures within reach: Tab talks.
+    for (const [id, e] of remotes.byId) {
+      if (!e.visible || e.hp <= 0 || !e.info.archetype?.startsWith('npc_') || !npcVoice(e.info.archetype)) continue;
+      const q = e.avatar.object.position;
+      const d = Math.hypot(q.x - p.x, q.z - p.z);
+      if (d > TALK_RANGE || Math.abs(q.y - p.y) > 2 || (best && best.d < d)) continue;
+      best = { id: -id, label: `Tab — talk to ${e.info.name}`, d };
+    }
     // Door exits (cell doors, inns, town gates): Tab goes through.
     for (const portal of levelView.arena.portals ?? []) {
       if (!portal.use || !inPortal(portal, p, PORTAL_USE_REACH)) continue;
@@ -383,7 +420,8 @@ async function main(): Promise<void> {
   input.onAction = (action) => {
     if (action === 'interact') {
       const target = nearestInteractable();
-      if (target && !target.key) session?.interact(target.id);
+      if (target && target.id < 0) talk(-target.id);
+      else if (target && !target.key) session?.interact(target.id);
     } else if (action === 'useItem') {
       // Z: the key on a locked door in reach, otherwise the weakest healing potion.
       const target = nearestInteractable();

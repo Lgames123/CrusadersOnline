@@ -297,6 +297,17 @@ export function stepCharacter(
   c.settled = still && grounded && Math.abs(moved.x) < 0.0005 && Math.abs(moved.y) < 0.0005 && Math.abs(moved.z) < 0.0005;
 }
 
+/**
+ * Whether the character should look grounded (animation): on the ground, or not jumping and
+ * not yet falling fast. Stepping up a stair or over a small bump leaves the ground for a tick
+ * or two; without this the run would flicker into the airborne clip on every step.
+ */
+export function looksGrounded(c: Character): boolean {
+  return c.grounded || (c.airKind === 0 && c.velocityY > LOOKS_GROUNDED_FALL_SPEED);
+}
+/** Downward speed (m/s) past which a fall shows as airborne (~0.17 s of falling). */
+const LOOKS_GROUNDED_FALL_SPEED = -4;
+
 /** Cosine of the steepest surface that still counts as ground (the climb limit, with a margin for faceted floors). */
 const GROUND_MIN_NORMAL_Y = Math.cos(((MAX_SLOPE_DEG + 5) * Math.PI) / 180);
 

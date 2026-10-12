@@ -319,7 +319,15 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
   for (const c of placements.creatures) {
     // Citizens, guards, merchants (dispositions 0-2): peaceful, standing at their place.
     if (c.disposition >= 0 && c.disposition < HOSTILE && CREATURE_TEMPLATES[c.type]) {
-      mobSpawns.push({ archetype: npcArchetypeId(c.type), x: c.position[0] * s, y: c.position[1] * s + 0.1, z: c.position[2] * s });
+      mobSpawns.push({
+        archetype: npcArchetypeId(c.type),
+        x: c.position[0] * s,
+        y: c.position[1] * s + 0.1,
+        z: c.position[2] * s,
+        ...(c.hp > 0 ? { hp: c.hp } : {}),
+        // Citizens (disposition 1) stroll about their place; guards and merchants stand.
+        ...(c.disposition === 1 ? { wander: true } : {}),
+      });
       continue;
     }
     const archetype = LEVEL_ARCHETYPES[c.type];

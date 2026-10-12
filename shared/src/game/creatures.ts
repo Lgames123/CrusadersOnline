@@ -1,5 +1,5 @@
 /**
- * The executable's creature template table (.data 0x004ED058, executable-analysis.md ง9.1) with
+ * The executable's creature template table (.data 0x004ED058, executable-analysis.md ยง9.1) with
  * models.ctx resolved: per creature type id, its display name, model and texture variant (the
  * appearance word), template weapon and shield (item ids) and cries (sound table 0x004EEA88:
  * impact material 0 bone / 1 flesh / 2-4 other, damage and death Sound.ctx ids). Facts only.
@@ -70,3 +70,17 @@ export const CREATURE_TEMPLATES: Readonly<Record<number, CreatureTemplate>> = {
 
 /** Archetype id of a peaceful creature (citizens, guards, merchants) of this type. */
 export const npcArchetypeId = (type: number): string => `npc_${type}`;
+
+/**
+ * Voice role of a peaceful creature type: the <role> part of its Sound.ctx dialogue files
+ * (townsman TM, townswoman TF, High / Old Guard HG / OG, dwarf male / female DM / DF, dasher DU).
+ * Named characters (Aerin, Celestia, Tamris, Prince Dain...) speak in their sequences instead.
+ */
+export const NPC_VOICES: Readonly<Record<number, string>> = {
+  113: 'hg', 114: 'og',
+  117: 'tm', 118: 'tm', 119: 'tm', 154: 'tm', 157: 'tm',
+  120: 'tf', 121: 'tf', 122: 'tf', 158: 'tf', 159: 'tf', 160: 'tf', 162: 'tf',
+  123: 'dm', 126: 'dm', 127: 'dm', 128: 'dm',
+  129: 'df', 130: 'df', 161: 'df',
+  132: 'du', 133: 'du',
+};

@@ -88,7 +88,7 @@ export interface ArenaDef {
    * Hostile spawns: archetype id (game/combat.ts) and position; original levels also carry the
    * placement's own HP, XP value and resists, which override the archetype's.
    */
-  mobSpawns: { archetype: string; x: number; y: number; z: number; hp?: number; xp?: number; resist?: number[] }[];
+  mobSpawns: { archetype: string; x: number; y: number; z: number; hp?: number; xp?: number; resist?: number[]; wander?: boolean }[];
   /** Items, chests and breakable props (original levels). */
   objects?: WorldObjectDef[];
   /** Exits to other zones (original levels). */
