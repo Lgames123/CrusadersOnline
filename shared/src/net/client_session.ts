@@ -23,6 +23,8 @@ export interface RemoteSample {
   /** Ticks since the current swing started (0 when not swinging). */
   animPhase: number;
   hp: number;
+  /** Entity flags (bit 0: shield up). */
+  flags: number;
 }
 
 interface RemoteFrame extends RemoteSample {
@@ -326,6 +328,7 @@ export class ClientSession {
         anim: e.anim,
         animPhase: e.animPhase,
         hp: e.hp,
+        flags: e.flags,
       });
       if (buf.length > REMOTE_BUFFER) buf.shift();
     }
@@ -389,6 +392,7 @@ export class ClientSession {
     out.anim = t < 0.5 ? a.anim : b.anim;
     out.animPhase = t < 0.5 ? a.animPhase : b.animPhase;
     out.hp = b.hp;
+    out.flags = t < 0.5 ? a.flags : b.flags;
     return true;
   }
 }

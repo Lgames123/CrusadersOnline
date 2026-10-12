@@ -24,6 +24,11 @@ export interface Avatar {
    * Original models only; when unset or unsupported, callers fall back to their own timing.
    */
   onEvent?: (name: string) => void;
+  /**
+   * Shield layer: the original raises the shield on the upper body only (ASM_BLOCK clip held at
+   * its end) while the legs keep their own clip (idle, walk, retreat, hops).
+   */
+  setShield?(up: boolean): void;
   /** Whether this avatar reports clip events through onEvent. */
   readonly hasEvents?: boolean;
   update(dt: number): void;

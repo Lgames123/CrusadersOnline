@@ -159,7 +159,7 @@ export const ANIM = {
   /** Side hops (ASM_HOP_L / _R): sideways movement with the shield up. */
   HOP_LEFT: 29,
   HOP_RIGHT: 30,
-  /** Standing still with the shield up: the combat stance (ASM_COMBAT_STANDING). */
+  /** Standing still with the shield up: the normal idle; the shield is an upper-body layer. */
   SHIELD_IDLE: 31,
 } as const;
 

@@ -807,6 +807,11 @@ export class WorldZone {
       s.anim = !alive(a) ? ANIM.DEAD : a.swing ? attackAnim(a.swing.kind, a.swing.combo) : a.anim;
       s.animPhase = a.swing ? Math.min(255, tick - a.swing.start) : 0;
       s.hp = Math.ceil(a.hp);
+      // Shield layer (upper body): a player holding block, a creature in guard or blocking.
+      const shieldUp = a.kind === 'player'
+        ? a.blocking
+        : a.shield !== null && !a.swing && (a.guardUntil > tick || a.blockUntil > tick);
+      s.flags = alive(a) && shieldUp ? 1 : 0;
     }
 
     // 6. Per-client stats + interest + delta snapshot.

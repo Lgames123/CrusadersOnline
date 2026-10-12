@@ -26,7 +26,7 @@ export class RemoteEntities {
   readonly byId = new Map<number, RemoteEntity>();
   private readonly scene: THREE.Scene;
   private readonly originals: AvatarFactory | null;
-  private readonly sample: RemoteSample = { x: 0, y: 0, z: 0, yaw: 0, anim: 0, animPhase: 0, hp: 0 };
+  private readonly sample: RemoteSample = { x: 0, y: 0, z: 0, yaw: 0, anim: 0, animPhase: 0, hp: 0, flags: 0 };
 
   constructor(scene: THREE.Scene, originals: AvatarFactory | null) {
     this.scene = scene;
@@ -74,6 +74,7 @@ export class RemoteEntities {
       if (this.sample.animPhase < e.lastPhase) e.swingId++;
       e.lastPhase = this.sample.animPhase;
       e.avatar.setState(this.sample.anim, swingSeconds, e.swingId);
+      e.avatar.setShield?.((this.sample.flags & 1) !== 0);
       e.avatar.update(dt);
     }
   }

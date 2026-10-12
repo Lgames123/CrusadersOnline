@@ -12,6 +12,7 @@ export interface EntityState {
   anim: number;
   animPhase: number;
   hp: number;
+  /** bit 0: shield up (upper-body shield layer). */
   flags: number;
 }
 

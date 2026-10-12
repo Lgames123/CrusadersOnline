@@ -393,6 +393,8 @@ Side hops and rolls move by their clip's root motion, which is far from uniform 
 
 ### 14.4 Standing idle and shield stance (2026-10-12)
 
-Standing still — with or without the shield held — the player's ASM_STANDING state plays one and the same clip whose header length is 170 frames (`+0x14`). Drake's relaxed idle PA16 has 90; the 170-frame idle matching the stance is PA21_id_br ("idle combat", ASM_COMBAT_STANDING), the shield-forward combat stance. The client now uses PA21 for Drake's idle and for standing with the shield up (ANIM.SHIELD_IDLE); the quick PE07 block clip stays for creatures stopping a hit.
+Standing still — with or without the shield held — the player's ASM_STANDING state plays one and the same clip whose header length is 170 frames (`+0x14`). Drake's relaxed idle PA16 has 90; the 170-frame idle matching the stance is PA21_id_br ("idle combat", ASM_COMBAT_STANDING), the shield-forward combat stance. The client uses PA21 for Drake's idle.
+
+**Shield layer.** The animation controller has a second channel (`+0x48` clip, `+0x4C` time, `+0x58` end, `+0x60`/`+0x64` layer state, `+0x6C` weight). Holding the shield sets it to state 5 (one of the shield-raised states `Stats_TryBlockWithShield` checks, §8.5) with weight 1.0, playing PE07_blk ("Shield Block", 27-frame header) once and holding its last frame, while the main channel keeps its clip (the idle continues, uninterrupted). Releasing the shield clears the channel. Implemented: original avatars play PE07 on the upper body only (Bip01 Spine and below) and switch the main clip to a legs-only version while the shield is up, without restarting it; the shield state is replicated in the entity flags (bit 0) for players blocking and creatures guarding.
 
 Also observed: the third combo step (SWING_OVERHEAD) plays backwards after its impact (clip time 10.8 → ~8 within the same state) — a weapon recoil, not reproduced yet.

@@ -130,6 +130,7 @@ export class LocalPlayer {
     }
     const anim = this.dead ? ANIM.DEAD : this.swingLeft > 0 ? attackAnim(this.kind, this.combo) : this.moveAnim;
     this.avatar.setState(anim, this.swingTime, this.swingCount);
+    this.avatar.setShield?.(this.blocking && this.swingLeft <= 0 && !this.dead);
     this.avatar.update(dt);
   }
 }

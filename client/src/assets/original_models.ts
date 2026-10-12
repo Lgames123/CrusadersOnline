@@ -149,7 +149,7 @@ class OriginalAvatar implements Avatar {
     if (anim >= ANIM.ROLL && anim < ANIM.ROLL + 4) return { name: m.rolls?.[anim - ANIM.ROLL] ?? m.run, loop: false };
     if (anim === ANIM.CROUCH) return { name: m.crouch ?? m.idle, loop: false };
     if (anim === ANIM.HOP_FORWARD) return { name: m.hop ?? m.run, loop: false };
-    if (anim === ANIM.SHIELD_IDLE) return { name: m.shieldIdle ?? m.idle, loop: true };
+    if (anim === ANIM.SHIELD_IDLE) return { name: m.idle, loop: true };
     if (anim === ANIM.HOP_LEFT) return { name: m.hopLeft ?? m.run, loop: false };
     if (anim === ANIM.HOP_RIGHT) return { name: m.hopRight ?? m.run, loop: false };
     if (anim === ANIM.ATTACK_OVERHEAD) return { name: m.attackOverhead ?? m.attacks[0]!, loop: false };
@@ -225,9 +225,67 @@ class OriginalAvatar implements Avatar {
     this.play(clip, loop, ORIGINAL_CLIP_FPS / 30);
   }
 
+  /** Upper-body bones (Bip01 Spine and below): the shield layer's domain. */
+  private upperBones: Set<string> | null = null;
+  private shieldUp = false;
+  private shieldAction: THREE.AnimationAction | null = null;
+  private readonly lowerClips = new Map<string, THREE.AnimationClip>();
+  private baseClip: THREE.AnimationClip | null = null;
+  private baseLoop = true;
+  private baseScale = 1;
+
+  private upper(): Set<string> {
+    if (this.upperBones) return this.upperBones;
+    const set = new Set<string>();
+    const spine = this.object.getObjectByProperty('name', 'Bip01_Spine') ?? this.object.getObjectByProperty('name', 'Bip01 Spine');
+    spine?.traverse((o) => set.add(THREE.PropertyBinding.sanitizeNodeName(o.name)));
+    return (this.upperBones = set);
+  }
+
+  /** The clip without its upper-body tracks (legs only), cached. */
+  private lowerOf(clip: THREE.AnimationClip): THREE.AnimationClip {
+    let c = this.lowerClips.get(clip.name);
+    if (!c) {
+      const up = this.upper();
+      c = new THREE.AnimationClip(`${clip.name}#lower`, clip.duration, clip.tracks.filter((t) => !up.has(t.name.split('.')[0]!)));
+      this.lowerClips.set(clip.name, c);
+    }
+    return c;
+  }
+
+  setShield(up: boolean): void {
+    if (up === this.shieldUp) return;
+    const block = this.clips.get(this.map.block);
+    if (!block || this.anim === ANIM.DEAD) return;
+    this.shieldUp = up;
+    if (up) {
+      if (!this.shieldAction) {
+        const ub = this.upper();
+        const clip = new THREE.AnimationClip(`${block.name}#upper`, block.duration, block.tracks.filter((t) => ub.has(t.name.split('.')[0]!)));
+        this.shieldAction = this.mixer.clipAction(clip);
+        this.shieldAction.setLoop(THREE.LoopOnce, 1);
+        this.shieldAction.clampWhenFinished = true; // hold the raised pose (the original holds its last frame)
+      }
+      this.shieldAction.reset();
+      this.shieldAction.timeScale = ORIGINAL_CLIP_FPS / 30;
+      this.shieldAction.fadeIn(0.1).play();
+    } else {
+      this.shieldAction?.fadeOut(0.15);
+    }
+    // The legs keep their clip; swap between the full and the legs-only version of it.
+    if (this.baseClip) this.play(this.baseClip, this.baseLoop, this.baseScale);
+  }
+
   private play(clip: THREE.AnimationClip, loop: boolean, timeScale: number): void {
-    const action = this.mixer.clipAction(clip);
+    this.baseClip = clip;
+    this.baseLoop = loop;
+    this.baseScale = timeScale;
+    const playing = this.shieldUp ? this.lowerOf(clip) : clip;
+    const keepTime = this.current && (this.current.getClip().name.split('#')[0] === clip.name) ? this.current.time : null;
+    const action = this.mixer.clipAction(playing);
     action.reset();
+    // Raising or lowering the shield does not restart the legs' clip.
+    if (keepTime !== null) action.time = keepTime;
     action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
     action.clampWhenFinished = !loop;
     action.timeScale = timeScale;
@@ -249,7 +307,7 @@ class OriginalAvatar implements Avatar {
     if (!cur) return;
     const now = cur.time;
     // Authored clip events (times in the clip's 30 fps frames), including loop wrap-around.
-    const events = this.events.get(cur.getClip().name);
+    const events = this.events.get(cur.getClip().name.split('#')[0]!);
     if (events && this.onEvent && cur === before) {
       const dur = cur.getClip().duration;
       for (const e of events) {
