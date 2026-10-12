@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { ANIM, isAttackAnim, isLocomotionAnim } from '@crusaders/shared';
+import { ANIM, ORIGINAL_CLIP_FPS, isAttackAnim, isLocomotionAnim } from '@crusaders/shared';
 import type { Avatar, AvatarKind } from '../entities/avatar.ts';
 
 /**
@@ -79,7 +79,8 @@ const MODELS: Record<string, { file: string; texture?: string; clips: ClipMap }>
     // overhead swing; left / right + click: the side swings (game Readme).
     clips: {
       idle: 'pa16_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pc03_ru_fw_jmp', death: 'pi03_hp', block: 'pt01_rdy_shld',
-      attacks: ['pn02_1_sw_lv', 'pn25_combo_a', 'pn15_1_chn_atk_a'],
+      // The ASM combo chain (routine 0x0042CA20): SWING_LEVEL, CHOP_LOW, SWING_OVERHEAD, 103, 104.
+      attacks: ['pn02_1_sw_lv', 'pn01_1_cp_lo', 'pn03_1_sw_ov', 'pn16_1_chn_atk_b', 'pn17_1_pwr_atk'],
       attackOverhead: 'pn03_1_sw_ov', attackLeft: 'pn09_1_sw_l', attackRight: 'pn10_1_sw_r',
       walkStrafeLeft: 'pb02_sdstp_l', walkStrafeRight: 'pb03_sdstp_r',
     },
@@ -127,6 +128,7 @@ class OriginalAvatar implements Avatar {
   private clipFor(anim: number): { name: string; loop: boolean } {
     const m = this.map;
     if (anim >= ANIM.ATTACK && anim < ANIM.ATTACK + 3) return { name: m.attacks[anim - ANIM.ATTACK] ?? m.attacks[0]!, loop: false };
+    if (anim === ANIM.ATTACK_COMBO4 || anim === ANIM.ATTACK_COMBO5) return { name: m.attacks[anim === ANIM.ATTACK_COMBO4 ? 3 : 4] ?? m.attacks[0]!, loop: false };
     if (anim >= ANIM.ROLL && anim < ANIM.ROLL + 4) return { name: m.rolls?.[anim - ANIM.ROLL] ?? m.run, loop: false };
     if (anim === ANIM.CROUCH) return { name: m.crouch ?? m.idle, loop: false };
     if (anim === ANIM.ATTACK_OVERHEAD) return { name: m.attackOverhead ?? m.attacks[0]!, loop: false };
@@ -169,8 +171,8 @@ class OriginalAvatar implements Avatar {
     const name = this.map.impacts?.[dir] ?? this.map.impacts?.[0];
     const clip = name ? this.clips.get(name) : undefined;
     if (!clip) return;
-    this.play(clip, false, 1);
-    this.reactLeft = clip.duration;
+    this.play(clip, false, ORIGINAL_CLIP_FPS / 30);
+    this.reactLeft = clip.duration / (ORIGINAL_CLIP_FPS / 30);
   }
 
   setState(anim: number, swingSeconds: number, swingId = 0): void {
@@ -192,8 +194,9 @@ class OriginalAvatar implements Avatar {
     // Models without a direction's clip fall back to their run cycle.
     const clip = this.clips.get(name) ?? (isLocomotionAnim(anim) ? this.clips.get(this.map.run) : undefined);
     if (!clip) return;
-    // Fit attack clips to the authoritative swing duration.
-    this.play(clip, loop, isAttackAnim(anim) && this.swingSeconds > 0 ? clip.duration / this.swingSeconds : 1);
+    // Every clip plays at the original's 1000/30 frames per second (converted clips are
+    // timed at 30): swings then hit on their IMPACT frame, in step with the server.
+    this.play(clip, loop, ORIGINAL_CLIP_FPS / 30);
   }
 
   private play(clip: THREE.AnimationClip, loop: boolean, timeScale: number): void {

@@ -320,3 +320,19 @@ Measured: the first frame after take-off reads 45.45 ft/s (50.45 minus that fram
 **Keyboard view rates** (measured by sampling the transform while only the keys were used): arrows turn the heading at a constant **200°/s**; Numpad 9/7 change the pitch (transform `+0x38`, degrees) at **150°/s**, clamped to **±80°**; Numpad 5 sets it to 0 at once. The code that applies them was not located (the 200 / 150 constants found are used elsewhere, e.g. 150 is a projectile speed).
 
 Implemented in `shared/src/constants.ts` / `movement/character.ts`: gravity, impulse, rising drag, hold lift, in-air horizontal physics (running jump = forward held at take-off, limit 13 ft; other jumps 5.2 ft). The jump state (kind, horizontal velocity, distance travelled) is part of the reconciled snapshot header. Not modelled: the vertical travel limit of kind 8 (changes the standing jump by < 0.15 ft). The body turn rate drives the local avatar and the classic camera (`client/src/entities/local_player.ts`).
+
+---
+
+## 14. Animation State Machine, Clip Rate and Melee Timing (x32dbg, 2026-10-11)
+
+**Animation controller.** The character's `+0x48` object (vtable `0x004DEDC8`) holds the current ASM state id (`+0x14`), the next state (`+0x18`), the clip (`+0x1C`), the clip time in frames (`+0x24`), the clip start / end (`+0x30` / `+0x34`) and a rate (`+0x28`, 1.0 with the starting axe).
+
+**State ids.** The table at `0x004EA6F0` is (id, name) pairs: 113 named states, e.g. 1 RUNNING, 2 WALKING, 7 STANDING, 8 STANDING_JUMP_V, 9 STANDING_JUMP_F, 10 RUNNING_JUMP_F, 11/12 STANDING_JUMP_L/R, 20 STANDING_JUMP_B, 23 CHOP_LOW, 24 SWING_LEVEL, 25 SWING_OVERHEAD, 29 BLOCK, 68 COMBAT_STANDING, 89 THRUST, 90 JUMP_ATTACK, 91 IMPACT_MEDIUM. Ids 0, 18, 31–33, 87, 88 and 102–110 have no name (engine-internal states: 87/88 appear with side attacks, 103/104 are combo steps). The physics "jump kind" of §13 is this state id.
+
+**Clip playback rate.** Measured over 49 clip segments of the running game: **33.6 frames/s** = 1000/30 × the level-1 speed multiplier (1.009, §7.2). Clips therefore play 10/9 faster than their 30 fps authoring rate (this settles UNK-012's playback question), and every root-motion speed of §11 is × 10/9 (run 17.3 ft/s).
+
+**Melee timing.** Attack clips carry `SWING`, `IMPACT` and `RECOVERY` events (e.g. PN02 swing level 7 / 8 / 13 of 23 frames; PN01 chop low 14 / 16 / 19; PN03 overhead 10 / 12 / 16; PN16 5 / 10 / 17; PN17 11 / 12 / 23; PN09 / PN10 side swings 5 / 8 / 14 and 8 / 9 / 14; PN05 jump attack 17 / 20 / 24). In play, the next combo swing starts about 3 frames after RECOVERY.
+
+**Combo chain** (`0x0042CA20`): a click after 10 % of the current swing queues the next one: SWING_LEVEL (24) → CHOP_LOW (23) → SWING_OVERHEAD (25) → 103 → 104, then the chain ends (a second chain 105 → 106 → … exists). By clip length, 103 and 104 play PN16_1_chn_atk_b and PN17_1_pwr_atk (models.ctx "COMBO 4" / "COMBO 5"). The 1.25 attack-mode scale of §8.2 is set per difficulty (`0x0044CDD0`), not per combo step.
+
+Implemented: `attackTiming()` in `shared/src/game/combat.ts` (hit window ends on the IMPACT frame at 1000/30 fps, scaled by weapon Speed), a five-step combo with equal attack mode, the ×10/9 speeds and roll timings, and original avatars playing every clip at 1000/30 frames per second. Open: which movement key selects 87, 88, THRUST and JUMP_ATTACK (the state-transition routine around `0x0042B7A0` selects attacks through tables).

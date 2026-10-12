@@ -2,7 +2,10 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { WorldZone, type PersistRecord } from '@crusaders/server/simulation/world_zone';
 import {
   ANIM,
+  COMBO_MULTIPLIERS,
   DEFAULT_MOVEMENT_STATS,
+  ORIGINAL_CLIP_FPS,
+  attackTiming,
   INPUT,
   TICK_RATE,
   INPUT_PACKET_MAX_BYTES,
@@ -67,6 +70,21 @@ function setup(opts: { experience?: number; inventory?: InventoryEntry[]; random
 /** Ticks of running that cover 6 m (towards the skeleton's aggro range). */
 const APPROACH = Math.ceil((6 / DEFAULT_MOVEMENT_STATS.runSpeed) * TICK_RATE);
 
+describe('original swing timing', () => {
+  it('hits on each clip IMPACT frame at 1000/30 fps and chains five plain swings', () => {
+    // SWING_LEVEL: SWING 7, IMPACT 8, RECOVERY 13 -> active window ends on tick round(8 / 33.3 × 20) = 5.
+    const first = attackTiming('normal', 1);
+    expect(first.startup + first.active - 1).toBe(Math.round((8 / ORIGINAL_CLIP_FPS) * TICK_RATE));
+    expect(COMBO_MULTIPLIERS).toHaveLength(5);
+    // Heavier steps take longer (PN17 power attack recovers at frame 23).
+    const last = attackTiming('normal', 5);
+    expect(last.startup + last.active + last.recovery).toBeGreaterThan(first.startup + first.active + first.recovery);
+    // A faster weapon shortens the swing.
+    const fast = attackTiming('normal', 1, 2);
+    expect(fast.startup + fast.active + fast.recovery).toBeLessThan(first.startup + first.active + first.recovery);
+  });
+});
+
 describe('melee arc', () => {
   it('accepts targets in front within reach and rejects behind or out of reach', () => {
     // yaw 0 faces -Z
@@ -112,9 +130,9 @@ describe('authoritative melee', () => {
     for (let i = 0; i < 200 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
     expect(t.mob().alive).toBe(false);
     const hits = t.events().filter((e) => e.target === t.mob().id);
-    // Axe 5/5 (tie -> bash) x Might multiplier 1.0 x attack mode 1.0 / 1.0 / 1.25 (power hit)
+    // Axe 5/5 (tie -> bash) x Might multiplier 1.0 x attack mode 1.0 (every combo step)
     // x the skeleton's original bash multiplier 1.1
-    expect(hits.map((e) => e.damage).slice(0, 3)).toEqual([5.5, 5.5, 6.88]);
+    expect(hits.map((e) => e.damage).slice(0, 3)).toEqual([5.5, 5.5, 5.5]);
     expect(hits.findIndex((e) => e.killed)).toBe(4); // 25 HP skeleton dies on the 5th hit
     const kill = hits.find((e) => e.killed)!;
     // random() = 0 makes every loot roll succeed.
@@ -288,7 +306,7 @@ describe('inventory and equipment', () => {
     t.run(30);
     for (let i = 0; i < 200 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
     const dealt = t.events().filter((e) => e.target === t.mob().id).map((e) => e.damage);
-    expect(dealt.slice(0, 3)).toEqual([9, 9, 11.25]); // Long Sword 10 slash x skeleton slash 0.9, power hit x1.25
+    expect(dealt.slice(0, 3)).toEqual([9, 9, 9]); // Long Sword 10 slash x skeleton slash 0.9
     const taken = t.events().filter((e) => e.target === t.entityId && !e.blocked).map((e) => e.damage);
     expect(taken.length).toBeGreaterThan(0);
     expect(taken.every((d) => d === 8.1)).toBe(true); // 10 x resist 0.9 x Scale Armor 0.9

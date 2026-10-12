@@ -32,10 +32,50 @@ export function swingForWeaponSpeed(speed: number, base: Readonly<SwingTiming> =
     recovery: Math.max(1, Math.round(base.recovery / s)),
   };
 }
+/**
+ * The original plays every clip at 1000/30 frames per second (× the character's speed
+ * multiplier, ~1 at level 1) and its swings follow each attack clip's SWING / IMPACT /
+ * RECOVERY events (executable-analysis.md §14). Frame numbers of Drake's clips:
+ */
+export const ORIGINAL_CLIP_FPS = 1000 / 30;
+interface ClipEvents { swing: number; impact: number; recovery: number }
+/**
+ * Plain clicks chain five swings (combo routine 0x0042CA20): ASM_SWING_LEVEL (PN02) →
+ * ASM_CHOP_LOW (PN01) → ASM_SWING_OVERHEAD (PN03) → combo state 103 (PN16) → 104 (PN17).
+ */
+const COMBO_CLIPS: readonly ClipEvents[] = [
+  { swing: 7, impact: 8, recovery: 13 },
+  { swing: 14, impact: 16, recovery: 19 },
+  { swing: 10, impact: 12, recovery: 16 },
+  { swing: 5, impact: 10, recovery: 17 },
+  { swing: 11, impact: 12, recovery: 23 },
+];
+/** Movement key + click (original controls): overhead PN03, side swings PN09/PN10, low PN01, jump PN05. */
+const DIRECTIONAL_CLIPS: Readonly<Record<'overhead' | 'left' | 'right' | 'low' | 'jump', ClipEvents>> = {
+  overhead: { swing: 10, impact: 12, recovery: 16 },
+  left: { swing: 5, impact: 8, recovery: 14 },
+  right: { swing: 8, impact: 9, recovery: 14 },
+  low: { swing: 14, impact: 16, recovery: 19 },
+  jump: { swing: 17, impact: 20, recovery: 24 },
+};
+/** Frames after RECOVERY before the next swing can start (observed chain hand-over). */
+const CHAIN_SLACK_FRAMES = 3;
+
+/** Swing timing of an attack (kind + combo step), scaled by the weapon's Speed. */
+export function attackTiming(kind: 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump', combo: number, weaponSpeed = 1): SwingTiming {
+  const c = kind === 'normal' ? COMBO_CLIPS[Math.min(Math.max(combo, 1), COMBO_CLIPS.length) - 1]! : DIRECTIONAL_CLIPS[kind];
+  const s = weaponSpeed > 0 ? weaponSpeed : 1;
+  const at = (frame: number) => Math.round((frame / ORIGINAL_CLIP_FPS / s) * TICK_RATE);
+  const startup = Math.max(1, at(c.swing));
+  const active = Math.max(1, at(c.impact) - startup + 1);
+  const recovery = Math.max(1, at(c.recovery + CHAIN_SLACK_FRAMES) - startup - active);
+  return { startup, active, recovery };
+}
+
 /** Inputs arriving during recovery (or this many ticks after it) continue the combo. */
 export const COMBO_WINDOW_TICKS = ticks(300);
-/** Attack-mode scale per combo hit: the third (power) hit uses the engine's 1.25 mode. */
-export const COMBO_MULTIPLIERS = [ATTACK_MODE_SCALE.normal, ATTACK_MODE_SCALE.normal, ATTACK_MODE_SCALE.power] as const;
+/** Five-hit combo; every step uses the normal attack mode (the 1.25 mode is a difficulty setting). */
+export const COMBO_MULTIPLIERS = [1, 1, 1, 1, 1].map(() => ATTACK_MODE_SCALE.normal);
 export const PLAYER_REACH = 2.2;
 export const PLAYER_ARC_DEG = 110;
 

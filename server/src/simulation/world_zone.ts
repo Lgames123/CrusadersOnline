@@ -55,7 +55,7 @@ import {
   originalWeaponHit,
   playerMaxHp,
   playerRules,
-  swingForWeaponSpeed,
+  attackTiming,
   quantizeAngle,
   quantizePosition,
   removeCharacter,
@@ -242,7 +242,6 @@ interface Player extends ActorBase {
   weapon: ItemDef;
   armor: ItemDef | null;
   damageMultiplier: number;
-  swingTiming: SwingTiming;
   /** Tick until which a flinch/stagger keeps the player from acting; 0 = none. */
   hitUntil: number;
   shield: ItemDef | null;
@@ -415,7 +414,6 @@ export class WorldZone {
       weapon: eq.weapon,
       armor: eq.armor,
       damageMultiplier: originalDamageMultiplier(rules.attributes, level),
-      swingTiming: swingForWeaponSpeed(eq.weapon.speed ?? 1),
       hitUntil: 0,
       shield: eq.shield,
       inPortal: new Set(),
@@ -556,7 +554,6 @@ export class WorldZone {
     p.weapon = eq.weapon;
     p.shield = eq.shield;
     p.armor = eq.armor;
-    p.swingTiming = swingForWeaponSpeed(eq.weapon.speed ?? 1);
     if (!p.shield) p.blocking = false;
   }
 
@@ -705,7 +702,7 @@ export class WorldZone {
   private startPlayerSwing(p: Player, kind: AttackKind): void {
     const chained = kind === 'normal' && this.tick - p.lastSwingEnd <= COMBO_WINDOW_TICKS && p.lastCombo < COMBO_MULTIPLIERS.length;
     const combo = chained ? p.lastCombo + 1 : 1;
-    p.swing = { combo, kind, start: this.tick, timing: p.swingTiming, hit: new Set() };
+    p.swing = { combo, kind, start: this.tick, timing: attackTiming(kind, combo, p.weapon.speed ?? 1), hit: new Set() };
     p.queuedAttack = false;
     this.mobsReactToSwing(p);
   }

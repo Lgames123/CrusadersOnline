@@ -149,6 +149,9 @@ export const ANIM = {
   /** C + click (ASM_CHOP_LOW) and Space + click (ASM_JUMP_ATTACK). */
   ATTACK_LOW: 23,
   ATTACK_JUMP: 24,
+  /** Fourth and fifth swings of the plain-click combo (combo states 103 / 104). */
+  ATTACK_COMBO4: 25,
+  ATTACK_COMBO5: 26,
 } as const;
 
 /** Animation for a character's own movement state (roll, duck, airborne, locomotion, idle). */
@@ -180,12 +183,12 @@ export function attackAnim(kind: AttackKind, combo: number): number {
     case 'right': return ANIM.ATTACK_RIGHT;
     case 'low': return ANIM.ATTACK_LOW;
     case 'jump': return ANIM.ATTACK_JUMP;
-    default: return ANIM.ATTACK + combo - 1;
+    default: return combo >= 5 ? ANIM.ATTACK_COMBO5 : combo === 4 ? ANIM.ATTACK_COMBO4 : ANIM.ATTACK + combo - 1;
   }
 }
 
 export function isAttackAnim(anim: number): boolean {
-  return (anim >= ANIM.ATTACK && anim < ANIM.ATTACK + 3) || (anim >= ANIM.ATTACK_OVERHEAD && anim <= ANIM.ATTACK_RIGHT) || anim === ANIM.ATTACK_LOW || anim === ANIM.ATTACK_JUMP;
+  return (anim >= ANIM.ATTACK && anim < ANIM.ATTACK + 3) || (anim >= ANIM.ATTACK_OVERHEAD && anim <= ANIM.ATTACK_RIGHT) || anim === ANIM.ATTACK_LOW || anim === ANIM.ATTACK_JUMP || anim === ANIM.ATTACK_COMBO4 || anim === ANIM.ATTACK_COMBO5;
 }
 
 /**

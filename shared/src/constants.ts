@@ -54,26 +54,29 @@ const FT = 0.3048;
 
 /**
  * The player's speeds in the original game: locomotion there is driven by the animations'
- * root motion, so each speed is the root displacement of Drake's clip per loop at 30 fps
- * (executable-analysis.md §11): run PA01 15.6 ft/s, retreat PA06 3.9, running sidestep
- * PB01_w_side* 10.3 (left/right averaged), walk PB01_w_fw 5.2, careful sidestep PB02/03 3.8;
+ * root motion, so each speed is the root displacement of Drake's clip per loop played at the
+ * engine's 1000/30 frames per second (executable-analysis.md §11, §14): run PA01 15.6 ft/s at
+ * 30 fps × 10/9, retreat PA06 3.9, running sidestep PB01_w_side* 10.3 (left/right averaged),
+ * walk PB01_w_fw 5.2, careful sidestep PB02/03 3.8 (all × 10/9);
  * the original has no careful-backward clip, so it uses the retreat speed.
  * The jump impulse comes from the physics code, not from the jump clips (§13).
  */
+/** Clips play at 1000/30 frames per second instead of their authored 30: speeds × 10/9. */
+const CLIP_RATE = 10 / 9;
 export const DEFAULT_MOVEMENT_STATS: Readonly<MovementStats> = {
-  runSpeed: 15.6 * FT,
-  backSpeed: 3.9 * FT,
-  strafeSpeed: 10.3 * FT,
-  walkSpeed: 5.2 * FT,
-  walkBackSpeed: 3.9 * FT,
-  walkStrafeSpeed: 3.8 * FT,
+  runSpeed: 15.6 * CLIP_RATE * FT,
+  backSpeed: 3.9 * CLIP_RATE * FT,
+  strafeSpeed: 10.3 * CLIP_RATE * FT,
+  walkSpeed: 5.2 * CLIP_RATE * FT,
+  walkBackSpeed: 3.9 * CLIP_RATE * FT,
+  walkStrafeSpeed: 3.8 * CLIP_RATE * FT,
   // Jump impulse: 78.4 × 0.033 × 15 × 1.3 ft/s added on take-off (§13).
   jumpVelocity: 78.4 * 0.033 * 15 * 1.3 * FT,
 };
 
 /**
  * Drake's rolls (C + direction): root displacement and length of ASM_ROLL_F/B/L/R
- * (PE03 / PE06 / PE04 / PE05) at 30 fps, in feet and frames (executable-analysis.md §11).
+ * (PE03 / PE06 / PE04 / PE05), in feet and frames (played at 1000/30 frames per second) (executable-analysis.md §11).
  * Index = roll direction - 1: forward, back, left, right.
  */
 export const ORIGINAL_ROLLS: readonly { distanceFt: number; frames: number }[] = [
@@ -85,7 +88,7 @@ export const ORIGINAL_ROLLS: readonly { distanceFt: number; frames: number }[] =
 
 /** Roll length in simulation ticks and speed in metres per second, per direction - 1. */
 export const ROLLS: readonly { ticks: number; speed: number }[] = ORIGINAL_ROLLS.map((r) => {
-  const ticks = Math.round((r.frames / 30) * TICK_RATE);
+  const ticks = Math.round((r.frames / (30 * CLIP_RATE)) * TICK_RATE);
   return { ticks, speed: (r.distanceFt * FT) / (ticks / TICK_RATE) };
 });
 

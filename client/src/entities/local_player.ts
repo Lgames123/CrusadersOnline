@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ANIM, INPUT, TICK_DT, attackAnim, dequantizeAngle, movementAnim, movementFacingOffset, type AttackKind, swingForWeaponSpeed, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
+import { ANIM, INPUT, TICK_DT, attackAnim, dequantizeAngle, movementAnim, movementFacingOffset, type AttackKind, attackTiming, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
 import type { Avatar } from './avatar.ts';
 
 /**
@@ -11,8 +11,8 @@ const TURN_RATE_AIR = (80 * Math.PI) / 180;
 const SMOOTH_RATE = 10; // 1/s decay of visual correction offset
 const SNAP_DISTANCE = 2; // corrections larger than this are shown immediately
 const MOVE_MASK = INPUT.FORWARD | INPUT.BACK | INPUT.LEFT | INPUT.RIGHT;
-function swingSeconds(weaponSpeed: number): number {
-  const s = swingForWeaponSpeed(weaponSpeed);
+function swingSeconds(kind: AttackKind, combo: number, weaponSpeed: number): number {
+  const s = attackTiming(kind, combo, weaponSpeed);
   return (s.startup + s.active + s.recovery) * TICK_DT;
 }
 
@@ -42,7 +42,8 @@ export class LocalPlayer {
   private sinceSwing = 99;
   private blocking = false;
   /** Swing duration of the equipped weapon (server INVENTORY_UPDATE weaponSpeed). */
-  private swingTime = swingSeconds(1.1);
+  private swingTime = swingSeconds('normal', 1, 1);
+  private weaponSpeed = 1;
   dead = false;
 
   constructor(character: Character, avatar: Avatar, step: (input: Readonly<InputFrame>) => void) {
@@ -69,16 +70,17 @@ export class LocalPlayer {
   }
 
   setWeaponSpeed(speed: number): void {
-    this.swingTime = swingSeconds(speed);
+    this.weaponSpeed = speed;
   }
 
   /** Local swing feedback; mirrors the server's combo rule closely enough for presentation. */
   swing(cameraYaw: number, kind: AttackKind = 'normal'): boolean {
     if (this.dead || this.swingLeft > 0) return false;
     // Directional attacks are single hits; plain clicks chain the combo.
-    this.combo = kind === 'normal' && this.kind === 'normal' && this.sinceSwing < 0.3 && this.combo < 3 ? this.combo + 1 : 1;
+    this.combo = kind === 'normal' && this.kind === 'normal' && this.sinceSwing < 0.3 && this.combo < 5 ? this.combo + 1 : 1;
     this.kind = kind;
     this.swingCount++;
+    this.swingTime = swingSeconds(kind, this.combo, this.weaponSpeed);
     this.swingLeft = this.swingTime;
     this.targetFacing = cameraYaw;
     return true;

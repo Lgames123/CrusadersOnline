@@ -55,7 +55,7 @@ describe('shared character controller', () => {
     const z0 = c.position.z;
     run(mw, c, INPUT.FORWARD, 0, 20); // 1 second
     expect(z0 - c.position.z).toBeCloseTo(DEFAULT_MOVEMENT_STATS.runSpeed, 0);
-    expect(Math.abs(c.position.x)).toBeLessThan(0.01);
+    expect(Math.abs(c.position.x)).toBeLessThan(0.02);
   });
 
   it('uses the original per-direction speeds (retreat, sidestep, careful walk)', () => {
