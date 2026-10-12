@@ -29,7 +29,7 @@ Every unknown item is assigned a priority and a concrete validation experiment t
 ---
 
 ### UNK-003: Exact Weapon Swing Hitbox Arc Angles
-- **Status:** Partly resolved (2026-10-12): hits captured up to 5.95 ft and ±40° (player), 5.25 ft (skeleton); maxima still open (executable-analysis.md §14.1). | **Priority:** Medium
+- **Status:** Resolved by measurement (2026-10-12): player reach 6–7.6 ft, arc ±40–45°; skeleton hits up to 5.25 ft (executable-analysis.md §14.1). The hit-test routine itself (sphere vs. weapon line?) is not located. | **Priority:** Low
 - **Description:** What was the precise angular sweep of Drake's horizontal slash ($90^\circ$, $120^\circ$, or $180^\circ$)?
 - **Hypothesis:** A $120^\circ$ forward cone with radius $2.2$ meters matches visual playthrough footage.
 - **Verification Experiment:** Record frame-by-frame hitbox intersection against multiple stationary targets.
