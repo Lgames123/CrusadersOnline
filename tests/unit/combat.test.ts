@@ -119,7 +119,8 @@ describe('skeleton warrior AI', () => {
     t.run(10);
     expect(t.mob().state).toBe('chase');
     t.run(200, INPUT.FORWARD, Math.PI); // flee to the +Z wall, ~35 m from the mob's spawn (leash 30 m)
-    t.run(200);
+    // Cornered at the wall the player falls to the skeleton's jabs; with no target left it walks home.
+    t.run(300);
     expect(t.mob().state).toBe('idle');
     expect(Math.hypot(t.mob().x - 0, t.mob().z + 15)).toBeLessThan(0.6);
     expect(t.mob().hp).toBe(SKELETON.maxHp);
@@ -366,35 +367,24 @@ describe('character spacing', () => {
 });
 
 describe('skeleton shield AI', () => {
-  it('raises its shield against a frontal swing with the quick block clip, then lowers it', () => {
-    // 0.99 passes the 35% block roll (and skips loot); 0 (the default) never blocks.
-    const t = setup({ random: () => 0.99 });
+  it('does not raise its shield in reaction to a swing (the logged original never did)', () => {
+    const t = setup({ random: () => 0.68 });
     t.run(APPROACH, INPUT.FORWARD, 0);
     t.run(30);
-    // A mob cannot block mid-swing: wait until the skeleton is in reach and not swinging.
     const gap = () => Math.hypot(t.mob().x - t.me().x, t.mob().z - t.me().z);
     for (let i = 0; i < 80 && (t.mob().swinging || gap() > PLAYER_REACH + 0.3); i++) t.run(1);
+    const before = t.mob().anim;
     t.zone.attack(1);
-    t.run(12);
-    const first = t.events().filter((e) => e.target === t.mob().id);
-    expect(first).toHaveLength(1);
-    expect(first[0]).toMatchObject({ blocked: true, damage: 0 });
-    expect(t.mob().hp).toBe(SKELETON.maxHp);
-    // The block plays briefly and the shield comes down again (no endless block pose).
-    const anims: number[] = [];
-    for (let i = 0; i < 60; i++) {
-      t.run(1);
-      anims.push(t.mob().anim);
-    }
-    expect(anims.some((a) => a !== ANIM.BLOCK)).toBe(true);
+    t.run(1);
+    expect(t.mob().anim === ANIM.BLOCK && before !== ANIM.BLOCK).toBe(false);
   });
 
-  it('guards between attack chains: frontal hits then are blocked, others land', () => {
-    // 0.99 passes the block rolls (guard and reactive shield) and the step-back roll.
-    const t = setup({ random: () => 0.99 });
+  it('raises the shield for 0.82 s after its 0.5 s stance; frontal hits then are blocked, others land', () => {
+    // 0.68 passes the stance-shield roll, not the step-back / leap rolls.
+    const t = setup({ random: () => 0.68 });
     t.run(APPROACH, INPUT.FORWARD, 0);
     t.run(30);
-    for (let i = 0; i < 200 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
+    for (let i = 0; i < 300 && t.mob().alive; i++) t.run(1, 0, 0, () => t.zone.attack(1));
     const onMob = t.events().filter((e) => e.target === t.mob().id);
     expect(onMob.some((e) => e.blocked)).toBe(true);
     expect(onMob.some((e) => !e.blocked && e.damage > 0)).toBe(true);

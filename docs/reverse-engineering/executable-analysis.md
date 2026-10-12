@@ -378,6 +378,26 @@ One skeleton sampled at ~9 Hz (only its animation-controller state, plus the dis
 
 Implemented: chains of 1/2/3 swings (55/35/10 %); guard of 0.4–1.9 s with the shield up that stops 50 % of frontal hits (within the original ±81° block cone); a 25 % chance to step back ~0.8 s in guard after a chain; the jab (THRUST, PP02 timing) preferred within 5 ft. Not yet: RAM_SHOULDER (needs knock-back).
 
+### 15.2 Skeleton AI decisions logged with Frida (2026-10-12)
+
+Frida (non-pausing `Interceptor` hooks in a standalone Python runner) logged every change of a creature's **requested** ASM state through `SetNextState` (`0x004C8900`: `ctl+0x18 = arg`, anim-controller vtable `+0x44`; the AI calls it every frame, so only changes were kept) with the call stack, the distance and bearing to the player and the player's state; also each creature's upper-body layer (`ctl+0x60/+0x64`) and every `Stats_TakeDamage` call. Creature controllers are updated by `0x00429810` (called from `0x00427575`); the player's by `0x00429BF0` (input → state). Hardware watchpoints set from Frida (`Thread.setHardwareWatchpoint` + an exception handler that returns `true`) catch writers without pausing the game. Two runs, ~12 minutes of fighting 6+ skeletons:
+
+| Decision | Logged condition |
+|---|---|
+| Run / walk | RUNNING beyond ~12 ft; COMBAT_STANDING ↔ WALKING within 8–12 ft |
+| Lunge | WALKING/RUNNING → HOP_F at 7.5–8.0 ft; the next request comes 0.9–1.06 s later: a swing (75 %) or the stance (25 %) |
+| Leaping strike | WALKING → JUMP_ATTACK at 7.2–7.9 ft instead of the hop (~15 % of approaches) |
+| Jab | COMBAT_STANDING → THRUST at 4.0–4.7 ft, repeated once per stance (~1.1 s or ~1.3 s apart) |
+| Step back | COMBAT_STANDING → RETREAT at 4.6–8 ft; every retreat ended at **8.0–8.2 ft** (distance-driven, not timed) |
+| Chains | 1 swing (74 %) or 2 (26 %), never 3; the second is always the next in the cycle CHOP_LOW → SWING_LEVEL → SWING_OVERHEAD → CHOP_LOW. Openers after a hop: SWING_LEVEL 14, CHOP_LOW 12, SWING_OVERHEAD 6 |
+| Stance | after any action COMBAT_STANDING for 0.50 s; then either the next action, or (55 %) the shield layer goes to state 5 for **0.82 s** and the next action starts as it drops (stance 1.32 s) |
+| Shield | 26 raises, all in that stance, none while the player swung: the skeleton's block is not a reaction |
+| Shield bash | COMBAT_STANDING → RAM_SHOULDER at 5.7 ft (once): the player went to IMPACT_MEDIUM without damage; the next hit 0.2 s later put him in IMPACT_SEVERE |
+
+Player hits on creatures always produced an IMPACT_* request unless they killed (25 → 10 HP: IMPACT_LEFT). Creature hits on the player (~10 HP of ~70) always produced a directional IMPACT_* on the player; IMPACT_SEVERE (knock-down) appeared twice: after the shield bash, and once on a 10/25 HP hit; IMPACT_MEDIUM once on a 14/15 HP hit while already in IMPACT_SEVERE.
+
+Implemented in the server AI (`world_zone.ts`, constants in `combat.ts`): the distance bands, the 1.0 s hop with 25 % no-swing, the leaping strike, the jab at ≤ 4.8 ft, retreat until 8 ft (30 %), chains 1/2 with the cycle order, the 0.5 s stance with a 55 % 0.82 s shield that blocks frontal hits, and no reactive block for skeletons.
+
 
 ### 14.2 Moving with the shield up (2026-10-12)
 

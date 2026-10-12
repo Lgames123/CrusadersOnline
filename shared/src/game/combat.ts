@@ -71,49 +71,77 @@ export function attackTiming(kind: 'normal' | 'overhead' | 'left' | 'right' | 'l
 }
 
 /**
- * Creature melee as observed in the running game (executable-analysis.md §15): a skeleton
- * walks in guard inside ~14 ft, hops forward (ASM_HOP_F) from up to ~9 ft and swings at once.
- * Swings are the clips bound to its ASM states: SWING_OVERHEAD (PN03, the most frequent),
- * SWING_LEVEL (PN02) and CHOP_LOW (PN01).
+ * Creature melee as logged from the running game's AI (every SetNextState request of the
+ * skeletons, executable-analysis.md §15.2): they run beyond ~12 ft, walk in combat stance
+ * inside it, hop forward (ASM_HOP_F) from ~8 ft and swing when the hop ends. Swings are the
+ * clips bound to their ASM states: SWING_LEVEL (PN02), CHOP_LOW (PN01), SWING_OVERHEAD (PN03),
+ * opening a chain in about 45 / 37 / 18 % of the hops. The order is also the chain order: a
+ * second swing is always the next one in the cycle low -> level -> overhead -> low.
  */
 export const MOB_ATTACKS: readonly { kind: 'overhead' | 'normal' | 'low'; weight: number; clip: ClipEvents }[] = [
-  { kind: 'overhead', weight: 0.5, clip: { swing: 10, impact: 12, recovery: 16 } },
-  { kind: 'normal', weight: 0.3, clip: { swing: 7, impact: 8, recovery: 13 } },
-  { kind: 'low', weight: 0.2, clip: { swing: 14, impact: 16, recovery: 19 } },
+  { kind: 'normal', weight: 0.45, clip: { swing: 7, impact: 8, recovery: 13 } },
+  { kind: 'low', weight: 0.37, clip: { swing: 14, impact: 16, recovery: 19 } },
+  { kind: 'overhead', weight: 0.18, clip: { swing: 10, impact: 12, recovery: 16 } },
 ];
+/** Chain order of the creature swings (next swing after each kind). */
+export const MOB_CHAIN_NEXT: Readonly<Record<'overhead' | 'normal' | 'low', 'overhead' | 'normal' | 'low'>> = {
+  low: 'normal',
+  normal: 'overhead',
+  overhead: 'low',
+};
 /** Close-range jab (ASM_THRUST, PP02: SWING 6, RECOVERY 17; no IMPACT event, hit on frame 9). */
 export const MOB_THRUST = { kind: 'thrust' as const, clip: { swing: 6, impact: 9, recovery: 17 } };
-/** Distance under which creatures prefer the jab (observed at ~4 ft). */
-export const MOB_THRUST_RANGE = 5 * 0.3048;
 /**
- * Attack rhythm observed in the original: chains of 1 (55 %), 2 (35 %) or 3 (10 %) swings,
- * then a guard of 0.4-1.9 s with the shield up (frontal hits are blocked); after about one
- * chain in four the creature first steps back ~2 steps in guard, then comes in again.
+ * Standing in combat stance closer than this, a creature jabs (ASM_THRUST, requested at
+ * 4.0-4.7 ft) instead of hopping in, once per stance (~1.1 s apart while the target stays).
  */
-export const MOB_CHAIN_WEIGHTS = [0.55, 0.35, 0.1] as const;
-export const MOB_GUARD_MIN_TICKS = Math.round(0.4 * TICK_RATE);
-export const MOB_GUARD_MAX_TICKS = Math.round(1.9 * TICK_RATE);
-export const MOB_RETREAT_CHANCE = 0.25;
-/** Share of frontal hits the guard stops (the original's skeletons die quickly to frontal attacks too). */
-export const MOB_GUARD_BLOCK_CHANCE = 0.5;
-export const MOB_RETREAT_TICKS = Math.round(0.8 * TICK_RATE);
-/** Guard held after stepping back before coming in again: 0.5-1.0 s (playtest feedback). */
-export const MOB_POST_RETREAT_MIN_TICKS = Math.round(0.5 * TICK_RATE);
-export const MOB_POST_RETREAT_SPAN_TICKS = Math.round(0.5 * TICK_RATE);
+export const MOB_THRUST_RANGE = 4.8 * 0.3048;
+/** Leaping strike (ASM_JUMP_ATTACK): taken instead of the hop in ~15 % of approaches at ~7.5 ft. */
+export const MOB_JUMP_ATTACK = { kind: 'jump' as const, clip: { swing: 17, impact: 20, recovery: 24 } };
+export const MOB_JUMP_ATTACK_CHANCE = 0.15;
+/** ASM_JUMP_ATTACK covers about 3.5 ft before its impact. */
+export const MOB_JUMP_ATTACK_DISTANCE = 3.5 * 0.3048;
+/**
+ * Attack rhythm logged in the original: chains of 1 (74 %) or 2 (26 %) swings. After each
+ * action the creature stands 0.5 s in combat stance; in about half the stances it then raises
+ * its shield (upper-body layer, ASM_BLOCK) for 0.82 s and attacks as it lowers it. The shield
+ * was never raised in reaction to the player's swings.
+ */
+export const MOB_CHAIN_WEIGHTS = [0.74, 0.26] as const;
+export const MOB_STANCE_TICKS = Math.round(0.5 * TICK_RATE);
+export const MOB_SHIELD_TICKS = Math.round(0.82 * TICK_RATE);
+export const MOB_SHIELD_CHANCE = 0.55;
+/**
+ * Inside 8 ft, after its stance, a creature sometimes steps back (ASM_RETREAT) instead of
+ * attacking, and keeps retreating until it is 8 ft away (logged: every retreat ended at
+ * 8.0-8.2 ft), then walks in and hops again.
+ */
+export const MOB_RETREAT_CHANCE = 0.3;
+export const MOB_RETREAT_RANGE = 8 * 0.3048;
+/** Upper bound of a retreat (it stops at 8 ft; this only stops it against a wall). */
+export const MOB_RETREAT_TICKS = Math.round(1.5 * TICK_RATE);
 
-/** Distance (centre to centre, m) inside which a creature walks in guard instead of running. */
-export const MOB_COMBAT_RANGE = 14 * 0.3048;
-/** Distance from which a creature lunges with a forward hop before swinging. */
-export const MOB_HOP_RANGE = 9 * 0.3048;
-/** ASM_HOP_F (PC07): 5.65 ft of root motion over 20 frames at 1000/30 fps. */
-export const MOB_HOP_TICKS = Math.round((20 / ORIGINAL_CLIP_FPS) * TICK_RATE);
+/** Distance (centre to centre, m) inside which a creature walks in combat stance instead of running (logged 8-12 ft). */
+export const MOB_COMBAT_RANGE = 12 * 0.3048;
+/** Distance from which a creature lunges with a forward hop before swinging (logged 7.5-8 ft). */
+export const MOB_HOP_RANGE = 8 * 0.3048;
+/** ASM_HOP_F (PC07): 5.65 ft of root motion; the swing was requested 0.9-1.06 s after the hop. */
+export const MOB_HOP_TICKS = Math.round(1.0 * TICK_RATE);
 export const MOB_HOP_SPEED = (5.65 * 0.3048) / (MOB_HOP_TICKS / TICK_RATE);
+/** Share of hops that end in the combat stance without a swing (logged 11 of 43). */
+export const MOB_HOP_NO_SWING_CHANCE = 0.25;
 
 /** Picks a creature attack with `roll` in [0, 1). */
 export function pickMobAttack(roll: number): (typeof MOB_ATTACKS)[number] {
   let acc = 0;
   for (const a of MOB_ATTACKS) if (roll < (acc += a.weight)) return a;
   return MOB_ATTACKS[0]!;
+}
+
+/** The swing that follows `kind` in a creature chain. */
+export function nextMobAttack(kind: 'overhead' | 'normal' | 'low'): (typeof MOB_ATTACKS)[number] {
+  const next = MOB_CHAIN_NEXT[kind];
+  return MOB_ATTACKS.find((a) => a.kind === next)!;
 }
 
 export function clipSwingTiming(c: Readonly<ClipEvents>, weaponSpeed = 1): SwingTiming {
@@ -207,7 +235,8 @@ const SKELETON_WARRIOR: MobArchetype = {
   weapon: 'long_sword',
   shield: 'wooden_shield',
   resist: [0.9, 1.1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.75],
-  blockChance: 0.35,
+  // No reactive block: logged skeletons raised the shield only in their stance (MOB_SHIELD_*).
+  blockChance: 0,
   blockTicks: ticks(700),
   blockCooldown: ticks(1500),
   speed: 4.2,

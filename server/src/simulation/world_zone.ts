@@ -60,18 +60,22 @@ import {
   attackTiming,
   clipSwingTiming,
   pickMobAttack,
+  nextMobAttack,
   MOB_COMBAT_RANGE,
   MOB_HOP_RANGE,
   MOB_HOP_SPEED,
   MOB_HOP_TICKS,
+  MOB_HOP_NO_SWING_CHANCE,
   MOB_CHAIN_WEIGHTS,
-  MOB_GUARD_BLOCK_CHANCE,
-  MOB_GUARD_MAX_TICKS,
-  MOB_GUARD_MIN_TICKS,
+  MOB_SHIELD_CHANCE,
+  MOB_SHIELD_TICKS,
+  MOB_STANCE_TICKS,
+  MOB_JUMP_ATTACK,
+  MOB_JUMP_ATTACK_CHANCE,
+  MOB_JUMP_ATTACK_DISTANCE,
   MOB_RETREAT_CHANCE,
+  MOB_RETREAT_RANGE,
   MOB_RETREAT_TICKS,
-  MOB_POST_RETREAT_MIN_TICKS,
-  MOB_POST_RETREAT_SPAN_TICKS,
   MOB_THRUST,
   MOB_THRUST_RANGE,
   quantizeAngle,
@@ -285,9 +289,11 @@ interface Mob extends ActorBase {
   hopTicks: number;
   /** Swings left in the current attack chain. */
   chainLeft: number;
-  /** Guard after a chain: shield up (blocks frontal hits) until this tick. */
+  /** Combat stance after an action until this tick (no new action before it). */
   guardUntil: number;
-  /** Stepping back in guard until this tick. */
+  /** Shield raised from this tick until the end of the stance (blocks frontal hits). */
+  shieldFrom: number;
+  /** Stepping back in guard (until 8 ft away, at most until this tick). */
   retreatUntil: number;
   input: InputFrame;
   stats: MovementStats;
@@ -392,6 +398,7 @@ export class WorldZone {
       hopTicks: 0,
       chainLeft: 0,
       guardUntil: 0,
+      shieldFrom: 0,
       retreatUntil: 0,
       input: createInputFrame(),
       // Creatures share the humanoid rig's root-motion speeds (run, walk); no jumping.
@@ -810,7 +817,7 @@ export class WorldZone {
       // Shield layer (upper body): a player holding block, a creature in guard or blocking.
       const shieldUp = a.kind === 'player'
         ? a.blocking
-        : a.shield !== null && !a.swing && (a.guardUntil > tick || a.blockUntil > tick);
+        : a.shield !== null && !a.swing && (a.blockUntil > tick || (a.shieldFrom <= tick && a.guardUntil > tick));
       s.flags = alive(a) && shieldUp ? 1 : 0;
     }
 
@@ -869,26 +876,40 @@ export class WorldZone {
         const t = target.character.position;
         m.yaw = quantizeAngle(yawTowards(pos.x, pos.z, t.x, t.z));
       } else if (m.hopTicks > 0) {
-        // Lunge: the forward hop carries the creature in, then the swing starts.
-        if (--m.hopTicks === 0) this.startMobSwing(m, target, true);
+        // Lunge: the forward hop carries the creature in; when it ends the creature swings,
+        // or (about one hop in four) just stands in its combat stance.
+        if (--m.hopTicks === 0) {
+          if (this.random() >= 1 - MOB_HOP_NO_SWING_CHANCE) this.enterStance(m);
+          else this.startMobSwing(m, pickMobAttack(this.random()), this.chainLength());
+        }
       } else if (!m.swing) {
+        // Decisions as logged from the original's skeleton AI (executable-analysis §15.2).
         const t = target.character.position;
         const dist = Math.hypot(t.x - pos.x, t.z - pos.z);
         m.yaw = quantizeAngle(yawTowards(pos.x, pos.z, t.x, t.z));
         const ready = this.tick >= m.nextSwingTick && this.tick >= m.guardUntil;
+        // Rolls are written as 1 - chance so a zero random source (deterministic tests) takes the plain path.
         if (m.retreatUntil > this.tick) {
-          m.input.flags = INPUT.BACK | INPUT.WALK; // two steps back in guard
+          // Stepping back in combat stance until 8 ft away, then a stance before coming in.
+          if (dist >= MOB_RETREAT_RANGE) {
+            m.retreatUntil = 0;
+            this.enterStance(m);
+          } else m.input.flags = INPUT.BACK | INPUT.WALK;
         } else if (!ready) {
-          // Guard: shield up facing the target; close in slowly if it backs off.
+          // Combat stance: shield ready, facing the target; close in slowly if it backs off.
           if (dist > MOB_HOP_RANGE) m.input.flags = INPUT.FORWARD | INPUT.WALK;
-        } else if (dist <= arch.reach * 0.85) {
-          this.startMobSwing(m, target, true);
+        } else if (dist < MOB_RETREAT_RANGE && this.random() >= 1 - MOB_RETREAT_CHANCE) {
+          m.retreatUntil = this.tick + MOB_RETREAT_TICKS;
+          m.input.flags = INPUT.BACK | INPUT.WALK;
+        } else if (dist <= MOB_THRUST_RANGE) {
+          this.startMobSwing(m, MOB_THRUST, 1); // the close-range jab, one per stance
         } else if (dist <= MOB_HOP_RANGE) {
-          m.hopTicks = MOB_HOP_TICKS;
+          if (this.random() >= 1 - MOB_JUMP_ATTACK_CHANCE) this.startMobSwing(m, MOB_JUMP_ATTACK, 1);
+          else m.hopTicks = MOB_HOP_TICKS;
         } else if (dist > MOB_COMBAT_RANGE) {
           m.input.flags = INPUT.FORWARD; // run in
-        } else if (dist > arch.reach * 0.85) {
-          m.input.flags = INPUT.FORWARD | INPUT.WALK; // walk in, in guard
+        } else {
+          m.input.flags = INPUT.FORWARD | INPUT.WALK; // walk in, in combat stance
         }
       }
     }
@@ -906,17 +927,22 @@ export class WorldZone {
 
     m.input.yaw = m.yaw;
     m.input.clientTick = this.tick;
-    if (m.hopTicks > 0) m.input.flags = INPUT.FORWARD;
-    stepCharacter(this.mw, m.character, m.input, m.hopTicks > 0 ? this.hopStats : m.stats, TICK_DT);
+    // The leaping strike carries the creature forward until its impact.
+    const leaping = m.swing?.kind === 'jump' && this.tick - m.swing.start < m.swing.timing.startup;
+    if (m.hopTicks > 0 || leaping) m.input.flags = INPUT.FORWARD;
+    stepCharacter(this.mw, m.character, m.input, m.hopTicks > 0 ? this.hopStats : leaping ? this.leapStats : m.stats, TICK_DT);
     this.separate(m);
     m.anim = m.blockUntil > this.tick
       ? ANIM.BLOCK
       : m.hopTicks > 0
       ? ANIM.HOP_FORWARD
+      : m.retreatUntil > this.tick && m.input.flags & INPUT.BACK
+      ? ANIM.RETREAT
       : m.input.flags & MOVE_MASK ? (m.input.flags & INPUT.WALK ? ANIM.WALK : ANIM.RUN) : ANIM.IDLE;
   }
 
   private readonly hopStats = uniformMovementStats(MOB_HOP_SPEED);
+  private readonly leapStats = uniformMovementStats(MOB_JUMP_ATTACK_DISTANCE / (clipSwingTiming(MOB_JUMP_ATTACK.clip).startup * TICK_DT));
 
   /**
    * Pushes a creature out of any character it overlaps (characters are sensors for the
@@ -947,43 +973,43 @@ export class WorldZone {
     setCharacterState(m.character, { x: pos.x + moved.x, y: pos.y, z: pos.z + moved.z }, m.character.velocityY, m.character.grounded);
   }
 
-  /**
-   * Starts a creature swing (one of its ASM attacks, timed by that clip's events). A new chain
-   * draws its length (1-3 swings, original rhythm); the jab is preferred at close range.
-   */
-  private startMobSwing(m: Mob, target: Actor | null, newChain: boolean): void {
-    if (newChain) {
-      const r = this.random();
-      m.chainLeft = r < MOB_CHAIN_WEIGHTS[0] ? 1 : r < MOB_CHAIN_WEIGHTS[0] + MOB_CHAIN_WEIGHTS[1] ? 2 : 3;
-    }
-    const pos = m.character.position;
-    const tp = target?.character.position;
-    const close = tp !== undefined && Math.hypot(tp.x - pos.x, tp.z - pos.z) <= MOB_THRUST_RANGE;
-    // Rolls are written as 1 - chance so a zero random source (deterministic tests) takes the plain path.
-    const atk = close && this.random() >= 0.4 ? MOB_THRUST : pickMobAttack(this.random());
+  /** Length of a new attack chain: 1 (74 %) or 2 swings (original rhythm). */
+  private chainLength(): number {
+    return this.random() < MOB_CHAIN_WEIGHTS[0] ? 1 : 2;
+  }
+
+  /** Starts a creature swing (one of its ASM attacks, timed by that clip's events). */
+  private startMobSwing(m: Mob, atk: { kind: AttackKind; clip: Parameters<typeof clipSwingTiming>[0] }, chain: number): void {
+    m.chainLeft = chain;
     m.swing = { combo: 1, kind: atk.kind, start: this.tick, timing: clipSwingTiming(atk.clip), hit: new Set() };
   }
 
-  /** End of a creature swing: next swing of the chain, or guard (sometimes stepping back first). */
-  private endMobSwing(m: Mob): void {
+  /**
+   * End of a creature swing: the chain's next swing (always the next one in the cycle
+   * low -> level -> overhead), or the combat stance for 0.52-1.8 s.
+   */
+  private endMobSwing(m: Mob, kind: AttackKind): void {
     m.nextSwingTick = this.tick + m.archetype.cooldown;
-    if (--m.chainLeft > 0) {
+    if (--m.chainLeft > 0 && (kind === 'low' || kind === 'normal' || kind === 'overhead')) {
       const target = [...m.threat.keys()].map((id) => this.actors.get(id)).find((a) => a !== undefined && alive(a)) ?? null;
       const tp = target?.character.position;
       const pos = m.character.position;
       if (target && tp && Math.hypot(tp.x - pos.x, tp.z - pos.z) <= m.archetype.reach * 1.2) {
-        this.startMobSwing(m, target, false);
+        this.startMobSwing(m, nextMobAttack(kind), m.chainLeft);
         return;
       }
     }
     m.chainLeft = 0;
-    const span = MOB_GUARD_MAX_TICKS - MOB_GUARD_MIN_TICKS;
-    m.guardUntil = this.tick + MOB_GUARD_MIN_TICKS + Math.floor(this.random() * (span + 1));
-    if (this.random() >= 1 - MOB_RETREAT_CHANCE) {
-      m.retreatUntil = this.tick + MOB_RETREAT_TICKS;
-      // After stepping back it holds its guard a moment before advancing again.
-      m.guardUntil = Math.max(m.guardUntil, m.retreatUntil + MOB_POST_RETREAT_MIN_TICKS + Math.floor(this.random() * (MOB_POST_RETREAT_SPAN_TICKS + 1)));
-    }
+    this.enterStance(m);
+  }
+
+  /** Combat stance: 0.5 s, then in about half the stances the shield goes up for 0.82 s. */
+  private enterStance(m: Mob): void {
+    const stand = this.tick + MOB_STANCE_TICKS;
+    // 1 - chance: a zero random source (deterministic tests) keeps the shield down.
+    const shield = m.shield !== null && this.random() >= 1 - MOB_SHIELD_CHANCE;
+    m.shieldFrom = shield ? stand : Number.MAX_SAFE_INTEGER;
+    m.guardUntil = shield ? stand + MOB_SHIELD_TICKS : stand;
   }
 
   private updateSwing(a: Actor): void {
@@ -1018,7 +1044,7 @@ export class WorldZone {
       a.swing = null;
       a.lastSwingEnd = this.tick;
       a.lastCombo = s.kind === 'normal' ? s.combo : 0;
-      if (a.kind === 'mob') this.endMobSwing(a);
+      if (a.kind === 'mob') this.endMobSwing(a, s.kind);
       else {
         if (a.pendingEquip) {
           const { slot, equip } = a.pendingEquip;
@@ -1035,11 +1061,10 @@ export class WorldZone {
    * the frontal cone dot(facing, toAttacker) > cos(30) — 30 radians in the original, ≈ ±81°.
    */
   private blocks(p: Actor, attacker: Actor): boolean {
-    // Creatures hold the shield up while blocking, and in their guard between chains they stop
-    // about half of the frontal hits (1 - chance: a zero random source never blocks).
+    // Creatures block frontal hits while their shield is up (stance shield or a block reaction).
     const raised = p.kind === 'player'
       ? p.blocking
-      : p.shield !== null && !p.swing && (p.blockUntil > this.tick || (p.guardUntil > this.tick && this.random() >= 1 - MOB_GUARD_BLOCK_CHANCE));
+      : p.shield !== null && !p.swing && (p.blockUntil > this.tick || (p.shieldFrom <= this.tick && p.guardUntil > this.tick));
     if (!raised) return false;
     const pp = p.character.position;
     const ap = attacker.character.position;
