@@ -41,7 +41,7 @@ beforeAll(async () => {
 const SKELETON = MOB_ARCHETYPES['skeleton_warrior']!;
 
 /** In-process zone with one player; captures JSON messages and persist requests. */
-function setup(opts: { experience?: number; inventory?: InventoryEntry[]; random?: () => number } = {}) {
+function setup(opts: { experience?: number; inventory?: InventoryEntry[]; random?: () => number; reactiveBlock?: boolean } = {}) {
   const messages: ServerControlMsg[] = [];
   const persisted: { records: PersistRecord[]; reason: string }[] = [];
   const zone = new WorldZone(rapier, 'test', createSyntheticArena(), {
@@ -49,7 +49,7 @@ function setup(opts: { experience?: number; inventory?: InventoryEntry[]; random
       if (typeof data === 'string') messages.push(JSON.parse(data) as ServerControlMsg);
     },
     persist: (records, reason) => persisted.push({ records, reason }),
-  }, { random: opts.random ?? (() => 0) });
+  }, { random: opts.random ?? (() => 0), reactiveBlock: opts.reactiveBlock });
   const entityId = zone.join(1, { name: 'Tester', characterId: 'c1', position: { x: 0, y: 0.5, z: 0 }, ...opts });
   const buf = new DataView(new ArrayBuffer(INPUT_PACKET_MAX_BYTES));
   let clientTick = 0;
@@ -377,6 +377,26 @@ describe('skeleton shield AI', () => {
     t.zone.attack(1);
     t.run(1);
     expect(t.mob().anim === ANIM.BLOCK && before !== ANIM.BLOCK).toBe(false);
+  });
+
+  it('optional reactive block: raises the shield against a frontal swing, then lowers it', () => {
+    // 0.68 passes the 35% block roll but not the step-back / leap rolls.
+    const t = setup({ random: () => 0.68, reactiveBlock: true });
+    t.run(APPROACH, INPUT.FORWARD, 0);
+    t.run(30);
+    const gap = () => Math.hypot(t.mob().x - t.me().x, t.mob().z - t.me().z);
+    for (let i = 0; i < 80 && (t.mob().swinging || gap() > PLAYER_REACH + 0.3); i++) t.run(1);
+    t.zone.attack(1);
+    t.run(12);
+    const first = t.events().filter((e) => e.target === t.mob().id);
+    expect(first).toHaveLength(1);
+    expect(first[0]).toMatchObject({ blocked: true, damage: 0 });
+    const anims: number[] = [];
+    for (let i = 0; i < 60; i++) {
+      t.run(1);
+      anims.push(t.mob().anim);
+    }
+    expect(anims.some((a) => a !== ANIM.BLOCK)).toBe(true);
   });
 
   it('raises the shield for 0.82 s after its 0.5 s stance; frontal hits then are blocked, others land', () => {

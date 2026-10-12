@@ -190,9 +190,10 @@ export interface MobArchetype {
   /** Damage-taken multipliers per type (level placement data, SLASH ... DARK). */
   resist: DamageVector;
   /**
-   * Shield AI (slice values; the original uses SHIELD_BLOCK / SHIELD_COVER maneuvers whose
-   * scripts are not decoded): chance to raise the shield when a player starts a swing at it,
-   * how long it stays up, and the minimum time before the next block.
+   * Reactive block (optional feature, off by default: WorldZoneOptions.reactiveBlock): chance
+   * to raise the shield when a player starts a swing at it, how long it stays up, and the
+   * minimum time before the next block. Not original behaviour: logged skeletons only raised
+   * the shield in their stance (MOB_SHIELD_*, executable-analysis §15.2).
    */
   blockChance: number;
   blockTicks: number;
@@ -235,8 +236,7 @@ const SKELETON_WARRIOR: MobArchetype = {
   weapon: 'long_sword',
   shield: 'wooden_shield',
   resist: [0.9, 1.1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.75],
-  // No reactive block: logged skeletons raised the shield only in their stance (MOB_SHIELD_*).
-  blockChance: 0,
+  blockChance: 0.35,
   blockTicks: ticks(700),
   blockCooldown: ticks(1500),
   speed: 4.2,

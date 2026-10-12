@@ -396,7 +396,7 @@ Frida (non-pausing `Interceptor` hooks in a standalone Python runner) logged eve
 
 Player hits on creatures always produced an IMPACT_* request unless they killed (25 → 10 HP: IMPACT_LEFT). Creature hits on the player (~10 HP of ~70) always produced a directional IMPACT_* on the player; IMPACT_SEVERE (knock-down) appeared twice: after the shield bash, and once on a 10/25 HP hit; IMPACT_MEDIUM once on a 14/15 HP hit while already in IMPACT_SEVERE.
 
-Implemented in the server AI (`world_zone.ts`, constants in `combat.ts`): the distance bands, the 1.0 s hop with 25 % no-swing, the leaping strike, the jab at ≤ 4.8 ft, retreat until 8 ft (30 %), chains 1/2 with the cycle order, the 0.5 s stance with a 55 % 0.82 s shield that blocks frontal hits, and no reactive block for skeletons.
+Implemented in the server AI (`world_zone.ts`, constants in `combat.ts`): the distance bands, the 1.0 s hop with 25 % no-swing, the leaping strike, the jab at ≤ 4.8 ft, retreat until 8 ft (30 %), chains 1/2 with the cycle order, the 0.5 s stance with a 55 % 0.82 s shield that blocks frontal hits, and no reactive block (kept as an optional, non-original feature: `WorldZoneOptions.reactiveBlock`, off by default, using the archetype's `blockChance` / `blockTicks` / `blockCooldown`).
 
 
 ### 14.2 Moving with the shield up (2026-10-12)

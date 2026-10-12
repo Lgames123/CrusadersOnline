@@ -167,6 +167,11 @@ export interface WorldZoneOptions {
   difficulty?: Difficulty;
   /** Item definitions (default: the built-in catalog). */
   items?: ItemCatalog;
+  /**
+   * Optional feature (not original, default off): shielded creatures may raise the shield in
+   * reaction to a player's swing (archetype blockChance / blockTicks / blockCooldown).
+   */
+  reactiveBlock?: boolean;
 }
 
 /** Ticks a light flinch / heavy stagger interrupts the player (slice value). */
@@ -321,6 +326,7 @@ export class WorldZone {
   private readonly outbox: ZoneOutbox;
   private readonly random: () => number;
   private readonly difficulty: Difficulty;
+  private readonly reactiveBlock: boolean;
   private readonly items: ItemCatalog;
   private readonly grid = new SpatialHashGrid(32);
   private readonly players = new Map<number, Player>(); // by connId
@@ -340,6 +346,7 @@ export class WorldZone {
     this.outbox = outbox;
     this.random = opts.random ?? Math.random;
     this.difficulty = opts.difficulty ?? 'medium';
+    this.reactiveBlock = opts.reactiveBlock ?? false;
     this.items = opts.items ?? BUILTIN_ITEMS;
     this.mw = createMovementWorld(rapier, arena);
     for (const s of arena.mobSpawns) this.spawnMob(s.archetype, s);
@@ -746,10 +753,10 @@ export class WorldZone {
     const combo = chained ? p.lastCombo + 1 : 1;
     p.swing = { combo, kind, start: this.tick, timing: attackTiming(kind, combo, p.weapon.speed ?? 1), hit: new Set() };
     p.queuedAttack = false;
-    this.mobsReactToSwing(p);
+    if (this.reactiveBlock) this.mobsReactToSwing(p);
   }
 
-  /** Shielded mobs in front of a player who starts a swing may raise their shield (AI block). */
+  /** Optional reactive block: shielded mobs in front of a player who starts a swing may raise their shield. */
   private mobsReactToSwing(p: Player): void {
     const pp = p.character.position;
     const yaw = dequantizeAngle(p.yaw);
