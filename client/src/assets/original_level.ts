@@ -21,6 +21,8 @@ interface Manifest {
  */
 const LIGHTMAP_GAIN = 2;
 const SKY_PREFIX = 'wld_sy_sky';
+/** Distance to the sky box's corners, metres (the camera's far plane is ~490 m). */
+const SKY_RADIUS = 300;
 
 export interface LevelObjectView {
   def: LevelObject;
@@ -112,6 +114,25 @@ function placementMatrix(o: LevelObject): THREE.Matrix4 {
   return new THREE.Matrix4().set(r[0]!, r[3]!, r[6]!, x, r[1]!, r[4]!, r[7]!, y, r[2]!, r[5]!, r[8]!, z, 0, 0, 0, 1);
 }
 
+/**
+ * Each sky piece is one tile of a face (sky1up_a..i) showing its texture once; Ws_a's texture
+ * axes repeat it 3.75 times, so the UVs are stretched to 0..1 per piece.
+ */
+function fitSkyTile(geo: THREE.BufferGeometry): void {
+  const uv = geo.getAttribute('uv');
+  if (!uv) return;
+  let u0 = Infinity, v0 = Infinity, u1 = -Infinity, v1 = -Infinity;
+  for (let i = 0; i < uv.count; i++) {
+    u0 = Math.min(u0, uv.getX(i));
+    u1 = Math.max(u1, uv.getX(i));
+    v0 = Math.min(v0, uv.getY(i));
+    v1 = Math.max(v1, uv.getY(i));
+  }
+  if (u1 - u0 < 1e-6 || v1 - v0 < 1e-6) return;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) - u0) / (u1 - u0), (uv.getY(i) - v0) / (v1 - v0));
+  uv.needsUpdate = true;
+}
+
 async function fetchOk(url: string): Promise<Response> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
@@ -160,7 +181,11 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
     mesh.removeFromParent();
     if (isSky) {
       material.depthWrite = false;
-      material.side = THREE.BackSide;
+      // Seen from inside; Ws_a's faces point the other way.
+      material.side = THREE.DoubleSide;
+      fitSkyTile(mesh.geometry);
+      // Drawn far around the camera: the level's fog would black it out.
+      material.fog = false;
       mesh.renderOrder = -1;
       sky.add(mesh);
     } else {
@@ -170,9 +195,12 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
   level.scale.setScalar(LEVEL_UNIT_METRES);
 
   // The sky box is a small cube modelled away from the map; draw it around the camera.
-  const skyCentre = new THREE.Box3().setFromObject(sky).getCenter(new THREE.Vector3());
+  // Scaled to a fixed size (its corners SKY_RADIUS away), inside the camera's far plane.
+  const skyBox = new THREE.Box3().setFromObject(sky);
+  const skyCentre = skyBox.getCenter(new THREE.Vector3());
   sky.children.forEach((m) => m.position.sub(skyCentre));
-  sky.scale.setScalar(LEVEL_UNIT_METRES * 20);
+  const skyHalfDiagonal = skyBox.getSize(new THREE.Vector3()).length() / 2;
+  sky.scale.setScalar(skyHalfDiagonal > 0 ? SKY_RADIUS / skyHalfDiagonal : 1);
   const root = new THREE.Group();
   root.add(level);
   if (sky.children.length) root.add(sky);

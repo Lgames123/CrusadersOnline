@@ -261,7 +261,7 @@ Moving level pieces are class `0x31` records, not part of the `.msh`: `[31 00 00
 
 Implemented (simplified, not the original's behaviour): the converter writes `brushes` (name + vertices) in each act's placements; brushes named *door* / *gate* become doors (world objects, convex-hull colliders) that open with the interact key (Tab) and slide up; doors, gates, bridges and platforms are solid, the rest are drawn only, untextured. Locked doors (a guess, keys placed in the acts): train `bfinaldoor` — Fain's Key, Cs1b-Inn `bDoorE_4` / `bDoorE_5` — Room 2 / Room 3 Key; they open with the use key (Z) while the key is carried (keys are not used up: `Permanent`).
 
-### 6.3 `.msh` layout and geometry `[CONFIRMED on 24 of 25 levels]`
+### 6.3 `.msh` layout and geometry `[CONFIRMED on 25 of 25 levels]`
 
 **Memory images.** Both `.msh` and `.cap` files are memory images ("game DBs"). The loader decompresses them into game memory at fixed addresses, so internal pointers are absolute: the mesh DBs live at `0x06000000` and the cap DB at `0x08000000`. Each DB ends with a **per-type object table**: for every object type, a count followed by that many pointers. It is the "recyclable overhead" in the loader's messages.
 
@@ -269,7 +269,7 @@ Implemented (simplified, not the original's behaviour): the converter writes `br
 
 | Part | Content |
 |---|---|
-| Header (0x112 bytes) | magic `0xFEED000A`, offset of the SpaceMap header, lightmap byte size, lightmap count, flags (0; `Ws_a.msh` has 2 and is not decoded yet) |
+| Header (0x112 bytes) | magic `0xFEED000A`, offset of the SpaceMap header, lightmap byte size, lightmap count, flags (0; `Ws_a.msh` has 2: an 8216-byte table follows the header, before the lightmaps — skipped, see UNK-010) |
 | `[u32 size][DCL]` | lightmap texels: 16-bit RGB555, tiles up to 16 × 16 |
 | Lightmap directory | 12 bytes per tile: `[?, ?, width, height][u32 byte offset][pad]` |
 | SpaceMap DB | 0x20-byte header (size, table bytes, version `0xA1A10001`, 11 types, …), then `[u32 size][DCL]`: 2D cell graph (cells with edges and neighbour links, for navigation and visibility) |

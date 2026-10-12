@@ -46,6 +46,32 @@
         "ARENA": "level:cs1b-inn"
       },
       "port": 8090
+    },
+    {
+      "name": "server-ws",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/server",
+        "dev"
+      ],
+      "env": {
+        "ARENA": "level:ws1a"
+      },
+      "port": 8090
+    },
+    {
+      "name": "server-town",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/server",
+        "dev"
+      ],
+      "env": {
+        "ARENA": "level:cs1b"
+      },
+      "port": 8090
     }
   ]
 }

@@ -70,8 +70,8 @@ Every unknown item is assigned a priority and a concrete validation experiment t
 - **Next step:** re-run Ghidra auto-analysis with the aggressive function finder, then follow readers of the resist table filled by `Rules_LoadDefaultCtx`.
 
 ### UNK-010: `Ws_a.msh` (header flags 2) and lightmap gain
-- **Status:** Open | **Priority:** Low
-- **Description:** `Ws_a.msh` sets header flag 2 and its lightmap block is not a DCL stream (probably stored uncompressed). The modulation factor between texture and lightmap (×2 assumed) is unverified.
+- **Status:** Partly resolved (2026-10-12) | **Priority:** Low
+- **Description:** `Ws_a.msh` sets header flag 2, which inserts an 8216-byte (0x2018) table at 0x112, before the usual `[u32 size][DCL]` lightmap block (16-bit values in ramps 0..27/31, purpose unknown — possibly a colour or fog table); the rest of the file is like the other meshes and converts. Still open: that table's meaning, and the modulation factor between texture and lightmap (×2 assumed).
 
 ### UNK-011: Keyboard Turn Rate, Look Rate and Pitch Limits
 - **Status:** Resolved by measurement (2026-10-11): the body follows the view heading at ≤ 270°/s (80°/s airborne), pitch clamp ±90° (executable-analysis.md §13). Arrow turn 200°/s, numpad look 150°/s and pitch ±80° measured in the running game; only the code location is missing. | **Priority:** Low

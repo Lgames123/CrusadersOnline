@@ -55,6 +55,8 @@ export interface MshLevel {
   skipped: number;
 }
 
+const FLAG2_TABLE_BYTES = 0x2018;
+
 export function parseMsh(bytes: Uint8Array): MshLevel {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const u32 = (o: number) => {
@@ -65,11 +67,15 @@ export function parseMsh(bytes: Uint8Array): MshLevel {
   const smOffset = u32(4);
   const lmBytes = u32(8);
   const lmCount = u32(12);
-  if (u32(16) !== 0) throw new MshError(`unsupported level flags ${u32(16)}`);
+  const flags = u32(16);
+  if (flags !== 0 && flags !== 2) throw new MshError(`unsupported level flags ${flags}`);
 
-  const lmSize = u32(0x112);
-  const lm = explode(bytes, 0x116, lmBytes);
-  if (lm.end !== 0x116 + lmSize || lm.data.length !== lmBytes) throw new MshError('lightmap block size mismatch');
+  // Flag 2 (Ws_a.msh only) inserts an 8216-byte table before the lightmaps (16-bit ramps, not
+  // decoded: possibly a colour / fog table); skipped.
+  const lmAt = 0x112 + (flags === 2 ? FLAG2_TABLE_BYTES : 0);
+  const lmSize = u32(lmAt);
+  const lm = explode(bytes, lmAt + 4, lmBytes);
+  if (lm.end !== lmAt + 4 + lmSize || lm.data.length !== lmBytes) throw new MshError('lightmap block size mismatch');
   const lightmaps: MshLightmap[] = [];
   for (let i = 0; i < lmCount; i++) {
     const o = lm.end + 12 * i;
