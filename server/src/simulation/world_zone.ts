@@ -921,7 +921,7 @@ export class WorldZone {
           m.retreatUntil = this.tick + MOB_RETREAT_TICKS;
           m.input.flags = INPUT.BACK | INPUT.WALK;
         } else if (dist <= MOB_BASH_RANGE && m.shield !== null && this.random() >= 1 - MOB_BASH_CHANCE) {
-          this.startMobSwing(m, MOB_BASH, 1); // the rare shield bash: stuns without damage
+          this.startMobSwing(m, MOB_BASH, 2); // the rare shield bash (stuns, no damage), then the jab
         } else if (dist <= MOB_THRUST_RANGE) {
           this.startMobSwing(m, MOB_THRUST, 1); // the close-range jab, one per stance
         } else if (dist <= MOB_HOP_RANGE && this.random() >= 1 - MOB_JUMP_ATTACK_CHANCE) {
@@ -1020,12 +1020,14 @@ export class WorldZone {
    */
   private endMobSwing(m: Mob, kind: AttackKind): void {
     m.nextSwingTick = this.tick + m.archetype.cooldown;
-    if (--m.chainLeft > 0 && (kind === 'low' || kind === 'normal' || kind === 'overhead')) {
+    if (--m.chainLeft > 0 && (kind === 'low' || kind === 'normal' || kind === 'overhead' || kind === 'bash')) {
       const target = [...m.threat.keys()].map((id) => this.actors.get(id)).find((a) => a !== undefined && alive(a)) ?? null;
       const tp = target?.character.position;
       const pos = m.character.position;
-      if (target && tp && Math.hypot(tp.x - pos.x, tp.z - pos.z) <= m.archetype.reach * 1.2) {
-        this.startMobSwing(m, nextMobAttack(kind), m.chainLeft);
+      // The chain goes on within the direct-swing range (the creature swings from 5-7 ft).
+      if (target && tp && Math.hypot(tp.x - pos.x, tp.z - pos.z) <= MOB_SWING_RANGE) {
+        // A shield bash is always followed by the jab (4 of 4 logged).
+        this.startMobSwing(m, kind === 'bash' ? MOB_THRUST : nextMobAttack(kind, this.random()), m.chainLeft);
         return;
       }
     }

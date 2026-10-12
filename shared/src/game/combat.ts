@@ -77,18 +77,19 @@ export function attackTiming(kind: 'normal' | 'overhead' | 'left' | 'right' | 'l
  * inside it, hop forward (ASM_HOP_F) from ~8 ft and swing when the hop ends. Swings are the
  * clips bound to their ASM states: SWING_LEVEL (PN02), CHOP_LOW (PN01), SWING_OVERHEAD (PN03),
  * opening a chain in about 45 / 37 / 18 % of the hops. The order is also the chain order: a
- * second swing is always the next one in the cycle low -> level -> overhead -> low.
+ * second swing follows low -> level, level -> overhead, overhead -> low or level (9 / 8 in four
+ * logs). Same-creature bursts of attacks <= 1.3 s apart: 1 (73 %), 2 (23 %), 3 (3 %).
  */
 export const MOB_ATTACKS: readonly { kind: 'overhead' | 'normal' | 'low'; weight: number; clip: ClipEvents }[] = [
   { kind: 'normal', weight: 0.45, clip: { swing: 7, impact: 8, recovery: 13 } },
   { kind: 'low', weight: 0.37, clip: { swing: 14, impact: 16, recovery: 19 } },
   { kind: 'overhead', weight: 0.18, clip: { swing: 10, impact: 12, recovery: 16 } },
 ];
-/** Chain order of the creature swings (next swing after each kind). */
-export const MOB_CHAIN_NEXT: Readonly<Record<'overhead' | 'normal' | 'low', 'overhead' | 'normal' | 'low'>> = {
-  low: 'normal',
-  normal: 'overhead',
-  overhead: 'low',
+/** Chain order of the creature swings (next swing after each kind; overhead goes on with low or level). */
+export const MOB_CHAIN_NEXT: Readonly<Record<'overhead' | 'normal' | 'low', readonly ('overhead' | 'normal' | 'low')[]>> = {
+  low: ['normal'],
+  normal: ['overhead'],
+  overhead: ['low', 'normal'],
 };
 /** Close-range jab (ASM_THRUST, PP02: SWING 6, RECOVERY 17; no IMPACT event, hit on frame 9). */
 export const MOB_THRUST = { kind: 'thrust' as const, clip: { swing: 6, impact: 9, recovery: 17 } };
@@ -150,9 +151,10 @@ export function pickMobAttack(roll: number): (typeof MOB_ATTACKS)[number] {
   return MOB_ATTACKS[0]!;
 }
 
-/** The swing that follows `kind` in a creature chain. */
-export function nextMobAttack(kind: 'overhead' | 'normal' | 'low'): (typeof MOB_ATTACKS)[number] {
-  const next = MOB_CHAIN_NEXT[kind];
+/** The swing that follows `kind` in a creature chain (`roll` in [0, 1) picks among the options). */
+export function nextMobAttack(kind: 'overhead' | 'normal' | 'low', roll = 0): (typeof MOB_ATTACKS)[number] {
+  const options = MOB_CHAIN_NEXT[kind];
+  const next = options[Math.min(options.length - 1, Math.floor(roll * options.length))]!;
   return MOB_ATTACKS.find((a) => a.kind === next)!;
 }
 
