@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ANIM, INPUT, TICK_DT, SIDE_SWING_RECHAIN_TICKS, attackAnim, attackMotion, isHitAction, isLayeredSwing, dequantizeAngle, movementAnim, movementFacingOffset, type AttackKind, attackTiming, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
+import { ANIM, INPUT, TICK_DT, SIDE_SWING_CHAIN_SECONDS, attackAnim, attackMotion, isHitAction, isLayeredSwing, dequantizeAngle, movementAnim, movementFacingOffset, type AttackKind, attackTiming, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
 import type { Avatar } from './avatar.ts';
 
 /**
@@ -85,14 +85,10 @@ export class LocalPlayer {
    * Returns the attack actually started (side swings alternate), or null.
    */
   swing(cameraYaw: number, kind: AttackKind = 'normal'): AttackKind | null {
-    if (this.dead || isHitAction(this.character.rollDir)) return null;
-    const side = (k: AttackKind) => k === 'left' || k === 'right';
-    if (this.swingLeft > 0) {
-      // Only a side swing re-triggers mid-swing, 0.3 s into the previous side swing.
-      if (!(side(kind) && side(this.kind) && this.swingTime - this.swingLeft >= SIDE_SWING_RECHAIN_TICKS * TICK_DT)) return null;
-    }
+    if (this.dead || this.swingLeft > 0 || isHitAction(this.character.rollDir)) return null;
     // Consecutive side swings alternate sides (the first one follows the held key).
-    if (side(kind) && side(this.kind) && (this.swingLeft > 0 || this.sinceSwing < 0.3)) kind = this.kind === 'left' ? 'right' : 'left';
+    const side = (k: AttackKind) => k === 'left' || k === 'right';
+    if (side(kind) && side(this.kind) && this.sinceSwing < SIDE_SWING_CHAIN_SECONDS) kind = this.kind === 'left' ? 'right' : 'left';
     // Directional attacks are single hits; plain clicks chain the combo.
     this.combo = kind === 'normal' && this.kind === 'normal' && this.sinceSwing < 0.3 && this.combo < 5 ? this.combo + 1 : 1;
     this.kind = kind;

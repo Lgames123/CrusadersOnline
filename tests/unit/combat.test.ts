@@ -2,7 +2,6 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { WorldZone, type PersistRecord } from '@crusaders/server/simulation/world_zone';
 import {
   ANIM,
-  SIDE_SWING_RECHAIN_TICKS,
   THRUST_WALL_DISTANCE,
   THRUST_WALL_HEIGHT,
   attackKindFor,
@@ -203,7 +202,7 @@ describe('authoritative melee', () => {
 });
 
 describe('directional attacks (original controls)', () => {
-  it('plays side swings on the upper body (legs keep moving), re-triggers them 0.3 s in, keeps them out of the combo', () => {
+  it('plays side swings on the upper body (legs keep moving), one at a time, and keeps them out of the combo', () => {
     const t = setup();
     t.run(5); // away from the skeleton: a hit would interrupt the swing
     t.zone.attack(1, 'left');
@@ -212,9 +211,11 @@ describe('directional attacks (original controls)', () => {
     expect(t.me().anim).toBe(ANIM.STRAFE_LEFT);
     expect((t.me().flags >> 1) & 3).toBe(1);
     const parity = (t.me().flags >> 3) & 1;
-    t.zone.attack(1, 'right'); // too early: ignored (queued for after the swing)
-    t.run(SIDE_SWING_RECHAIN_TICKS);
-    t.zone.attack(1, 'right'); // 0.3 s in: the next side swing starts at once
+    t.zone.attack(1, 'right'); // mid-swing: not started at once (balance), queued after the impact
+    t.run(1);
+    expect((t.me().flags >> 1) & 3).toBe(1);
+    t.run(20);
+    t.zone.attack(1, 'right');
     t.run(1);
     expect((t.me().flags >> 1) & 3).toBe(2);
     expect((t.me().flags >> 3) & 1).not.toBe(parity);

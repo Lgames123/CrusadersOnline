@@ -27,7 +27,6 @@ import {
   attackAnim,
   isLayeredSwing,
   UPPER_SWING_CODES,
-  SIDE_SWING_RECHAIN_TICKS,
   type AttackKind,
   INPUT,
   INTEREST_RADIUS,
@@ -754,12 +753,6 @@ export class WorldZone {
     if (!p || !alive(p) || p.hitUntil > this.tick) return;
     p.blocking = false; // swinging lowers the shield until the next input re-raises it
     if (p.swing) {
-      // Side swings re-trigger 0.3 s into the previous one (the client alternates the side).
-      const side = (k: AttackKind) => k === 'left' || k === 'right';
-      if (side(p.swing.kind) && side(kind) && this.tick - p.swing.start >= SIDE_SWING_RECHAIN_TICKS) {
-        this.startPlayerSwing(p, kind);
-        return;
-      }
       const t = p.swing.timing;
       if (this.tick - p.swing.start >= t.startup + t.active) {
         p.queuedAttack = true;

@@ -61,10 +61,11 @@ const DIRECTIONAL_CLIPS: Readonly<Record<'overhead' | 'left' | 'right' | 'low' |
   jump: { swing: 17, impact: 20, recovery: 24 },
 };
 /**
- * Side swings re-trigger 0.3 s into the previous one, alternating sides (logged: holding D and
- * clicking played 88, 87, 88, 87 about 0.3-0.6 s apart while Drake kept side-stepping).
+ * Consecutive side swings alternate sides (logged: holding D and clicking played 88, 87, 88, 87
+ * while Drake kept side-stepping). The original re-triggered them 0.3-0.6 s apart; here each one
+ * runs its full clip (~0.5 s) so they do not outpace the combo (balance choice).
  */
-export const SIDE_SWING_RECHAIN_TICKS = Math.round(0.3 * TICK_RATE);
+export const SIDE_SWING_CHAIN_SECONDS = 0.3;
 /**
  * A plain click with level geometry within 5 ft ahead (probed 5.5 ft above the feet, routine
  * 0x00437BE0 called from the combo routine 0x0042CA20) plays the jab (ASM_THRUST, PP02) instead

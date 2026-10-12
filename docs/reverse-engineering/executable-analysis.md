@@ -414,7 +414,9 @@ Logged Drake's ASM states with pose and the controller's second channel:
 - **Click in the air**: the main state stays the jump / fall while SWING_LEVEL plays on the upper-body layer; the jump's physics is untouched.
 - **Combo routine `0x0042CA20`** (decoded): per current state, a click queues the next step — none → 24, 24 → 23, 23 → 25, 25 → 103, 103 → 104, 104 → end; a separate chain 105 → 106 → 107 (models.ctx COMBO 6–8: PN21_1_vt, PN17, PN16) is never requested with the sword (another weapon class). The queued step needs the current clip ≥ 10 % played. Then `0x00437BE0(position + 5.5 ft up, 5 ft, owner)` tests level geometry ahead: if hit, the request becomes **ASM_THRUST (89)** and the queue is cleared — the jab a plain click plays against a wall.
 
-Implemented: side and air swings as layered swings (no rooting; replicated as the locomotion anim plus entity flags bits 1–3), the side-swing alternation and 0.3 s re-trigger, the air swing, and the wall jab (shared `wallAhead` ray, 5 ft at 5.5 ft height).
+Implemented: side and air swings as layered swings (no rooting; replicated as the locomotion anim plus entity flags bits 1–3), the side-swing alternation, the air swing, and the wall jab (shared `wallAhead` ray, 5 ft at 5.5 ft height). Balance deviation: the original re-triggers side swings 0.3–0.6 s apart; here each runs its full clip (~0.5 s) so moving side swings do not outpace the rooted combo (~0.6 s per hit).
+
+The second chain (105–107, COMBO 6–8) uses melee clips (PN21 "vertical", PN17, PN16), so it presumably belongs to another melee weapon class. The community item list (Might and Magic wiki, "List of Crusaders items") gives the PC weapon classes: axes, clubs, dasher weapons (Chl'tk, Dasher Hand Bow — ranged, Dasher Weapon), halberds, hammers, maces, morning stars, pick axes and swords; the Boomer Axe is ranged too. A capture with a halberd or hammer equipped would show which class requests 105.
 
 ### 14.2 Moving with the shield up (2026-10-12)
 
