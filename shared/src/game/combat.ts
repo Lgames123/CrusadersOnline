@@ -121,9 +121,9 @@ export const MOB_THRUST_RANGE = 4.8 * 0.3048;
 export const MOB_BASH = { kind: 'bash' as const, clip: { swing: 4, impact: 9, recovery: 24 } };
 export const MOB_BASH_CHANCE = 0.02;
 /**
- * Drake's shield rush (Space + RMB in the game's Readme): the same PL01 charge. It interrupts a
- * creature it meets during the charge (frames 4-14, ~6 ft ahead) with an impact; no damage value
- * was found for it (shields have none in items.ctx), so it deals none.
+ * Drake's shield rush (Space + RMB in the game's Readme): the same PL01 charge. Logged live: a
+ * creature it meets reels back (IMPACT_BACK) and ~0.5 s later is knocked down (IMPACT_SEVERE,
+ * ~1.3-1.9 s) without losing HP, while Drake loses 1 HP per tick of contact (2-5 per rush).
  */
 export const RUSH_CONTACT_TICKS: readonly [number, number] = [2, 8];
 export const RUSH_REACH = 3 * 0.3048;

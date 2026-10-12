@@ -227,19 +227,23 @@ describe('directional attacks (original controls)', () => {
 });
 
 describe('shield rush (original controls)', () => {
-  it('a rush that meets the skeleton interrupts it without damage', () => {
+  it('a rush that meets the skeleton reels it back and knocks it down, unharmed; Drake loses HP on contact', () => {
     const t = setup();
     t.run(APPROACH, INPUT.FORWARD, 0);
     // Wait until the skeleton stands within reach of the charge, then rush (shield + jump).
     for (let i = 0; i < 200 && Math.hypot(t.mob().x - t.me().x, t.mob().z - t.me().z) > 1.6; i++) t.run(1);
     const hp = t.mob().hp;
-    let hit = false;
-    for (let i = 0; i < 12 && !hit; i++) {
+    const myHp = t.me().hp;
+    const anims: number[] = [];
+    for (let i = 0; i < 30; i++) {
       t.run(1, i === 0 ? INPUT.BLOCK | INPUT.JUMP : INPUT.BLOCK, 0);
-      hit = t.mob().anim === ANIM.HIT;
+      anims.push(t.mob().anim);
     }
-    expect(hit).toBe(true);
+    const reel = anims.indexOf(ANIM.HIT);
+    expect(reel).toBeGreaterThanOrEqual(0);
+    expect(anims.indexOf(ANIM.KNOCKDOWN)).toBeGreaterThan(reel);
     expect(t.mob().hp).toBe(hp);
+    expect(t.me().hp).toBeLessThan(myHp);
   });
 });
 

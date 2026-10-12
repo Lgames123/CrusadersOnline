@@ -315,6 +315,8 @@ interface Mob extends ActorBase {
   guardUntil: number;
   /** Shield raised from this tick until the end of the stance (blocks frontal hits). */
   shieldFrom: number;
+  /** Tick at which a shield rush's reel turns into the knock-down (0 = none). */
+  knockdownAt: number;
   /** Stepping back in guard (until 8 ft away, at most until this tick). */
   retreatUntil: number;
   input: InputFrame;
@@ -425,6 +427,7 @@ export class WorldZone {
       guardUntil: 0,
       shieldFrom: 0,
       retreatUntil: 0,
+      knockdownAt: 0,
       input: createInputFrame(),
       // Creatures share the humanoid rig's root-motion speeds (run, walk); no jumping.
       stats: { ...DEFAULT_MOVEMENT_STATS, jumpVelocity: 0 },
@@ -904,7 +907,13 @@ export class WorldZone {
         m.threat.clear();
         m.state = 'return';
       } else if (m.hitUntil > this.tick) {
-        // Hit reaction (directional impact): no action until it ends.
+        // Hit reaction: no action until it ends. A shield rush's reel turns into the knock-down.
+        if (m.knockdownAt && this.tick >= m.knockdownAt) {
+          m.knockdownAt = 0;
+          startHitReaction(m.character, ACTION_KNOCKDOWN);
+          m.hitUntil = Math.max(m.hitUntil, this.tick + hitReactionTicks(ACTION_KNOCKDOWN));
+          m.guardUntil = m.hitUntil;
+        }
       } else if (m.blockUntil > this.tick) {
         // Shield up: hold position facing the target.
         const t = target.character.position;
@@ -975,7 +984,7 @@ export class WorldZone {
     stepCharacter(this.mw, m.character, m.input, m.stats, TICK_DT);
     this.separate(m);
     m.anim = m.hitUntil > this.tick
-      ? ANIM.HIT
+      ? (m.character.rollDir === ACTION_KNOCKDOWN ? ANIM.KNOCKDOWN : ANIM.HIT)
       : m.blockUntil > this.tick
       ? ANIM.BLOCK
       : m.hopTicks > 0
@@ -1068,12 +1077,22 @@ export class WorldZone {
     const pos = c.position;
     const yaw = dequantizeAngle(p.yaw);
     for (const m of this.actors.values()) {
-      if (m.kind !== 'mob' || !alive(m) || p.rushHit.has(m.entityId)) continue;
+      if (m.kind !== 'mob' || !alive(m)) continue;
       const mp = m.character.position;
       if (!inMeleeArc(pos.x, pos.z, yaw, mp.x, mp.z, RUSH_REACH + PLAYER_RADIUS, PLAYER_ARC_DEG, PLAYER_RADIUS)) continue;
+      // Logged in the original: the rushing player loses 1 HP per tick of contact (2-5 per rush).
+      if (p.hp > 1) {
+        p.hp -= 1;
+        p.statsDirty = true;
+      }
+      if (p.rushHit.has(m.entityId)) continue;
       p.rushHit.add(m.entityId);
       if (!m.character.grounded) continue;
+      // The creature reels back (IMPACT_BACK) and is knocked down (IMPACT_SEVERE) - no damage.
       this.hitReaction(m, ACTION_IMPACT);
+      m.knockdownAt = this.tick + hitReactionTicks(ACTION_IMPACT);
+      m.hitUntil = m.knockdownAt + hitReactionTicks(ACTION_KNOCKDOWN);
+      m.guardUntil = m.hitUntil;
       if (m.state !== 'chase') m.state = 'chase';
       m.threat.set(p.entityId, (m.threat.get(p.entityId) ?? 0) + 1);
     }
