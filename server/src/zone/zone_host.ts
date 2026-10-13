@@ -9,7 +9,7 @@ export interface ZoneHostEvents {
   metrics?(m: ZoneMetrics): void;
   persist?(records: PersistRecord[], reason: PersistReason): void;
   error?(err: Error): void;
-  portal?(connId: number, target: string): void;
+  portal?(connId: number, target: string, keep?: { x: number; y: number; z: number; mesh: string }): void;
   transferred?(connId: number, record: PersistRecord | null, state: TransferState | null): void;
 }
 
@@ -46,7 +46,7 @@ export class ZoneHost {
             events.persist?.(msg.records, msg.reason);
             break;
           case 'portal':
-            events.portal?.(msg.connId, msg.target);
+            events.portal?.(msg.connId, msg.target, msg.keep);
             break;
           case 'transferred':
             events.transferred?.(msg.connId, msg.record, msg.state);
@@ -96,6 +96,10 @@ export class ZoneHost {
 
   talk(connId: number, entity: number, ms: number): void {
     this.post({ t: 'talk', connId, entity, ms });
+  }
+
+  cutsceneDone(connId: number, sequence: string): void {
+    this.post({ t: 'cutsceneDone', connId, sequence });
   }
 
   useItem(connId: number, slot: number): void {

@@ -1,6 +1,7 @@
 import { doorSwingFromMotion, type LevelBrushMotion } from './door_swing.ts';
 import { CREATURE_TEMPLATES, npcArchetypeId } from '../game/creatures.ts';
 import type { ArenaDef, BrushDef, PortalDef, TriMeshDef, WorldObjectDef } from './types.ts';
+import type { LevelStory } from '../game/story.ts';
 
 /**
  * Arenas built from an original level converted from the user's own installation
@@ -107,6 +108,8 @@ export interface LevelPlacements {
   /** Music track (Music/<n>.mp3, the original CD track number); absent = silence. */
   music?: number;
   brushes?: LevelBrush[];
+  /** Triggers, scripted sequences and their cameras (converter 1.14+). */
+  story?: LevelStory;
 }
 
 /** Horizontal radius / height of a portal trigger without a volume, metres (slice values). */
@@ -328,11 +331,12 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
     .filter((c) => c.disposition === HOSTILE)
     .map((c) => ({ x: c.position[0] * s, y: c.position[1] * s, z: c.position[2] * s }));
   const mobSpawns: ArenaDef['mobSpawns'] = [];
-  for (const c of placements.creatures) {
+  placements.creatures.forEach((c, placement) => {
     // Citizens, guards, merchants (dispositions 0-2): peaceful, standing at their place.
     if (c.disposition >= 0 && c.disposition < HOSTILE && CREATURE_TEMPLATES[c.type]) {
       mobSpawns.push({
         archetype: npcArchetypeId(c.type),
+        placement,
         x: c.position[0] * s,
         y: c.position[1] * s + 0.1,
         z: c.position[2] * s,
@@ -341,12 +345,13 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
         ...(c.disposition === 1 ? { wander: true } : {}),
         ...(c.facing ? { yaw: Math.atan2(-c.facing[0], -c.facing[1]) } : {}),
       });
-      continue;
+      return;
     }
     const archetype = LEVEL_ARCHETYPES[c.type];
-    if (!archetype || c.disposition !== HOSTILE || !(c.hp > 0)) continue;
+    if (!archetype || c.disposition !== HOSTILE || !(c.hp > 0)) return;
     mobSpawns.push({
       archetype,
+      placement,
       x: c.position[0] * s,
       y: c.position[1] * s + 0.1,
       z: c.position[2] * s,
@@ -355,7 +360,7 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
       resist: c.resist,
       ...(c.facing ? { yaw: Math.atan2(-c.facing[0], -c.facing[1]) } : {}),
     });
-  }
+  });
   const objects: WorldObjectDef[] = [];
   const solids: { points: Float32Array; object?: number }[] = [];
   (placements.objects ?? []).forEach((o, id) => {
@@ -428,5 +433,9 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
     for (const g of gates) g.byLever = true;
     for (const l of levers) l.opens = gates.map((g) => g.id);
   }
-  return { name, boxes: [], meshes: [mesh], spawnPoints: spawnPoints(mesh, hostiles, 8), mobSpawns, objects, portals, brushes, solids };
+  return {
+    name, boxes: [], meshes: [mesh], spawnPoints: spawnPoints(mesh, hostiles, 8), mobSpawns, objects, portals, brushes, solids,
+    ...(placements.story ? { story: placements.story } : {}),
+    mesh: placements.mesh,
+  };
 }

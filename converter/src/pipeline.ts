@@ -9,6 +9,8 @@ import { parseModelsCtx } from './formats/models_ctx.ts';
 import { buildModelDocument, writeGlb } from './emit/gltf_model.ts';
 import { parseMsh } from './formats/msh.ts';
 import { parseCap } from './formats/cap.ts';
+import type { CapArg, CapCameraPath, CapStory, CapTriggerVolume } from './formats/cap_story.ts';
+import { parsePeStrings } from './formats/pe_strings.ts';
 import { parseSoundCtx, parseTexturesNfo } from './formats/sound_ctx.ts';
 import { emitLevel } from './emit/gltf_level.ts';
 
@@ -64,7 +66,7 @@ export interface ConvertReport {
   warnings: string[];
 }
 
-const MANIFEST_VERSION = '1.13.0'; // 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers; 1.9: door sounds; 1.10: lightmap UVs at 16 bytes a vertex; 1.11: lightmap seams stitched; 1.12: prop model boxes, model names in lower case; 1.13: creature facing
+const MANIFEST_VERSION = '1.14.0'; // 1.14: story (triggers, sequences, cameras), rules/strings.json; 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers; 1.9: door sounds; 1.10: lightmap UVs at 16 bytes a vertex; 1.11: lightmap seams stitched; 1.12: prop model boxes, model names in lower case; 1.13: creature facing
 /** Bump when level output changes so cached levels are rebuilt. */
 const LEVEL_EMIT_VERSION = '2';
 
@@ -365,6 +367,21 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
     }
   }
 
+  // --- Text: crusaders.exe string table -> rules/strings.json (the quest book: quests, journal)
+  const exe = await source.readFile('crusaders.exe');
+  if (!exe) {
+    report.warnings.push('crusaders.exe not found (quest book text)');
+  } else {
+    try {
+      const strings = parsePeStrings(exe);
+      await sink.writeFile('rules/strings.json', JSON.stringify({ strings: Object.fromEntries(strings) }));
+      manifest.rules['strings'] = 'rules/strings.json';
+      log(`text: ${strings.size} strings`);
+    } catch (err) {
+      report.warnings.push(`crusaders.exe: ${(err as Error).message}`);
+    }
+  }
+
   // --- Placements: Caps/*.cap -> levels/<cap>.placements.json (positions mirrored like the meshes)
   const capFiles = (await source.list?.('Caps'))?.filter((f) => f.toLowerCase().endsWith('.cap')).sort() ?? [];
   let creatures = 0;
@@ -400,6 +417,7 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
             ...(p.use ? { use: true } : {}),
             ...(p.trigger ? { trigger: { polygon: p.trigger.polygon.map(([x, z]) => [x, -z]), yMin: p.trigger.yMin, yMax: p.trigger.yMax } } : {}),
           })),
+        story: mirrorStory(cap.story),
         objects: cap.objects.map((o) => {
           const model = o.kind === 'sprite' ? undefined : modelById.get(o.modelId);
           const glb = model ? manifest.models[model] : undefined;
@@ -425,4 +443,19 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
   manifest.generated_at = (opts.now ?? (() => new Date()))().toISOString();
   await sink.writeFile('manifest.json', JSON.stringify(manifest, null, 2));
   return report;
+}
+
+/** The story layer in the converted (Z mirrored) frame: volumes, camera paths, step positions. */
+function mirrorStory(story: CapStory): CapStory {
+  const vol = (v: CapTriggerVolume): CapTriggerVolume => ({ polygon: v.polygon.map(([x, z]) => [x, -z] as [number, number]), yMin: v.yMin, yMax: v.yMax });
+  const path = (p: CapCameraPath): CapCameraPath => ({ ...p, points: p.points.map(([x, y, z]) => [x, y, -z] as [number, number, number]) });
+  const arg = (a: CapArg): CapArg => (Array.isArray(a) ? [a[0], a[1], -a[2]] : a);
+  return {
+    triggers: story.triggers.map((t) => ({ ...t, ...(t.volume ? { volume: vol(t.volume) } : {}) })),
+    cameras: story.cameras.map((c) => ({ id: c.id, eye: path(c.eye), target: path(c.target) })),
+    sequences: story.sequences.map((s) => ({
+      ...s,
+      steps: s.steps.map((st) => ({ ...st, args: Object.fromEntries(Object.entries(st.args).map(([k, v]) => [k, arg(v)])) })),
+    })),
+  };
 }

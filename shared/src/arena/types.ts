@@ -1,4 +1,5 @@
 import type { DoorSwing } from './door_swing.ts';
+import type { LevelStory } from '../game/story.ts';
 
 /**
  * Static level description shared by renderer (client) and collision world (client + server).
@@ -94,7 +95,11 @@ export interface ArenaDef {
    * Hostile spawns: archetype id (game/combat.ts) and position; original levels also carry the
    * placement's own HP, XP value and resists, which override the archetype's.
    */
-  mobSpawns: { archetype: string; x: number; y: number; z: number; hp?: number; xp?: number; resist?: number[]; wander?: boolean; /** Heading (radians, 0 = -Z). */ yaw?: number }[];
+  mobSpawns: {
+    archetype: string; x: number; y: number; z: number; hp?: number; xp?: number; resist?: number[]; wander?: boolean;
+    /** Heading (radians, 0 = -Z). */ yaw?: number;
+    /** Original levels: the creature's index in the act's placements (sequences name actors by it). */ placement?: number;
+  }[];
   /** Items, chests and breakable props (original levels). */
   objects?: WorldObjectDef[];
   /** Exits to other zones (original levels). */
@@ -106,4 +111,8 @@ export interface ArenaDef {
    * world-object id, its collider gone while it is broken.
    */
   solids?: { points: Float32Array; object?: number }[];
+  /** Triggers, scripted sequences and cameras (original levels; original units, Z mirrored). */
+  story?: LevelStory;
+  /** Original levels: the mesh the act is built on (acts of one mesh share its coordinates). */
+  mesh?: string;
 }

@@ -86,6 +86,12 @@ export const ZoneReadyPacketSchema = z.object({
   d: z.object({ arena: z.string().min(1).max(64) }),
 });
 
+export const CutsceneDonePacketSchema = z.object({
+  op: z.literal(CS.CUTSCENE_DONE),
+  seq: z.number().int().positive(),
+  d: z.object({ sequence: z.string().min(1).max(64) }),
+});
+
 export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   AuthTicketPacketSchema,
   SelectCharacterPacketSchema,
@@ -98,6 +104,7 @@ export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   SelectSpellPacketSchema,
   ChatMessagePacketSchema,
   PingPacketSchema,
+  CutsceneDonePacketSchema,
 ]);
 
 export type ClientControlPacket = z.infer<typeof ClientControlPacketSchema>;

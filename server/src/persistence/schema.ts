@@ -35,6 +35,8 @@ export interface CharactersTable {
   /** Known spells, "spell:level" comma-separated (002_spells.sql). */
   spells: Generated<string>;
   selected_spell: string | null;
+  /** Story progress, story.ts StoryState as JSON (003_story.sql). */
+  story: Generated<string>;
   might: Generated<number>;
   intelligence: Generated<number>;
   endurance: Generated<number>;

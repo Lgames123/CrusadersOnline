@@ -1,4 +1,5 @@
 import { explode } from './dcl.ts';
+import { capTypeTable, parseStory, type CapStory } from './cap_story.ts';
 
 /**
  * Level object placements (`Caps/*.cap`), asset-format-discovery.md §6.2. Header: u32
@@ -76,6 +77,8 @@ export interface CapLevel {
   music: number;
   /** Moving level pieces ("brushes": doors, gates, levers, bridges, wheels...). */
   brushes: CapBrush[];
+  /** Triggers, scripted sequences (cutscenes) and their cameras (cap_story.ts). */
+  story: CapStory;
 }
 
 /**
@@ -142,6 +145,8 @@ export function parseCap(bytes: Uint8Array, itemNames: ReadonlySet<string> = new
   const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const f32 = (o: number) => dv.getFloat32(o, true);
   const creatures: CapCreature[] = [];
+  /** Creature record offset -> index in `creatures` (the story layer names actors by record). */
+  const creatureAt = new Map<number, number>();
   const objects = parseObjects(data, dv, itemNames);
   for (let a = 0; a + 0x400 < data.length; a++) {
     if (data[a] !== 0x2d || data[a + 1] !== 0 || data[a + 4] !== 0xcd || dv.getUint32(a, true) !== 0x2d || dv.getUint32(a + 4, true) !== 0xcdcdcdcd) continue;
@@ -164,6 +169,7 @@ export function parseCap(bytes: Uint8Array, itemNames: ReadonlySet<string> = new
     for (let i = 0; i < 11; i++) resist.push(Math.round(f32(x - 0x118 + 4 * i) * 1000) / 1000);
     // The transform's 3x3 rotation sits just before the position; its third row is the facing.
     const facing: [number, number] = [f32(x - 0x200 - 0xc), f32(x - 0x200 - 0x4)];
+    creatureAt.set(a, creatures.length);
     creatures.push({
       type,
       name,
@@ -176,14 +182,18 @@ export function parseCap(bytes: Uint8Array, itemNames: ReadonlySet<string> = new
     });
     a = x;
   }
-  return { mesh, creatures, objects, portals: parsePortals(data, dv), music: bytes[0x1c] ?? 0, brushes: parseBrushes(data, dv) };
+  const exitAt = new Map<number, { target: string; exit: number }>();
+  const portals = parsePortals(data, dv, exitAt);
+  const types = capTypeTable(data, dv, view.getUint32(0, true), view.getUint32(4, true));
+  const story = parseStory(data, dv, types, { creatureAt, exitAt, parseVolume: (at) => parseTrigger(data, dv, at) ?? null });
+  return { mesh, creatures, objects, portals, music: bytes[0x1c] ?? 0, brushes: parseBrushes(data, dv), story };
 }
 
 /**
  * Portal record: [pointer to its own name at +0x20][0xFFFF0000 | exit][...][+0x10 position]
  * [+0x20 NUL-terminated destination act name].
  */
-function parsePortals(data: Uint8Array, dv: DataView): CapPortal[] {
+function parsePortals(data: Uint8Array, dv: DataView, exitAt?: Map<number, { target: string; exit: number }>): CapPortal[] {
   const out: CapPortal[] = [];
   for (let o = 0; o + 0x30 < data.length; o++) {
     if (dv.getUint32(o, true) !== CAP_BASE + o + 0x20 || dv.getUint16(o + 6, true) !== 0xffff) continue;
@@ -193,6 +203,7 @@ function parsePortals(data: Uint8Array, dv: DataView): CapPortal[] {
     if (!position.every((v) => Number.isFinite(v) && Math.abs(v) < 1e5)) continue;
     const trigger = parseTrigger(data, dv, dv.getUint32(o - 0x30, true) - CAP_BASE);
     const use = (dv.getUint32(o - 0x2c, true) & 8) !== 0;
+    exitAt?.set(o, { target, exit: dv.getUint16(o + 4, true) });
     out.push({ exit: dv.getUint16(o + 4, true), target, position, use, ...(trigger ? { trigger } : {}) });
   }
   return out;

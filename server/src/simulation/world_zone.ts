@@ -1,6 +1,16 @@
 import {
   ANIM,
   BUILTIN_ITEMS,
+  LEVEL_PREFIX,
+  LEVEL_UNIT_METRES,
+  applyQuestAction,
+  emptyStoryState,
+  estimateSequenceMs,
+  inStoryVolume,
+  storyFlag,
+  type StorySequence,
+  type StoryState,
+  type StoryTrigger,
   TICK_MS,
   setDoorPose,
   stepDoorMotion,
@@ -163,8 +173,11 @@ export interface ZoneOutbox {
   send(connId: number, data: Uint8Array | string): void;
   /** Immediate save request (e.g. after a kill reward or level-up). */
   persist?(records: PersistRecord[], reason: PersistReason): void;
-  /** A player walked into a portal trigger leading to `target` (once per entry). */
-  portal?(connId: number, target: string): void;
+  /**
+   * A player walked into a portal trigger leading to `target` (once per entry), or a scripted
+   * sequence loads another act; `keep`: arrive at this position if `target` is on the same mesh.
+   */
+  portal?(connId: number, target: string, keep?: { x: number; y: number; z: number; mesh: string }): void;
 }
 
 export interface JoinOptions {
@@ -185,10 +198,15 @@ export interface JoinOptions {
   selectedSpell?: SpellId | null;
   /** Arriving through a portal from this arena: placed at the portal leading back there. */
   arrivingFrom?: string;
+  /** A story level change: arrive here if this arena is on `arrivingMesh` (another act of the same level). */
+  arrivingAt?: { x: number; y: number; z: number };
+  arrivingMesh?: string;
+  /** Story progress: triggers fired and the quest book (story.ts). */
+  story?: StoryState;
 }
 
 /** Player state carried across a zone transfer (everything but the position). */
-export type TransferState = Omit<JoinOptions, 'position' | 'arrivingFrom'>;
+export type TransferState = Omit<JoinOptions, 'position' | 'arrivingFrom' | 'arrivingAt' | 'arrivingMesh'>;
 
 /** State a zone hands back for saving (see persistence/characters.ts). */
 export interface PersistRecord {
@@ -212,6 +230,7 @@ export interface PersistRecord {
   zone?: string;
   /** Forget the saved position (zone transfer: spawn at the destination's arrival point). */
   resetPosition?: boolean;
+  story: StoryState;
 }
 
 export interface WorldZoneOptions {
@@ -418,6 +437,11 @@ interface Player extends ActorBase {
   inPortal: Set<number>;
   /** Shield raised this tick (BLOCK held, shield equipped, not swinging or flinching). */
   blocking: boolean;
+  /** Story progress (fired triggers, quest book). */
+  story: StoryState;
+  storyFlags: Set<string>;
+  /** A scripted sequence the client is playing; the server finishes it by `until` at the latest. */
+  cutscene: { sequence: StorySequence; until: number } | null;
 }
 
 interface Mob extends ActorBase {
@@ -469,6 +493,8 @@ interface Mob extends ActorBase {
   talkUntil: number;
   input: InputFrame;
   stats: MovementStats;
+  /** Original levels: index in the act's placements (scripted sequences name actors by it). */
+  placement?: number;
 }
 
 type Actor = Player | Mob;
@@ -611,13 +637,16 @@ export class WorldZone {
       input: createInputFrame(),
       // Creatures share the humanoid rig's root-motion speeds (run, walk); no jumping.
       stats: { ...DEFAULT_MOVEMENT_STATS, jumpVelocity: 0 },
+      ...(at.placement !== undefined ? { placement: at.placement } : {}),
     };
     this.register(mob);
   }
 
   join(connId: number, opts: JoinOptions): number {
     if (this.players.has(connId)) throw new Error(`connection ${connId} already in zone`);
-    const spawn = opts.arrivingFrom
+    const spawn = opts.arrivingAt && opts.arrivingMesh && opts.arrivingMesh === this.arena.mesh && validPosition(opts.arrivingAt)
+      ? opts.arrivingAt
+      : opts.arrivingFrom
       ? arrivalPoint(this.arena, opts.arrivingFrom)
       : validPosition(opts.position) ? opts.position : this.nextSpawnPoint();
     const xp = Math.max(0, Math.floor(opts.experience ?? 0));
@@ -681,6 +710,9 @@ export class WorldZone {
       shield: eq.shield,
       inPortal: new Set(),
       blocking: false,
+      story: opts.story ? { flags: [...opts.story.flags], quests: structuredClone(opts.story.quests) } : emptyStoryState(),
+      storyFlags: new Set(opts.story?.flags ?? []),
+      cutscene: null,
     };
     this.players.set(connId, p);
     this.register(p);
@@ -696,6 +728,7 @@ export class WorldZone {
     });
     this.sendStats(p);
     this.sendInventory(p);
+    this.sendJson(connId, { op: SC.QUEST_LOG, d: { log: p.story.quests } });
     if (this.objects.size) {
       const changed = [...this.objects.values()].filter((o) => o.state !== 'present').map((o) => ({ id: o.def.id, state: o.state, ...(o.swing?.motion ? { swing: { ...o.swing.motion } } : {}) }));
       this.sendJson(connId, { op: SC.OBJECT_STATE, d: { objects: changed, full: true } });
@@ -1052,6 +1085,7 @@ export class WorldZone {
       spells: p.spells.map((s) => ({ ...s })),
       selectedSpell: p.selectedSpell,
       zone: this.arena.name,
+      story: { flags: [...p.story.flags], quests: structuredClone(p.story.quests) },
       ...(this.takeInventoryChange(p)),
     };
   }
@@ -1091,6 +1125,7 @@ export class WorldZone {
       mana: p.mana,
       spells: p.spells.map((s) => ({ ...s })),
       selectedSpell: p.selectedSpell,
+      story: { flags: [...p.story.flags], quests: structuredClone(p.story.quests) },
     };
     const record = this.leave(connId);
     return { record, state };
@@ -1110,6 +1145,127 @@ export class WorldZone {
         this.outbox.portal?.(p.connId, portal.target);
       }
     }
+  }
+
+  // --- Story: triggers, scripted sequences, quests (story.ts; executable-analysis.md §17)
+
+  /** The act of this zone's level ("cs1a"), or null for synthetic arenas. */
+  private get act(): string | null {
+    return this.arena.name.startsWith(LEVEL_PREFIX) ? this.arena.name.slice(LEVEL_PREFIX.length) : null;
+  }
+
+  /**
+   * Triggers walked into (activation bit 0) fire once per character: a flag trigger starts the
+   * sequence bound to it, a quest trigger updates the quest book.
+   */
+  private checkStory(p: Player): void {
+    const story = this.arena.story;
+    const act = this.act;
+    if (!story || !act) return;
+    const pos = p.character.position;
+    const x = pos.x / LEVEL_UNIT_METRES, y = pos.y / LEVEL_UNIT_METRES, z = pos.z / LEVEL_UNIT_METRES;
+    for (const t of story.triggers) {
+      if (!(t.activation & 1) || !t.volume || p.storyFlags.has(storyFlag(act, t.id))) continue;
+      if (!inStoryVolume(t.volume, x, y, z)) continue;
+      this.fireTrigger(p, t);
+      if (p.cutscene) return;
+    }
+  }
+
+  /** Fires a trigger for a player: its flag, then what it does (sequence, quest, relay targets). */
+  private fireTrigger(p: Player, t: StoryTrigger, depth = 0): void {
+    const act = this.act;
+    if (!act || depth > 8) return;
+    const flag = storyFlag(act, t.id);
+    if (p.storyFlags.has(flag)) return;
+    p.storyFlags.add(flag);
+    p.story.flags.push(flag);
+    if (t.kind === 'quest' && t.quest) this.applyQuest(p, t);
+    if (t.kind === 'relay') {
+      for (const ref of t.targets ?? []) {
+        const next = 'trigger' in ref ? this.arena.story?.triggers.find((u) => u.id === ref.trigger) : undefined;
+        if (next) this.fireTrigger(p, next, depth + 1);
+      }
+    }
+    if (t.kind === 'flag' && !p.cutscene) {
+      const seq = this.arena.story?.sequences.find((q) => q.trigger === t.id);
+      if (seq) this.startCutscene(p, seq);
+    }
+    const record = this.persistRecord(p);
+    if (record) this.outbox.persist?.([record], 'progress');
+  }
+
+  private applyQuest(p: Player, t: StoryTrigger): void {
+    const out = applyQuestAction(p.story.quests, t.quest!);
+    if (!out.assigned.length && !out.completed.length && !out.journal.length) return;
+    if (out.xp > 0) this.addExperience(p, out.xp);
+    if (out.gold > 0) {
+      p.gold += out.gold;
+      p.statsDirty = true;
+    }
+    this.sendJson(p.connId, { op: SC.QUEST_LOG, d: { log: p.story.quests, news: { assigned: out.assigned, completed: out.completed, journal: out.journal } } });
+  }
+
+  /** A scripted sequence starts for this player: the client plays it, the server waits for it. */
+  private startCutscene(p: Player, sequence: StorySequence): void {
+    const actors = sequence.actors.map((a) => {
+      if (!a || !('creature' in a)) return null;
+      for (const m of this.actors.values()) if (m.kind === 'mob' && m.placement === a.creature && alive(m)) return m.entityId;
+      return null;
+    });
+    // At most the estimated length (actors' steps at walking pace) and a margin.
+    const ms = estimateSequenceMs(sequence) * 1.5 + 15_000;
+    p.cutscene = { sequence, until: this.tick + Math.ceil(ms / TICK_MS) };
+    p.swing = null;
+    p.queuedAttack = false;
+    p.cast = null;
+    this.sendJson(p.connId, { op: SC.CUTSCENE, d: { sequence: sequence.name, actors } });
+  }
+
+  /** CS_CUTSCENE_DONE: the client has played (or skipped) the sequence. */
+  cutsceneDone(connId: number, name: string): void {
+    const p = this.players.get(connId);
+    if (p?.cutscene && p.cutscene.sequence.name === name) this.finishCutscene(p);
+  }
+
+  /**
+   * The sequence's effects, as the original applies them while it plays: its TriggerFlag steps
+   * fire their triggers, Drake ends where the stand-in walked to (0x41FB80), and its
+   * ScriptedSequenceDone may load another act (the next stage of the story).
+   */
+  private finishCutscene(p: Player): void {
+    const run = p.cutscene;
+    if (!run) return;
+    p.cutscene = null;
+    const seq = run.sequence;
+    const story = this.arena.story;
+    const standIn = new Set(seq.actors.map((a, i) => (a && 'player' in a ? i + 2 : -1)).filter((i) => i >= 0));
+    let end: [number, number, number] | null = null;
+    let load: string | null = null;
+    for (const track of seq.tracks) {
+      for (const index of track.steps) {
+        const step = seq.steps[index];
+        if (!step) continue;
+        const pos = step.args['pos'];
+        if (step.action === 'MoveToPos' && standIn.has(track.actor) && Array.isArray(pos)) end = pos;
+        const flag = step.args['flag'];
+        if (step.action === 'TriggerFlag' && flag && typeof flag === 'object' && 'trigger' in flag) {
+          const t = story?.triggers.find((u) => u.id === flag.trigger);
+          if (t) this.fireTrigger(p, t);
+        }
+        const level = step.args['loadlevel'];
+        if (step.action === 'ScriptedSequenceDone' && level && typeof level === 'object' && 'exit' in level) load = level.exit.toLowerCase();
+      }
+    }
+    if (end) {
+      const s = LEVEL_UNIT_METRES;
+      setCharacterState(p.character, { x: end[0] * s, y: end[1] * s + 0.1, z: end[2] * s }, 0, false);
+    }
+    const record = this.persistRecord(p);
+    if (record) this.outbox.persist?.([record], 'progress');
+    // Another act of the same level keeps Drake where he stands (the acts share the mesh's coordinates).
+    const pos = p.character.position;
+    if (load) this.outbox.portal?.(p.connId, `${LEVEL_PREFIX}${load}`, this.arena.mesh ? { x: pos.x, y: pos.y, z: pos.z, mesh: this.arena.mesh } : undefined);
   }
 
   /** Removes the player; returns its final state for saving (null for guests / unknown). */
@@ -1204,11 +1360,12 @@ export class WorldZone {
       if (p.queue.shift(this.frame)) {
         // The client roots itself during its own swing (INPUT.ROOTED, same tick on both
         // sides); the dead do not act. The client mirrors the dead rule.
-        if (!alive(p)) this.frame.flags = 0;
+        // During a scripted sequence the player's character stands where it was (the stand-in plays).
+        if (!alive(p) || p.cutscene) this.frame.flags = 0;
         stepCharacter(this.mw, p.character, this.frame, p.moveStats, TICK_DT);
         p.lastProcessedInput = this.frame.clientTick;
-        if (alive(p)) p.yaw = this.frame.yaw;
-        this.checkPortals(p);
+        if (alive(p) && !p.cutscene) p.yaw = this.frame.yaw;
+        if (!p.cutscene) this.checkPortals(p);
         this.catchFall(p);
         const moving = (this.frame.flags & MOVE_MASK) !== 0 && !(this.frame.flags & INPUT.ROOTED);
         p.blocking = alive(p) && p.shield !== null && (this.frame.flags & INPUT.BLOCK) !== 0 && !p.swing && p.hitUntil <= tick && p.character.rollDir !== ACTION_BASH;
@@ -1220,6 +1377,9 @@ export class WorldZone {
         if (p.cast) p.anim = ANIM.SPELL_CONJURE;
       }
       if (alive(p)) this.updateMagic(p);
+      if (p.cutscene) {
+        if (tick >= p.cutscene.until) this.finishCutscene(p);
+      } else if (alive(p)) this.checkStory(p);
     }
 
     // 2. Mobs think and move.
@@ -1928,19 +2088,8 @@ export class WorldZone {
 
   private grantReward(p: Player, arch: MobArchetype): { xp: number; gold: number; loot?: string[] } {
     const gold = arch.goldMin + Math.floor(this.random() * (arch.goldMax - arch.goldMin + 1));
-    p.xp += arch.xpReward;
+    this.addExperience(p, arch.xpReward);
     p.gold += gold;
-    const level = levelForXp(p.xp);
-    if (level > p.level) {
-      // Engine Stats_LevelUp: derived stats are recomputed and the max-HP gain is added to HP.
-      const before = p.maxHp;
-      p.level = level;
-      p.maxHp = playerMaxHp(p.attributes, level);
-      p.maxMana = originalMaxMana(p.attributes, level);
-      p.damageMultiplier = originalDamageMultiplier(p.attributes, level);
-      p.moveStats = { ...p.moveStats, clipRate: originalSpeedMultiplier(p.attributes, level) };
-      p.hp = Math.min(p.maxHp, p.hp + (p.maxHp - before));
-    }
     const loot: string[] = [];
     for (const drop of arch.loot) {
       if (this.random() >= drop.chance) continue;
@@ -1955,6 +2104,23 @@ export class WorldZone {
     const record = this.persistRecord(p);
     if (record) this.outbox.persist?.([record], 'progress');
     return { xp: arch.xpReward, gold, ...(loot.length > 0 ? { loot } : {}) };
+  }
+
+  /** Stats_AddExperience: the XP, and Stats_LevelUp for each level reached. */
+  private addExperience(p: Player, xp: number): void {
+    p.xp += xp;
+    p.statsDirty = true;
+    const level = levelForXp(p.xp);
+    if (level > p.level) {
+      // Engine Stats_LevelUp: derived stats are recomputed and the max-HP gain is added to HP.
+      const before = p.maxHp;
+      p.level = level;
+      p.maxHp = playerMaxHp(p.attributes, level);
+      p.maxMana = originalMaxMana(p.attributes, level);
+      p.damageMultiplier = originalDamageMultiplier(p.attributes, level);
+      p.moveStats = { ...p.moveStats, clipRate: originalSpeedMultiplier(p.attributes, level) };
+      p.hp = Math.min(p.maxHp, p.hp + (p.maxHp - before));
+    }
   }
 
   private respawn(a: Actor): void {
@@ -2026,7 +2192,10 @@ export class WorldZone {
       const kind: EntityKind = other.kind;
       this.sendJson(p.connId, {
         op: SC.ENTITY_SPAWN,
-        d: { id, kind, name: other.name, maxHp: other.maxHp, ...(other.kind === 'mob' ? { archetype: other.archetype.id } : {}) },
+        d: {
+          id, kind, name: other.name, maxHp: other.maxHp,
+          ...(other.kind === 'mob' ? { archetype: other.archetype.id, ...(other.placement !== undefined ? { placement: other.placement } : {}) } : {}),
+        },
       });
     }
     for (const id of p.known) {

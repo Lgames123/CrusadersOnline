@@ -56,8 +56,8 @@ const zone = new WorldZone(rapier, zoneName, loadArena(arenaName), {
   persist(records, reason) {
     post({ t: 'persist', reason, records });
   },
-  portal(connId, target) {
-    post({ t: 'portal', connId, target });
+  portal(connId, target, keep) {
+    post({ t: 'portal', connId, target, ...(keep ? { keep } : {}) });
   },
 }, { difficulty, features: gameplayFeatures(features ?? []), items: loadItems(itemRulesPath), spells: loadSpells(generatedDir) });
 
@@ -106,6 +106,10 @@ port.on('message', (msg: ToZone) => {
       break;
     case 'use':
       zone.useItem(msg.connId, msg.slot);
+      flush();
+      break;
+    case 'cutsceneDone':
+      zone.cutsceneDone(msg.connId, msg.sequence);
       flush();
       break;
     case 'transfer': {

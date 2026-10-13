@@ -13,6 +13,8 @@ export const CS = {
   USE_ITEM: 0x0b,
   ZONE_READY: 0x0c,
   SELECT_SPELL: 0x0d,
+  /** The client finished playing a scripted sequence (or skipped it). */
+  CUTSCENE_DONE: 0x0e,
 } as const;
 
 /** Server -> client opcodes. */
@@ -29,6 +31,10 @@ export const SC = {
   PLAYER_STATS: 0x49,
   OBJECT_STATE: 0x4a,
   ZONE_CHANGE: 0x4b,
+  /** A scripted sequence starts for this player (the client plays it). */
+  CUTSCENE: 0x4c,
+  /** The player's quest book. */
+  QUEST_LOG: 0x4d,
   ERROR: 0x4f,
 } as const;
 

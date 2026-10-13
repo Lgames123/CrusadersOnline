@@ -3,6 +3,7 @@ import { INPUT, SC } from '../opcodes.ts';
 import type { SpellId } from '../../game/spells.ts';
 import type { ItemType } from '../../game/items.ts';
 import type { GameplayFeatures } from '../../game/features.ts';
+import type { QuestLog } from '../../game/story.ts';
 
 /** JSON control messages sent by the server. Trusted direction, so plain types (no Zod). */
 
@@ -33,7 +34,8 @@ export type EntityKind = 'player' | 'mob';
 
 export interface EntitySpawnMsg {
   op: typeof SC.ENTITY_SPAWN;
-  d: { id: number; kind: EntityKind; name: string; maxHp: number; archetype?: string };
+  /** `placement`: a creature of an original level, its index in the act's placements. */
+  d: { id: number; kind: EntityKind; name: string; maxHp: number; archetype?: string; placement?: number };
 }
 
 /** Sent to the owning player on entry and whenever any of these values change. */
@@ -116,6 +118,21 @@ export interface ZoneChangeMsg {
   d: { arena: string };
 }
 
+/**
+ * A scripted sequence of the player's level starts (story.ts): its name in the act's placements,
+ * and the entity playing each of its actors (null: the stand-in for Drake, or not present).
+ */
+export interface CutsceneMsg {
+  op: typeof SC.CUTSCENE;
+  d: { sequence: string; actors: (number | null)[] };
+}
+
+/** The player's quest book; `news` lists what changed with this message (absent on entry). */
+export interface QuestLogMsg {
+  op: typeof SC.QUEST_LOG;
+  d: { log: QuestLog; news?: { assigned: number[]; completed: number[]; journal: number[] } };
+}
+
 export interface EntityDespawnMsg {
   op: typeof SC.ENTITY_DESPAWN;
   d: { id: number };
@@ -142,7 +159,9 @@ export type ServerControlMsg =
   | CombatEventMsg
   | InventoryUpdateMsg
   | ObjectStateMsg
-  | ZoneChangeMsg;
+  | ZoneChangeMsg
+  | CutsceneMsg
+  | QuestLogMsg;
 
 /** Animation state ids carried in snapshot `anim`. */
 export const ANIM = {

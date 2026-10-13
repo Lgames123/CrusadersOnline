@@ -67,7 +67,7 @@ export class SessionManager implements TransportHandlers {
   }
 
   /** A player of `arena` entered a portal to `target` (from the zone worker). */
-  onPortal(arena: string, connId: number, target: string): void {
+  onPortal(arena: string, connId: number, target: string, keep?: { x: number; y: number; z: number; mesh: string }): void {
     const s = this.sessions.get(connId);
     if (!s || s.state !== 'in_world' || s.zone !== arena) return;
     if (!this.zones.available(target)) {
@@ -81,16 +81,19 @@ export class SessionManager implements TransportHandlers {
     this.log.info({ conn: connId, from: arena, to: target }, 'zone transfer');
     // Remember the destination; the 'transferred' answer carries the player's state.
     (s as Session & { transferTo?: string }).transferTo = target;
+    (s as Session & { transferKeep?: typeof keep }).transferKeep = keep;
   }
 
   /** The old zone removed the player: save, then send them into the destination zone. */
   onTransferred(arena: string, connId: number, record: PersistRecord | null, state: TransferState | null): void {
-    const s = this.sessions.get(connId) as (Session & { transferTo?: string }) | undefined;
+    const s = this.sessions.get(connId) as (Session & { transferTo?: string; transferKeep?: { x: number; y: number; z: number; mesh: string } }) | undefined;
     const target = s?.transferTo;
+    const keep = s?.transferKeep;
     if (record) this.persist([{ ...record, ...(target ? { zone: target, resetPosition: true } : {}) }]);
     if (!s || !target || !state) return;
     delete s.transferTo;
-    void this.sendToZone(s, target, { ...state, arrivingFrom: arena });
+    delete s.transferKeep;
+    void this.sendToZone(s, target, { ...state, arrivingFrom: arena, ...(keep ? { arrivingAt: { x: keep.x, y: keep.y, z: keep.z }, arrivingMesh: keep.mesh } : {}) });
   }
 
   /** Announces the arena to the client and waits for CS_ZONE_READY before joining. */
@@ -223,6 +226,9 @@ export class SessionManager implements TransportHandlers {
       case CS.PLAYER_ATTACK:
         if (s.state === 'in_world') this.zoneOf(s)?.attack(conn.id, msg.d.kind ?? 'normal');
         return;
+      case CS.CUTSCENE_DONE:
+        if (s.state === 'in_world') this.zoneOf(s)?.cutsceneDone(conn.id, msg.d.sequence);
+        return;
       case CS.PING:
         this.send(s, { op: SC.PONG, d: { clientTime: msg.d.clientTime, serverTick: this.zoneOf(s)?.tick ?? 0 } });
         return;
@@ -256,6 +262,7 @@ export class SessionManager implements TransportHandlers {
           mana: saved.mana,
           spells: saved.spells,
           selectedSpell: saved.selectedSpell,
+          story: saved.story,
         });
       }
       this.log.info({ conn: s.conn.id, character: name, zone: s.zone, guest: account.guest }, 'entering world');

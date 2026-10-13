@@ -15,6 +15,7 @@ export type ToZone =
   | { t: 'interact'; connId: number; object: number; key: boolean }
   | { t: 'talk'; connId: number; entity: number; ms: number }
   | { t: 'use'; connId: number; slot: number }
+  | { t: 'cutsceneDone'; connId: number; sequence: string }
   /** Remove the player for a zone transfer; answered with 'transferred'. */
   | { t: 'transfer'; connId: number }
   | { t: 'stop' };
@@ -37,7 +38,7 @@ export type FromZone =
   /** Character states to save: periodic flush, a player leaving, or final flush before stop. */
   | { t: 'persist'; reason: PersistReason; records: PersistRecord[] }
   /** A player entered a portal trigger (the main thread decides whether to transfer). */
-  | { t: 'portal'; connId: number; target: string }
+  | { t: 'portal'; connId: number; target: string; keep?: { x: number; y: number; z: number; mesh: string } }
   | { t: 'transferred'; connId: number; record: PersistRecord | null; state: TransferState | null }
   | { t: 'stopped' };
 

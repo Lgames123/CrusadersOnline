@@ -1,5 +1,5 @@
 import type { Kysely } from 'kysely';
-import { decodeSpells, encodeSpells, type InventoryEntry, type KnownSpell, type SpellId } from '@crusaders/shared';
+import { decodeSpells, encodeSpells, sanitizeStoryState, type InventoryEntry, type KnownSpell, type SpellId, type StoryState } from '@crusaders/shared';
 import type { DB } from './schema.ts';
 
 /** Character state the zone needs to spawn a player. */
@@ -18,6 +18,7 @@ export interface CharacterSpawnState {
   mana: number;
   spells: KnownSpell[];
   selectedSpell: SpellId | null;
+  story: StoryState;
 }
 
 /** Live state flushed from a zone (periodic, on leave, after progress and on shutdown). */
@@ -42,6 +43,8 @@ export interface CharacterPersistRecord {
   zone?: string;
   /** Clear the saved position (the character spawns at the zone's arrival point). */
   resetPosition?: boolean;
+  /** Story progress; omitted = unchanged. */
+  story?: StoryState;
 }
 
 export class CharacterRepository {
@@ -55,7 +58,7 @@ export class CharacterRepository {
   async loadOwned(accountId: string, characterId: string): Promise<CharacterSpawnState | null> {
     const r = await this.db
       .selectFrom('characters')
-      .select(['id', 'name', 'zone_id', 'pos_x', 'pos_y', 'pos_z', 'yaw', 'level', 'experience_points', 'gold', 'current_hp', 'current_mana', 'spells', 'selected_spell'])
+      .select(['id', 'name', 'zone_id', 'pos_x', 'pos_y', 'pos_z', 'yaw', 'level', 'experience_points', 'gold', 'current_hp', 'current_mana', 'spells', 'selected_spell', 'story'])
       .where('id', '=', characterId)
       .where('account_id', '=', accountId)
       .executeTakeFirst();
@@ -80,6 +83,7 @@ export class CharacterRepository {
       mana: r.current_mana,
       spells: decodeSpells(r.spells),
       selectedSpell: decodeSpells(r.selected_spell ? `${r.selected_spell}:1` : '')[0]?.spell ?? null,
+      story: parseStory(r.story),
       inventory: items.map((i) => ({ slot: i.slot_index, itemId: i.item_id, equipped: i.is_equipped, ...(i.quantity > 1 ? { quantity: i.quantity } : {}) })),
     };
   }
@@ -106,6 +110,7 @@ export class CharacterRepository {
             max_mana: r.maxMana,
             spells: encodeSpells(r.spells),
             selected_spell: r.selectedSpell,
+            ...(r.story ? { story: JSON.stringify(r.story) } : {}),
             last_saved_at: now,
           })
           .where('id', '=', r.characterId)
@@ -121,5 +126,13 @@ export class CharacterRepository {
         }
       }
     });
+  }
+}
+
+function parseStory(text: string): StoryState {
+  try {
+    return sanitizeStoryState(JSON.parse(text));
+  } catch {
+    return sanitizeStoryState(null);
   }
 }
