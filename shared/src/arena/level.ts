@@ -1,3 +1,4 @@
+import { doorSwingFromMotion, type LevelBrushMotion } from './door_swing.ts';
 import { CREATURE_TEMPLATES, npcArchetypeId } from '../game/creatures.ts';
 import type { ArenaDef, BrushDef, PortalDef, TriMeshDef, WorldObjectDef } from './types.ts';
 
@@ -64,6 +65,8 @@ export interface LevelBrush {
   points: [number, number, number][];
   /** Textured polygons: indices into `points`, texel coordinates (×32 texels) per vertex. */
   faces?: { texture: string; indices: number[]; texels: number[] }[];
+  /** Its keyframe mover (doors, gates, lifts...). */
+  motion?: LevelBrushMotion;
 }
 
 /** Door world-object ids start here (placement indices stay below). */
@@ -365,6 +368,8 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
     const pts = b.points.length > 4 ? b.points.slice(1) : b.points;
     const points = new Float32Array(pts.flatMap((p) => [p[0] * s, p[1] * s, p[2] * s]));
     const brush: BrushDef = { name: b.name, points, solid: SOLID_BRUSH.test(b.name) };
+    const swing = b.motion ? doorSwingFromMotion(b.motion, s) : null;
+    if (swing && DOOR_BRUSH.test(b.name)) brush.swing = swing;
     const lever = LEVER_BRUSH.test(b.name);
     if (DOOR_BRUSH.test(b.name) || lever) {
       const min = [Infinity, Infinity, Infinity];

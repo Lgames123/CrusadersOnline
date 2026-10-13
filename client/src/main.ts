@@ -31,6 +31,7 @@ import {
   type ArenaDef,
   type ClientSession,
   type MovementWorld,
+  type DoorMotion,
 } from '@crusaders/shared';
 import { createRenderContext } from './engine/renderer.ts';
 import { CameraRig } from './engine/camera_rig.ts';
@@ -222,9 +223,9 @@ async function main(): Promise<void> {
             }
           },
           objects: (d) => {
-            for (const o of d.objects as { id: number; state: 'present' | 'gone' | 'open'; by?: number; loot?: string[]; damage?: number }[]) {
+            for (const o of d.objects as { id: number; state: 'present' | 'gone' | 'open'; by?: number; loot?: string[]; damage?: number; swing?: DoorMotion }[]) {
               const view = levelView?.objects.get(o.id);
-              levelView?.setObjectState(o.id, o.state);
+              levelView?.setObjectState(o.id, o.state, o.swing ?? null);
               if (!view || d.full) continue;
               const mine = session !== null && o.by === session.entityId;
               const at = view.position;
@@ -269,7 +270,7 @@ async function main(): Promise<void> {
             player.character = live.character!;
             chase.mw = live.mw;
             chase.snap();
-            for (const [id, state] of live.objectStates) levelView?.setObjectState(id, state);
+            for (const [id, state] of live.objectStates) levelView?.setObjectState(id, state, live.swings.get(id)?.motion ?? null);
           },
           close: (code, reason) => {
             document.getElementById('error')!.textContent = `Disconnected from server (${code}${reason ? `: ${reason}` : ''}). Reload to reconnect.`;
@@ -285,7 +286,7 @@ async function main(): Promise<void> {
       hud.stats(session.playerStats);
       lastStats = { level: session.playerStats.level, dead: session.playerStats.dead };
     }
-    for (const [id, state] of session.objectStates) levelView?.setObjectState(id, state);
+    for (const [id, state] of session.objectStates) levelView?.setObjectState(id, state, session.swings.get(id)?.motion ?? null);
     if (session.inventory) {
       inventoryPanel.update(session.inventory);
       player.setWeaponSpeed(session.inventory.weaponSpeed);

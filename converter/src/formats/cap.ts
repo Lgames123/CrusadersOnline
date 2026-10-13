@@ -85,6 +85,25 @@ export interface CapBrush {
   name: string;
   points: [number, number, number][];
   faces: CapBrushFace[];
+  /** Its keyframe mover, when the record has one (doors, gates, levers, lifts...). */
+  motion?: CapBrushMotion;
+}
+
+/**
+ * A brush's keyframe mover (object +0x4C -> a 0x230-byte record; update 0x48EFC0): mode flags
+ * (+0x100: low 3 bits the end-of-path mode, 8 = return after the delay, 0x2000 = eased speed),
+ * key count (+0x105), starting key (+0x106), delay before returning (+0x11E, ms), and three arrays:
+ * segment types (+0x120, a byte per key: 0x10 = turn about the vertical axis), keys (+0x124,
+ * three floats per key: degrees and the turn centre x, z) and speeds (+0x128, 2 x count floats:
+ * progress per ms at the ends and, eased, at the middle of a segment).
+ */
+export interface CapBrushMotion {
+  flags: number;
+  start: number;
+  delayMs: number;
+  types: number[];
+  keys: [number, number, number][];
+  speeds: number[];
 }
 
 /** One textured polygon of a brush: texture, indices into `points`, texel coordinates per vertex. */
@@ -225,11 +244,38 @@ function parseBrushes(data: Uint8Array, dv: DataView): CapBrush[] {
       const ok = points.every((p) => p.every((v) => Number.isFinite(v) && Math.abs(v) < 1e5)) &&
         points.every((p) => Math.hypot(p[0] - points[0]![0], p[1] - points[0]![1], p[2] - points[0]![2]) < 400);
       if (!ok) continue;
-      out.push({ name, points, faces: parseBrushFaces(data, dv, ptr - CAP_BASE, nf, points) });
+      const motion = parseBrushMotion(data, dv, a - 0x18);
+      out.push({ name, points, faces: parseBrushFaces(data, dv, ptr - CAP_BASE, nf, points), ...(motion ? { motion } : {}) });
       break;
     }
   }
   return out;
+}
+
+/** The mover of the brush object at `obj` (its class-0x31 record is at +0x18), if any. */
+function parseBrushMotion(data: Uint8Array, dv: DataView, obj: number): CapBrushMotion | undefined {
+  if (obj < 0 || obj + 0x50 > data.length) return undefined;
+  const ptr = (o: number) => dv.getUint32(o, true) - CAP_BASE;
+  const mv = ptr(obj + 0x4c);
+  if (mv <= obj || mv + 0x230 > data.length) return undefined;
+  const count = dv.getInt8(mv + 0x105);
+  const start = dv.getInt8(mv + 0x106);
+  const types = ptr(mv + 0x120);
+  const keys = ptr(mv + 0x124);
+  const speeds = ptr(mv + 0x128);
+  if (count < 1 || count > 32 || start < 0 || start >= count) return undefined;
+  if (types < 0 || types + count > data.length || keys < 0 || keys + 12 * count > data.length || speeds < 0 || speeds + 8 * count > data.length) return undefined;
+  const f32 = (o: number) => Math.round(dv.getFloat32(o, true) * 1e4) / 1e4;
+  const motion: CapBrushMotion = {
+    flags: dv.getUint32(mv + 0x100, true),
+    start,
+    delayMs: dv.getInt16(mv + 0x11e, true),
+    types: [...data.subarray(types, types + count)],
+    keys: Array.from({ length: count }, (_, i) => [f32(keys + 12 * i), f32(keys + 12 * i + 4), f32(keys + 12 * i + 8)] as [number, number, number]),
+    speeds: Array.from({ length: 2 * count }, (_, i) => dv.getFloat32(speeds + 4 * i, true)),
+  };
+  if (![...motion.keys.flat(), ...motion.speeds].every((v) => Number.isFinite(v) && Math.abs(v) < 1e6)) return undefined;
+  return motion;
 }
 
 /**

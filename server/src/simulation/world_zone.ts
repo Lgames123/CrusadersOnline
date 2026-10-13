@@ -1,6 +1,14 @@
 import {
   ANIM,
   BUILTIN_ITEMS,
+  TICK_MS,
+  setDoorPose,
+  stepDoorMotion,
+  swingKeyAwayFrom,
+  swingPoint,
+  swingPose,
+  type DoorMotion,
+  type DoorSwing,
   inPortal,
   UNARMED,
   PORTAL_OBJECT_BASE,
@@ -232,6 +240,8 @@ interface WorldObject {
   state: WorldObjectState;
   hp: number;
   respawnAt: number;
+  /** Swinging doors: the swing, the slab's shut footprint (x/z hull, metres) and the motion. */
+  swing?: { def: DoorSwing; points: Float32Array; hull: [number, number][]; motion: DoorMotion | null; blocked: boolean };
 }
 
 /** One change in an OBJECT_STATE message. */
@@ -245,6 +255,42 @@ interface ObjectChange {
   /** Breakables: damage of this hit and remaining HP. */
   damage?: number;
   hp?: number;
+  /** Swinging doors: the motion as of now. */
+  swing?: DoorMotion;
+}
+
+/** Convex hull (x/z) of a brush's points, counter-clockwise (monotone chain). */
+function hullXZ(points: Float32Array): [number, number][] {
+  const pts: [number, number][] = [];
+  for (let i = 0; i < points.length; i += 3) pts.push([points[i]!, points[i + 2]!]);
+  pts.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o: [number, number], a: [number, number], b: [number, number]) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower: [number, number][] = [];
+  const upper: [number, number][] = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2]!, lower[lower.length - 1]!, p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  for (const p of [...pts].reverse()) {
+    while (upper.length >= 2 && cross(upper[upper.length - 2]!, upper[upper.length - 1]!, p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  return [...lower.slice(0, -1), ...upper.slice(0, -1)];
+}
+
+/** Whether a circle (x, z, r) touches a convex polygon. */
+function circleTouchesPolygon(poly: [number, number][], x: number, z: number, r: number): boolean {
+  let inside = true;
+  for (let i = 0; i < poly.length; i++) {
+    const [ax, az] = poly[i]!;
+    const [bx, bz] = poly[(i + 1) % poly.length]!;
+    const ex = bx - ax;
+    const ez = bz - az;
+    if (ex * (z - az) - ez * (x - ax) < 0) inside = false;
+    const t = Math.max(0, Math.min(1, ((x - ax) * ex + (z - az) * ez) / (ex * ex + ez * ez || 1)));
+    if (Math.hypot(ax + t * ex - x, az + t * ez - z) < r) return true;
+  }
+  return inside;
 }
 
 /** Citizens' strolls: radius around their place (m), longest walk and the pause between walks. */
@@ -444,6 +490,10 @@ export class WorldZone {
     this.fallLimit = (Number.isFinite(lowest) ? lowest : 0) - FALL_MARGIN;
     for (const s of arena.mobSpawns) this.spawnMob(s.archetype, s);
     for (const def of arena.objects ?? []) this.objects.set(def.id, { def, state: 'present', hp: def.hp ?? 0, respawnAt: 0 });
+    for (const b of arena.brushes ?? []) {
+      const o = b.door !== undefined ? this.objects.get(b.door) : undefined;
+      if (o && b.swing) o.swing = { def: b.swing, points: b.points, hull: hullXZ(b.points), motion: null, blocked: false };
+    }
   }
 
   get playerCount(): number {
@@ -594,7 +644,7 @@ export class WorldZone {
     this.sendStats(p);
     this.sendInventory(p);
     if (this.objects.size) {
-      const changed = [...this.objects.values()].filter((o) => o.state !== 'present').map((o) => ({ id: o.def.id, state: o.state }));
+      const changed = [...this.objects.values()].filter((o) => o.state !== 'present').map((o) => ({ id: o.def.id, state: o.state, ...(o.swing?.motion ? { swing: { ...o.swing.motion } } : {}) }));
       this.sendJson(connId, { op: SC.OBJECT_STATE, d: { objects: changed, full: true } });
     }
     return p.entityId;
@@ -613,7 +663,9 @@ export class WorldZone {
       return;
     }
     const o = this.objects.get(id);
-    if (!p || !o || !alive(p) || o.state !== 'present' || o.def.kind === 'breakable') return;
+    // A swinging door may be opened again while it swings shut.
+    const reopens = o?.swing?.motion?.phase === 'closing';
+    if (!p || !o || !alive(p) || (o.state !== 'present' && !reopens) || o.def.kind === 'breakable') return;
     if (o.def.kind === 'door' || o.def.kind === 'lever') {
       this.openDoor(p, o, key);
       return;
@@ -633,7 +685,8 @@ export class WorldZone {
 
   /**
    * Opens a door in reach (its bounds); a locked one needs its key carried and the use key, a
-   * lever-operated one its lever. Pulling a lever opens its doors. Doors stay open.
+   * lever-operated one its lever. Pulling a lever opens its doors. Swinging doors swing shut
+   * after their delay (stepDoors); the others stay open.
    */
   private openDoor(p: Player, o: WorldObject, key: boolean): void {
     const b = o.def.bounds;
@@ -648,6 +701,17 @@ export class WorldZone {
     }
     const changes: ObjectChange[] = [];
     for (const target of [o, ...(o.def.opens ?? []).map((id) => this.objects.get(id))]) {
+      const sw = target?.swing;
+      if (target && sw) {
+        // A swinging door opens away from the player; one swinging shut opens again.
+        if (sw.motion && sw.motion.phase !== 'closing') continue;
+        sw.motion = sw.motion
+          ? { ...sw.motion, phase: 'opening' }
+          : { key: swingKeyAwayFrom(sw.def, sw.points, pos.x, pos.z), progress: 0, phase: 'opening', holdLeftMs: 0 };
+        target.state = 'open';
+        changes.push({ id: target.def.id, state: 'open', by: p.entityId, swing: { ...sw.motion } });
+        continue;
+      }
       if (!target || target.state === 'open') continue;
       target.state = 'open';
       setDoorOpen(this.mw, target.def.id, true);
@@ -788,6 +852,47 @@ export class WorldZone {
       }
       this.broadcastObjects([{ id: o.def.id, state: o.state, by: a.entityId, damage, hp: Math.ceil(o.hp) }]);
     }
+  }
+
+  /**
+   * Swinging doors: open, held, swung shut (the original's mover). A door does not swing into a
+   * character: it waits until the way is clear (the original pushes Drake when it can).
+   */
+  private stepDoors(): void {
+    const changes: ObjectChange[] = [];
+    for (const o of this.objects.values()) {
+      const sw = o.swing;
+      const m = sw?.motion;
+      if (!sw || !m) continue;
+      const phase = m.phase;
+      const before = m.progress;
+      const wasBlocked = sw.blocked;
+      sw.blocked = false;
+      const moving = stepDoorMotion(sw.def, m, TICK_MS, (next) => (sw.blocked = this.doorHits(o, next) && !this.doorHits(o, m.progress)));
+      const pose = swingPose(sw.def, m);
+      if (m.progress !== before || !moving) setDoorPose(this.mw, o.def.id, pose.cx, pose.cz, moving ? pose.angle : 0);
+      if (!moving) {
+        sw.motion = null;
+        o.state = 'present';
+        changes.push({ id: o.def.id, state: 'present' });
+      } else if (m.phase !== phase || sw.blocked !== wasBlocked) changes.push({ id: o.def.id, state: 'open', swing: { ...m, blocked: sw.blocked } });
+    }
+    if (changes.length) this.broadcastObjects(changes);
+  }
+
+  /** Whether a swinging door at `progress` touches a live character within its height. */
+  private doorHits(o: WorldObject, progress: number): boolean {
+    const sw = o.swing!;
+    const k = sw.def.keys[sw.motion!.key] ?? sw.def.keys[0]!;
+    const poly = sw.hull.map(([x, z]) => swingPoint(k.cx, k.cz, k.angle * progress, x, z));
+    const b = o.def.bounds!;
+    for (const a of this.actors.values()) {
+      if (!alive(a)) continue;
+      const p = a.character.position;
+      if (p.y > b[4] || p.y + 1.8 < b[1]) continue;
+      if (circleTouchesPolygon(poly, p.x, p.z, PLAYER_RADIUS)) return true;
+    }
+    return false;
   }
 
   private respawnObjects(): void {
@@ -1058,6 +1163,7 @@ export class WorldZone {
 
     // 4. Deaths and respawns (actors and world objects).
     if (this.objects.size && tick % 20 === 0) this.respawnObjects();
+    if (this.objects.size) this.stepDoors();
     for (const a of this.actors.values()) {
       if (a.deadUntil !== 0 && tick >= a.deadUntil) this.respawn(a);
     }

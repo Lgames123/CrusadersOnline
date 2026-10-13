@@ -6,7 +6,8 @@ import { INPUT_PACKET_MAX_BYTES, MAX_INPUT_FRAMES, createInputFrame, encodeInput
 import { decodeSnapshot, type EntityState } from '../protocol/binary/snapshot.ts';
 import type { AttackKind, CombatEventMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PlayerStatsMsg, ServerControlMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
 import type { ArenaDef } from '../arena/types.ts';
-import { createMovementWorld, disposeMovementWorld, setDoorOpen, type MovementWorld, type Rapier } from '../movement/physics.ts';
+import { createMovementWorld, disposeMovementWorld, setDoorOpen, setDoorPose, type MovementWorld, type Rapier } from '../movement/physics.ts';
+import { stepDoorMotion, swingPose, type DoorMotion, type DoorSwing } from '../arena/door_swing.ts';
 import { createCharacter, setCharacterState, stepCharacter, type Character } from '../movement/character.ts';
 
 const INPUT_HISTORY = 64;
@@ -86,6 +87,8 @@ export class ClientSession {
   inventory: Inventory | null = null;
   /** World object states (absent = present). */
   readonly objectStates = new Map<number, WorldObjectState>();
+  /** Swinging doors of the arena by object id, with their motion (null = shut). */
+  readonly swings = new Map<number, { def: DoorSwing; motion: DoorMotion | null }>();
 
   private ws: WebSocket | null = null;
   private readonly events: ClientSessionEvents;
@@ -110,6 +113,20 @@ export class ClientSession {
     this.mw = createMovementWorld(rapier, arena);
     this.arenaName = arena.name;
     this.events = events;
+    this.collectSwings(arena);
+  }
+
+  private collectSwings(arena: ArenaDef): void {
+    this.swings.clear();
+    for (const b of arena.brushes ?? []) if (b.door !== undefined && b.swing) this.swings.set(b.door, { def: b.swing, motion: null });
+  }
+
+  /** Puts a swinging door's collider at its current turn. */
+  private poseDoor(id: number): void {
+    const d = this.swings.get(id);
+    if (!d) return;
+    const pose = d.motion ? swingPose(d.def, d.motion) : { ...d.def.keys[0]!, angle: 0 };
+    setDoorPose(this.mw, id, pose.cx, pose.cz, pose.angle);
   }
 
   /**
@@ -120,6 +137,7 @@ export class ClientSession {
     disposeMovementWorld(this.mw);
     this.mw = createMovementWorld(this.rapier, arena);
     this.arenaName = arena.name;
+    this.collectSwings(arena);
     this.character = null;
     this.entityId = 0;
     this.snapshots.clear();
@@ -238,9 +256,15 @@ export class ClientSession {
       case SC.OBJECT_STATE:
         if (msg.d.full) this.objectStates.clear();
         if (msg.d.full) for (const id of this.mw.doors.keys()) setDoorOpen(this.mw, id, false);
+        if (msg.d.full) for (const [id, d] of this.swings) d.motion = null, this.poseDoor(id);
         for (const o of msg.d.objects) {
           this.objectStates.set(o.id, o.state);
-          setDoorOpen(this.mw, o.id, o.state === 'open');
+          const swing = this.swings.get(o.id);
+          if (swing) {
+            // Swinging doors keep their collider and turn it (stepped in tick()).
+            swing.motion = o.state === 'open' && o.swing ? { ...o.swing } : null;
+            this.poseDoor(o.id);
+          } else setDoorOpen(this.mw, o.id, o.state === 'open');
         }
         this.events.objects?.(msg.d);
         break;
@@ -315,6 +339,12 @@ export class ClientSession {
     slot.flags = this.dead ? 0 : input.flags;
     slot.yaw = input.yaw;
     slot.pitch = input.pitch;
+    for (const [id, d] of this.swings) {
+      if (!d.motion) continue;
+      const before = d.motion.progress;
+      if (!stepDoorMotion(d.def, d.motion, TICK_MS)) d.motion = null;
+      if (!d.motion || d.motion.progress !== before) this.poseDoor(id);
+    }
     stepCharacter(this.mw, c, slot, DEFAULT_MOVEMENT_STATS, TICK_DT);
 
     const frames: InputFrame[] = [];

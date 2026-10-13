@@ -1,3 +1,5 @@
+import type { DoorSwing } from './door_swing.ts';
+
 /**
  * Static level description shared by renderer (client) and collision world (client + server).
  * Synthetic arenas use primitive boxes; converted original levels use triangle meshes (level.ts).
@@ -62,6 +64,8 @@ export interface BrushDef {
   solid: boolean;
   /** World object id when the brush is a door or a lever. */
   door?: number;
+  /** A door that swings about its hinge (the original's turning mover); others slide up. */
+  swing?: DoorSwing;
 }
 
 /** Level exit: walking into its trigger moves the player to another zone (arena). */

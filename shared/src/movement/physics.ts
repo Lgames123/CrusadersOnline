@@ -97,6 +97,18 @@ export function setDoorOpen(mw: MovementWorld, id: number, open: boolean): boole
   return true;
 }
 
+/** Turns a swinging door's collider by `angle` (about +Y) round (cx, cz), from its shut pose. */
+export function setDoorPose(mw: MovementWorld, id: number, cx: number, cz: number, angle: number): void {
+  const c = mw.doors.get(id);
+  if (!c) return;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  // World point = R p + t with t = c - R c: the hull turns about the hinge.
+  c.setRotation({ x: 0, y: Math.sin(angle / 2), z: 0, w: Math.cos(angle / 2) });
+  c.setTranslation({ x: cx - (cos * cx + sin * cz), y: 0, z: cz - (-sin * cx + cos * cz) });
+  mw.world.step(); // refresh the broad phase for scene queries
+}
+
 export function disposeMovementWorld(mw: MovementWorld): void {
   mw.world.removeCharacterController(mw.controller);
   mw.world.free();

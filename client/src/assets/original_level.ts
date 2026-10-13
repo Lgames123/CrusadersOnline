@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, type ArenaDef, type LevelObject, type LevelBrush, type LevelPlacements, type WorldObjectDef, type WorldObjectState } from '@crusaders/shared';
+import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, type ArenaDef, type LevelObject, type LevelBrush, type LevelPlacements, type WorldObjectDef, type WorldObjectState, type DoorMotion, type DoorSwing, stepDoorMotion, swingPose } from '@crusaders/shared';
 
 /**
  * An original level converted from the player's own installation (imported in the browser, or
@@ -34,13 +34,18 @@ export interface LevelObjectView {
   state: WorldObjectState;
 }
 
-/** A door or lever brush: its world object and the drawn piece (doors slide up, levers tip over). */
+/**
+ * A door or lever brush: its world object and the drawn piece (swinging doors turn about their
+ * hinge, other doors slide up, levers tip over).
+ */
 export interface DoorView {
   def: WorldObjectDef;
   mesh: THREE.Mesh;
   state: WorldObjectState;
   /** 0 closed .. 1 open. */
   open: number;
+  /** Swinging doors: the swing and its motion (null = shut), stepped every frame. */
+  swing?: { def: DoorSwing; motion: DoorMotion | null };
 }
 
 /** Footstep surfaces (Sound.ctx has a step pair for each). */
@@ -89,7 +94,8 @@ export interface OriginalLevel {
   doors: Map<number, DoorView>;
   /** Torch flame positions (metres), e.g. for ambient fire sounds. */
   torches: THREE.Vector3[];
-  setObjectState(id: number, state: WorldObjectState): void;
+  /** `swing`: a swinging door's motion as of now (from the server). */
+  setObjectState(id: number, state: WorldObjectState, swing?: DoorMotion | null): void;
   /** Surface under a point (metres), for footsteps; null off the level. */
   surfaceAt(pos: THREE.Vector3): Surface | null;
   /** Music track of the level act (Music/<n>.mp3), if any. */
@@ -367,7 +373,13 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
       mesh.geometry.translate(-c.x, -c.y, -c.z);
       mesh.position.copy(c);
     }
-    if (def) doors.set(def.id, { def, mesh, state: 'present', open: 0 });
+    if (def && b.swing) {
+      // Pivot at the hinge so it can turn.
+      const k = b.swing.keys[0]!;
+      mesh.geometry.translate(-k.cx, 0, -k.cz);
+      mesh.position.set(k.cx, 0, k.cz);
+      doors.set(def.id, { def, mesh, state: 'present', open: 0, swing: { def: b.swing, motion: null } });
+    } else if (def) doors.set(def.id, { def, mesh, state: 'present', open: 0 });
   });
 
   const lights: THREE.PointLight[] = [];
@@ -411,9 +423,10 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
     objects,
     doors,
     torches,
-    setObjectState(id, state) {
+    setObjectState(id, state, swing) {
       const door = doors.get(id);
       if (door) door.state = state;
+      if (door?.swing && swing !== undefined) door.swing.motion = state === 'open' && swing ? { ...swing } : null;
       const v = objects.get(id);
       if (!v) return;
       v.state = state;
@@ -432,6 +445,12 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
       if (sky.children.length) sky.position.copy(camera.position);
       t += dt;
       for (const d of doors.values()) {
+        if (d.swing) {
+          const m = d.swing.motion;
+          if (m && !stepDoorMotion(d.swing.def, m, dt * 1000)) d.swing.motion = null;
+          d.mesh.rotation.y = d.swing.motion ? swingPose(d.swing.def, d.swing.motion).angle : 0;
+          continue;
+        }
         const target = d.state === 'open' ? 1 : 0;
         if (d.open === target) continue;
         d.open = target > d.open ? Math.min(1, d.open + dt / DOOR_OPEN_SECONDS) : 0;
