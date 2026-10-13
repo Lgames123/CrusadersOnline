@@ -253,6 +253,15 @@ const STROLL_MAX_TICKS = 20 * 8;
 const STROLL_PAUSE_MIN = 20 * 4;
 const STROLL_PAUSE_SPREAD = 20 * 8;
 
+/**
+ * Citizens who see an assault (a player landing a blow within this many metres, on the same
+ * floor) stand on the alert facing it, then run away from it for a while; the blow itself
+ * plays no impact on them.
+ */
+const WITNESS_RADIUS = 12;
+const ALERT_TICKS = 12;
+const FLEE_TICKS = 20 * 6;
+
 /** Metres below the lowest level geometry at which a falling player is caught. */
 const FALL_MARGIN = 20;
 
@@ -349,7 +358,7 @@ interface Mob extends ActorBase {
   blockUntil: number;
   nextBlockTick: number;
   spawn: { x: number; y: number; z: number };
-  state: 'idle' | 'chase' | 'return';
+  state: 'idle' | 'chase' | 'return' | 'flee';
   threat: Map<number, number>;
   nextSwingTick: number;
   /** Ticks of a forward hop still to run before the swing it leads into. */
@@ -369,6 +378,10 @@ interface Mob extends ActorBase {
   strollTo: { x: number; z: number } | null;
   strollAt: number;
   strollUntil: number;
+  /** Fleeing citizen: on the alert until this tick, then running from `fleeFrom` until `fleeUntil`. */
+  alertUntil: number;
+  fleeUntil: number;
+  fleeFrom: { x: number; z: number };
   input: InputFrame;
   stats: MovementStats;
 }
@@ -376,6 +389,8 @@ interface Mob extends ActorBase {
 type Actor = Player | Mob;
 
 const alive = (a: Actor) => a.deadUntil === 0;
+/** Unarmed peaceful creatures (citizens, merchants): no flinch, no fighting back - they run. */
+const isCitizen = (m: Mob) => m.archetype.passive && m.weapon.id === UNARMED.id;
 /** Minimum distance between two characters' centres (two capsule radii). */
 const CHARACTER_SPACING = 2 * PLAYER_RADIUS;
 /** Quick shield block clip (PE07, 20 frames at 1000/30 fps). */
@@ -491,6 +506,9 @@ export class WorldZone {
       strollTo: null,
       strollAt: 0,
       strollUntil: 0,
+      alertUntil: 0,
+      fleeUntil: 0,
+      fleeFrom: { x: 0, z: 0 },
       input: createInputFrame(),
       // Creatures share the humanoid rig's root-motion speeds (run, walk); no jumping.
       stats: { ...DEFAULT_MOVEMENT_STATS, jumpVelocity: 0 },
@@ -1084,6 +1102,7 @@ export class WorldZone {
     m.input.flags = 0;
     // Peaceful creatures stand (or stroll) until hit; armed ones then fight like any creature.
     if (arch.passive && m.state === 'idle') this.stroll(m);
+    if (m.state === 'flee') this.flee(m);
 
     if (m.state === 'idle' && !arch.passive) {
       let best: Player | null = null;
@@ -1203,6 +1222,8 @@ export class WorldZone {
       ? (m.character.rollDir === ACTION_KNOCKDOWN ? ANIM.KNOCKDOWN : ANIM.HIT)
       : m.blockUntil > this.tick
       ? ANIM.BLOCK
+      : m.state === 'flee' && m.alertUntil > this.tick
+      ? ANIM.ALERT
       : m.hopTicks > 0
       ? ANIM.HOP_FORWARD
       : m.retreatUntil > this.tick && m.input.flags & INPUT.BACK
@@ -1210,6 +1231,37 @@ export class WorldZone {
       : m.input.flags & MOVE_MASK ? (m.input.flags & INPUT.WALK ? ANIM.WALK : ANIM.RUN) : ANIM.IDLE;
   }
 
+
+  /** A citizen who saw an assault: on the alert facing it, then running away; calm again after. */
+  private flee(m: Mob): void {
+    const pos = m.character.position;
+    if (this.tick >= m.fleeUntil) {
+      m.state = 'idle';
+      m.strollTo = null;
+      m.strollAt = this.tick + STROLL_PAUSE_MIN;
+      return;
+    }
+    const away = yawTowards(m.fleeFrom.x, m.fleeFrom.z, pos.x, pos.z);
+    if (this.tick < m.alertUntil) {
+      m.yaw = quantizeAngle(yawTowards(pos.x, pos.z, m.fleeFrom.x, m.fleeFrom.z));
+      return;
+    }
+    m.yaw = quantizeAngle(away);
+    m.input.flags = INPUT.FORWARD;
+  }
+
+  /** An assault at `at`: the citizens around see it and run (the alerted keep running further). */
+  private witnessAssault(at: { x: number; y: number; z: number }): void {
+    for (const m of this.actors.values()) {
+      if (m.kind !== 'mob' || !alive(m) || !isCitizen(m)) continue;
+      const p = m.character.position;
+      if (Math.abs(p.y - at.y) > AGGRO_HEIGHT || Math.hypot(p.x - at.x, p.z - at.z) > WITNESS_RADIUS) continue;
+      if (m.state !== 'flee') m.alertUntil = this.tick + ALERT_TICKS;
+      m.state = 'flee';
+      m.fleeUntil = Math.max(m.alertUntil, this.tick) + FLEE_TICKS;
+      m.fleeFrom = { x: at.x, z: at.z };
+    }
+  }
 
   /** A citizen's stroll: now and then a short walk to a point near its place, then a pause. */
   private stroll(m: Mob): void {
@@ -1325,6 +1377,10 @@ export class WorldZone {
       if (p.rushHit.has(m.entityId)) continue;
       p.rushHit.add(m.entityId);
       if (!m.character.grounded) continue;
+      if (isCitizen(m)) {
+        this.witnessAssault(pos);
+        continue;
+      }
       // The creature reels back (IMPACT_BACK) and is knocked down (IMPACT_SEVERE) - no damage.
       this.hitReaction(m, ACTION_IMPACT);
       this.broadcastNear(m, { op: SC.COMBAT_EVENT, d: { attacker: p.entityId, target: m.entityId, damage: 0, hp: Math.ceil(m.hp), killed: false, rush: true } });
@@ -1449,7 +1505,8 @@ export class WorldZone {
     target.hp = Math.max(0, target.hp - damage);
     const killed = target.hp <= 0;
     if (killed) target.hp = 0;
-    if (!killed && hpBefore > 0 && damage > 0 && target.character.grounded) {
+    const citizen = target.kind === 'mob' && isCitizen(target);
+    if (!killed && hpBefore > 0 && damage > 0 && target.character.grounded && !citizen) {
       // Every landed hit interrupts with an impact (the original skips airborne targets). The
       // player rolls for a stun or a knock-down (confirmed live: v = 0.771 knocked Drake down,
       // 0.845 and 1.145 stunned him). Creatures only take the directional impact.
@@ -1471,6 +1528,8 @@ export class WorldZone {
     } else {
       target.statsDirty = true;
     }
+
+    if (attacker.kind === 'player' && damage > 0) this.witnessAssault(attacker.character.position);
 
     if (killed) {
       target.swing = null;

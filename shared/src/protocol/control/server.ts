@@ -186,6 +186,8 @@ export const ANIM = {
   ATTACK_BASH: 34,
   /** Casting (ASM_SPELL_CONJURE, before the spell's own state). */
   SPELL_CONJURE: 35,
+  /** On the alert (ASM_COMBAT_STANDING): a citizen who just saw an assault, before running off. */
+  ALERT: 36,
 } as const;
 
 /** Animation for a character's own movement state (roll, duck, airborne, locomotion, idle). */

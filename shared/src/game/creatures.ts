@@ -71,6 +71,12 @@ export const CREATURE_TEMPLATES: Readonly<Record<number, CreatureTemplate>> = {
 /** Archetype id of a peaceful creature (citizens, guards, merchants) of this type. */
 export const npcArchetypeId = (type: number): string => `npc_${type}`;
 
+/** An unarmed peaceful creature (citizens, merchants): it neither flinches nor fights back - it runs. */
+export const isCitizenArchetype = (archetype: string | undefined): boolean => {
+  const t = archetype?.startsWith('npc_') ? CREATURE_TEMPLATES[Number(archetype.slice(4))] : undefined;
+  return !!t && !t.weapon;
+};
+
 /**
  * Voice role of a peaceful creature type: the <role> part of its Sound.ctx dialogue files
  * (townsman TM, townswoman TF, High / Old Guard HG / OG, dwarf male / female DM / DF, dasher DU).

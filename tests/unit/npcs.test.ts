@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { WorldZone } from '@crusaders/server/simulation/world_zone';
 import {
+  ANIM,
   INPUT_PACKET_MAX_BYTES,
   SC,
   createSyntheticArena,
@@ -19,9 +20,10 @@ beforeAll(async () => {
 type CombatEvent = Extract<ServerControlMsg, { op: typeof SC.COMBAT_EVENT }>['d'];
 
 /** A player at the origin facing -Z and one peaceful creature 1.2 m ahead (the arena's skeletons removed). */
-function npcZone(archetype: string, hp: number, wander = false) {
+function npcZone(archetype: string, hp: number, wander = false, bystander?: { archetype: string; x: number; z: number }) {
   const arena = createSyntheticArena();
   arena.mobSpawns = [{ archetype, x: 0, y: 0.5, z: -1.2, hp, ...(wander ? { wander } : {}) }];
+  if (bystander) arena.mobSpawns.push({ archetype: bystander.archetype, x: bystander.x, y: 0.5, z: bystander.z, hp: 20 });
   const messages: ServerControlMsg[] = [];
   const zone = new WorldZone(rapier, 'npc', arena, {
     send: (_c, data) => { if (typeof data === 'string') messages.push(JSON.parse(data) as ServerControlMsg); },
@@ -37,9 +39,10 @@ function npcZone(archetype: string, hp: number, wander = false) {
       zone.step();
     }
   };
-  const npc = () => zone.inspect().find((a) => a.kind === 'mob')!;
+  const mobs = () => zone.inspect().filter((a) => a.kind === 'mob');
+  const npc = () => mobs()[0]!;
   const events = () => messages.filter((m) => m.op === SC.COMBAT_EVENT).map((m) => m.d as CombatEvent);
-  return { zone, run, npc, events, me };
+  return { zone, run, npc, mobs, events, me };
 }
 
 describe('peaceful creatures (NPCs)', () => {
@@ -59,13 +62,35 @@ describe('peaceful creatures (NPCs)', () => {
     expect(moved).toBeLessThan(4.5);
   });
 
-  it('a citizen takes hits and dies, without fighting back', () => {
+  it('a hit citizen does not flinch or fight back: on the alert, then it runs off', () => {
     const t = npcZone('npc_118', 20);
-    t.run(400, (i) => i % 10 === 0 && t.zone.attack(1));
-    const onNpc = t.events().filter((e) => e.target === t.npc().id);
-    expect(onNpc.some((e) => e.damage > 0)).toBe(true);
-    expect(onNpc.some((e) => e.killed)).toBe(true);
+    t.zone.attack(1);
+    const anims = new Set<number>();
+    let far = 0;
+    t.run(20 * 8, () => {
+      const n = t.npc();
+      anims.add(n.anim);
+      far = Math.max(far, Math.hypot(n.x, n.z));
+    });
+    expect(t.events().some((e) => e.target === t.npc().id && e.damage > 0)).toBe(true);
     expect(t.events().some((e) => e.target === t.me)).toBe(false);
+    expect(anims.has(ANIM.HIT)).toBe(false);
+    expect(anims.has(ANIM.ALERT)).toBe(true);
+    expect(anims.has(ANIM.RUN)).toBe(true);
+    expect(far).toBeGreaterThan(6);
+  });
+
+  it('citizens nearby run from an assault on someone else', () => {
+    const t = npcZone('npc_114', 250, false, { archetype: 'npc_118', x: 5, z: 0 });
+    let far = 0;
+    t.zone.attack(1);
+    t.run(20 * 6, () => {
+      const b = t.mobs()[1]!;
+      far = Math.max(far, Math.hypot(b.x, b.z));
+    });
+    expect(t.events().some((e) => e.target === t.npc().id && e.damage > 0)).toBe(true);
+    expect(t.mobs()[1]!.hp).toBe(20);
+    expect(far).toBeGreaterThan(9);
   });
 
   it('a guard fights back once hit', () => {

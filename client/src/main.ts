@@ -15,6 +15,7 @@ import {
   attackTiming,
   LEVEL_PREFIX,
   NPC_VOICES,
+  isCitizenArchetype,
   PORTAL_OBJECT_BASE,
   PORTAL_USE_REACH,
   inPortal,
@@ -178,7 +179,9 @@ async function main(): Promise<void> {
             // Hit reaction from the attacker's side (ASM_IMPACT_FRONT/LEFT/RIGHT/BACK).
             const from = mine ? player?.object : remotes.byId.get(e.attacker)?.avatar.object;
             const avatar = isMe ? player?.avatar : target?.avatar;
-            if (from && avatar?.react && !e.blocked && !e.killed && e.damage > 0) avatar.react(impactSide(obj, from));
+            // Citizens take the blow without flinching (they run off instead, server side).
+            const citizen = !isMe && isCitizenArchetype(target?.info.archetype);
+            if (from && avatar?.react && !e.blocked && !e.killed && e.damage > 0 && !citizen) avatar.react(impactSide(obj, from));
             if (e.rush) {
               // Shield rush contact: the shield's thud and a blunt impact on the target's material.
               const sfx = CREATURE_SFX[target?.info.archetype ?? ''];
@@ -353,7 +356,7 @@ async function main(): Promise<void> {
   // Talking (provisional): the original links each NPC to its lines in the acts' sequence scripts
   // (not decoded). Here a peaceful creature gets a speaker of its voice role (Sound.ctx files
   // <speaker>_<role>_nn: townsman TM, townswoman TF, guards HG / OG, dwarves DM / DF, dashers DU):
-  // the greeting first, then the speaker's other lines in turn, with the text on screen.
+  // each NPC keeps its own set of lines and every Tab plays the next one, round and round.
   const TALK_RANGE = 2.5;
   const subtitle = document.getElementById('subtitle')!;
   let subtitleTimer = 0;
@@ -368,7 +371,7 @@ async function main(): Promise<void> {
     const lines = speakers[entityId % speakers.length]!;
     const n = talked.get(entityId) ?? 0;
     talked.set(entityId, n + 1);
-    const id = n === 0 ? lines[0]! : lines[1 + ((n - 1) % Math.max(1, lines.length - 1))] ?? lines[0]!;
+    const id = lines[n % lines.length]!;
     const line = sounds.lines.get(id);
     if (!line) return;
     sounds.play(id, e.avatar.object.position, { volume: 1 });
