@@ -412,6 +412,7 @@ export class ClientSession {
       header.selfRollDir,
       header.selfRollTicks,
       { kind: header.selfAirKind, velX: header.selfAirVelX / 1000, velZ: header.selfAirVelZ / 1000, travel: header.selfAirTravel / 1000 },
+      { state: header.selfLocoState, frame: header.selfLocoFrame },
     );
     const from = Math.max(header.lastProcessedInput + 1, this.clientTick - INPUT_HISTORY + 1);
     for (let t = from; t <= this.clientTick; t++) {

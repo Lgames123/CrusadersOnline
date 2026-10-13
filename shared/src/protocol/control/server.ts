@@ -212,8 +212,11 @@ export function movementAnim(flags: number, grounded: boolean, rollDir: number, 
   if (flags & INPUT.DUCK) return ANIM.CROUCH;
   if (flags & INPUT.ROOTED) return ANIM.IDLE;
   if (flags & INPUT.BLOCK) {
-    // Shield up: forward walks, back retreats (side hops come through rollDir above).
+    // Shield up: a sideways key hops (it overrides forward / back), forward walks, back retreats.
     const fwd = flags & INPUT.BACK ? -1 : flags & INPUT.FORWARD ? 1 : 0;
+    const right = flags & INPUT.LEFT ? -1 : flags & INPUT.RIGHT ? 1 : 0;
+    if (!diagonalMoves && right < 0) return ANIM.HOP_LEFT;
+    if (!diagonalMoves && right > 0) return ANIM.HOP_RIGHT;
     if (fwd > 0) return ANIM.WALK;
     if (fwd < 0) return ANIM.RETREAT;
     return ANIM.SHIELD_IDLE;

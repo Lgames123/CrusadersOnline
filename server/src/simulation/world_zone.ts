@@ -1873,6 +1873,8 @@ export class WorldZone {
         selfAirVelX: Math.round(p.character.airVelX * 1000),
         selfAirVelZ: Math.round(p.character.airVelZ * 1000),
         selfAirTravel: Math.round(p.character.airTravel * 1000),
+        selfLocoState: p.character.locoState,
+        selfLocoFrame: p.character.locoFrame,
       },
       current,
       baseline,

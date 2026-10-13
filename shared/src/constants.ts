@@ -56,6 +56,8 @@ export interface MovementStats {
   walkStrafeLeft?: readonly [number, number];
   walkStrafeRight?: readonly [number, number];
   jumpVelocity: number;
+  /** Locomotion from the original's clips (LOCO_CLIPS) instead of the constant speeds above. */
+  clipLocomotion?: boolean;
   /**
    * Feature diagonalMoves (not original): a diagonal key pair runs (or retreats) along the
    * diagonal with the body turned 45°, and shield + diagonal hops along it. The original's
@@ -93,6 +95,7 @@ export const DEFAULT_MOVEMENT_STATS: Readonly<MovementStats> = {
   strafeRight: [clipSpeed(7.707, 22), clipSpeed(0.848, 22)],
   walkStrafeLeft: [-clipSpeed(2.323, 33), 0],
   walkStrafeRight: [clipSpeed(2.754, 33), 0],
+  clipLocomotion: true,
   // Jump impulse: 78.4 × 0.033 × 15 × 1.3 ft/s added on take-off (§13).
   jumpVelocity: 78.4 * 0.033 * 15 * 1.3 * FT,
 };
@@ -237,6 +240,72 @@ export function curveAtTick(curve: readonly number[], ticks: number): number {
 export const ACTION_HOP_LEFT = 5;
 export const ACTION_HOP_RIGHT = 6;
 export const ACTION_HOP_PAUSE = 7;
+
+/**
+ * The player's locomotion as the original moves it. Each frame the state's clip advances (at the
+ * engine's 1000/30 frames per second, looping at header +0x14 - 1 frames, the root holding its
+ * last key past the clip's end) and the root's path length over that time, as a speed, is applied
+ * to the held movement keys: sideways and forward / back each at that speed (0x427600:
+ * velocity += key axis x speed). So a sideways key alone moves straight sideways, a diagonal moves
+ * at 45 degrees at sqrt(2) x the sidestep's speed, and a new state restarts its clip from frame 0
+ * (switching sides restarts the step). Confirmed in play (Frida, 16 ms samples): run 17.6 ft/s,
+ * sidesteps 11.1 / 11.9, diagonals 15.2-17.1 at 45 degrees, shield hops looping every 33 frames.
+ *
+ * States (selector 0x42AFC0; clips from the player's table 0x4EC820): run PA01, walk PB01_w_fw,
+ * retreat PA06, running sidesteps PB01_w_sideleft / right (87 / 88), careful sidesteps (Shift)
+ * PB02 / PB03, shield hops PB04 / PB05. Path: cumulative root path length per frame, in feet.
+ */
+export interface LocoClip {
+  /** Loop length in frames (header +0x14 - 1). */
+  wrap: number;
+  path: readonly number[];
+}
+export const LOCO_RUN = 1;
+export const LOCO_WALK = 2;
+export const LOCO_RETREAT = 3;
+export const LOCO_SIDE_LEFT = 4;
+export const LOCO_SIDE_RIGHT = 5;
+export const LOCO_CAREFUL_LEFT = 6;
+export const LOCO_CAREFUL_RIGHT = 7;
+export const LOCO_HOP_LEFT = 8;
+export const LOCO_HOP_RIGHT = 9;
+export const LOCO_CLIPS: Readonly<Record<number, LocoClip>> = {
+  [LOCO_RUN]: { wrap: 25, path: [0, 0.3, 0.952, 1.588, 2.079, 2.554, 3.03, 3.512, 3.996, 4.488, 4.988, 5.497, 6.021, 6.571, 7.136, 7.69, 8.22, 8.739, 9.257, 9.777, 10.295, 10.814, 11.335, 11.856, 12.374, 13, 13.622] },
+  [LOCO_WALK]: { wrap: 33, path: [0, 0.18, 0.359, 0.539, 0.719, 0.898, 1.077, 1.257, 1.436, 1.616, 1.795, 1.975, 2.155, 2.334, 2.512, 2.691, 2.867, 3.043, 3.22, 3.389, 3.559, 3.729, 3.894, 4.059, 4.224, 4.387, 4.55, 4.713, 4.875, 5.037, 5.198, 5.36, 5.522, 5.684, 5.684] },
+  [LOCO_RETREAT]: { wrap: 39, path: [0, 0.064, 0.326, 0.399, 0.469, 0.558, 0.74, 0.831, 0.924, 1.017, 1.203, 1.297, 1.39, 1.483, 1.67, 1.767, 1.866, 1.971, 2.19, 2.299, 2.404, 2.498, 2.672, 2.768, 2.882, 3.023, 3.354, 3.516, 3.657, 3.773, 3.962, 4.05, 4.141, 4.246, 4.488, 4.615, 4.738, 4.852, 5.027, 5.078, 5.096] },
+  [LOCO_SIDE_LEFT]: { wrap: 22, path: [0, 0.273, 0.545, 0.818, 1.091, 1.364, 1.73, 2.097, 2.464, 2.927, 3.391, 3.694, 3.997, 4.3, 4.603, 4.906, 5.209, 5.513, 5.816, 6.119, 6.422, 6.725, 7.323, 7.922] },
+  [LOCO_SIDE_RIGHT]: { wrap: 22, path: [0, 0.331, 0.662, 0.993, 1.324, 1.655, 1.986, 2.352, 2.718, 3.292, 3.867, 4.127, 4.387, 4.647, 4.907, 5.167, 5.427, 5.687, 5.947, 6.207, 6.696, 7.184, 7.77, 8.356] },
+  [LOCO_CAREFUL_LEFT]: { wrap: 33, path: [0, 0.061, 0.121, 0.182, 0.243, 0.303, 0.364, 0.425, 0.485, 0.728, 0.971, 1.214, 1.457, 1.703, 1.95, 2.196, 2.442, 2.523, 2.603, 2.683, 2.764] },
+  [LOCO_CAREFUL_RIGHT]: { wrap: 33, path: [0, 0.076, 0.151, 0.227, 0.303, 0.437, 0.572, 0.706, 0.841, 1.039, 1.237, 1.436, 1.634, 1.814, 1.994, 2.174, 2.354, 2.534, 2.714, 2.894, 3.074] },
+  [LOCO_HOP_LEFT]: { wrap: 33, path: [0, 0.107, 0.215, 0.322, 0.429, 0.537, 0.644, 1.244, 1.843, 2.443, 3.042, 3.594, 4.088, 4.581, 5.074, 5.293, 5.511, 5.63, 5.749, 5.868, 5.986, 6.105] },
+  [LOCO_HOP_RIGHT]: { wrap: 33, path: [0, 0.168, 0.335, 0.503, 0.792, 1.082, 1.372, 1.915, 2.459, 3.003, 3.547, 3.809, 4.071, 4.333, 4.594, 4.856, 5.049, 5.242, 5.31, 5.379, 5.447] },
+};
+/** The engine's clip rate, frames per second. */
+export const ENGINE_CLIP_FPS = 1000 / 30;
+
+/** Root path (feet) of a locomotion clip at a frame (linear between keys; held past the end). */
+function locoPathAt(clip: LocoClip, frame: number): number {
+  const p = clip.path;
+  if (frame >= p.length - 1) return p[p.length - 1]!;
+  const i = Math.max(0, Math.floor(frame));
+  return p[i]! + (p[i + 1]! - p[i]!) * (frame - i);
+}
+
+/** Advances a locomotion clip by `dt` seconds from `frame`: [new frame, path covered in feet]. */
+export function advanceLoco(state: number, frame: number, dt: number): [number, number] {
+  const clip = LOCO_CLIPS[state];
+  if (!clip) return [0, 0];
+  let f = frame + dt * ENGINE_CLIP_FPS;
+  let path = 0;
+  if (f >= clip.wrap) {
+    path += locoPathAt(clip, clip.wrap) - locoPathAt(clip, frame);
+    f -= clip.wrap;
+    path += locoPathAt(clip, f);
+  } else {
+    path = locoPathAt(clip, f) - locoPathAt(clip, frame);
+  }
+  return [f, path];
+}
 
 /** Same speed in every direction (creatures until their own clips are measured). */
 export function uniformMovementStats(speed: number, jumpVelocity = 0): MovementStats {

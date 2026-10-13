@@ -331,8 +331,16 @@ class OriginalAvatar implements Avatar {
     if (!clip) return;
     // Every clip plays at the original's 1000/30 frames per second (converted clips are
     // timed at 30): swings then hit on their IMPACT frame, in step with the server.
-    this.play(clip, loop, ORIGINAL_CLIP_FPS / 30);
+    // The shield hops and careful sidesteps loop every 33 frames (header +0x14 - 1), longer
+    // than their 20-21 frames: the step, then the last pose held until the clip restarts.
+    const longLoop = anim === ANIM.HOP_LEFT || anim === ANIM.HOP_RIGHT || anim === ANIM.WALK_STRAFE_LEFT || anim === ANIM.WALK_STRAFE_RIGHT;
+    this.restartEvery = longLoop ? 33 / ORIGINAL_CLIP_FPS : 0;
+    this.restartIn = this.restartEvery;
+    this.play(clip, longLoop ? false : loop, ORIGINAL_CLIP_FPS / 30);
   }
+  /** Seconds between restarts of a clip that loops later than its last frame (0: none), and left. */
+  private restartEvery = 0;
+  private restartIn = 0;
 
   /** Upper-body bones (Bip01 Spine and below): the shield layer's domain. */
   private upperBones: Set<string> | null = null;
@@ -447,6 +455,10 @@ class OriginalAvatar implements Avatar {
   }
 
   update(dt: number): void {
+    if (this.restartEvery > 0 && (this.restartIn -= dt) <= 0) {
+      this.restartIn += this.restartEvery;
+      this.current?.reset().play();
+    }
     if (this.upperSwing && (this.upperSwing.left -= dt) <= 0) {
       this.upperSwing.action.fadeOut(0.1);
       this.upperSwing = null;

@@ -21,6 +21,17 @@ import {
   ACTION_HOP_RIGHT,
   SHIELD_HOP_PAUSE_TICKS,
   shieldHopTicks,
+  advanceLoco,
+  ENGINE_CLIP_FPS,
+  LOCO_RUN,
+  LOCO_WALK,
+  LOCO_RETREAT,
+  LOCO_SIDE_LEFT,
+  LOCO_SIDE_RIGHT,
+  LOCO_CAREFUL_LEFT,
+  LOCO_CAREFUL_RIGHT,
+  LOCO_HOP_LEFT,
+  LOCO_HOP_RIGHT,
   movementAnim,
   ROLLS,
   attackKindFor,
@@ -60,6 +71,17 @@ function run(mw: MovementWorld, c: Character, flags: number, yaw: number, ticks:
   }
 }
 const DIAGONAL_STATS = { ...DEFAULT_MOVEMENT_STATS, diagonalMoves: true };
+/** Root path (feet) of a locomotion clip over `ticks` from its first frame. */
+function clipFeet(state: number, ticks: number): number {
+  let frame = 0;
+  let feet = 0;
+  for (let i = 0; i < ticks; i++) {
+    const [next, d] = advanceLoco(state, frame, TICK_DT);
+    frame = Math.round(next * 4) / 4;
+    feet += d;
+  }
+  return feet;
+}
 
 describe('shared character controller', () => {
   it('falls onto the floor and becomes grounded', () => {
@@ -79,53 +101,58 @@ describe('shared character controller', () => {
     expect(Math.abs(c.position.x)).toBeLessThan(0.02);
   });
 
-  it('uses the original per-direction speeds (retreat, sidestep, careful walk)', () => {
-    const cases: [number, number][] = [
-      [INPUT.BACK, DEFAULT_MOVEMENT_STATS.backSpeed],
-      [INPUT.LEFT, Math.hypot(...DEFAULT_MOVEMENT_STATS.strafeLeft!)],
-      [INPUT.RIGHT, Math.hypot(...DEFAULT_MOVEMENT_STATS.strafeRight!)],
-      [INPUT.FORWARD | INPUT.WALK, DEFAULT_MOVEMENT_STATS.walkSpeed],
-      [INPUT.RIGHT | INPUT.WALK, Math.hypot(...DEFAULT_MOVEMENT_STATS.walkStrafeRight!)],
-      [INPUT.LEFT | INPUT.WALK, Math.hypot(...DEFAULT_MOVEMENT_STATS.walkStrafeLeft!)],
+  it('moves by the state clip root path, applied to each held key axis (0x427600)', () => {
+    const cases: [number, number, number, number][] = [
+      // flags, state, expected sideways sign, expected forward sign
+      [INPUT.FORWARD, LOCO_RUN, 0, 1],
+      [INPUT.BACK, LOCO_RETREAT, 0, -1],
+      [INPUT.FORWARD | INPUT.WALK, LOCO_WALK, 0, 1],
+      [INPUT.LEFT, LOCO_SIDE_LEFT, -1, 0],
+      [INPUT.RIGHT, LOCO_SIDE_RIGHT, 1, 0],
+      [INPUT.LEFT | INPUT.WALK, LOCO_CAREFUL_LEFT, -1, 0],
+      [INPUT.RIGHT | INPUT.WALK, LOCO_CAREFUL_RIGHT, 1, 0],
     ];
-    for (const [flags, speed] of cases) {
+    for (const [flags, state, sx, sf] of cases) {
       const { mw, c } = setup();
       run(mw, c, 0, 0, 10);
       const start = { ...c.position };
       run(mw, c, flags, 0, 20);
-      expect(Math.hypot(c.position.x - start.x, c.position.z - start.z)).toBeCloseTo(speed, 1);
+      const feet = clipFeet(state, 20);
+      // yaw 0: right = +X, forward = -Z
+      expect(c.position.x - start.x).toBeCloseTo(sx * feet * 0.3048, 1);
+      expect(start.z - c.position.z).toBeCloseTo(sf * feet * 0.3048, 1);
+      expect(c.locoState).toBe(state);
     }
-    // Running is about four times faster than retreating, as in the original.
-    expect(DEFAULT_MOVEMENT_STATS.runSpeed / DEFAULT_MOVEMENT_STATS.backSpeed).toBeCloseTo(4, 0);
+    // Per loop: run 13.0 ft / 25 frames (17.3 ft/s), sidesteps 7.32 / 7.77 ft / 22 frames.
+    expect(clipFeet(LOCO_RUN, 15) / 0.75).toBeCloseTo(17.3, 0);
   });
 
-  it('sidesteps by the clip root motion: sideways plus a slight forward drift', () => {
-    const { mw, c } = setup();
-    run(mw, c, 0, 0, 10);
-    const start = { ...c.position };
-    run(mw, c, INPUT.LEFT, 0, 20); // yaw 0: left = -X, forward = -Z
-    expect(c.position.x - start.x).toBeCloseTo(DEFAULT_MOVEMENT_STATS.strafeLeft![0], 1);
-    expect(start.z - c.position.z).toBeCloseTo(DEFAULT_MOVEMENT_STATS.strafeLeft![1], 1);
-    // Running sidesteps: PB01_w_sideleft 7.20 ft and PB01_w_sideright 7.71 ft per 22-frame loop.
-    expect(-DEFAULT_MOVEMENT_STATS.strafeLeft![0] / 0.3048).toBeCloseTo(10.91, 1);
-    expect(DEFAULT_MOVEMENT_STATS.strafeRight![0] / 0.3048).toBeCloseTo(11.68, 1);
-    expect(DEFAULT_MOVEMENT_STATS.runSpeed / 0.3048).toBeCloseTo(17.33, 1); // PA01 13.0 ft / 25 frames
-  });
-
-  it('a diagonal key pair is a sidestep: the sideways key overrides forward / back (0x42AFC0)', () => {
-    for (const fwd of [INPUT.FORWARD, INPUT.BACK]) {
+  it('a diagonal is the sidestep at 45 degrees: the sidestep speed on both axes', () => {
+    for (const [fwd, sf] of [[INPUT.FORWARD, 1], [INPUT.BACK, -1]] as const) {
       const { mw, c } = setup();
       run(mw, c, 0, 0, 10);
       const start = { ...c.position };
       run(mw, c, fwd | INPUT.RIGHT, 0, 20);
-      expect(c.position.x - start.x).toBeCloseTo(DEFAULT_MOVEMENT_STATS.strafeRight![0], 1);
-      expect(start.z - c.position.z).toBeCloseTo(DEFAULT_MOVEMENT_STATS.strafeRight![1], 1);
+      const feet = clipFeet(LOCO_SIDE_RIGHT, 20) * 0.3048;
+      expect(c.position.x - start.x).toBeCloseTo(feet, 1);
+      expect(start.z - c.position.z).toBeCloseTo(sf * feet, 1);
       expect(movementAnim(fwd | INPUT.RIGHT, true, 0)).toBe(ANIM.STRAFE_RIGHT);
       expect(movementFacingOffset(fwd | INPUT.RIGHT)).toBe(0); // the body keeps the view heading
     }
     // Back wins over forward, left over right.
     expect(movementAnim(INPUT.FORWARD | INPUT.BACK, true, 0)).toBe(ANIM.RETREAT);
     expect(movementAnim(INPUT.LEFT | INPUT.RIGHT, true, 0)).toBe(ANIM.STRAFE_LEFT);
+  });
+
+  it('switching sides restarts the step clip from its first frame', () => {
+    const { mw, c } = setup();
+    run(mw, c, 0, 0, 10);
+    run(mw, c, INPUT.LEFT | INPUT.BACK, 0, 7);
+    expect(c.locoState).toBe(LOCO_SIDE_LEFT);
+    expect(c.locoFrame).toBeGreaterThan(10);
+    run(mw, c, INPUT.RIGHT | INPUT.BACK, 0, 1);
+    expect(c.locoState).toBe(LOCO_SIDE_RIGHT);
+    expect(Math.abs(c.locoFrame - ENGINE_CLIP_FPS * TICK_DT)).toBeLessThanOrEqual(0.125); // one tick in, quarter frames
   });
 
   it('feature diagonalMoves (not original): diagonals run along the diagonal, body turned', () => {
@@ -264,43 +291,38 @@ describe('shared character controller', () => {
     expect(jumpDistance(0)).toBeLessThan(0.05);
   });
 
-  it('moves like the original with the shield up: walk, retreat, side hops', () => {
-    const cases: [number, number][] = [
-      [INPUT.BLOCK | INPUT.FORWARD, DEFAULT_MOVEMENT_STATS.walkSpeed],
-      [INPUT.BLOCK | INPUT.BACK, DEFAULT_MOVEMENT_STATS.walkBackSpeed],
-    ];
-    for (const [flags, speed] of cases) {
+  it('moves like the original with the shield up: walk, retreat, looping side hops', () => {
+    for (const [flags, state, sf] of [[INPUT.BLOCK | INPUT.FORWARD, LOCO_WALK, 1], [INPUT.BLOCK | INPUT.BACK, LOCO_RETREAT, -1]] as const) {
       const { mw, c } = setup();
       run(mw, c, 0, 0, 10);
       const start = { ...c.position };
       run(mw, c, flags, 0, 20);
-      expect(Math.hypot(c.position.x - start.x, c.position.z - start.z)).toBeCloseTo(speed, 1);
+      expect(start.z - c.position.z).toBeCloseTo(sf * clipFeet(state, 20) * 0.3048, 1);
     }
-    // Sideways: one discrete hop covers the clip's root motion (PB04 4.91 ft / PB05 4.5 ft), then a short stand.
-    for (const [flags, feet, dir] of [[INPUT.BLOCK | INPUT.LEFT, 4.908, ACTION_HOP_LEFT], [INPUT.BLOCK | INPUT.RIGHT, 4.5, ACTION_HOP_RIGHT]] as const) {
+    // Sideways (a diagonal too): the hop clip (PB04 / PB05) loops every 33 frames - the step,
+    // then still until it restarts.
+    for (const [flags, state, sx] of [[INPUT.BLOCK | INPUT.LEFT, LOCO_HOP_LEFT, -1], [INPUT.BLOCK | INPUT.RIGHT, LOCO_HOP_RIGHT, 1]] as const) {
       const { mw, c } = setup();
       run(mw, c, 0, 0, 10);
       const start = { ...c.position };
-      run(mw, c, flags, 0, 1);
-      expect(c.rollDir).toBe(dir);
-      run(mw, c, flags, 0, shieldHopTicks(dir) - 1);
-      expect(c.rollDir).toBe(ACTION_HOP_PAUSE);
-      const hopped = Math.hypot(c.position.x - start.x, c.position.z - start.z) / 0.3048;
-      expect(Math.abs(hopped - feet)).toBeLessThan(0.1); // the controller's skin takes ~2 cm
+      run(mw, c, flags, 0, 13); // the step: frames 0-21
+      expect(c.position.x - start.x).toBeCloseTo(sx * clipFeet(state, 13) * 0.3048, 1);
       const mid = { ...c.position };
-      run(mw, c, flags, 0, SHIELD_HOP_PAUSE_TICKS - 1);
-      expect(Math.hypot(c.position.x - mid.x, c.position.z - mid.z)).toBeLessThan(1e-3); // standing
+      run(mw, c, flags, 0, 5); // still: frames 21-33
+      expect(Math.abs(c.position.x - mid.x)).toBeLessThan(0.02);
+      expect(movementAnim(flags, true, 0)).toBe(sx < 0 ? ANIM.HOP_LEFT : ANIM.HOP_RIGHT);
     }
-    // Diagonals (shield + forward / back + a side key): the side hop (the sideways key wins).
     {
       const { mw, c } = setup();
       run(mw, c, 0, 0, 10);
       const start = { ...c.position };
-      run(mw, c, INPUT.BLOCK | INPUT.FORWARD | INPUT.RIGHT, 0, shieldHopTicks(ACTION_HOP_RIGHT));
-      expect((c.position.x - start.x) / 0.3048).toBeCloseTo(4.5, 1);
-      expect(Math.abs(c.position.z - start.z)).toBeLessThan(0.02);
+      run(mw, c, INPUT.BLOCK | INPUT.FORWARD | INPUT.RIGHT, 0, 13);
+      const feet = clipFeet(LOCO_HOP_RIGHT, 13) * 0.3048;
+      expect(c.position.x - start.x).toBeCloseTo(feet, 1);
+      expect(start.z - c.position.z).toBeCloseTo(feet, 1); // 45 degrees
+      expect(movementAnim(INPUT.BLOCK | INPUT.FORWARD | INPUT.RIGHT, true, 0)).toBe(ANIM.HOP_RIGHT);
     }
-    // Feature diagonalMoves (not original): shield + a diagonal hops along it.
+    // Feature diagonalMoves (not original): discrete timed hops along the diagonal.
     for (const [flags, sx, sz] of [[INPUT.BLOCK | INPUT.FORWARD | INPUT.RIGHT, 1, -1], [INPUT.BLOCK | INPUT.BACK | INPUT.LEFT, -1, 1]] as const) {
       const { mw, c } = setup();
       run(mw, c, 0, 0, 10);
@@ -308,26 +330,11 @@ describe('shared character controller', () => {
       run(mw, c, flags, 0, shieldHopTicks(flags & INPUT.LEFT ? ACTION_HOP_LEFT : ACTION_HOP_RIGHT), 0, DIAGONAL_STATS);
       const dx = c.position.x - start.x;
       const dz = c.position.z - start.z;
-      expect(Math.sign(dx)).toBe(sx); // yaw 0: right = +X, forward = -Z
+      expect(Math.sign(dx)).toBe(sx);
       expect(Math.sign(dz)).toBe(sz);
       expect(Math.abs(Math.abs(dx) - Math.abs(dz))).toBeLessThan(0.02);
     }
-    // The hop follows the clip's profile: a slow wind-up, then the quick leap.
-    {
-      const { mw, c } = setup();
-      run(mw, c, 0, 0, 10);
-      const steps: number[] = [];
-      for (let i = 0; i < 6; i++) {
-        const before = c.position.x;
-        run(mw, c, INPUT.BLOCK | INPUT.LEFT, 0, 1);
-        steps.push(Math.abs(c.position.x - before));
-      }
-      expect(steps[0]!).toBeLessThan(steps[3]! / 2);
-    }
-    expect(movementAnim(INPUT.BLOCK | INPUT.FORWARD, true, 0)).toBe(ANIM.WALK);
-    expect(movementAnim(INPUT.BLOCK | INPUT.BACK, true, 0)).toBe(ANIM.RETREAT);
-    expect(movementAnim(INPUT.BLOCK | INPUT.LEFT, true, ACTION_HOP_LEFT)).toBe(ANIM.HOP_LEFT);
-    expect(movementAnim(INPUT.BLOCK | INPUT.LEFT, true, ACTION_HOP_PAUSE)).toBe(ANIM.SHIELD_IDLE);
+    expect(movementAnim(INPUT.BLOCK | INPUT.LEFT, true, ACTION_HOP_PAUSE, true)).toBe(ANIM.SHIELD_IDLE);
     expect(movementAnim(INPUT.BLOCK, true, 0)).toBe(ANIM.SHIELD_IDLE);
   });
 

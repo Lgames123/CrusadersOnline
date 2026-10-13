@@ -1,5 +1,5 @@
 import type RAPIER from '@dimforge/rapier3d-deterministic-compat';
-import { ACTION_ATTACK, ACTION_BASH, ACTION_LUNGE, LUNGE_TICKS, ATTACK_CURVES, actionCurve, attackMotionTicks, curveTicks, hitReactionTicks, isAttackAction, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_LEFT_FORWARD, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_RIGHT_FORWARD, shieldHopTicks, curveAtTick, ROLL_CURVES, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, MAX_SLOPE_DEG, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
+import { ACTION_ATTACK, ACTION_BASH, ACTION_LUNGE, LUNGE_TICKS, ATTACK_CURVES, actionCurve, attackMotionTicks, curveTicks, hitReactionTicks, isAttackAction, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_LEFT_FORWARD, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_RIGHT_FORWARD, shieldHopTicks, curveAtTick, ROLL_CURVES, advanceLoco, LOCO_CAREFUL_LEFT, LOCO_CAREFUL_RIGHT, LOCO_HOP_LEFT, LOCO_HOP_RIGHT, LOCO_RETREAT, LOCO_RUN, LOCO_SIDE_LEFT, LOCO_SIDE_RIGHT, LOCO_WALK, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, MAX_SLOPE_DEG, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
 import type { Vec3 } from '../math/vec3.ts';
 import { dequantizeAngle } from '../math/quantize.ts';
 import { INPUT, INPUT_ATTACK_SHIFT } from '../protocol/opcodes.ts';
@@ -39,6 +39,15 @@ export interface Character {
   airVelZ: number;
   /** Horizontal distance travelled since take-off, metres. */
   airTravel: number;
+  /** Locomotion state (LOCO_*; 0 standing) and its clip's frame (clip locomotion, LOCO_CLIPS). */
+  locoState: number;
+  locoFrame: number;
+}
+
+/** Locomotion clip state carried in reconciliation snapshots. */
+export interface LocoState {
+  state: number;
+  frame: number;
 }
 
 /** Jump state carried in reconciliation snapshots. */
@@ -72,6 +81,8 @@ export function createCharacter(mw: MovementWorld, feet: Readonly<Vec3>): Charac
     airVelX: 0,
     airVelZ: 0,
     airTravel: 0,
+    locoState: 0,
+    locoFrame: 0,
   };
 }
 
@@ -80,7 +91,9 @@ export function removeCharacter(mw: MovementWorld, c: Character): void {
 }
 
 /** Hard-sets the character state (spawn, teleport, reconciliation). Values are snapped to wire resolution. */
-export function setCharacterState(c: Character, feet: Readonly<Vec3>, velocityY: number, grounded: boolean, rollDir = 0, rollTicks = 0, air?: Readonly<AirState>): void {
+export function setCharacterState(c: Character, feet: Readonly<Vec3>, velocityY: number, grounded: boolean, rollDir = 0, rollTicks = 0, air?: Readonly<AirState>, loco?: Readonly<LocoState>): void {
+  c.locoState = loco?.state ?? 0;
+  c.locoFrame = loco ? Math.round(loco.frame * 4) / 4 : 0;
   c.airKind = air?.kind ?? 0;
   c.airVelX = c.airKind ? snapMm(air!.velX) : 0;
   c.airVelZ = c.airKind ? snapMm(air!.velZ) : 0;
@@ -98,6 +111,8 @@ export function setCharacterState(c: Character, feet: Readonly<Vec3>, velocityY:
 }
 
 const desired = { x: 0, y: 0, z: 0 };
+/** Metres per foot (the clips' unit). */
+const FT_M = 0.3048;
 /** Downward speed while grounded, m/s. */
 const GROUND_STICK = -0.5;
 
@@ -135,7 +150,9 @@ export function stepCharacter(
     } else if (f & INPUT.BLOCK && f & INPUT.JUMP) {
       // Shield + jump: the shield rush (ASM_RAM_SHOULDER, PL01's root motion) instead of a jump.
       startTimedAction(c, ACTION_BASH);
-    } else if (f & INPUT.BLOCK && side !== 0) {
+    } else if (f & INPUT.BLOCK && side !== 0 && (!stats.clipLocomotion || stats.diagonalMoves)) {
+      // Constant-speed / feature locomotion: discrete hops as timed actions (clip locomotion
+      // loops the hop clip as a locomotion state instead, below).
       c.rollDir = side > 0 ? ACTION_HOP_RIGHT : ACTION_HOP_LEFT;
       c.rollTicks = shieldHopTicks(c.rollDir);
     }
@@ -148,6 +165,8 @@ export function stepCharacter(
 
   let vx = 0;
   let vz = 0;
+  /** Locomotion clip state after this step (standing unless moving by clip locomotion). */
+  let locoNext: LocoState = { state: 0, frame: 0 };
   if (rolling) {
     const yaw = dequantizeAngle(input.yaw);
     const s = Math.sin(yaw);
@@ -201,7 +220,19 @@ export function stepCharacter(
     const walk = (f & INPUT.WALK) !== 0 || shield;
     let along = 0;
     let side = 0;
-    if (stats.diagonalMoves) {
+    if (stats.clipLocomotion && !stats.diagonalMoves) {
+      // The state's clip (restarted on a state change) gives the speed; the held keys its
+      // direction, each axis at that speed (LOCO_CLIPS).
+      let state: number;
+      if (right !== 0) state = shield ? (right < 0 ? LOCO_HOP_LEFT : LOCO_HOP_RIGHT) : f & INPUT.WALK ? (right < 0 ? LOCO_CAREFUL_LEFT : LOCO_CAREFUL_RIGHT) : right < 0 ? LOCO_SIDE_LEFT : LOCO_SIDE_RIGHT;
+      else state = fwd > 0 ? (walk ? LOCO_WALK : LOCO_RUN) : LOCO_RETREAT;
+      const frame = state === c.locoState ? c.locoFrame : 0;
+      const [next, feet] = advanceLoco(state, frame, dt);
+      locoNext = { state, frame: next };
+      const speed = (feet * FT_M) / dt;
+      side = right * speed;
+      along = fwd * speed;
+    } else if (stats.diagonalMoves) {
       // Feature diagonalMoves (not original): diagonals run along the diagonal (body turned 45°).
       const len = Math.hypot(fwd, right);
       const lengthwise = fwd > 0 ? (walk ? stats.walkSpeed : stats.runSpeed) : (walk ? stats.walkBackSpeed : stats.backSpeed);
@@ -272,7 +303,7 @@ export function stepCharacter(
   // Standing still on the ground (no input motion, timed action or jump): nothing moves, so the
   // controller's collision query is skipped - it is most of a crowded zone's tick. The ground
   // stick would only re-confirm the contact.
-  const still = c.grounded && vx === 0 && vz === 0 && !jumping && !rolling && !air.kind;
+  const still = c.grounded && vx === 0 && vz === 0 && !jumping && !rolling && !air.kind && locoNext.state === 0;
   if (still && c.settled) return;
 
   desired.x = vx * dt;
@@ -309,6 +340,7 @@ export function stepCharacter(
     rollDir,
     rollTicks,
     air,
+    air.kind ? undefined : locoNext,
   );
   c.settled = still && grounded && Math.abs(moved.x) < 0.0005 && Math.abs(moved.y) < 0.0005 && Math.abs(moved.z) < 0.0005;
 }
