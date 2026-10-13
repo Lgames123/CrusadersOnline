@@ -227,7 +227,7 @@ export function stepCharacter(
       if (right !== 0) state = shield ? (right < 0 ? LOCO_HOP_LEFT : LOCO_HOP_RIGHT) : f & INPUT.WALK ? (right < 0 ? LOCO_CAREFUL_LEFT : LOCO_CAREFUL_RIGHT) : right < 0 ? LOCO_SIDE_LEFT : LOCO_SIDE_RIGHT;
       else state = fwd > 0 ? (walk ? LOCO_WALK : LOCO_RUN) : LOCO_RETREAT;
       const frame = state === c.locoState ? c.locoFrame : 0;
-      const [next, feet] = advanceLoco(state, frame, dt);
+      const [next, feet] = advanceLoco(state, frame, dt * (stats.clipRate ?? 1));
       locoNext = { state, frame: next };
       const speed = (feet * FT_M) / dt;
       side = right * speed;

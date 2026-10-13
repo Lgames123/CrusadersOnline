@@ -232,7 +232,7 @@ export class ClientSession {
         if (this.pingTimer) clearInterval(this.pingTimer);
         this.entityId = msg.d.entityId;
         this.features = gameplayFeatures(msg.d.features ?? {});
-        this.moveStats = { ...DEFAULT_MOVEMENT_STATS, diagonalMoves: this.features.diagonalMoves };
+        this.moveStats = { ...DEFAULT_MOVEMENT_STATS, diagonalMoves: this.features.diagonalMoves, clipRate: this.moveStats.clipRate };
         this.character = createCharacter(this.mw, msg.d.spawn);
         this.latestTick = this.serverTickEstimate = msg.d.serverTick;
         this.latestAt = performance.now();
@@ -255,6 +255,7 @@ export class ClientSession {
         break;
       case SC.PLAYER_STATS:
         this.stats_ = msg.d;
+        if (msg.d.speed) this.moveStats = { ...this.moveStats, clipRate: msg.d.speed };
         this.events.stats?.(msg.d);
         break;
       case SC.COMBAT_EVENT:

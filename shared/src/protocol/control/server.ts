@@ -53,6 +53,8 @@ export interface PlayerStatsMsg {
     spell: SpellId | null;
     /** Torch light around the player: radius in metres (0 = off). */
     light: number;
+    /** Speed multiplier (stats +0x24C): the rate the character's clips play at, x 1000/30 fps. */
+    speed?: number;
   };
 }
 

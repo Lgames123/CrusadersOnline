@@ -59,6 +59,12 @@ export interface MovementStats {
   /** Locomotion from the original's clips (LOCO_CLIPS) instead of the constant speeds above. */
   clipLocomotion?: boolean;
   /**
+   * Clip rate multiplier: the character's speed multiplier (stats +0x24C, 0.999 + 0.01 x level +
+   * (Speed - 15) x 1.2 / 35 x 0.5); clips play at 1000/30 x it frames per second (logged 34.0 at
+   * level 2). Default 1.
+   */
+  clipRate?: number;
+  /**
    * Feature diagonalMoves (not original): a diagonal key pair runs (or retreats) along the
    * diagonal with the body turned 45°, and shield + diagonal hops along it. The original's
    * movement selector (0x42AFC0) lets a sideways key override forward / back.

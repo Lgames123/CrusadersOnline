@@ -144,6 +144,19 @@ describe('shared character controller', () => {
     expect(movementAnim(INPUT.LEFT | INPUT.RIGHT, true, 0)).toBe(ANIM.STRAFE_LEFT);
   });
 
+  it('clips play at the character speed multiplier (34 fps logged at level 2)', () => {
+    const fast = { ...DEFAULT_MOVEMENT_STATS, clipRate: 1.02 };
+    const a = setup();
+    const b = setup();
+    run(a.mw, a.c, 0, 0, 10);
+    run(b.mw, b.c, 0, 0, 10, 0, fast);
+    const za = a.c.position.z;
+    const zb = b.c.position.z;
+    run(a.mw, a.c, INPUT.FORWARD, 0, 15);
+    run(b.mw, b.c, INPUT.FORWARD, 0, 15, 0, fast);
+    expect((zb - b.c.position.z) / (za - a.c.position.z)).toBeCloseTo(1.02, 1);
+  });
+
   it('switching sides restarts the step clip from its first frame', () => {
     const { mw, c } = setup();
     run(mw, c, 0, 0, 10);

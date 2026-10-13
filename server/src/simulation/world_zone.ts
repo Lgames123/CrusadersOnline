@@ -80,6 +80,7 @@ import {
   damageVector,
   levelForXp,
   originalDamageMultiplier,
+  originalSpeedMultiplier,
   originalDamageTaken,
   originalFlinch,
   originalWeaponHit,
@@ -360,6 +361,8 @@ interface ActorBase {
 
 interface Player extends ActorBase {
   kind: 'player';
+  /** Movement stats: the original's, the server's features, and the clip rate (speed multiplier). */
+  moveStats: MovementStats;
   connId: number;
   characterId: string | null;
   queue: InputQueue;
@@ -613,6 +616,7 @@ export class WorldZone {
       characterId: opts.characterId,
       name: opts.name,
       character: createCharacter(this.mw, spawn),
+      moveStats: { ...this.playerStats, clipRate: originalSpeedMultiplier(rules.attributes, level) },
       queue: new InputQueue(),
       yaw: (opts.yaw ?? 0) & 0xffff,
       anim: ANIM.IDLE,
@@ -1178,7 +1182,7 @@ export class WorldZone {
         // The client roots itself during its own swing (INPUT.ROOTED, same tick on both
         // sides); the dead do not act. The client mirrors the dead rule.
         if (!alive(p)) this.frame.flags = 0;
-        stepCharacter(this.mw, p.character, this.frame, this.playerStats, TICK_DT);
+        stepCharacter(this.mw, p.character, this.frame, p.moveStats, TICK_DT);
         p.lastProcessedInput = this.frame.clientTick;
         if (alive(p)) p.yaw = this.frame.yaw;
         this.checkPortals(p);
@@ -1764,6 +1768,7 @@ export class WorldZone {
       p.maxHp = playerMaxHp(p.attributes, level);
       p.maxMana = originalMaxMana(p.attributes, level);
       p.damageMultiplier = originalDamageMultiplier(p.attributes, level);
+      p.moveStats = { ...p.moveStats, clipRate: originalSpeedMultiplier(p.attributes, level) };
       p.hp = Math.min(p.maxHp, p.hp + (p.maxHp - before));
     }
     const loot: string[] = [];
@@ -1825,6 +1830,7 @@ export class WorldZone {
         spells: p.spells.map((s) => ({ ...s })),
         spell: p.selectedSpell,
         light: p.light ? p.light.radius : 0,
+        speed: p.moveStats.clipRate ?? 1,
       },
     });
   }
