@@ -22,7 +22,7 @@ the current value is a stand-in until a capture or a reading settles it).
 | Side swings (A/D + click) | each played its whole clip (balance request) | re-triggered mid-swing 0.3 s into the previous one, alternating sides (Frida, executable-analysis §14.1b) | **fixed**; old behaviour = feature `sideSwingFullClip` |
 | Reactive creature block | option on the zone only | skeletons raise the shield only in their stance, never in reaction (§15.2) | already off; now feature `reactiveBlock` |
 | Character shadows | silhouettes on by default | a shadow texture projected on the floor polygons (shadow routine 0x4ACA10, triage in local/PLANO_GEMINIREA.md); the round shadow is the closest we have | **fixed**: round shadow by default; silhouettes = setting (not original) |
-| Hit-effect size | 0.425 (15 % smaller by eye against the original, then halved on request) | the 15 % was matched against the original on screen; the halving was a preference | **fixed**: 0.85; half size = setting `smallEffects` (not original) |
+| Hit effects | sizes in tenths of a foot × 0.425 by eye, MOVE / GRAVITY per 30 Hz tick, no chips from creatures | from the code: 0.05 ft per size unit, MOVE ft/s, GRAVITY ft/s² turned by the flash heading, rotation in turns/s; a landed blow also throws 5 physical chips in the victim's texture (executable-analysis §8.6) | **fixed** (units and the chips); half size stays a setting `smallEffects` (not original) |
 
 ## 2. Checked: matches the evidence
 
@@ -38,7 +38,7 @@ the current value is a stand-in until a capture or a reading settles it).
 | Skeleton combat AI (distance bands, hop, chains, stance, shield, jab, retreat, bash, leap) | four Frida logs (§15.2) |
 | Citizens under assault, talking (turn, gesture) | Frida (§16) |
 | Swinging doors (mover keys, delay, sounds), levers | `.cap` mover records, Frida |
-| Breaking props (chips, pieces, impact sound, ~12 s) | Frida (§16) and the user's observation |
+| Breaking props (chips, pieces, impact sound) | Frida (§16); piece size and life (5-10 s, 1.5 s small) from 0x4108B0 |
 | Sword trail (line, nodes, alpha ramp, texture) | decompiled trail pool (§16) |
 | Creature HP, XP, resists, loadouts | `.cap` placements, creature template table |
 | Projectile / effect object pool sizes (32 debris, 8 arrows, ...) | 0x482F60 (local/PASSADA_REA_GAPS.md §7) |
@@ -59,7 +59,6 @@ the original's skeletons followed past 75 m), zone workers.
 | Interaction reach (Tab pick-up / open / talk) | 2.5 m (doors 1.8 m from the slab) | the object search 0x437A70 is a segment test: log its segment length |
 | Portal fallback cylinder | radius / height for portals without a volume | most portals carry their volume (decoded); rare |
 | Lightmap gain | texture × lightmap × 2 (by eye, approved by the user) | the D3D driver (gfx_d3d.dll) only sets MODULATE (×1) and DESTCOLOR × ZERO blending: the ×2 must come from how the lightmap texels are uploaded; find that conversion |
-| Effect units (size, MOVE, GRAVITY) | sizes in tenths of a foot, MOVE per 30 Hz tick | the effects parser stores MOVE × 0.001 and GRAVITY × 10⁻⁶ (per ms, per ms²) and rotation × 2π/1000: MOVE is units per second, GRAVITY units per second². The sprite's size unit is still open (the draw routine) |
 | Starting equipment | Axe + Wooden Shield | the first act's start |
 | Locked doors | a hand-made list (train door, inn rooms); key in the potion slot + Z, as in the original | the acts' door scripting (sequence scripts) |
 | NPC lines | each NPC cycles its voice role's lines | the acts' sequence scripts (HermitLadySeq13 ...) |

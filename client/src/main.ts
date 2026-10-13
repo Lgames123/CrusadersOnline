@@ -233,7 +233,15 @@ async function main(): Promise<void> {
                 // Undead blows carry dark damage: the original adds its green flame on the victim.
                 const undeadAttacker = !mine && CREATURE_SFX[remotes.byId.get(e.attacker)?.info.archetype ?? '']?.material === 'bone';
                 if (undeadAttacker) effects.spawn('FIREBALL_PROJ_EVIL_SPAWN', at);
-                if (bone) fxBurst('BONE', 3 + Math.floor(Math.random() * 5), at, step.clone().multiplyScalar(-1));
+                if (bone) {
+                  // The victim also sheds 5 chips in its own texture (debris spawner 0x43E310:
+                  // ±1.2 ft about the hit, speed 40), small, so gone after 1.5 s.
+                  const chip = 1.2 * LEVEL_UNIT_METRES;
+                  const light = new THREE.Color(0.8, 0.8, 0.8);
+                  levelView?.light?.sample(obj.position, light);
+                  debris?.spawn(obj, 5, new THREE.Vector3(chip, chip, chip), at, 40, obj.position.y, light);
+                  fxBurst('BONE', 3 + Math.floor(Math.random() * 5), at, step.clone().multiplyScalar(-1));
+                }
                 else fxBurst('BLOOD', 2 + Math.floor(Math.random() * 2), at, step.clone().multiplyScalar(-1));
               }
             }

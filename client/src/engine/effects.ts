@@ -6,9 +6,13 @@ import * as THREE from 'three';
  * shrink, spin, fade in / hold / fade out and fly with gravity. The engine spawns them on hits
  * and blocks (executable-analysis §8.6); here the client spawns them from combat events.
  *
- * Units are not stated in the file; the sizes read as tenths of a foot (85 %, by eye against the
- * original), MOVE as units per 30 Hz engine tick and GRAVITY as units per tick per second (a
- * spark flies ~7 m/s and arcs gently; per tick squared pulled everything straight down).
+ * Units, from the engine: the effects parser (0x4C45C0 / property setter 0x4C5170) keeps MOVE,
+ * RANDOMIZE_MOVE and size speeds x 0.001 and GRAVITY and size accelerations x 10^-6 (per ms and
+ * ms^2 of its integer-millisecond clock): feet per second and per second squared. A flash moves
+ * (0x4C5B50) by its velocity, which gains GRAVITY turned by the flash's heading (about the
+ * vertical only); POSITION is an offset in feet; ROTATIONSPEED is turns per second (x 2 pi). The
+ * sprite (0x4A9990) draws a quad 0.05 ft per size unit: half-width size x 0.05 x 27.3 px-scale
+ * over a view depth stored x 54.6.
  */
 
 interface Shape {
@@ -41,16 +45,22 @@ interface Table {
   multis: Record<string, Record<string, [string, number][]>>;
 }
 
-/** One original unit, metres (a tenth of a foot). */
-const UNIT = 0.03048;
-/** Sprite sizes against the original, by eye (playtest: 15 % smaller). */
-const SIZE_SCALE = 0.85;
+/** One foot (the world unit), metres. */
+const FOOT = 0.3048;
+/** Sprite size per size unit, metres (0.05 ft). */
+const UNIT = 0.05 * FOOT;
+const SIZE_SCALE = 1;
 /** Setting smallEffects (not original): half that again. */
 export const SMALL_EFFECTS_SCALE = SIZE_SCALE * 0.5;
 export const EFFECTS_SCALE = SIZE_SCALE;
-/** The engine's tick rate for MOVE / GRAVITY (per tick). */
-const ENGINE_HZ = 30;
 const MAX_LIVE = 600;
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const zAxis = new THREE.Vector3();
+/** Heading (about the vertical) of a basis' +Z: the original turns GRAVITY by the flash's heading only. */
+function headingOf(basis: THREE.Matrix4): number {
+  basis.extractBasis(new THREE.Vector3(), new THREE.Vector3(), zAxis);
+  return Math.atan2(zAxis.x, zAxis.z);
+}
 /** Textures drawn with alpha (blood, chips, dust); the rest glow additively. */
 const OPAQUE = /blood|bone|rock|dust|blacksmk|icecube|snow/;
 
@@ -155,7 +165,7 @@ export class Effects {
     const r = () => Math.random() * 2 - 1;
     const local = (v: [number, number, number], rand?: [number, number, number]) =>
       new THREE.Vector3(v[0] + (rand ? rand[0] * r() : 0), v[1] + (rand ? rand[1] * r() : 0), v[2] + (rand ? rand[2] * r() : 0)).applyMatrix4(basis);
-    const offset = local(flash.position).multiplyScalar(UNIT);
+    const offset = local(flash.position).multiplyScalar(FOOT);
     sprite.position.copy(pos).add(offset);
     const size = flash.randomizeSize * Math.random();
     const life = flash.attack + flash.sustain + flash.decay;
@@ -170,9 +180,9 @@ export class Effects {
       w: (flash.startWidth + size) * UNIT * this.scale,
       vh: flash.deltaHeight * UNIT * this.scale,
       vw: flash.deltaWidth * UNIT * this.scale,
-      vel: local(flash.move, flash.randomizeMove).multiplyScalar(UNIT * ENGINE_HZ),
-      grav: new THREE.Vector3(...flash.gravity).multiplyScalar(UNIT * ENGINE_HZ),
-      spin: flash.rotating ? (flash.rotationSpeed * Math.PI) / 180 : 0,
+      vel: local(flash.move, flash.randomizeMove).multiplyScalar(FOOT),
+      grav: new THREE.Vector3(...flash.gravity).applyAxisAngle(Y_AXIS, headingOf(basis)).multiplyScalar(FOOT),
+      spin: flash.rotating ? flash.rotationSpeed * Math.PI * 2 : 0,
       nextSpawn: flash.spawnMulti?.interval ?? 0,
     });
     sprite.visible = delay <= 0;
