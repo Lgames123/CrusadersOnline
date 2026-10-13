@@ -174,8 +174,8 @@ export const ATTACK_CURVES: readonly (readonly number[])[] = [
 /** Movement action id of an attack's root motion (rollDir = ACTION_ATTACK + motion - 1). */
 export const ACTION_ATTACK = 8;
 /** Ticks an attack motion lasts (its clip at 1000/30 fps). */
-export function attackMotionTicks(motion: number): number {
-  return Math.ceil(((ATTACK_CURVES[motion - 1]!.length - 1) / (30 * CLIP_RATE)) * TICK_RATE);
+export function attackMotionTicks(motion: number, rate = 1): number {
+  return Math.ceil(((ATTACK_CURVES[motion - 1]!.length - 1) / (30 * CLIP_RATE * rate)) * TICK_RATE);
 }
 /** Attack motion id (0 = none) of an attack kind and combo step. */
 export function attackMotion(kind: string, combo: number): number {
@@ -196,9 +196,9 @@ export const ACTION_KNOCKDOWN = 18;
 /** PI02 root displacement per frame along the facing, in feet (negative = backwards). */
 export const KNOCKDOWN_CURVE: readonly number[] = [0, -1.42, -2.84, -4.26, -5.51, -6.75, -7.99, -8.18, -8.34, -8.46, -8.57, -8.59, -8.61, -8.63, -8.65, -8.67, -8.69, -8.7, -8.72, -8.74, -8.76, -8.76, -8.75, -8.76, -8.79, -8.82, -8.86, -8.9, -8.95, -9.04, -9.08, -8.33, -7.44, -6.56, -5.77, -4.97, -4.18, -4.31, -4.43, -4.56, -4.69, -4.82, -4.94, -5.01, -5.08, -5.16, -5.25, -5.3, -5.36];
 /** Ticks of each hit reaction. */
-export function hitReactionTicks(action: number): number {
+export function hitReactionTicks(action: number, rate = 1): number {
   const frames = action === ACTION_KNOCKDOWN ? KNOCKDOWN_CURVE.length - 1 : action === ACTION_STUN ? 0.9 * 30 * CLIP_RATE : 17;
-  return Math.ceil((frames / (30 * CLIP_RATE)) * TICK_RATE);
+  return Math.ceil((frames / (30 * CLIP_RATE * rate)) * TICK_RATE);
 }
 /**
  * Creature actions that move by their clip's forward root curve (feet per frame): 12 the
@@ -212,9 +212,16 @@ export const ACTION_BASH = 13;
 export const LUNGE_TICKS = Math.round(1.0 * TICK_RATE);
 export const LUNGE_CURVE: readonly number[] = [0, 0, 0, 0, 0, 0.54, 1.16, 1.86, 2.59, 3.32, 4.01, 4.7, 5.22, 5.74, 5.72, 5.71, 5.69, 5.67, 5.65, 5.65, 5.65];
 export const BASH_CURVE: readonly number[] = [0, 0.08, 0.17, 0.25, 0.94, 1.63, 2.46, 3.36, 4.37, 5.37, 5.96, 6.54, 6.44, 6.33, 6.23, 6.12, 6.02, 5.91, 5.81, 5.71, 5.6, 5.5, 5.39, 5.29, 5.18];
-/** Ticks a clip curve lasts at 1000/30 fps. */
-export function curveTicks(curve: readonly number[]): number {
-  return Math.ceil(((curve.length - 1) / (30 * CLIP_RATE)) * TICK_RATE);
+/**
+ * Ticks a clip curve lasts at 1000/30 fps x `rate`. Every clip of a character plays at 1000/30 x
+ * its speed multiplier (stats +0x24C; main clips 0x429810, the upper-body layer 0x428DD0).
+ */
+export function curveTicks(curve: readonly number[], rate = 1): number {
+  return Math.ceil(((curve.length - 1) / (30 * CLIP_RATE * rate)) * TICK_RATE);
+}
+/** A roll's length in ticks at clip rate `rate`. */
+export function rollTicks(dir: number, rate = 1): number {
+  return Math.round((ORIGINAL_ROLLS[dir - 1]!.frames / (30 * CLIP_RATE * rate)) * TICK_RATE);
 }
 /** Forward root curve of a timed action (attacks, knock-down, lunge, bash), or null. */
 export function actionCurve(action: number): readonly number[] | null {
@@ -235,8 +242,8 @@ export function isHitAction(action: number): boolean {
 }
 
 /** Root displacement (metres) of a curve sampled per clip frame, at `ticks` into the action. */
-export function curveAtTick(curve: readonly number[], ticks: number): number {
-  const frame = (ticks / TICK_RATE) * 30 * CLIP_RATE;
+export function curveAtTick(curve: readonly number[], ticks: number, rate = 1): number {
+  const frame = (ticks / TICK_RATE) * 30 * CLIP_RATE * rate;
   const i = Math.min(curve.length - 1, Math.max(0, Math.floor(frame)));
   const j = Math.min(curve.length - 1, i + 1);
   const t = Math.min(1, Math.max(0, frame - i));

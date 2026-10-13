@@ -8,6 +8,8 @@ import { ANIM, PLAYER_HEIGHT, PLAYER_RADIUS, isAttackAnim, isLocomotionAnim, typ
  */
 export interface Avatar {
   readonly object: THREE.Object3D;
+  /** The character's clip rate (speed multiplier), where the avatar plays original clips. */
+  clipRate?: number;
   /** Height above the feet where name plates / health bars go, metres. */
   readonly headHeight: number;
   /**

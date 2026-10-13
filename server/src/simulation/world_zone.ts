@@ -814,7 +814,8 @@ export class WorldZone {
     if (!spell || !known || !CASTABLE_SPELLS.has(spell)) return;
     const values = this.spells[spell]?.[known.level - 1];
     if (!values || p.mana < values.mana) return;
-    p.cast = { spell, level: known.level, end: this.tick + SPELL_CONJURE_TICKS };
+    // ASM_SPELL_CONJURE (PK15) plays at the character's clip rate.
+    p.cast = { spell, level: known.level, end: this.tick + Math.round(SPELL_CONJURE_TICKS / (p.moveStats.clipRate ?? 1)) };
     p.blocking = false;
   }
 
@@ -1148,7 +1149,7 @@ export class WorldZone {
   private startPlayerSwing(p: Player, kind: AttackKind): void {
     const chained = kind === 'normal' && this.tick - p.lastSwingEnd <= COMBO_WINDOW_TICKS && p.lastCombo < COMBO_MULTIPLIERS.length;
     const combo = chained ? p.lastCombo + 1 : 1;
-    p.swing = { combo, kind, start: this.tick, timing: attackTiming(kind, combo, p.weapon.speed ?? 1), hit: new Set() };
+    p.swing = { combo, kind, start: this.tick, timing: attackTiming(kind, combo, p.weapon.speed ?? 1, p.moveStats.clipRate ?? 1), hit: new Set() };
     p.swingSerial++;
     p.queuedAttack = false;
     if (this.reactiveBlock) this.mobsReactToSwing(p);
@@ -1672,7 +1673,7 @@ export class WorldZone {
   /** Starts a hit reaction: the current swing / hop / retreat is interrupted. */
   private hitReaction(target: Actor, action: number): void {
     target.swing = null;
-    target.hitUntil = this.tick + hitReactionTicks(action);
+    target.hitUntil = this.tick + hitReactionTicks(action, target.character.clipRate);
     startHitReaction(target.character, action);
     if (target.kind === 'player') {
       target.queuedAttack = false;

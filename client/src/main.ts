@@ -40,7 +40,7 @@ import { CLASSIC_SETTINGS, SettingsStore } from './settings.ts';
 import { SettingsPanel } from './ui/settings_panel.ts';
 import { CONTROLS_HELP } from './input/keybindings.ts';
 import { buildArenaMeshes } from './entities/arena.ts';
-import { ProceduralAvatar } from './entities/avatar.ts';
+import { ProceduralAvatar, type Avatar } from './entities/avatar.ts';
 import { LocalPlayer } from './entities/local_player.ts';
 import { RemoteEntities } from './entities/remote_entities.ts';
 import { loadOriginalAvatars } from './assets/original_models.ts';
@@ -194,6 +194,10 @@ async function main(): Promise<void> {
             myTorch.distance = s.light;
             myTorch.visible = s.light > 0;
             if (player) player.dead = s.dead;
+            if (player && s.speed) {
+              player.clipRate = s.speed;
+              player.avatar.clipRate = s.speed;
+            }
             if (lastStats && s.level > lastStats.level) sounds?.play(SFX.levelUp);
             if (lastStats && s.dead && !lastStats.dead) sounds?.play(SFX.died);
             lastStats = { level: s.level, dead: s.dead };
@@ -349,6 +353,10 @@ async function main(): Promise<void> {
     mw = session.mw;
     player = new LocalPlayer(session.character!, selfAvatar, (f) => session.tick(f));
     player.features = session.features;
+    if (session.playerStats?.speed) {
+      player.clipRate = session.playerStats.speed;
+      (selfAvatar as Avatar).clipRate = session.playerStats.speed;
+    }
     if (session.playerStats) {
       hud.stats(session.playerStats);
       lastStats = { level: session.playerStats.level, dead: session.playerStats.dead };
@@ -415,7 +423,7 @@ async function main(): Promise<void> {
     const started = local.swing(input.yaw, kind);
     if (started) {
       // Check for a wall at the swing's impact frame (sparks off the stone).
-      const timing = attackTiming(started, 1);
+      const timing = attackTiming(started, 1, 1, local.clipRate);
       wallChecks.push({ t: (timing.startup + timing.active / 2) * TICK_DT, yaw: input.yaw });
       session?.attack(started);
       sounds?.play(pick(SFX.swing), local.object.position, { volume: 0.7 });
@@ -527,7 +535,7 @@ async function main(): Promise<void> {
       const st = session?.playerStats;
       const known = st?.spells.find((k) => k.spell === st.spell);
       const cost = known && st?.spell ? BUILTIN_SPELLS[st.spell]?.[known.level - 1]?.mana ?? 0 : 0;
-      if (st?.spell && CASTABLE_SPELLS.has(st.spell) && st.mana >= cost && local.startCast(SPELL_CONJURE_TICKS * TICK_DT)) session?.castSpell();
+      if (st?.spell && CASTABLE_SPELLS.has(st.spell) && st.mana >= cost && local.startCast((SPELL_CONJURE_TICKS / local.clipRate) * TICK_DT)) session?.castSpell();
     } else if (action === 'nextSpell') {
       // T: the next known spell.
       const st = session?.playerStats;

@@ -69,7 +69,9 @@ const DIRECTIONAL_CLIPS: Readonly<Record<'overhead' | 'left' | 'right' | 'low' |
  * are dropped; the next swing needs a click after that. Logged with clicks every ~90 ms: one
  * side swing every ~0.91 s, either side, no alternation.
  */
-export const LAYERED_SWING_SECONDS = 0.745 + 1 / 12;
+export const LAYERED_CLIP_SECONDS = 0.745;
+export const LAYER_FADE_SECONDS = 1 / 12;
+export const LAYERED_SWING_SECONDS = LAYERED_CLIP_SECONDS + LAYER_FADE_SECONDS;
 /**
  * Feature sideSwingRetrigger (not original, an earlier misreading of a capture): a side swing
  * re-triggers 0.3 s into the previous one and consecutive side swings alternate sides.
@@ -86,18 +88,23 @@ export const THRUST_WALL_HEIGHT = 5.5 * 0.3048;
 /** Frames after RECOVERY before the next swing can start (observed chain hand-over). */
 const CHAIN_SLACK_FRAMES = 3;
 
-/** Swing timing of an attack (kind + combo step), scaled by the weapon's Speed. */
-export function attackTiming(kind: 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump' | 'thrust' | 'bash' | 'air', combo: number, weaponSpeed = 1): SwingTiming {
-  if (kind === 'thrust') return clipSwingTiming(MOB_THRUST.clip, weaponSpeed);
-  if (kind === 'bash') return clipSwingTiming(MOB_BASH.clip, weaponSpeed);
-  // Side and air swings: SWING_LEVEL (PN02) on the upper-body layer, held until the layer frees.
+/**
+ * Swing timing of an attack (kind + combo step), scaled by the weapon's Speed and by the
+ * character's clip rate (its speed multiplier, stats +0x24C: every clip plays at 1000/30 x it).
+ */
+export function attackTiming(kind: 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump' | 'thrust' | 'bash' | 'air', combo: number, weaponSpeed = 1, clipRate = 1): SwingTiming {
+  const rate = weaponSpeed * clipRate;
+  if (kind === 'thrust') return clipSwingTiming(MOB_THRUST.clip, rate);
+  if (kind === 'bash') return clipSwingTiming(MOB_BASH.clip, rate);
+  // Side and air swings: SWING_LEVEL (PN02) on the upper-body layer, held until the layer frees
+  // (the clip at the clip rate, not the weapon's; then the layer's 1/12 s fade).
   if (kind === 'air' || kind === 'left' || kind === 'right') {
-    const t = clipSwingTiming(COMBO_CLIPS[1]!);
-    t.recovery = Math.max(1, Math.round(LAYERED_SWING_SECONDS * TICK_RATE) - t.startup - t.active);
+    const t = clipSwingTiming(COMBO_CLIPS[1]!, clipRate);
+    t.recovery = Math.max(1, Math.round((LAYERED_CLIP_SECONDS / clipRate + LAYER_FADE_SECONDS) * TICK_RATE) - t.startup - t.active);
     return t;
   }
   const c = kind === 'normal' ? COMBO_CLIPS[Math.min(Math.max(combo, 1), COMBO_CLIPS.length) - 1]! : DIRECTIONAL_CLIPS[kind];
-  return clipSwingTiming(c, weaponSpeed);
+  return clipSwingTiming(c, rate);
 }
 
 /**

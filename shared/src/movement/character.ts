@@ -1,5 +1,5 @@
 import type RAPIER from '@dimforge/rapier3d-deterministic-compat';
-import { ACTION_ATTACK, ACTION_BASH, ACTION_LUNGE, LUNGE_TICKS, ATTACK_CURVES, actionCurve, attackMotionTicks, curveTicks, hitReactionTicks, isAttackAction, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_LEFT_FORWARD, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_RIGHT_FORWARD, shieldHopTicks, curveAtTick, ROLL_CURVES, advanceLoco, LOCO_CAREFUL_LEFT, LOCO_CAREFUL_RIGHT, LOCO_HOP_LEFT, LOCO_HOP_RIGHT, LOCO_RETREAT, LOCO_RUN, LOCO_SIDE_LEFT, LOCO_SIDE_RIGHT, LOCO_WALK, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, MAX_SLOPE_DEG, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
+import { ACTION_ATTACK, ACTION_BASH, ACTION_LUNGE, LUNGE_TICKS, ATTACK_CURVES, actionCurve, attackMotionTicks, curveTicks, hitReactionTicks, isAttackAction, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_LEFT_FORWARD, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_RIGHT_FORWARD, shieldHopTicks, curveAtTick, ROLL_CURVES, rollTicks as rollLength, advanceLoco, LOCO_CAREFUL_LEFT, LOCO_CAREFUL_RIGHT, LOCO_HOP_LEFT, LOCO_HOP_RIGHT, LOCO_RETREAT, LOCO_RUN, LOCO_SIDE_LEFT, LOCO_SIDE_RIGHT, LOCO_WALK, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, MAX_SLOPE_DEG, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
 import type { Vec3 } from '../math/vec3.ts';
 import { dequantizeAngle } from '../math/quantize.ts';
 import { INPUT, INPUT_ATTACK_SHIFT } from '../protocol/opcodes.ts';
@@ -39,6 +39,8 @@ export interface Character {
   airVelZ: number;
   /** Horizontal distance travelled since take-off, metres. */
   airTravel: number;
+  /** Clip rate multiplier (the character's speed multiplier; set from its stats every step). */
+  clipRate: number;
   /** Locomotion state (LOCO_*; 0 standing) and its clip's frame (clip locomotion, LOCO_CLIPS). */
   locoState: number;
   locoFrame: number;
@@ -81,6 +83,7 @@ export function createCharacter(mw: MovementWorld, feet: Readonly<Vec3>): Charac
     airVelX: 0,
     airVelZ: 0,
     airTravel: 0,
+    clipRate: 1,
     locoState: 0,
     locoFrame: 0,
   };
@@ -100,7 +103,7 @@ export function setCharacterState(c: Character, feet: Readonly<Vec3>, velocityY:
   c.airTravel = c.airKind ? snapMm(air!.travel) : 0;
   c.rollDir = rollTicks > 0 ? rollDir : 0;
   c.rollTicks = c.rollDir ? rollTicks : 0;
-  c.actionLength = actionTicks(c.rollDir);
+  c.actionLength = actionTicks(c.rollDir, c.clipRate);
   c.settled = false;
   c.position.x = snapMm(feet.x);
   c.position.y = snapMm(feet.y);
@@ -130,6 +133,8 @@ export function stepCharacter(
   dt: number,
 ): void {
   const f = input.flags;
+  c.clipRate = stats.clipRate ?? 1;
+  const rate = c.clipRate;
   let fwd = 0;
   let right = 0;
   // An attack whose clip carries the character starts its root motion (also over the stand
@@ -146,7 +151,7 @@ export function stepCharacter(
     const side = movementAxes(f)[1];
     if (dir) {
       c.rollDir = dir;
-      c.rollTicks = ROLLS[dir - 1]!.ticks;
+      c.rollTicks = rollLength(dir, rate);
     } else if (f & INPUT.BLOCK && f & INPUT.JUMP) {
       // Shield + jump: the shield rush (ASM_RAM_SHOULDER, PL01's root motion) instead of a jump.
       startTimedAction(c, ACTION_BASH);
@@ -179,15 +184,15 @@ export function stepCharacter(
       const curve = left ? SHIELD_HOP_LEFT_CURVE : SHIELD_HOP_RIGHT_CURVE;
       const fwdCurve = left ? SHIELD_HOP_LEFT_FORWARD : SHIELD_HOP_RIGHT_FORWARD;
       const done = shieldHopTicks(c.rollDir) - c.rollTicks;
-      hop = (curveAtTick(curve, done + 1) - curveAtTick(curve, done)) / dt;
-      hopForward = (curveAtTick(fwdCurve, done + 1) - curveAtTick(fwdCurve, done)) / dt;
+      hop = (curveAtTick(curve, done + 1, rate) - curveAtTick(curve, done, rate)) / dt;
+      hopForward = (curveAtTick(fwdCurve, done + 1, rate) - curveAtTick(fwdCurve, done, rate)) / dt;
     }
     // Rolls follow their clip's root-motion profile too (lengthwise forward/back, sideways left/right).
     let roll = 0;
     if (c.rollDir >= 1 && c.rollDir <= 4) {
       const curve = ROLL_CURVES[c.rollDir - 1]!;
-      const done = ROLLS[c.rollDir - 1]!.ticks - c.rollTicks;
-      roll = (curveAtTick(curve, done + 1) - curveAtTick(curve, done)) / dt;
+      const done = rollLength(c.rollDir, rate) - c.rollTicks;
+      roll = (curveAtTick(curve, done + 1, rate) - curveAtTick(curve, done, rate)) / dt;
     }
     // Attacks move along the facing by their clip's forward root displacement.
     // Attacks, the knock-down (thrown back, PI02) and creature lunges / bashes follow their
@@ -195,7 +200,7 @@ export function stepCharacter(
     const curve = actionCurve(c.rollDir);
     if (curve) {
       const done = c.actionLength - c.rollTicks;
-      roll = (curveAtTick(curve, done + 1) - curveAtTick(curve, done)) / dt;
+      roll = (curveAtTick(curve, done + 1, rate) - curveAtTick(curve, done, rate)) / dt;
     }
     let along = c.rollDir === 1 || c.rollDir === 2 || curve ? roll : hopForward;
     let side = c.rollDir === 3 || c.rollDir === 4 ? roll : hop;
@@ -371,18 +376,18 @@ function touchesWalkable(mw: MovementWorld): boolean {
 }
 
 /** Length in ticks of a timed action that follows a curve or holds the character (0 otherwise). */
-function actionTicks(action: number): number {
-  if (isAttackAction(action)) return attackMotionTicks(action - ACTION_ATTACK + 1);
-  if (action >= 16 && action <= 18) return hitReactionTicks(action);
+function actionTicks(action: number, rate = 1): number {
+  if (isAttackAction(action)) return attackMotionTicks(action - ACTION_ATTACK + 1, rate);
+  if (action >= 16 && action <= 18) return hitReactionTicks(action, rate);
   if (action === ACTION_LUNGE) return LUNGE_TICKS;
   const curve = actionCurve(action);
-  return curve ? curveTicks(curve) : 0;
+  return curve ? curveTicks(curve, rate) : 0;
 }
 
 /** Starts a timed action (attack motion, hit reaction, creature lunge / bash), replacing any other. */
 export function startTimedAction(c: Character, action: number): void {
   c.rollDir = action;
-  c.rollTicks = actionTicks(action);
+  c.rollTicks = actionTicks(action, c.clipRate);
   c.actionLength = c.rollTicks;
 }
 

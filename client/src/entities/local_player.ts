@@ -11,8 +11,8 @@ const TURN_RATE_AIR = (80 * Math.PI) / 180;
 const SMOOTH_RATE = 10; // 1/s decay of visual correction offset
 const SNAP_DISTANCE = 2; // corrections larger than this are shown immediately
 const MOVE_MASK = INPUT.FORWARD | INPUT.BACK | INPUT.LEFT | INPUT.RIGHT;
-function swingSeconds(kind: AttackKind, combo: number, weaponSpeed: number): number {
-  const s = attackTiming(kind, combo, weaponSpeed);
+function swingSeconds(kind: AttackKind, combo: number, weaponSpeed: number, clipRate = 1): number {
+  const s = attackTiming(kind, combo, weaponSpeed, clipRate);
   return (s.startup + s.active + s.recovery) * TICK_DT;
 }
 
@@ -48,6 +48,8 @@ export class LocalPlayer {
   /** Swing duration of the equipped weapon (server INVENTORY_UPDATE weaponSpeed). */
   private swingTime = swingSeconds('normal', 1, 1);
   private weaponSpeed = 1;
+  /** The character's clip rate (speed multiplier, SC_PLAYER_STATS speed). */
+  clipRate = 1;
   /** The server's gameplay rules (prediction follows them). */
   features: GameplayFeatures = gameplayFeatures();
   dead = false;
@@ -102,7 +104,7 @@ export class LocalPlayer {
     this.combo = kind === 'normal' && this.kind === 'normal' && this.sinceSwing < 0.3 && this.combo < 5 ? this.combo + 1 : 1;
     this.kind = kind;
     this.swingCount++;
-    this.swingTime = swingSeconds(kind, this.combo, this.weaponSpeed);
+    this.swingTime = swingSeconds(kind, this.combo, this.weaponSpeed, this.clipRate);
     this.pendingMotion = attackMotion(kind, this.combo);
     this.swingLeft = this.swingTime;
     if (!isLayeredSwing(kind)) this.targetFacing = cameraYaw;

@@ -22,6 +22,8 @@ import {
   SHIELD_HOP_PAUSE_TICKS,
   shieldHopTicks,
   advanceLoco,
+  rollTicks,
+  attackTiming,
   ENGINE_CLIP_FPS,
   LOCO_RUN,
   LOCO_WALK,
@@ -155,6 +157,15 @@ describe('shared character controller', () => {
     run(a.mw, a.c, INPUT.FORWARD, 0, 15);
     run(b.mw, b.c, INPUT.FORWARD, 0, 15, 0, fast);
     expect((zb - b.c.position.z) / (za - a.c.position.z)).toBeCloseTo(1.02, 1);
+  });
+
+  it('swings, rolls and timed actions play at the clip rate too', () => {
+    const total = (s: { startup: number; active: number; recovery: number }) => s.startup + s.active + s.recovery;
+    expect(total(attackTiming('normal', 5, 1, 1.25))).toBeLessThan(total(attackTiming('normal', 5, 1, 1)));
+    expect(total(attackTiming('left', 1, 2, 1))).toBe(total(attackTiming('left', 1, 1, 1))); // layer: not the weapon's speed
+    expect(total(attackTiming('left', 1, 1, 1.25))).toBeLessThan(total(attackTiming('left', 1, 1, 1)));
+    expect(rollTicks(3, 1.25)).toBeLessThan(rollTicks(3, 1));
+    expect(hitReactionTicks(ACTION_KNOCKDOWN, 1.25)).toBeLessThan(hitReactionTicks(ACTION_KNOCKDOWN, 1));
   });
 
   it('switching sides restarts the step clip from its first frame', () => {

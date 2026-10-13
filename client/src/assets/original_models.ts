@@ -305,8 +305,8 @@ class OriginalAvatar implements Avatar {
     const name = this.map.impacts?.[dir] ?? this.map.impacts?.[0];
     const clip = name ? this.clips.get(name) : undefined;
     if (!clip) return;
-    this.play(clip, false, ORIGINAL_CLIP_FPS / 30);
-    this.reactLeft = clip.duration / (ORIGINAL_CLIP_FPS / 30);
+    this.play(clip, false, this.clipScale);
+    this.reactLeft = clip.duration / (this.clipScale);
   }
 
   setState(anim: number, swingSeconds: number, swingId = 0): void {
@@ -334,9 +334,15 @@ class OriginalAvatar implements Avatar {
     // The shield hops and careful sidesteps loop every 33 frames (header +0x14 - 1), longer
     // than their 20-21 frames: the step, then the last pose held until the clip restarts.
     const longLoop = anim === ANIM.HOP_LEFT || anim === ANIM.HOP_RIGHT || anim === ANIM.WALK_STRAFE_LEFT || anim === ANIM.WALK_STRAFE_RIGHT;
-    this.restartEvery = longLoop ? 33 / ORIGINAL_CLIP_FPS : 0;
+    this.restartEvery = longLoop ? 33 / (ORIGINAL_CLIP_FPS * this.clipRate) : 0;
     this.restartIn = this.restartEvery;
-    this.play(clip, longLoop ? false : loop, ORIGINAL_CLIP_FPS / 30);
+    this.play(clip, longLoop ? false : loop, this.clipScale);
+  }
+  /** The character's clip rate (its speed multiplier; clips play at 1000/30 x it). */
+  clipRate = 1;
+  /** Mixer time scale: converted clips are timed at 30 fps. */
+  private get clipScale(): number {
+    return (ORIGINAL_CLIP_FPS / 30) * this.clipRate;
   }
   /** Seconds between restarts of a clip that loops later than its last frame (0: none), and left. */
   private restartEvery = 0;
@@ -405,7 +411,7 @@ class OriginalAvatar implements Avatar {
     action.reset();
     action.setLoop(THREE.LoopOnce, 1);
     action.clampWhenFinished = false;
-    action.timeScale = ORIGINAL_CLIP_FPS / 30;
+    action.timeScale = this.clipScale;
     action.fadeIn(0.05).play();
     this.upperSwing = { action, left: clip.duration / action.timeScale };
     if (!was && this.baseClip) this.play(this.baseClip, this.baseLoop, this.baseScale);
@@ -426,7 +432,7 @@ class OriginalAvatar implements Avatar {
         this.shieldAction.clampWhenFinished = true; // hold the raised pose (the original holds its last frame)
       }
       this.shieldAction.reset();
-      this.shieldAction.timeScale = ORIGINAL_CLIP_FPS / 30;
+      this.shieldAction.timeScale = this.clipScale;
       this.shieldAction.fadeIn(0.1).play();
     } else {
       this.shieldAction?.fadeOut(0.15);
@@ -480,8 +486,8 @@ class OriginalAvatar implements Avatar {
       } else if ((this.gestureIn -= dt) <= 0) {
         const clip = this.clips.get(gestures[Math.floor(Math.random() * gestures.length)]!);
         if (clip) {
-          this.play(clip, false, ORIGINAL_CLIP_FPS / 30);
-          this.gestureLeft = clip.duration / (ORIGINAL_CLIP_FPS / 30);
+          this.play(clip, false, this.clipScale);
+          this.gestureLeft = clip.duration / (this.clipScale);
         } else this.gestureIn = 8;
       }
     }
