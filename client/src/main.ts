@@ -559,7 +559,8 @@ async function main(): Promise<void> {
     if (session) remotes.update(session, dt);
     effects?.update(dt);
     debris?.update(dt);
-    // Players' sword trails (the plain-click combo).
+    // Players' sword trails (every swing but the ducking chop).
+    trails.update(dt);
     trails.track('me', (b, t) => local.avatar.blade?.(b, t) ?? false, dt);
     for (const [id, e] of remotes.byId) if (e.info.kind !== 'mob') trails.track(id, (b, t) => (e.visible && e.avatar.blade?.(b, t)) ?? false, dt);
     // A swing that reaches a wall throws sparks off it at its impact frame (SWORD_DAMAGE + SWORD_METAL x3).

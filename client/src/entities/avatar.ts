@@ -33,7 +33,7 @@ export interface Avatar {
   setUpperSwing?(kind: AttackKind | null, id: number): void;
   /**
    * The held weapon's blade, world space (near the hilt and the tip), while in a swing that
-   * leaves a trail (the plain-click combo); false otherwise or without a weapon.
+   * leaves a trail (every swing but the low chop while ducking); false otherwise or without a weapon.
    */
   blade?(base: THREE.Vector3, tip: THREE.Vector3): boolean;
   /** Whether this avatar reports clip events through onEvent. */

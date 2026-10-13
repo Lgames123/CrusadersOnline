@@ -199,8 +199,10 @@ class OriginalAvatar implements Avatar {
   private bladeLocal: { mount: THREE.Object3D; held: THREE.Object3D | undefined; base: THREE.Vector3; tip: THREE.Vector3 } | null | undefined;
 
   blade(base: THREE.Vector3, tip: THREE.Vector3): boolean {
+    // Every sword swing leaves one but the low chop while ducking (playtest); side and air
+    // swings play on the upper body over the legs' clip.
     const a = this.anim;
-    if (!((a >= ANIM.ATTACK && a < ANIM.ATTACK + 3) || a === ANIM.ATTACK_COMBO4 || a === ANIM.ATTACK_COMBO5)) return false;
+    if (!((isAttackAnim(a) && a !== ANIM.ATTACK_LOW && a !== ANIM.ATTACK_BASH) || this.upperSwing)) return false;
     let b = this.bladeLocal;
     if (b === undefined || (b && b.held !== b.mount.children[0])) b = this.bladeLocal = findBlade(this.object);
     if (!b) return false;
