@@ -101,4 +101,9 @@ export interface ArenaDef {
   portals?: PortalDef[];
   /** Brushes (original levels). */
   brushes?: BrushDef[];
+  /**
+   * Solid props (original levels): convex hulls (metres, x y z flat). `object`: a breakable's
+   * world-object id, its collider gone while it is broken.
+   */
+  solids?: { points: Float32Array; object?: number }[];
 }

@@ -40,6 +40,8 @@ export interface LevelObject {
   effect?: string;
   /** Converted model file (relative to the converter output), when available. */
   model?: string;
+  /** The model's bounding box in its own frame (original units, Z mirrored): min x y z, max x y z. */
+  box?: number[];
 }
 
 export interface LevelPortal {
@@ -78,6 +80,9 @@ export const DOOR_BRUSH = /door|gate/i;
 /** Levers (Tab pulls them); in an act with levers its gates open by lever only (Ws1a/5a/9a). */
 const LEVER_BRUSH = /lever/i;
 const LEVER_GATE = /gate/i;
+/** Props that do not block movement: foliage (plants, the pines' branch canopies), bottles. */
+const NON_SOLID_PROP = /plant|brnch|branch|bottle|grass|flower|bush|debris/i;
+
 /** Brushes that block movement: doors and the walkable pieces. */
 const SOLID_BRUSH = /door|gate|bridge|plat/i;
 /**
@@ -348,7 +353,23 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
     });
   }
   const objects: WorldObjectDef[] = [];
+  const solids: { points: Float32Array; object?: number }[] = [];
   (placements.objects ?? []).forEach((o, id) => {
+    // Props block movement with their model's box, but foliage, bottles and anything under a
+    // foot high (tools, fire pits) - the original's prop records carry no collision volume.
+    if (o.kind === 'prop' && o.box && !NON_SOLID_PROP.test(`${o.name} ${o.model ?? ''}`) && o.box[4]! - o.box[1]! >= 1) {
+      const b = o.box;
+      const r = o.rotation;
+      const pts: number[] = [];
+      for (const x of [b[0]!, b[3]!]) for (const y of [b[1]!, b[4]!]) for (const z of [b[2]!, b[5]!]) {
+        pts.push(
+          (r[0]! * x + r[3]! * y + r[6]! * z + o.position[0]) * s,
+          (r[1]! * x + r[4]! * y + r[7]! * z + o.position[1]) * s,
+          (r[2]! * x + r[5]! * y + r[8]! * z + o.position[2]) * s,
+        );
+      }
+      solids.push({ points: new Float32Array(pts), ...(o.hp > 0 ? { object: id } : {}) });
+    }
     const at = { x: o.position[0] * s, y: o.position[1] * s, z: o.position[2] * s };
     if (o.kind === 'item' && o.item) objects.push({ id, kind: 'item', ...at, item: o.item });
     else if (o.kind === 'chest') objects.push({ id, kind: 'chest', ...at, contents: o.contents ?? [] });
@@ -403,5 +424,5 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
     for (const g of gates) g.byLever = true;
     for (const l of levers) l.opens = gates.map((g) => g.id);
   }
-  return { name, boxes: [], meshes: [mesh], spawnPoints: spawnPoints(mesh, hostiles, 8), mobSpawns, objects, portals, brushes };
+  return { name, boxes: [], meshes: [mesh], spawnPoints: spawnPoints(mesh, hostiles, 8), mobSpawns, objects, portals, brushes, solids };
 }

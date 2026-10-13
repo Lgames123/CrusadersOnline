@@ -865,6 +865,7 @@ export class WorldZone {
       if (o.hp <= 0) {
         o.state = 'gone';
         o.respawnAt = this.tick + OBJECT_RESPAWN_TICKS;
+        setDoorOpen(this.mw, o.def.id, true); // broken: no longer in the way
       }
       this.broadcastObjects([{ id: o.def.id, state: o.state, by: a.entityId, damage, hp: Math.ceil(o.hp) }]);
     }
@@ -918,6 +919,7 @@ export class WorldZone {
       o.state = 'present';
       o.hp = o.def.hp ?? 0;
       o.respawnAt = 0;
+      setDoorOpen(this.mw, o.def.id, false);
       back.push({ id: o.def.id, state: 'present' });
     }
     if (back.length) this.broadcastObjects(back);

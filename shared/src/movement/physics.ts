@@ -24,7 +24,7 @@ export interface MovementWorld {
   rapier: Rapier;
   world: RAPIER.World;
   controller: RAPIER.KinematicCharacterController;
-  /** Door colliders by world-object id (disabled while open). */
+  /** Door colliders by world-object id (disabled while open), and breakable props' (while broken). */
   doors: Map<number, RAPIER.Collider>;
 }
 
@@ -71,6 +71,13 @@ export function createMovementWorld(rapier: Rapier, arena: ArenaDef): MovementWo
     if (!desc) continue;
     const c = world.createCollider(desc.setCollisionGroups(WORLD_GROUPS));
     if (b.door !== undefined) doors.set(b.door, c);
+  }
+  // Solid props; a breakable one is switched off like an open door while it is broken.
+  for (const sp of arena.solids ?? []) {
+    const desc = rapier.ColliderDesc.convexHull(sp.points);
+    if (!desc) continue;
+    const c = world.createCollider(desc.setCollisionGroups(WORLD_GROUPS));
+    if (sp.object !== undefined) doors.set(sp.object, c);
   }
   // Populate the broad phase so scene queries see the static geometry.
   world.step();

@@ -64,7 +64,7 @@ export interface ConvertReport {
   warnings: string[];
 }
 
-const MANIFEST_VERSION = '1.11.0'; // 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers; 1.9: door sounds; 1.10: lightmap UVs at 16 bytes a vertex; 1.11: lightmap seams stitched
+const MANIFEST_VERSION = '1.12.0'; // 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers; 1.9: door sounds; 1.10: lightmap UVs at 16 bytes a vertex; 1.11: lightmap seams stitched; 1.12: prop model boxes, model names in lower case
 /** Bump when level output changes so cached levels are rebuilt. */
 const LEVEL_EMIT_VERSION = '2';
 
@@ -149,6 +149,8 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
   /** For level placements: item names (chest contents) and models.ctx id -> converted model. */
   const itemNames = new Set<string>(['Gold Pieces']);
   const modelById = new Map<number, string>();
+  /** Model bounding boxes (MDL header, original units) by converted model name, for prop colliders. */
+  const modelBoxes = new Map<string, { min: [number, number, number]; max: [number, number, number] }>();
 
   // --- Rules: script/default.ctx -> rules/default.json
   const ctxPath = 'script/default.ctx';
@@ -205,7 +207,8 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
     report.warnings.push(`${bindingsPath} not found`);
   } else {
     const bindings = parseModelsCtx(new TextDecoder('latin1').decode(bindingsBytes));
-    for (const b of bindings) if (!modelById.has(b.id)) modelById.set(b.id, b.file.replace(/\.mdl$/i, ''));
+    // Converted models are keyed in lower case (models.ctx names mix cases: Drawers01, PineTrTrunkV1).
+    for (const b of bindings) if (!modelById.has(b.id)) modelById.set(b.id, b.file.replace(/\.mdl$/i, '').toLowerCase());
     const files = new Map<string, string | undefined>(); // lower-case file -> first texture
     const anims = new Map<string, Map<string, string>>(); // lower-case model file -> ani file -> label
     const states = new Map<string, Record<string, string>>(); // lower-case model file -> ASM state -> clip
@@ -231,6 +234,7 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
       const base = file.replace(/\.mdl$/i, '');
       try {
         const model = parseMdl(bytes);
+        modelBoxes.set(base.toLowerCase(), { min: model.bboxMin, max: model.bboxMax });
         const tex = texture?.replace(/\.tga$/i, '').toLowerCase();
         const textureFile = tex ? manifest.textures[tex] : undefined;
         if (tex && !textureFile) report.warnings.push(`Models/${file}: texture "${texture}" not found`);
@@ -399,11 +403,14 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
         objects: cap.objects.map((o) => {
           const model = o.kind === 'sprite' ? undefined : modelById.get(o.modelId);
           const glb = model ? manifest.models[model] : undefined;
+          const box = model ? modelBoxes.get(model) : undefined;
           return {
             ...o,
             position: [o.position[0], o.position[1], -o.position[2]],
             rotation: mirrorRot(o.rotation),
             ...(glb ? { model: glb } : {}),
+            // The model's box in its converted (Z mirrored) frame: [min x, y, z, max x, y, z].
+            ...(box ? { box: [box.min[0], box.min[1], -box.max[2], box.max[0], box.max[1], -box.min[2]] } : {}),
           };
         }),
       }));

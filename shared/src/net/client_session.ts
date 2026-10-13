@@ -264,7 +264,7 @@ export class ClientSession {
             // Swinging doors keep their collider and turn it (stepped in tick()).
             swing.motion = o.state === 'open' && o.swing ? { ...o.swing } : null;
             this.poseDoor(o.id);
-          } else setDoorOpen(this.mw, o.id, o.state === 'open');
+          } else setDoorOpen(this.mw, o.id, o.state !== 'present'); // open doors, broken props
         }
         this.events.objects?.(msg.d);
         break;

@@ -175,4 +175,16 @@ describe('doors', () => {
     expect(last).toMatchObject({ state: 'open', swing: { phase: 'opening', blocked: true } });
     expect(last.swing!.progress).toBeLessThan(1);
   });
+
+  it('solid props block; a breakable one stops blocking once broken', () => {
+    const arena = createSyntheticArena();
+    const pts: number[] = [];
+    for (const x of [-1, 1]) for (const y of [0, 1.5]) for (const z of [-1.6, -1.4]) pts.push(x, y, z);
+    arena.solids = [{ points: new Float32Array(pts), object: 7 }];
+    const mw = createMovementWorld(rapier, arena);
+    const feet = { x: 0, y: 0, z: 0 };
+    expect(wallDistance(mw, feet, 0, 3, 1)).toBeCloseTo(1.4, 1);
+    expect(setDoorOpen(mw, 7, true)).toBe(true); // broken
+    expect(wallDistance(mw, feet, 0, 3, 1)).toBeNull();
+  });
 });
