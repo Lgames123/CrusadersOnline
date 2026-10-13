@@ -145,10 +145,8 @@ export const SFX = {
   click: 401,
   shieldBlockWood: 345,
   chestOpen: 520,
-  hitWood: 344,
-  breakBarrel: 358,
-  breakWood: 532,
-  breakGlass: 523,
+  /** A debris piece landing (HitMetal02; logged ~0.3 s after a barrel broke). */
+  debrisLand: 339,
   fireLoop: 533,
   /** Impact by target material x weapon edge (executable table 0x004EEDA8): bone / flesh. */
   impact: { bone: { sharp: 308, blunt: 302 }, flesh: { sharp: 306, blunt: 303 } },

@@ -15,6 +15,7 @@ import {
   attackTiming,
   LEVEL_PREFIX,
   NPC_VOICES,
+  LEVEL_UNIT_METRES,
   PORTAL_OBJECT_BASE,
   PORTAL_USE_REACH,
   inPortal,
@@ -49,6 +50,8 @@ import { GameFilesPanel } from './ui/game_files_panel.ts';
 import { InputManager } from './input/input_manager.ts';
 import { MusicPlayer } from './audio/music.ts';
 import { Effects } from './engine/effects.ts';
+import { Debris } from './engine/debris.ts';
+import { SwingTrails } from './engine/swing_trail.ts';
 import { TORCH_LIGHT_COLOR, TORCH_LIGHT_HEIGHT, TORCH_LIGHT_INTENSITY } from './entities/torch_light.ts';
 import { connectToWorld } from './network/connect.ts';
 import { CombatUi } from './ui/combat_ui.ts';
@@ -133,6 +136,9 @@ async function main(): Promise<void> {
   /** The original's special effects (sparks, blood, bone chips), when the game files are imported. */
   let effects: Effects | null = null;
   void Effects.load(scene).then((e) => (effects = e));
+  let debris: Debris | null = null;
+  const trails = new SwingTrails(scene);
+  void Debris.load(scene).then((d) => (debris = d));
   const fxPos = new THREE.Vector3();
   /** Pending wall-spark checks of the local swings (seconds to the impact frame, heading). */
   const wallChecks: { t: number; yaw: number }[] = [];
@@ -156,7 +162,10 @@ async function main(): Promise<void> {
       ? null
       : await connectToWorld(rapier, arena, auth.kind, {
           spawn: (id, _name, info) => remotes.spawn(id, info),
-          despawn: (id) => remotes.despawn(id),
+          despawn: (id) => {
+            remotes.despawn(id);
+            trails.forget(id);
+          },
           correction: (dx, dy, dz) => player?.correct(dx, dy, dz),
           stats: (s) => {
             hud.stats(s);
@@ -231,14 +240,24 @@ async function main(): Promise<void> {
               if (view.def.kind === 'chest' && o.state === 'open') sounds?.play(SFX.chestOpen, at);
               else if (view.def.kind === 'item' && o.state === 'gone' && mine) sounds?.play(SFX.click);
               else if (view.def.kind === 'prop') {
-                // Struck props throw stone-like sparks upwards (SWORD_STONE x6, logged on a barrel).
-                fxPos.copy(at);
-                fxPos.y += 0.8;
-                fxBurst('SWORD_STONE', 6, fxPos.clone(), new THREE.Vector3(0, -0.2, 0), new THREE.Vector3(0, 1, 0));
-                const glass = /bottle|glass/i.test(view.def.name);
-                const barrel = /barrel/i.test(view.def.name);
-                if (o.state === 'gone') sounds?.play(glass ? SFX.breakGlass : barrel ? SFX.breakBarrel : SFX.breakWood, at);
-                else sounds?.play(SFX.hitWood, at);
+                // As logged on barrels: every hit throws 5 SWORD_STONE sparks down the blade and 5
+                // chips of the prop (±1.2 ft, speed 40) and plays its material's impact (306, the
+                // sharp flesh one, on a barrel; a mace's blunt one by the same table); breaking it
+                // adds 3-12 pieces through its volume (speed 1) and no sound of its own, only a
+                // piece landing (339, ~0.3 s later).
+                const box = new THREE.Box3().setFromObject(view.object);
+                const centre = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                fxPos.copy(centre);
+                fxBurst('SWORD_STONE', 5, fxPos.clone(), new THREE.Vector3(0, -0.2, 0), new THREE.Vector3(0, 1, 0));
+                const chip = 1.2 * LEVEL_UNIT_METRES;
+                debris?.spawn(view.object, 5, new THREE.Vector3(chip, chip, chip), centre, 40, box.min.y);
+                sounds?.play(SFX.impact.flesh[mine ? myEdge : 'sharp'], centre);
+                if (o.state === 'gone') {
+                  const base = new THREE.Vector3(centre.x, box.min.y, centre.z);
+                  debris?.spawn(view.object, 3 + Math.floor(Math.random() * 10), size.clone().multiplyScalar(0.5), base, 1, box.min.y);
+                  window.setTimeout(() => sounds?.play(SFX.debrisLand, base), 300);
+                }
               }
               if (mine && o.loot?.length) {
                 headPos.copy(at);
@@ -539,6 +558,10 @@ async function main(): Promise<void> {
     if (myTorch.visible) myTorch.position.set(local.object.position.x, local.object.position.y + TORCH_LIGHT_HEIGHT, local.object.position.z);
     if (session) remotes.update(session, dt);
     effects?.update(dt);
+    debris?.update(dt);
+    // Players' sword trails (the plain-click combo).
+    trails.track('me', (b, t) => local.avatar.blade?.(b, t) ?? false, dt);
+    for (const [id, e] of remotes.byId) if (e.info.kind !== 'mob') trails.track(id, (b, t) => (e.visible && e.avatar.blade?.(b, t)) ?? false, dt);
     // A swing that reaches a wall throws sparks off it at its impact frame (SWORD_DAMAGE + SWORD_METAL x3).
     for (let i = wallChecks.length - 1; i >= 0; i--) {
       const w = wallChecks[i]!;

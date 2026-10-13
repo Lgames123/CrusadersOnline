@@ -195,6 +195,19 @@ class OriginalAvatar implements Avatar {
   private readonly map: ClipMap;
   private current: THREE.AnimationAction | null = null;
   private anim = -1;
+  /** The right-hand weapon's blade in its mount's frame (undefined: not looked up yet). */
+  private bladeLocal: { mount: THREE.Object3D; held: THREE.Object3D | undefined; base: THREE.Vector3; tip: THREE.Vector3 } | null | undefined;
+
+  blade(base: THREE.Vector3, tip: THREE.Vector3): boolean {
+    const a = this.anim;
+    if (!((a >= ANIM.ATTACK && a < ANIM.ATTACK + 3) || a === ANIM.ATTACK_COMBO4 || a === ANIM.ATTACK_COMBO5)) return false;
+    let b = this.bladeLocal;
+    if (b === undefined || (b && b.held !== b.mount.children[0])) b = this.bladeLocal = findBlade(this.object);
+    if (!b) return false;
+    base.copy(b.base).applyMatrix4(b.mount.matrixWorld);
+    tip.copy(b.tip).applyMatrix4(b.mount.matrixWorld);
+    return true;
+  }
 
   constructor(source: GLTF, map: ClipMap, texture?: THREE.Texture, equipment?: { right?: THREE.Object3D; left?: THREE.Object3D }) {
     const model = cloneSkinned(source.scene);
@@ -514,6 +527,37 @@ function attachEquipment(model: THREE.Object3D, equipment: { right?: THREE.Objec
     mount.add(held);
     bone.add(mount);
   }
+}
+
+/**
+ * The weapon held at the right-hand dummy, as a segment in the mount's frame: along the item's
+ * longest extent, from a quarter of the way out of the hand to the far end (the tip).
+ */
+function findBlade(model: THREE.Object3D): { mount: THREE.Object3D; held: THREE.Object3D | undefined; base: THREE.Vector3; tip: THREE.Vector3 } | null {
+  let mount: THREE.Object3D | undefined;
+  model.traverse((o) => {
+    if (!mount && o.name.endsWith('WPN RIGHT')) mount = o;
+  });
+  if (!mount || !mount.children.length) return null;
+  model.updateMatrixWorld(true);
+  const toMount = new THREE.Matrix4().copy(mount.matrixWorld).invert();
+  const box = new THREE.Box3();
+  mount.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.geometry.computeBoundingBox();
+    box.union(mesh.geometry.boundingBox!.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(toMount, mesh.matrixWorld)));
+  });
+  if (box.isEmpty()) return null;
+  const size = box.getSize(new THREE.Vector3());
+  const axis = size.x >= size.y && size.x >= size.z ? 'x' : size.y >= size.z ? 'y' : 'z';
+  const centre = box.getCenter(new THREE.Vector3());
+  const lo = centre.clone();
+  const hi = centre.clone();
+  lo[axis] = box.min[axis];
+  hi[axis] = box.max[axis];
+  const [near, far] = lo.length() <= hi.length() ? [lo, hi] : [hi, lo];
+  return { mount, held: mount.children[0], base: near.lerp(far, 0.25), tip: far };
 }
 
 export type AvatarFactory = (kind: AvatarKind) => Avatar | null;
