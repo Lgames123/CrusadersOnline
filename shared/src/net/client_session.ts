@@ -55,6 +55,8 @@ export interface ClientSessionEvents {
   /** Local prediction was corrected by (dx, dy, dz) metres. */
   correction?(dx: number, dy: number, dz: number): void;
   close?(code: number, reason: string): void;
+  /** A refusal from the server worth telling the player (e.g. the bag is full). */
+  error?(code: string, message: string): void;
 }
 
 export interface ClientSessionStats {
@@ -273,6 +275,7 @@ export class ClientSession {
         this.events.inventory?.(msg.d);
         break;
       case SC.ERROR:
+        this.events.error?.(msg.d.code, msg.d.message);
         break;
     }
   }

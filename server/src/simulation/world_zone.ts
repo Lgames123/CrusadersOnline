@@ -691,7 +691,10 @@ export class WorldZone {
     const grants = o.def.kind === 'item' ? (o.def.item ? [o.def.item] : []) : (o.def.contents ?? []);
     const loot: string[] = [];
     for (const g of grants) if (this.grantItem(p, g.name, g.quantity)) loot.push(g.quantity > 1 ? `${g.quantity} ${g.name}` : g.name);
-    if (o.def.kind === 'item' && grants.length && !loot.length) return; // bag full: leave it
+    if (o.def.kind === 'item' && grants.length && !loot.length) {
+      this.sendJson(connId, { op: SC.ERROR, d: { code: 'bag_full', message: 'Your bag is full.' } }); // leave it there
+      return;
+    }
     o.state = o.def.kind === 'chest' ? 'open' : 'gone';
     o.respawnAt = this.tick + OBJECT_RESPAWN_TICKS;
     this.broadcastObjects([{ id, state: o.state, by: p.entityId, loot }]);

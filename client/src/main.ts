@@ -312,6 +312,12 @@ async function main(): Promise<void> {
             chase.snap();
             for (const [id, state] of live.objectStates) levelView?.setObjectState(id, state, live.swings.get(id)?.motion ?? null);
           },
+          error: (_code, message) => {
+            if (!player) return;
+            headPos.copy(player.object.position);
+            headPos.y += player.avatar.headHeight;
+            combatUi.notice(message, headPos);
+          },
           close: (code, reason) => {
             document.getElementById('error')!.textContent = `Disconnected from server (${code}${reason ? `: ${reason}` : ''}). Reload to reconnect.`;
           },
