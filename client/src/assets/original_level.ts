@@ -114,10 +114,10 @@ const BRUSH_COLOURS: [RegExp, number][] = [[/metal|cell|gate|gear|wheel|crusher/
 const BRUSH_STONE = 0x5d554a;
 
 /**
- * Texels per brush texture unit. Not the level mesh's ×32: brush faces span 15 units across a
- * door picture (an 8 ft and a 14 ft door alike), so ×8 shows it once, as the sky tiles.
+ * Brush texture units per picture: brush faces span 15 units across a door picture (an 8 ft and
+ * a 14 ft door alike), and the original shows the whole picture once on them.
  */
-const TEXELS_PER_UNIT = 8;
+const BRUSH_UNITS_PER_PICTURE = 15;
 /** Brushes have no lightmap: their textures are dimmed to sit in the lightmapped level. */
 const BRUSH_SHADE = 0.6;
 
@@ -138,7 +138,8 @@ function texturedBrushMesh(brush: LevelBrush, texture: (name: string) => { map: 
     const vert = (i: number) => {
       const p = brush.points[f.indices[i]!]!;
       g.pos.push(p[0] * s, p[1] * s, p[2] * s);
-      g.uv.push((f.texels[2 * i]! * TEXELS_PER_UNIT) / tex.size[0], (f.texels[2 * i + 1]! * TEXELS_PER_UNIT) / tex.size[1]);
+      // Brush V runs upwards (the level faces' downwards): flipped, the picture stands upright.
+      g.uv.push(f.texels[2 * i]! / BRUSH_UNITS_PER_PICTURE, 1 - f.texels[2 * i + 1]! / BRUSH_UNITS_PER_PICTURE);
     };
     for (let i = 1; i + 1 < f.indices.length; i++) {
       vert(0);
