@@ -93,12 +93,11 @@ export class LocalPlayer {
     if (this.dead || this.castLeft > 0 || isHitAction(this.character.rollDir)) return null;
     const side = (k: AttackKind) => k === 'left' || k === 'right';
     if (this.swingLeft > 0) {
-      // Only a side swing re-triggers mid-swing, 0.3 s into the previous side swing (unless the
-      // server plays side swings whole: feature sideSwingFullClip).
-      if (this.features.sideSwingFullClip || !(side(kind) && side(this.kind) && this.swingTime - this.swingLeft >= SIDE_SWING_RECHAIN_TICKS * TICK_DT)) return null;
+      // One swing at a time; feature sideSwingRetrigger: a side swing re-triggers 0.3 s in.
+      if (!this.features.sideSwingRetrigger || !(side(kind) && side(this.kind) && this.swingTime - this.swingLeft >= SIDE_SWING_RECHAIN_TICKS * TICK_DT)) return null;
     }
-    // Consecutive side swings alternate sides (the first one follows the held key).
-    if (side(kind) && side(this.kind) && (this.swingLeft > 0 || this.sinceSwing < SIDE_SWING_CHAIN_SECONDS)) kind = this.kind === 'left' ? 'right' : 'left';
+    // Feature sideSwingRetrigger: consecutive side swings alternate sides.
+    if (this.features.sideSwingRetrigger && side(kind) && side(this.kind) && (this.swingLeft > 0 || this.sinceSwing < SIDE_SWING_CHAIN_SECONDS)) kind = this.kind === 'left' ? 'right' : 'left';
     // Directional attacks are single hits; plain clicks chain the combo.
     this.combo = kind === 'normal' && this.kind === 'normal' && this.sinceSwing < 0.3 && this.combo < 5 ? this.combo + 1 : 1;
     this.kind = kind;

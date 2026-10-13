@@ -1120,12 +1120,14 @@ export class WorldZone {
     if (!p || !alive(p) || p.hitUntil > this.tick || p.cast) return;
     p.blocking = false; // swinging lowers the shield until the next input re-raises it
     if (p.swing) {
-      // Side swings re-trigger 0.3 s into the previous one (the client alternates the side).
+      // Upper-body swings: clicks are dropped until the layer frees (no queue). Feature
+      // sideSwingRetrigger: a side swing re-triggers 0.3 s in (the client alternates the side).
       const side = (k: AttackKind) => k === 'left' || k === 'right';
-      if (!this.features.sideSwingFullClip && side(p.swing.kind) && side(kind) && this.tick - p.swing.start >= SIDE_SWING_RECHAIN_TICKS) {
+      if (this.features.sideSwingRetrigger && side(p.swing.kind) && side(kind) && this.tick - p.swing.start >= SIDE_SWING_RECHAIN_TICKS) {
         this.startPlayerSwing(p, kind);
         return;
       }
+      if (isLayeredSwing(p.swing.kind)) return;
       const t = p.swing.timing;
       if (this.tick - p.swing.start >= t.startup + t.active) {
         p.queuedAttack = true;

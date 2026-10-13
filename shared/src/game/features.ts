@@ -12,16 +12,16 @@ export interface GameplayFeatures {
    */
   reactiveBlock: boolean;
   /**
-   * Side swings play their whole clip before the next one starts (balance: they no longer
-   * outpace the combo). The original re-triggers a side swing mid-swing, 0.3 s into the
-   * previous one (executable-analysis §14.1b).
+   * A side swing re-triggers 0.3 s into the previous one and consecutive side swings alternate
+   * sides (an earlier reading of a capture). The original plays each upper-body swing whole and
+   * frees the layer before the next click counts (~0.91 s apart; executable-analysis §14.1b).
    */
-  sideSwingFullClip: boolean;
+  sideSwingRetrigger: boolean;
 }
 
 export const ORIGINAL_FEATURES: Readonly<GameplayFeatures> = {
   reactiveBlock: false,
-  sideSwingFullClip: false,
+  sideSwingRetrigger: false,
 };
 
 export type FeatureName = keyof GameplayFeatures;

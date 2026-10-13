@@ -19,7 +19,7 @@ the current value is a stand-in until a capture or a reading settles it).
 
 | System | Before | Original (evidence) | Now |
 |---|---|---|---|
-| Side swings (A/D + click) | each played its whole clip (balance request) | re-triggered mid-swing 0.3 s into the previous one, alternating sides (Frida, executable-analysis §14.1b) | **fixed**; old behaviour = feature `sideSwingFullClip` |
+| Side swings (A/D + click) | re-triggered 0.3 s in, alternating sides (a misread capture) | one upper-body SWING_LEVEL at a time, whole clip + layer fade (~0.83 s), clicks meanwhile dropped: ~0.91 s apart (controller 0x429BF0, layer update 0x428DD0, Frida 10 ms log; executable-analysis §14.1b) | **fixed**; the re-trigger = feature `sideSwingRetrigger` |
 | Reactive creature block | option on the zone only | skeletons raise the shield only in their stance, never in reaction (§15.2) | already off; now feature `reactiveBlock` |
 | Character shadows | silhouettes on by default | a shadow texture projected on the floor polygons (shadow routine 0x4ACA10, triage in local/PLANO_GEMINIREA.md); the round shadow is the closest we have | **fixed**: round shadow by default; silhouettes = setting (not original) |
 | Hit effects | sizes in tenths of a foot × 0.425 by eye, MOVE / GRAVITY per 30 Hz tick, no chips from creatures | from the code: 0.05 ft per size unit, MOVE ft/s, GRAVITY ft/s² turned by the flash heading, rotation in turns/s; a landed blow also throws 5 physical chips in the victim's texture (executable-analysis §8.6) | **fixed** (units and the chips); half size stays a setting `smallEffects` (not original) |

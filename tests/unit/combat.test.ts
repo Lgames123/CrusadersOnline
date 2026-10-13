@@ -3,6 +3,7 @@ import { WorldZone, type PersistRecord } from '@crusaders/server/simulation/worl
 import {
   ANIM,
   SIDE_SWING_RECHAIN_TICKS,
+  LAYERED_SWING_SECONDS,
   type GameplayFeatures,
   THRUST_WALL_DISTANCE,
   THRUST_WALL_HEIGHT,
@@ -204,7 +205,7 @@ describe('authoritative melee', () => {
 });
 
 describe('directional attacks (original controls)', () => {
-  it('plays side swings on the upper body (legs keep moving), re-triggers them 0.3 s in, keeps them out of the combo', () => {
+  it('plays side swings on the upper body (legs keep moving), whole, dropping clicks until the layer frees', () => {
     const t = setup();
     t.run(5); // away from the skeleton: a hit would interrupt the swing
     t.zone.attack(1, 'left');
@@ -212,42 +213,45 @@ describe('directional attacks (original controls)', () => {
     // Replicated as the legs' clip (side-stepping) plus the upper-body swing in the entity flags.
     expect(t.me().anim).toBe(ANIM.STRAFE_LEFT);
     expect((t.me().flags >> 1) & 3).toBe(1);
-    const parity = (t.me().flags >> 3) & 1;
-    t.zone.attack(1, 'right'); // too early: ignored (queued for after the swing)
-    t.run(SIDE_SWING_RECHAIN_TICKS);
-    t.zone.attack(1, 'right'); // 0.3 s in: the next side swing starts at once
+    const total = Math.round(LAYERED_SWING_SECONDS * 20);
+    expect(total).toBe(17); // ~0.83 s: the whole PN02 clip and the layer's fade
+    // Clicks during the swing are dropped, not queued.
+    for (let i = 0; i < total - 3; i++) {
+      if (i % 2 === 0) t.zone.attack(1, 'right');
+      t.run(1);
+    }
+    t.run(4);
+    expect((t.me().flags >> 1) & 3).toBe(0);
+    t.zone.attack(1, 'right'); // a click after the layer freed starts the next side swing
     t.run(1);
     expect((t.me().flags >> 1) & 3).toBe(2);
-    expect((t.me().flags >> 3) & 1).not.toBe(parity);
     t.run(40);
     t.zone.attack(1); // a plain click right after starts the combo at hit 1
     t.run(1);
     expect(t.me().anim).toBe(ANIM.ATTACK);
   });
 
-  it('feature sideSwingFullClip (not original): each side swing plays its whole clip', () => {
-    const t = setup({ features: { sideSwingFullClip: true } });
+  it('feature sideSwingRetrigger (not original): a side swing re-triggers 0.3 s in, alternating sides', () => {
+    const t = setup({ features: { sideSwingRetrigger: true } });
     t.run(5);
     t.zone.attack(1, 'left');
     t.run(1, INPUT.LEFT, 0);
     expect((t.me().flags >> 1) & 3).toBe(1);
+    const parity = (t.me().flags >> 3) & 1;
     t.run(SIDE_SWING_RECHAIN_TICKS);
-    t.zone.attack(1, 'right'); // mid-swing: not started at once, queued after the impact
-    t.run(1);
-    expect((t.me().flags >> 1) & 3).toBe(1);
-    t.run(20);
     t.zone.attack(1, 'right');
     t.run(1);
     expect((t.me().flags >> 1) & 3).toBe(2);
+    expect((t.me().flags >> 3) & 1).not.toBe(parity);
   });
 
   it('tells the client which non-original features are on (none by default)', () => {
     const plain = setup();
     const enter = plain.messages.find((m) => m.op === SC.WORLD_ENTER);
     expect(enter && 'features' in enter.d).toBe(false);
-    const on = setup({ features: { sideSwingFullClip: true } });
+    const on = setup({ features: { sideSwingRetrigger: true } });
     const msg = on.messages.find((m) => m.op === SC.WORLD_ENTER);
-    expect(msg?.op === SC.WORLD_ENTER && msg.d.features).toEqual({ sideSwingFullClip: true });
+    expect(msg?.op === SC.WORLD_ENTER && msg.d.features).toEqual({ sideSwingRetrigger: true });
   });
 });
 

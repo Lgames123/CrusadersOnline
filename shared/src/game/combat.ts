@@ -62,9 +62,17 @@ const DIRECTIONAL_CLIPS: Readonly<Record<'overhead' | 'left' | 'right' | 'low' |
   jump: { swing: 17, impact: 20, recovery: 24 },
 };
 /**
- * Consecutive side swings alternate sides (logged: holding D and clicking played 88, 87, 88, 87
- * while Drake kept side-stepping) and re-trigger mid-swing, 0.3 s into the previous one (clicks
- * 0.3-0.6 s apart). Feature sideSwingFullClip (off) plays each one's whole clip instead.
+ * Side swings and the air swing play SWING_LEVEL (PN02, ASM state 23) on the upper-body layer
+ * (player controller 0x429BF0, layer state 2) over the legs' movement. A new layer swing starts
+ * only once the layer is free: the clip plays whole (~0.745 s at speed 1, not scaled by the
+ * weapon), then the layer weight falls at 12/s (0x428DD0) and the layer clears. Clicks meanwhile
+ * are dropped; the next swing needs a click after that. Logged with clicks every ~90 ms: one
+ * side swing every ~0.91 s, either side, no alternation.
+ */
+export const LAYERED_SWING_SECONDS = 0.745 + 1 / 12;
+/**
+ * Feature sideSwingRetrigger (not original, an earlier misreading of a capture): a side swing
+ * re-triggers 0.3 s into the previous one and consecutive side swings alternate sides.
  */
 export const SIDE_SWING_CHAIN_SECONDS = 0.3;
 export const SIDE_SWING_RECHAIN_TICKS = Math.round(SIDE_SWING_CHAIN_SECONDS * TICK_RATE);
@@ -82,8 +90,12 @@ const CHAIN_SLACK_FRAMES = 3;
 export function attackTiming(kind: 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump' | 'thrust' | 'bash' | 'air', combo: number, weaponSpeed = 1): SwingTiming {
   if (kind === 'thrust') return clipSwingTiming(MOB_THRUST.clip, weaponSpeed);
   if (kind === 'bash') return clipSwingTiming(MOB_BASH.clip, weaponSpeed);
-  // The air swing is SWING_LEVEL (PN02), the second combo clip.
-  if (kind === 'air') return clipSwingTiming(COMBO_CLIPS[1]!, weaponSpeed);
+  // Side and air swings: SWING_LEVEL (PN02) on the upper-body layer, held until the layer frees.
+  if (kind === 'air' || kind === 'left' || kind === 'right') {
+    const t = clipSwingTiming(COMBO_CLIPS[1]!);
+    t.recovery = Math.max(1, Math.round(LAYERED_SWING_SECONDS * TICK_RATE) - t.startup - t.active);
+    return t;
+  }
   const c = kind === 'normal' ? COMBO_CLIPS[Math.min(Math.max(combo, 1), COMBO_CLIPS.length) - 1]! : DIRECTIONAL_CLIPS[kind];
   return clipSwingTiming(c, weaponSpeed);
 }
