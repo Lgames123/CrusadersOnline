@@ -1,5 +1,5 @@
 import type RAPIER from '@dimforge/rapier3d-deterministic-compat';
-import { ACTION_ATTACK, ACTION_BASH, ACTION_LUNGE, LUNGE_TICKS, ATTACK_CURVES, actionCurve, attackMotionTicks, curveTicks, hitReactionTicks, isAttackAction, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_LEFT_FORWARD, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_RIGHT_FORWARD, shieldHopTicks, curveAtTick, ROLL_CURVES, rollTicks as rollLength, advanceLoco, LOCO_CAREFUL_LEFT, LOCO_CAREFUL_RIGHT, LOCO_HOP_LEFT, LOCO_HOP_RIGHT, LOCO_RETREAT, LOCO_RUN, LOCO_SIDE_LEFT, LOCO_SIDE_RIGHT, LOCO_WALK, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, MAX_SLOPE_DEG, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
+import { IMPACT_VARIANTS, isHitAction, ACTION_ATTACK, ACTION_BASH, ACTION_LUNGE, LUNGE_TICKS, ATTACK_CURVES, actionCurve, attackMotionTicks, curveTicks, hitReactionTicks, isAttackAction, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_LEFT_FORWARD, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_RIGHT_FORWARD, shieldHopTicks, curveAtTick, ROLL_CURVES, rollTicks as rollLength, advanceLoco, LOCO_CAREFUL_LEFT, LOCO_CAREFUL_RIGHT, LOCO_HOP_LEFT, LOCO_HOP_RIGHT, LOCO_RETREAT, LOCO_RUN, LOCO_SIDE_LEFT, LOCO_SIDE_RIGHT, LOCO_WALK, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, MAX_SLOPE_DEG, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
 import type { Vec3 } from '../math/vec3.ts';
 import { dequantizeAngle } from '../math/quantize.ts';
 import { INPUT, INPUT_ATTACK_SHIFT } from '../protocol/opcodes.ts';
@@ -202,6 +202,12 @@ export function stepCharacter(
       const done = c.actionLength - c.rollTicks;
       roll = (curveAtTick(curve, done + 1, rate) - curveAtTick(curve, done, rate)) / dt;
     }
+    // A creature thrown sideways by its impact (ASM_IMPACT_LEFT_ALT_01).
+    const sideCurve = IMPACT_VARIANTS[c.rollDir]?.side;
+    if (sideCurve) {
+      const done = c.actionLength - c.rollTicks;
+      hop = (curveAtTick(sideCurve, done + 1, rate) - curveAtTick(sideCurve, done, rate)) / dt;
+    }
     let along = c.rollDir === 1 || c.rollDir === 2 || curve ? roll : hopForward;
     let side = c.rollDir === 3 || c.rollDir === 4 ? roll : hop;
     // Feature diagonalMoves (not original): shield + a diagonal hops along that diagonal.
@@ -378,7 +384,7 @@ function touchesWalkable(mw: MovementWorld): boolean {
 /** Length in ticks of a timed action that follows a curve or holds the character (0 otherwise). */
 function actionTicks(action: number, rate = 1): number {
   if (isAttackAction(action)) return attackMotionTicks(action - ACTION_ATTACK + 1, rate);
-  if (action >= 16 && action <= 18) return hitReactionTicks(action, rate);
+  if (isHitAction(action)) return hitReactionTicks(action, rate);
   if (action === ACTION_LUNGE) return LUNGE_TICKS;
   const curve = actionCurve(action);
   return curve ? curveTicks(curve, rate) : 0;

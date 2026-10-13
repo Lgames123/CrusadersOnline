@@ -19,6 +19,8 @@ export interface CapCreature {
   xp: number;
   disposition: number;
   resist: number[];
+  /** Facing (the transform's third row, x and z), original axes. */
+  facing: [number, number];
 }
 
 export type CapObjectKind = 'prop' | 'item' | 'sprite' | 'chest' | 'flag';
@@ -160,6 +162,8 @@ export function parseCap(bytes: Uint8Array, itemNames: ReadonlySet<string> = new
     if (!position.every(Number.isFinite)) continue;
     const resist: number[] = [];
     for (let i = 0; i < 11; i++) resist.push(Math.round(f32(x - 0x118 + 4 * i) * 1000) / 1000);
+    // The transform's 3x3 rotation sits just before the position; its third row is the facing.
+    const facing: [number, number] = [f32(x - 0x200 - 0xc), f32(x - 0x200 - 0x4)];
     creatures.push({
       type,
       name,
@@ -168,6 +172,7 @@ export function parseCap(bytes: Uint8Array, itemNames: ReadonlySet<string> = new
       xp: dv.getInt32(x + 4, true),
       disposition: dv.getInt32(x + 20, true),
       resist,
+      facing: facing.every(Number.isFinite) ? [Math.round(facing[0] * 1e4) / 1e4, Math.round(facing[1] * 1e4) / 1e4] : [0, 1],
     });
     a = x;
   }

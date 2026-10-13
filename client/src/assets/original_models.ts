@@ -47,6 +47,8 @@ interface ClipMap {
   hopRight?: string;
   /** Hit reactions: front, left, right, back (ASM_IMPACT_*). */
   impacts?: string[];
+  /** A creature's long impacts by ASM state id (IMPACT_FRONT_ALT_01, RIGHT_FRONT, TWO_STEPS_BACK, LOW_FRONT, LEFT_ALT_01). */
+  impactVariants?: Record<number, string>;
   /** Knock-down (ASM_IMPACT_SEVERE, PI02). */
   knockdown?: string;
   /** Shield bash (ASM_RAM_SHOULDER, PL01). */
@@ -85,6 +87,11 @@ function withStates(base: ClipMap, states: Record<string, string> | undefined): 
     hopRight: base.hopRight ?? st['ASM_HOP_R'] ?? base.strafeRight ?? base.run,
     impacts: base.impacts ?? ['FRONT', 'LEFT', 'RIGHT', 'BACK'].map((k) => st[`ASM_IMPACT_${k}`]).filter((c): c is string => !!c),
     knockdown: base.knockdown ?? st['ASM_IMPACT_SEVERE'],
+    impactVariants: base.impactVariants ?? Object.fromEntries(
+      ([[121, 'FRONT_ALT_01'], [119, 'RIGHT_FRONT'], [120, 'FRONT_TWO_STEPS_BACK'], [123, 'LOW_FRONT'], [122, 'LEFT_ALT_01']] as const)
+        .map(([id, k]) => [id, st[`ASM_IMPACT_${k}`]] as const)
+        .filter((e): e is readonly [121 | 119 | 120 | 123 | 122, string] => !!e[1]),
+    ),
     bash: base.bash ?? st['ASM_RAM_SHOULDER'],
     conjure: base.conjure ?? st['ASM_SPELL_CONJURE'],
     deaths: base.deaths ?? [st['ASM_HIT_POINTS_DEPLETED'] ?? base.death, ...[1, 2, 3, 4, 5, 6, 7, 8].map((i) => st[`ASM_HIT_POINTS_DEPLETED_ALT_0${i}`]).filter((c): c is string => !!c)],
@@ -300,9 +307,9 @@ class OriginalAvatar implements Avatar {
   }
 
   /** Hit reaction from a direction (0 front, 1 left, 2 right, 3 back), over the current state (a hit interrupts swings too). */
-  react(dir: number): void {
+  react(dir: number, state?: number): void {
     if (this.anim === ANIM.DEAD || this.anim === ANIM.KNOCKDOWN) return;
-    const name = this.map.impacts?.[dir] ?? this.map.impacts?.[0];
+    const name = (state !== undefined ? this.map.impactVariants?.[state] : undefined) ?? this.map.impacts?.[dir] ?? this.map.impacts?.[0];
     const clip = name ? this.clips.get(name) : undefined;
     if (!clip) return;
     this.play(clip, false, this.clipScale);
@@ -402,7 +409,9 @@ class OriginalAvatar implements Avatar {
     this.upperSwingKey = key;
     if (!kind || this.anim === ANIM.DEAD) return; // a swing ends with its clip
     const m = this.map;
-    const name = kind === 'left' ? m.attackLeft : kind === 'right' ? m.attackRight : (m.attacks[1] ?? m.attacks[0]);
+    // Side swings and the air swing (Drake); a creature's hop swing plays its own attack's clip.
+    const name = kind === 'left' ? m.attackLeft : kind === 'right' ? m.attackRight : kind === 'low' ? m.attackLow
+      : kind === 'overhead' ? m.attackOverhead : kind === 'normal' ? m.attacks[0] : (m.attacks[1] ?? m.attacks[0]);
     const clip = name ? this.clips.get(name) : undefined;
     if (!clip) return;
     const was = this.layered;

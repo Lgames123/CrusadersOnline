@@ -11,7 +11,12 @@ import {
   createMovementWorld,
   wallAhead,
   COMBO_MULTIPLIERS,
-  MOB_HOP_RANGE,
+  MOB_ENGAGE,
+  MOB_SHIELD_TICKS,
+  MOB_SPECIAL_ROLL,
+  chooseMobSequence,
+  chooseMobSpecial,
+  mobBand,
   PLAYER_RADIUS,
   PLAYER_REACH,
   DEFAULT_MOVEMENT_STATS,
@@ -48,6 +53,12 @@ beforeAll(async () => {
 
 const SKELETON = MOB_ARCHETYPES['skeleton_warrior']!;
 
+/** Deterministic pseudo-random source in [0, 1) (a small LCG). */
+function lcg(seed: number): () => number {
+  let x = seed >>> 0;
+  return () => ((x = (Math.imul(x, 1664525) + 1013904223) >>> 0) / 2 ** 32);
+}
+
 /** In-process zone with one player; captures JSON messages and persist requests. */
 function setup(opts: { experience?: number; inventory?: InventoryEntry[]; random?: () => number; reactiveBlock?: boolean; features?: Partial<GameplayFeatures> } = {}) {
   const messages: ServerControlMsg[] = [];
@@ -78,8 +89,11 @@ function setup(opts: { experience?: number; inventory?: InventoryEntry[]; random
   return { zone, run, mob, me, events, stats, inventories, persisted, entityId, messages };
 }
 
-/** Ticks of running that cover 6 m (towards the skeleton's aggro range). */
-const APPROACH = Math.ceil((6 / DEFAULT_MOVEMENT_STATS.runSpeed) * TICK_RATE);
+/**
+ * Ticks of running that cover 9.5 m: the skeleton (15 m away, facing away) notices a player
+ * behind it within 20 ft.
+ */
+const APPROACH = Math.ceil((9.5 / DEFAULT_MOVEMENT_STATS.runSpeed) * TICK_RATE);
 
 describe('original swing timing', () => {
   it('hits on each clip IMPACT frame at 1000/30 fps and chains five plain swings', () => {
@@ -116,9 +130,9 @@ describe('skeleton warrior AI', () => {
     t.run(APPROACH, INPUT.FORWARD, 0); // run towards -Z (mob at z = -15)
     t.run(40);
     expect(t.mob().state).toBe('chase');
-    // Closed in: within its lunge (forward hop) range, or already in reach.
+    // Closed in: within its engage distance, or already in reach.
     const gap = Math.hypot(t.mob().x - t.me().x, t.mob().z - t.me().z);
-    expect(gap).toBeLessThan(MOB_HOP_RANGE);
+    expect(gap).toBeLessThan(MOB_ENGAGE + 0.5);
   });
 
   it('gives up beyond its leash, walks home and stays idle', () => {
@@ -385,6 +399,7 @@ describe('inventory and equipment', () => {
         { slot: 2, itemId: 'long_sword', equipped: false },
         { slot: 3, itemId: 'scale_armor', equipped: false },
       ],
+      random: lcg(3),
     });
     t.zone.equip(1, 2, true);
     t.zone.equip(1, 3, true);
@@ -419,19 +434,95 @@ describe('inventory and equipment', () => {
   });
 });
 
-describe('skeleton lunge (original behaviour)', () => {
-  it('hops forward from range and swings straight after', () => {
+describe('skeleton melee brain (decompiled, 0x00409520)', () => {
+  it('walks in with its shield up, then hops in swinging on the upper body from 20 % of the hop', () => {
     const t = setup();
     t.run(APPROACH, INPUT.FORWARD, 0);
-    const anims: number[] = [];
+    const samples: { anim: number; flags: number; swinging: boolean; shield: boolean; gap: number }[] = [];
     for (let i = 0; i < 80; i++) {
       t.run(1);
-      anims.push(t.mob().anim);
+      samples.push({ ...t.mob(), gap: Math.hypot(t.mob().x - t.me().x, t.mob().z - t.me().z) });
     }
-    const hop = anims.indexOf(ANIM.HOP_FORWARD);
+    // Within 12 ft it walks in shield raised (the player stands, facing it).
+    expect(samples.some((s) => s.anim === ANIM.WALK && s.shield && s.gap < 12 * 0.3048)).toBe(true);
+    const hop = samples.findIndex((s) => s.anim === ANIM.HOP_FORWARD);
     expect(hop).toBeGreaterThanOrEqual(0);
-    const after = anims.slice(hop).find((a) => a !== ANIM.HOP_FORWARD);
-    expect([ANIM.ATTACK, ANIM.ATTACK_OVERHEAD, ANIM.ATTACK_LOW]).toContain(after);
+    // During the hop: the hop clip on the legs, a swing on the upper body (entity flags bits 1-2).
+    const during = samples.slice(hop).filter((s) => s.anim === ANIM.HOP_FORWARD);
+    expect(during.some((s) => s.swinging && ((s.flags >> 1) & 3) !== 0)).toBe(true);
+    expect(during[0]!.swinging).toBe(false);
+  });
+
+  it('attacks again at once after its pause when the player within 8 ft neither swings nor blocks', () => {
+    const t = setup();
+    t.run(APPROACH, INPUT.FORWARD, 0);
+    const starts: number[] = [];
+    let was = false;
+    for (let i = 0; i < 200 && t.me().alive; i++) {
+      t.run(1);
+      const sw = t.mob().swinging;
+      if (sw && !was) starts.push(i);
+      was = sw;
+    }
+    // The jab (500 ms pause after it) every ~1.2 s: no guard in between.
+    const gaps = starts.slice(2).map((s, k) => s - starts[k + 1]!);
+    expect(gaps.length).toBeGreaterThan(2);
+    for (const g of gaps) expect(g).toBeLessThanOrEqual(26);
+  });
+
+  it('guards after an attack against a player holding a shield; a stopped blow sends it back in', () => {
+    const t = setup({ random: lcg(7) });
+    t.run(APPROACH, INPUT.FORWARD, 0);
+    // Holding the shield up (frontal hits are stopped) until the skeleton guards after an attack.
+    let guarding = false;
+    for (let i = 0; i < 400 && !guarding && t.me().alive; i++) {
+      t.run(1, INPUT.BLOCK, 0);
+      guarding = t.mob().brain === 'post' && t.mob().shield;
+    }
+    expect(guarding).toBe(true);
+    t.zone.attack(1);
+    let blocked = false;
+    for (let i = 0; i < 12 && !blocked; i++) {
+      t.run(1);
+      blocked = t.events().some((e) => e.target === t.mob().id && e.blocked);
+    }
+    expect(blocked).toBe(true);
+    // The stopped blow ends the guard: the counter-attack follows within the shield clip.
+    let swung = false;
+    for (let i = 0; i < MOB_SHIELD_TICKS && !swung; i++) {
+      t.run(1);
+      swung = t.mob().swinging;
+    }
+    expect(swung).toBe(true);
+  });
+
+  it('chooses its sequences as the original (0x004083F0) and its specials against a raised shield (0x004087A0)', () => {
+    const ft = 0.3048;
+    // Beyond 7 ft: the hop, its swing on the upper body, the rest standing; pauses 500 / 700 / 900 ms.
+    expect(chooseMobSequence(7.5 * ft, 0)).toMatchObject({ hop: true, upper: { kind: 'overhead' }, main: [], pauseMs: 500 });
+    expect(chooseMobSequence(7.5 * ft, 3 / 12)).toMatchObject({ hop: true, upper: { kind: 'normal' }, main: [{ kind: 'overhead' }], pauseMs: 700 });
+    expect(chooseMobSequence(7.5 * ft, 0.99)).toMatchObject({ hop: true, upper: { kind: 'overhead' }, main: [{ kind: 'low' }, { kind: 'normal' }], pauseMs: 900 });
+    // Under 5 ft the jab; 5-7 ft swings where it stands.
+    expect(chooseMobSequence(4 * ft, 0.5)).toMatchObject({ hop: false, main: [{ kind: 'thrust' }], pauseMs: 500 });
+    expect(chooseMobSequence(6 * ft, 8 / 12)).toMatchObject({ hop: false, upper: null, main: [{ kind: 'low' }, { kind: 'normal' }, { kind: 'overhead' }] });
+    expect(chooseMobSpecial(true, 0)).toMatchObject({ main: [{ kind: 'bash' }, { kind: 'thrust' }] });
+    expect(chooseMobSpecial(true, 0.7)).toMatchObject({ main: [{ kind: 'jump' }] });
+    expect(chooseMobSpecial(false, 0)).toMatchObject({ main: [{ kind: 'jump' }] });
+    expect(MOB_SPECIAL_ROLL).toBe(0.8);
+    expect([7.9, 8.1, 12.5, 21].map((f) => mobBand(f * ft))).toEqual([0, 1, 2, 3]);
+  });
+
+  it('notices a player 100 ft ahead within 60 degrees, otherwise only within 20 ft', () => {
+    const t = setup();
+    // The skeleton (z = -15) faces -Z, away from the player at z = 0: 49 ft behind it.
+    t.run(20);
+    expect(t.mob().state).toBe('idle');
+    t.run(Math.ceil((7 / DEFAULT_MOVEMENT_STATS.runSpeed) * TICK_RATE), INPUT.FORWARD, 0); // 26 ft behind
+    t.run(5);
+    expect(t.mob().state).toBe('idle');
+    t.run(Math.ceil((2.5 / DEFAULT_MOVEMENT_STATS.runSpeed) * TICK_RATE), INPUT.FORWARD, 0); // under 20 ft
+    t.run(2);
+    expect(t.mob().state).toBe('chase');
   });
 });
 
@@ -450,7 +541,7 @@ describe('character spacing', () => {
 
 describe('hit reactions (original rules)', () => {
   it('a landed hit puts the player in an impact and stops the creature for its impact', () => {
-    const t = setup();
+    const t = setup({ random: lcg(5) });
     t.run(APPROACH, INPUT.FORWARD, 0);
     let hitMe = false;
     for (let i = 0; i < 400 && !hitMe; i++) {
@@ -465,7 +556,7 @@ describe('hit reactions (original rules)', () => {
     let hitMob = false;
     for (let i = 0; i < 600 && !hitMob && t.mob().alive; i++) {
       const n = t.events().length;
-      t.run(1, 0, 0, () => i % 25 === 0 && t.zone.attack(1));
+      t.run(1, 0, 0, () => i % 7 === 0 && t.zone.attack(1));
       hitMob = t.events().slice(n).some((e) => e.target === t.mob().id && e.damage > 0 && !e.killed);
     }
     expect(hitMob).toBe(true);
@@ -476,7 +567,7 @@ describe('hit reactions (original rules)', () => {
 });
 
 describe('skeleton shield AI', () => {
-  it('does not raise its shield in reaction to a swing (the logged original never did)', () => {
+  it('does not raise its shield in reaction to a swing (the original only guards after its own attack)', () => {
     const t = setup({ random: () => 0.68 });
     t.run(APPROACH, INPUT.FORWARD, 0);
     t.run(30);
@@ -489,12 +580,12 @@ describe('skeleton shield AI', () => {
   });
 
   it('optional reactive block: raises the shield against a frontal swing, then lowers it', () => {
-    // 0.68 passes the 35% block roll but not the step-back / leap rolls.
+    // 0.68 passes the 35% block roll.
     const t = setup({ random: () => 0.68, reactiveBlock: true });
     t.run(APPROACH, INPUT.FORWARD, 0);
     t.run(30);
     const gap = () => Math.hypot(t.mob().x - t.me().x, t.mob().z - t.me().z);
-    for (let i = 0; i < 80 && (t.mob().swinging || gap() > PLAYER_REACH + 0.3); i++) t.run(1);
+    for (let i = 0; i < 80 && (t.mob().swinging || t.me().anim === ANIM.HIT || gap() > PLAYER_REACH + 0.3); i++) t.run(1);
     t.zone.attack(1);
     t.run(12);
     const first = t.events().filter((e) => e.target === t.mob().id);
@@ -506,25 +597,6 @@ describe('skeleton shield AI', () => {
       anims.push(t.mob().anim);
     }
     expect(anims.some((a) => a !== ANIM.BLOCK)).toBe(true);
-  });
-
-  it('raises the shield for 0.82 s after its 0.5 s stance; frontal hits then are blocked, others land', () => {
-    // 0.68 passes the stance-shield roll, not the step-back / leap rolls.
-    const t = setup({ random: () => 0.68 });
-    t.run(APPROACH, INPUT.FORWARD, 0);
-    t.run(30);
-    // Swing as soon as the stance shield is up (it stays up 0.82 s); otherwise wait.
-    for (let i = 0; i < 600 && t.mob().alive; i++) {
-      const up = t.mob().shield;
-      t.run(1, 0, 0, () => up && t.zone.attack(1));
-      if (t.events().some((e) => e.target === t.mob().id && e.blocked)) break;
-    }
-    // ...then keep swinging until one lands.
-    const landed = () => t.events().some((e) => e.target === t.mob().id && !e.blocked && e.damage > 0);
-    for (let i = 0; i < 600 && t.mob().alive && !landed(); i++) t.run(1, 0, 0, () => i % 5 === 0 && t.zone.attack(1));
-    const onMob = t.events().filter((e) => e.target === t.mob().id);
-    expect(onMob.some((e) => e.blocked)).toBe(true);
-    expect(onMob.some((e) => !e.blocked && e.damage > 0)).toBe(true);
   });
 });
 

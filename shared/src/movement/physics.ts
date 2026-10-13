@@ -50,6 +50,15 @@ export function wallDistance(mw: MovementWorld, feet: { x: number; y: number; z:
   return hit ? hit.timeOfImpact : null;
 }
 
+/** Whether level geometry lies between two points `height` above their feet. */
+export function lineOfSight(mw: MovementWorld, from: { x: number; y: number; z: number }, to: { x: number; y: number; z: number }, height: number): boolean {
+  const d = { x: to.x - from.x, y: to.y - from.y, z: to.z - from.z };
+  const len = Math.hypot(d.x, d.y, d.z);
+  if (len < 1e-6) return true;
+  const ray = new mw.rapier.Ray({ x: from.x, y: from.y + height, z: from.z }, { x: d.x / len, y: d.y / len, z: d.z / len });
+  return mw.world.castRay(ray, len, true, undefined, CHARACTER_GROUPS) === null;
+}
+
 /** Builds the static collision world for a level. Identical on client and server. */
 export function createMovementWorld(rapier: Rapier, arena: ArenaDef): MovementWorld {
   const world = new rapier.World({ x: 0, y: 0, z: 0 }); // gravity is applied by the controller, not the solver

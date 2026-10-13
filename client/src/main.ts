@@ -214,7 +214,7 @@ async function main(): Promise<void> {
             // Hit reaction from the attacker's side (ASM_IMPACT_FRONT/LEFT/RIGHT/BACK).
             const from = mine ? player?.object : remotes.byId.get(e.attacker)?.avatar.object;
             const avatar = isMe ? player?.avatar : target?.avatar;
-            if (from && avatar?.react && !e.blocked && !e.killed && e.damage > 0) avatar.react(impactSide(obj, from));
+            if (from && avatar?.react && !e.blocked && !e.killed && e.damage > 0) avatar.react(impactSide(obj, from), e.impact);
             if (e.rush) {
               // Shield rush contact: the shield's thud and a blunt impact on the target's material.
               const sfx = CREATURE_SFX[target?.info.archetype ?? ''];

@@ -4,6 +4,7 @@ import {
   MOB_ARCHETYPES,
   TICK_DT,
   UPPER_SWING_CODES,
+  MOB_UPPER_SWING_CODES,
   type ClientSession,
   type EntityInfo,
   type RemoteSample,
@@ -101,7 +102,8 @@ export class RemoteEntities {
       e.avatar.setShield?.((this.sample.flags & 1) !== 0);
       this.updateLight(e.id, (this.sample.flags >> 4) & 3, e.avatar.object.position);
       const upper = (this.sample.flags >> 1) & 3;
-      e.avatar.setUpperSwing?.(upper ? UPPER_SWING_CODES[upper - 1]! : null, (this.sample.flags >> 3) & 1);
+      const codes = e.info.kind === 'mob' ? MOB_UPPER_SWING_CODES : UPPER_SWING_CODES;
+      e.avatar.setUpperSwing?.(upper ? codes[upper - 1]! : null, (this.sample.flags >> 3) & 1);
       e.avatar.update(dt);
     }
   }

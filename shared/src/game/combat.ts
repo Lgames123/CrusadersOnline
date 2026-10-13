@@ -107,99 +107,139 @@ export function attackTiming(kind: 'normal' | 'overhead' | 'left' | 'right' | 'l
   return clipSwingTiming(c, rate);
 }
 
+const FT = 0.3048;
+type MobSwingKind = 'overhead' | 'normal' | 'low';
 /**
- * Creature melee as logged from the running game's AI (every SetNextState request of the
- * skeletons, executable-analysis.md §15.2): they run beyond ~12 ft, walk in combat stance
- * inside it, hop forward (ASM_HOP_F) from ~8 ft and swing when the hop ends. Swings are the
- * clips bound to their ASM states: SWING_LEVEL (PN02), CHOP_LOW (PN01), SWING_OVERHEAD (PN03),
- * opening a chain in about 45 / 37 / 18 % of the hops. The order is also the chain order: a
- * second swing follows low -> level, level -> overhead, overhead -> low or level (9 / 8 in four
- * logs). Same-creature bursts of attacks <= 1.3 s apart: 1 (73 %), 2 (23 %), 3 (3 %).
+ * A creature attack: its ASM state's attack kind, the clip's SWING / IMPACT / RECOVERY frames
+ * and its reach (centre to centre, metres).
  */
-export const MOB_ATTACKS: readonly { kind: 'overhead' | 'normal' | 'low'; weight: number; clip: ClipEvents }[] = [
-  { kind: 'normal', weight: 0.45, clip: { swing: 7, impact: 8, recovery: 13 } },
-  { kind: 'low', weight: 0.37, clip: { swing: 14, impact: 16, recovery: 19 } },
-  { kind: 'overhead', weight: 0.18, clip: { swing: 10, impact: 12, recovery: 16 } },
+export interface MobAttack {
+  kind: 'normal' | 'overhead' | 'low' | 'thrust' | 'bash' | 'jump';
+  clip: ClipEvents;
+  reach: number;
+}
+/**
+ * Reach of the creature attacks: the executable's attack table (.data 0x004EA200: state, angle
+ * range, reach in feet) gives SWING_OVERHEAD and SWING_LEVEL 7.5 ft, CHOP_LOW and THRUST 6 ft.
+ * (The aim lookup that would read it, 0x004619E0, is a stub; the original's hits come from the
+ * blade's sweep. Logged skeleton hits landed at 4.0-5.25 ft, a lower bound.)
+ */
+const reachFt = (ft: number) => ft * FT;
+/** Creature swings: the clips bound to SWING_LEVEL (PN02), CHOP_LOW (PN01) and SWING_OVERHEAD (PN03). */
+export const MOB_ATTACKS: readonly MobAttack[] = [
+  { kind: 'normal', clip: { swing: 7, impact: 8, recovery: 13 }, reach: reachFt(7.5) },
+  { kind: 'low', clip: { swing: 14, impact: 16, recovery: 19 }, reach: reachFt(6) },
+  { kind: 'overhead', clip: { swing: 10, impact: 12, recovery: 16 }, reach: reachFt(7.5) },
 ];
-/** Chain order of the creature swings (next swing after each kind; overhead goes on with low or level). */
-export const MOB_CHAIN_NEXT: Readonly<Record<'overhead' | 'normal' | 'low', readonly ('overhead' | 'normal' | 'low')[]>> = {
-  low: ['normal'],
-  normal: ['overhead'],
-  overhead: ['low', 'normal'],
-};
+const mobSwing = (k: MobSwingKind): MobAttack => MOB_ATTACKS.find((a) => a.kind === k)!;
 /** Close-range jab (ASM_THRUST, PP02: SWING 6, RECOVERY 17; no IMPACT event, hit on frame 9). */
-export const MOB_THRUST = { kind: 'thrust' as const, clip: { swing: 6, impact: 9, recovery: 17 } };
-/**
- * Standing in combat stance closer than this, a creature jabs (ASM_THRUST, requested at
- * 4.0-4.7 ft) instead of hopping in, once per stance (~1.1 s apart while the target stays).
- */
-export const MOB_THRUST_RANGE = 4.8 * 0.3048;
+export const MOB_THRUST: MobAttack = { kind: 'thrust', clip: { swing: 6, impact: 9, recovery: 17 }, reach: reachFt(6) };
 /**
  * Shield bash (ASM_RAM_SHOULDER, PL01: 24 frames, no events; the charge covers 6.5 ft by
- * frame 11). Logged twice in ~90 stance decisions within 8 ft (4-5.7 ft): the player was
- * stunned (ASM_IMPACT_MEDIUM) without damage.
+ * frame 11). Logged: the player was stunned (ASM_IMPACT_MEDIUM) without damage.
  */
-export const MOB_BASH = { kind: 'bash' as const, clip: { swing: 4, impact: 9, recovery: 24 } };
-export const MOB_BASH_CHANCE = 0.02;
+export const MOB_BASH: MobAttack = { kind: 'bash', clip: { swing: 4, impact: 9, recovery: 24 }, reach: reachFt(6) };
 /**
  * Drake's shield rush (Space + RMB in the game's Readme): the same PL01 charge. Logged live: a
  * creature it meets reels back (IMPACT_BACK) and ~0.5 s later is knocked down (IMPACT_SEVERE,
  * ~1.3-1.9 s) without losing HP, while Drake loses 1 HP per tick of contact (2-5 per rush).
  */
 export const RUSH_CONTACT_TICKS: readonly [number, number] = [2, 8];
-export const RUSH_REACH = 3 * 0.3048;
-export const MOB_BASH_RANGE = 5.8 * 0.3048;
-/** Leaping strike (ASM_JUMP_ATTACK): taken instead of the hop in ~15 % of approaches at ~7.5 ft. */
-export const MOB_JUMP_ATTACK = { kind: 'jump' as const, clip: { swing: 17, impact: 20, recovery: 24 } };
-export const MOB_JUMP_ATTACK_CHANCE = 0.12;
-/**
- * From the stance at 5-7 ft a creature swings straight away (no hop): SWING_OVERHEAD, SWING_LEVEL
- * and CHOP_LOW were requested 12 / 9 / 8 times at 5.0-7.0 ft in three logs (~32 % of the stance
- * decisions); beyond that it hops in first.
- */
-export const MOB_SWING_RANGE = 7 * 0.3048;
-/**
- * Attack rhythm logged in the original: chains of 1 (74 %) or 2 (26 %) swings. After each
- * action the creature stands 0.5 s in combat stance; in about half the stances it then raises
- * its shield (upper-body layer, ASM_BLOCK) for 0.82 s and attacks as it lowers it. The shield
- * was never raised in reaction to the player's swings.
- */
-export const MOB_CHAIN_WEIGHTS = [0.74, 0.26] as const;
-export const MOB_STANCE_TICKS = Math.round(0.5 * TICK_RATE);
-export const MOB_SHIELD_TICKS = Math.round(0.82 * TICK_RATE);
-export const MOB_SHIELD_CHANCE = 0.55;
-/**
- * Inside 8 ft, after its stance, a creature sometimes steps back (ASM_RETREAT) instead of
- * attacking, and keeps retreating until it is 8 ft away (logged: every retreat ended at
- * 8.0-8.2 ft), then walks in and hops again.
- */
-export const MOB_RETREAT_CHANCE = 0.12;
-export const MOB_RETREAT_RANGE = 8 * 0.3048;
-/** Upper bound of a retreat (it stops at 8 ft; this only stops it against a wall). */
-export const MOB_RETREAT_TICKS = Math.round(1.5 * TICK_RATE);
+export const RUSH_REACH = 3 * FT;
+/** Leaping strike (ASM_JUMP_ATTACK, PN05). */
+export const MOB_JUMP_ATTACK: MobAttack = { kind: 'jump', clip: { swing: 17, impact: 20, recovery: 24 }, reach: reachFt(7.5) };
 
-/** Distance (centre to centre, m) inside which a creature walks in combat stance instead of running (logged 8-12 ft). */
-export const MOB_COMBAT_RANGE = 12 * 0.3048;
-/** Distance from which a creature lunges with a forward hop before swinging (logged 7.5-8 ft). */
-export const MOB_HOP_RANGE = 8 * 0.3048;
-/** ASM_HOP_F (PC07): 5.65 ft of root motion; the swing was requested 0.9-1.06 s after the hop. */
+/**
+ * The original's melee brain (decompiled: 0x00409520 and the routines it runs). Distances are
+ * centre to centre, in bands (0x0040E6B0): up to 8 ft, 12 ft, 20 ft, beyond.
+ */
+export const MOB_BAND_FT: readonly number[] = [8, 12, 20];
+export function mobBand(distance: number): 0 | 1 | 2 | 3 {
+  const ft = distance / FT;
+  return ft <= MOB_BAND_FT[0]! ? 0 : ft <= MOB_BAND_FT[1]! ? 1 : ft <= MOB_BAND_FT[2]! ? 2 : 3;
+}
+/**
+ * Distance a creature closes to before it attacks (0x0040EA30): 8 ft; dwarves (types 124-130,
+ * 161) 4.2 ft; Dasher Scout / Brute, Deceiver and Tamris (132-134, 148) 5 ft.
+ */
+export const MOB_ENGAGE = 8 * FT;
+/**
+ * Attack choice (0x004083F0): beyond 7 ft a creature with a forward hop hops in; under 5 ft it
+ * jabs; otherwise it swings where it stands. A roll of 12 picks the sequence: one swing (3 of
+ * 12, 500 ms pause after), two (5 of 12, 700 ms) or three (4 of 12, 900 ms). Hopping, the first
+ * swing plays on the upper body from 20 % of the hop (behaviour templates 14-16) and the rest
+ * standing after it; the one-swing hop ends in the combat stance.
+ */
+export const MOB_HOP_ATTACK_RANGE = 7 * FT;
+export const MOB_THRUST_ATTACK_RANGE = 5 * FT;
+const MOB_SEQUENCES: readonly (readonly MobSwingKind[])[] = [
+  ['overhead'], ['low'], ['normal'],
+  ['normal', 'overhead'], ['low', 'overhead'], ['normal', 'normal'], ['overhead', 'normal'], ['overhead', 'low'],
+  ['low', 'normal', 'overhead'], ['normal', 'normal', 'overhead'], ['overhead', 'low', 'low'], ['overhead', 'low', 'normal'],
+];
+/** Pause in the combat stance after a sequence of 1 / 2 / 3 attacks (the templates' times). */
+export const MOB_SEQUENCE_PAUSE_MS: readonly number[] = [500, 700, 900];
+/** ASM_HOP_F (PC07): 33 frames at 1000/30 fps, 5.65 ft of root motion. */
 export const MOB_HOP_TICKS = LUNGE_TICKS;
-/** Share of hops that end in the combat stance without a swing (logged 11 of 43). */
-export const MOB_HOP_NO_SWING_CHANCE = 0.25;
+/** The hop's first swing starts at 20 % of ASM_HOP_F. */
+export const MOB_HOP_SWING_DELAY = Math.round(0.2 * LUNGE_TICKS);
 
-/** Picks a creature attack with `roll` in [0, 1). */
-export function pickMobAttack(roll: number): (typeof MOB_ATTACKS)[number] {
-  let acc = 0;
-  for (const a of MOB_ATTACKS) if (roll < (acc += a.weight)) return a;
-  return MOB_ATTACKS[0]!;
+export interface MobSequence {
+  /** Opens with the forward hop. */
+  hop: boolean;
+  /** Played on the upper body from 20 % of the hop. */
+  upper: MobAttack | null;
+  /** Played one after another (after the hop when there is one). */
+  main: MobAttack[];
+  /** Combat-stance pause once the sequence is over, ms. */
+  pauseMs: number;
 }
 
-/** The swing that follows `kind` in a creature chain (`roll` in [0, 1) picks among the options). */
-export function nextMobAttack(kind: 'overhead' | 'normal' | 'low', roll = 0): (typeof MOB_ATTACKS)[number] {
-  const options = MOB_CHAIN_NEXT[kind];
-  const next = options[Math.min(options.length - 1, Math.floor(roll * options.length))]!;
-  return MOB_ATTACKS.find((a) => a.kind === next)!;
+/** The attack sequence for a creature `distance` metres from its target (`roll` in [0, 1)). */
+export function chooseMobSequence(distance: number, roll: number, canHop = true): MobSequence {
+  const r = Math.min(11, Math.floor(roll * 12));
+  if (distance > MOB_HOP_ATTACK_RANGE && canHop) {
+    const [first, ...rest] = MOB_SEQUENCES[r]!;
+    return { hop: true, upper: mobSwing(first!), main: rest.map(mobSwing), pauseMs: MOB_SEQUENCE_PAUSE_MS[rest.length]! };
+  }
+  if (distance < MOB_THRUST_ATTACK_RANGE) return { hop: false, upper: null, main: [MOB_THRUST], pauseMs: MOB_SEQUENCE_PAUSE_MS[0]! };
+  const seq = MOB_SEQUENCES[r]!;
+  return { hop: false, upper: null, main: seq.map(mobSwing), pauseMs: MOB_SEQUENCE_PAUSE_MS[seq.length - 1]! };
 }
+
+/**
+ * Against a target holding its shield up, one attack decision in five (a roll of 1000 above
+ * 800, 0x00409920) is a special (0x004087A0): a shielded creature rams with the shield and jabs
+ * (2 of 3) or leaps (1 of 3); one without a shield leaps.
+ */
+export const MOB_SPECIAL_ROLL = 0.8;
+export function chooseMobSpecial(hasShield: boolean, roll: number): MobSequence {
+  if (hasShield && Math.floor(roll * 3) < 2) return { hop: false, upper: null, main: [MOB_BASH, MOB_THRUST], pauseMs: MOB_SEQUENCE_PAUSE_MS[1]! };
+  return { hop: false, upper: null, main: [MOB_JUMP_ATTACK], pauseMs: MOB_SEQUENCE_PAUSE_MS[0]! };
+}
+
+/**
+ * After a sequence a shielded creature (0x00409C30) attacks again at once if its target is
+ * within 8 ft and neither swinging nor blocking; otherwise it raises its shield (template 17:
+ * COMBAT_STANDING with ASM_BLOCK, PE07, on the upper body) for the block clip, 26 frames.
+ */
+export const MOB_SHIELD_TICKS = Math.round((26 / ORIGINAL_CLIP_FPS) * TICK_RATE);
+/**
+ * One without a shield (0x0040A500), for up to 1.5 s: steps back (ASM_RETREAT) while within
+ * 8 ft, stands in its combat stance at 8-12 ft, and decides again early once the target is
+ * beyond 12 ft or has turned away (more than 90 degrees).
+ */
+export const MOB_POST_TICKS = Math.round(1.5 * TICK_RATE);
+/** Body turn towards the heading the brain sets (0x004918E0, standing): 270 degrees a second. */
+export const MOB_TURN_RATE = (270 * Math.PI) / 180;
+/**
+ * Noticing the player (0x0040D910, hostile creatures): within 100 ft when the player is less
+ * than 60 degrees off the creature's heading, 20 ft otherwise, and in sight (a ray through the
+ * level, 0x00406AF0).
+ */
+export const MOB_SIGHT_RANGE = 100 * FT;
+export const MOB_SIGHT_HALF_ANGLE = (60 * Math.PI) / 180;
+export const MOB_NEAR_SENSE_RANGE = 20 * FT;
 
 export function clipSwingTiming(c: Readonly<ClipEvents>, weaponSpeed = 1): SwingTiming {
   const s = weaponSpeed > 0 ? weaponSpeed : 1;
@@ -215,11 +255,12 @@ export const COMBO_WINDOW_TICKS = ticks(300);
 /** Five-hit combo; every step uses the normal attack mode (the 1.25 mode is a difficulty setting). */
 export const COMBO_MULTIPLIERS = [1, 1, 1, 1, 1].map(() => ATTACK_MODE_SCALE.normal);
 /**
- * Melee reach beyond the target's radius and arc, from 18 hits captured in the running game
- * (executable-analysis.md §14): hits landed up to 5.95 ft centre to centre and up to ~40° off
- * the attacker's heading. These are lower bounds (few attempts at longer range).
+ * Melee reach beyond the target's radius and arc. Captured hits landed up to 5.95 ft centre to
+ * centre and ~40° off the heading, and a head-on swing missed at 7.6 ft (executable-analysis.md
+ * §14.1); within that bracket, 7.5 ft: the reach the executable's attack table gives the same
+ * humanoid swing on a creature (MOB_ATTACKS).
  */
-export const PLAYER_REACH = 6 * 0.3048 - 0.4;
+export const PLAYER_REACH = 7.5 * 0.3048 - 0.4;
 export const PLAYER_ARC_DEG = 90;
 
 export const PLAYER_RESPAWN_TICKS = ticks(5000);
@@ -257,14 +298,13 @@ export interface MobArchetype {
   blockCooldown: number;
   /** Chase speed, m/s. */
   speed: number;
-  aggroRadius: number;
+  /** Distance it closes to before attacking (0x0040EA30; MOB_ENGAGE unless the type says otherwise). */
+  engage: number;
   /** Distance from its spawn beyond which the mob gives up and returns. */
   leashRadius: number;
   reach: number;
   arcDeg: number;
   swing: SwingTiming;
-  /** Minimum ticks between the end of one swing and the start of the next. */
-  cooldown: number;
   xpReward: number;
   goldMin: number;
   goldMax: number;
@@ -279,8 +319,8 @@ export interface MobArchetype {
 /**
  * Melee creatures of the original levels. Loadouts come from the creature template table
  * (executable-analysis.md §9.1); HP, XP and resists are overridden per placement in original
- * levels (the values here are each type's most common placement). AI, swing timings, loot and
- * shield behaviour are slice values shared with the skeleton.
+ * levels (the values here are each type's most common placement). They share the original's melee
+ * brain (MOB_* above) with their type's engage distance; loot is a slice value.
  */
 function meleeVariant(base: MobArchetype, over: Partial<MobArchetype> & Pick<MobArchetype, 'id' | 'name'>): MobArchetype {
   return { ...base, loot: [], ...over };
@@ -299,14 +339,13 @@ const SKELETON_WARRIOR: MobArchetype = {
   blockTicks: ticks(700),
   blockCooldown: ticks(1500),
   speed: 4.2,
-  aggroRadius: 10,
+  engage: MOB_ENGAGE,
   // Skeletons followed the player for more than 75 m in the original.
   leashRadius: 80,
   // Skeleton hits on the player were captured from 4.0 to 5.25 ft centre to centre.
   reach: 5.25 * 0.3048 - 0.4,
   arcDeg: 90,
   swing: { startup: ticks(400), active: ticks(150), recovery: ticks(500) },
-  cooldown: ticks(300),
   xpReward: 40,
   goldMin: 5,
   goldMax: 10,
@@ -341,7 +380,7 @@ export const MOB_ARCHETYPES: Record<string, MobArchetype> = {
   }),
   // Dasher Brute: Dasher Weapon; 30 HP, 50 XP (201 of 273 placements).
   dasher_brute: meleeVariant(SKELETON_WARRIOR, {
-    id: 'dasher_brute', name: 'Dasher Brute', maxHp: 30, xpReward: 50, weapon: 'dasher_weapon', shield: null,
+    id: 'dasher_brute', name: 'Dasher Brute', maxHp: 30, xpReward: 50, weapon: 'dasher_weapon', shield: null, engage: 5 * 0.3048,
     resist: [0.8, 1.2, 1, 1, 1, 1, 0.75, 1, 0.75, 0, 0],
   }),
   // Ogre Outlaw: Battle Axe; 100 HP, 75 XP.
@@ -351,12 +390,12 @@ export const MOB_ARCHETYPES: Record<string, MobArchetype> = {
   }),
   // Dwarf Ironpick Rebel: War Hammer + Metal Shield; 40 HP, 60 XP.
   dwarf_rebel: meleeVariant(SKELETON_WARRIOR, {
-    id: 'dwarf_rebel', name: 'Dwarf Ironpick Rebel', maxHp: 40, xpReward: 60, weapon: 'war_hammer', shield: 'metal_shield',
+    id: 'dwarf_rebel', name: 'Dwarf Ironpick Rebel', maxHp: 40, xpReward: 60, weapon: 'war_hammer', shield: 'metal_shield', engage: 4.2 * 0.3048,
     resist: [0.9, 0.8, 1, 1, 0.5, 1, 0.8, 1, 0.8, 0, 0],
   }),
   // Dwarf Ironpick Zealot: Battle Axe + Metal Shield; 60 HP, 100 XP.
   dwarf_zealot: meleeVariant(SKELETON_WARRIOR, {
-    id: 'dwarf_zealot', name: 'Dwarf Ironpick Zealot', maxHp: 60, xpReward: 100, weapon: 'battle_axe', shield: 'metal_shield',
+    id: 'dwarf_zealot', name: 'Dwarf Ironpick Zealot', maxHp: 60, xpReward: 100, weapon: 'battle_axe', shield: 'metal_shield', engage: 4.2 * 0.3048,
     resist: [0.75, 0.5, 1, 1, 0.5, 1, 0.5, 1, 0.5, 0, 0],
   }),
   // Ice Titan: Club; 125 HP, 150 XP.
@@ -371,7 +410,7 @@ export const MOB_ARCHETYPES: Record<string, MobArchetype> = {
   }),
   // Deceiver: Mace (a caster; spells not implemented); 201 HP, 250 XP.
   deceiver: meleeVariant(SKELETON_WARRIOR, {
-    id: 'deceiver', name: 'Deceiver', maxHp: 201, xpReward: 250, weapon: 'mace', shield: null,
+    id: 'deceiver', name: 'Deceiver', maxHp: 201, xpReward: 250, weapon: 'mace', shield: null, engage: 5 * 0.3048,
     resist: [0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 1, 0],
   }),
 };

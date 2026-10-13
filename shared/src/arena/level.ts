@@ -24,6 +24,8 @@ export interface LevelCreature {
   xp: number;
   disposition: number;
   resist: number[];
+  /** Facing direction (x, z), Z mirrored; absent in placements converted before it was read. */
+  facing?: [number, number];
 }
 
 export interface LevelObject {
@@ -337,6 +339,7 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
         ...(c.hp > 0 ? { hp: c.hp } : {}),
         // Citizens (disposition 1) stroll about their place; guards and merchants stand.
         ...(c.disposition === 1 ? { wander: true } : {}),
+        ...(c.facing ? { yaw: Math.atan2(-c.facing[0], -c.facing[1]) } : {}),
       });
       continue;
     }
@@ -350,6 +353,7 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
       hp: c.hp,
       xp: c.xp,
       resist: c.resist,
+      ...(c.facing ? { yaw: Math.atan2(-c.facing[0], -c.facing[1]) } : {}),
     });
   }
   const objects: WorldObjectDef[] = [];

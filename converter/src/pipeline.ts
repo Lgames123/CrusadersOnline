@@ -64,7 +64,7 @@ export interface ConvertReport {
   warnings: string[];
 }
 
-const MANIFEST_VERSION = '1.12.0'; // 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers; 1.9: door sounds; 1.10: lightmap UVs at 16 bytes a vertex; 1.11: lightmap seams stitched; 1.12: prop model boxes, model names in lower case
+const MANIFEST_VERSION = '1.13.0'; // 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers; 1.9: door sounds; 1.10: lightmap UVs at 16 bytes a vertex; 1.11: lightmap seams stitched; 1.12: prop model boxes, model names in lower case; 1.13: creature facing
 /** Bump when level output changes so cached levels are rebuilt. */
 const LEVEL_EMIT_VERSION = '2';
 
@@ -390,7 +390,7 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
           ...(b.motion ? { motion: { ...b.motion, keys: b.motion.keys.map(([a, x, z]) => [-a, x, -z]) } } : {}),
           ...(b.sounds ? { sounds: b.sounds } : {}),
         })),
-        creatures: cap.creatures.map((c) => ({ ...c, position: [c.position[0], c.position[1], -c.position[2]] })),
+        creatures: cap.creatures.map((c) => ({ ...c, position: [c.position[0], c.position[1], -c.position[2]], facing: [c.facing[0], -c.facing[1]] })),
         portals: cap.portals
           .filter((p) => capFiles.some((f) => f.toLowerCase() === `${p.target.toLowerCase()}.cap`))
           .map((p) => ({

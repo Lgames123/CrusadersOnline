@@ -44,8 +44,8 @@ describe.each(backends)('vertical-slice combat over the network on $name (M08)',
 
     const s = await play();
     const input: InputFrame = { clientTick: 0, flags: INPUT.FORWARD, yaw: quantizeAngle(0), pitch: 0 };
-    // Run 6 m towards the skeleton (into its aggro range).
-    for (let i = 0; i < Math.ceil((6 / DEFAULT_MOVEMENT_STATS.runSpeed) * 20); i++) {
+    // Run 9.5 m towards the skeleton, which faces away: it notices a player behind it within 20 ft.
+    for (let i = 0; i < Math.ceil((9.5 / DEFAULT_MOVEMENT_STATS.runSpeed) * 20); i++) {
       s.tick(input);
       await sleep(50);
     }
@@ -54,7 +54,7 @@ describe.each(backends)('vertical-slice combat over the network on $name (M08)',
     expect(mobId).toBeDefined();
 
     let killed = false;
-    // The skeleton guards (blocks frontal hits) between its attack chains: allow 20 s.
+    // The skeleton guards (blocks frontal hits) after its attacks: allow 20 s.
     for (let i = 0; i < 400 && !killed; i++) {
       s.tick(input);
       if (i % 4 === 0) s.attack();

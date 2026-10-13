@@ -18,7 +18,7 @@ export interface Avatar {
    */
   setState(anim: number, swingSeconds: number, swingId?: number): void;
   /** Hit reaction from a direction: 0 front, 1 left, 2 right, 3 back (original models only). */
-  react?(dir: number): void;
+  react?(dir: number, state?: number): void;
   /** Death-variant seed (entity id), so all clients pick the same death animation. */
   seed?: number;
   /**

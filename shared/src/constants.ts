@@ -195,9 +195,33 @@ export const ACTION_STUN = 17;
 export const ACTION_KNOCKDOWN = 18;
 /** PI02 root displacement per frame along the facing, in feet (negative = backwards). */
 export const KNOCKDOWN_CURVE: readonly number[] = [0, -1.42, -2.84, -4.26, -5.51, -6.75, -7.99, -8.18, -8.34, -8.46, -8.57, -8.59, -8.61, -8.63, -8.65, -8.67, -8.69, -8.7, -8.72, -8.74, -8.76, -8.76, -8.75, -8.76, -8.79, -8.82, -8.86, -8.9, -8.95, -9.04, -9.08, -8.33, -7.44, -6.56, -5.77, -4.97, -4.18, -4.31, -4.43, -4.56, -4.69, -4.82, -4.94, -5.01, -5.08, -5.16, -5.25, -5.3, -5.36];
+/**
+ * A creature's longer impacts (the picker 0x004273F0): hit from the front it plays
+ * ASM_IMPACT_FRONT or, 4 times in 5, one of these; hit from the left, ASM_IMPACT_LEFT or (half
+ * the time) LEFT_ALT_01. Clips of the humanoid rig (pi30-pi34), with their root motion in feet
+ * per frame: along the facing (negative = back) and sideways (positive = right).
+ */
+export const ACTION_IMPACT_FRONT_ALT = 19;
+export const ACTION_IMPACT_RIGHT_FRONT = 20;
+export const ACTION_IMPACT_TWO_STEPS_BACK = 21;
+export const ACTION_IMPACT_LOW_FRONT = 22;
+export const ACTION_IMPACT_LEFT_ALT = 23;
+export const IMPACT_VARIANTS: Readonly<Record<number, { state: number; along: readonly number[]; side?: readonly number[] }>> = {
+  // ASM_IMPACT_FRONT_ALT_01 (pi32, 60 frames): reels 1.7 ft back and steps in again.
+  [ACTION_IMPACT_FRONT_ALT]: { state: 121, along: [0, -0.134, -0.267, -0.424, -0.581, -0.74, -0.899, -1.039, -1.18, -1.281, -1.382, -1.442, -1.501, -1.535, -1.57, -1.586, -1.603, -1.61, -1.616, -1.619, -1.623, -1.631, -1.639, -1.662, -1.684, -1.709, -1.734, -1.735, -1.736, -1.688, -1.639, -1.534, -1.429, -1.289, -1.149, -0.991, -0.833, -0.674, -0.514, -0.37, -0.225, -0.113, 0, 0.04, 0.081, 0.061, 0.04, 0.02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+  // ASM_IMPACT_RIGHT_FRONT (pi30, 52 frames): staggers about in place.
+  [ACTION_IMPACT_RIGHT_FRONT]: { state: 119, along: new Array(53).fill(0) },
+  // ASM_IMPACT_FRONT_TWO_STEPS_BACK (pi31, 52 frames): two steps back, 5.1 ft.
+  [ACTION_IMPACT_TWO_STEPS_BACK]: { state: 120, along: [0, -0.303, -0.607, -0.955, -1.304, -1.662, -2.021, -2.353, -2.685, -2.955, -3.225, -3.443, -3.661, -3.858, -4.055, -4.225, -4.395, -4.534, -4.673, -4.775, -4.877, -4.937, -4.998, -5.03, -5.062, -5.084, -5.106, -5.118, -5.13, -5.134, -5.138, -5.135, -5.132, -5.124, -5.115, -5.101, -5.088, -5.071, -5.054, -5.034, -5.015, -4.995, -4.974, -4.954, -4.933, -4.914, -4.894, -4.877, -4.86, -4.847, -4.833, -4.825, -4.816] },
+  // ASM_IMPACT_LOW_FRONT (pi34, 48 frames): doubled over, 4.5 ft back.
+  [ACTION_IMPACT_LOW_FRONT]: { state: 123, along: [0, -0.629, -1.258, -1.696, -2.133, -2.529, -2.924, -3.384, -3.844, -4.168, -4.491, -4.564, -4.638, -4.63, -4.622, -4.581, -4.54, -4.516, -4.491, -4.491, -4.49, -4.49, -4.489, -4.49, -4.491, -4.496, -4.501, -4.509, -4.517, -4.524, -4.531, -4.533, -4.536, -4.53, -4.524, -4.51, -4.496, -4.477, -4.459, -4.436, -4.414, -4.39, -4.366, -4.34, -4.315, -4.291, -4.266, -4.243, -4.22] },
+  // ASM_IMPACT_LEFT_ALT_01 (pi33, 42 frames): thrown 3.8 ft to the right.
+  [ACTION_IMPACT_LEFT_ALT]: { state: 122, along: new Array(43).fill(0), side: [0, -0.025, -0.05, 0.026, 0.102, 0.705, 1.308, 1.548, 1.789, 2.046, 2.303, 2.556, 2.809, 2.954, 3.099, 3.151, 3.203, 3.248, 3.292, 3.329, 3.367, 3.398, 3.429, 3.456, 3.482, 3.504, 3.526, 3.544, 3.562, 3.578, 3.594, 3.608, 3.622, 3.635, 3.649, 3.662, 3.675, 3.689, 3.703, 3.719, 3.735, 3.753, 3.772] },
+};
 /** Ticks of each hit reaction. */
 export function hitReactionTicks(action: number, rate = 1): number {
-  const frames = action === ACTION_KNOCKDOWN ? KNOCKDOWN_CURVE.length - 1 : action === ACTION_STUN ? 0.9 * 30 * CLIP_RATE : 17;
+  const variant = IMPACT_VARIANTS[action];
+  const frames = variant ? variant.along.length - 1 : action === ACTION_KNOCKDOWN ? KNOCKDOWN_CURVE.length - 1 : action === ACTION_STUN ? 0.9 * 30 * CLIP_RATE : 17;
   return Math.ceil((frames / (30 * CLIP_RATE * rate)) * TICK_RATE);
 }
 /**
@@ -227,6 +251,7 @@ export function rollTicks(dir: number, rate = 1): number {
 export function actionCurve(action: number): readonly number[] | null {
   if (action >= ACTION_ATTACK && action < ACTION_ATTACK + ATTACK_CURVES.length) return ATTACK_CURVES[action - ACTION_ATTACK]!;
   if (action === ACTION_KNOCKDOWN) return KNOCKDOWN_CURVE;
+  if (IMPACT_VARIANTS[action]) return IMPACT_VARIANTS[action]!.along;
   if (action === ACTION_LUNGE) return LUNGE_CURVE;
   if (action === ACTION_BASH) return BASH_CURVE;
   return null;
@@ -238,7 +263,7 @@ export function isAttackAction(action: number): boolean {
 }
 /** Whether a timed movement action is a hit reaction (no acting until it ends). */
 export function isHitAction(action: number): boolean {
-  return action >= ACTION_IMPACT && action <= ACTION_KNOCKDOWN;
+  return (action >= ACTION_IMPACT && action <= ACTION_KNOCKDOWN) || IMPACT_VARIANTS[action] !== undefined;
 }
 
 /** Root displacement (metres) of a curve sampled per clip frame, at `ticks` into the action. */

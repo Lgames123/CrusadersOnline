@@ -72,6 +72,8 @@ export interface CombatEventMsg {
     blocked?: boolean;
     /** A shield rush met the target (no damage; it reels and is knocked down). */
     rush?: boolean;
+    /** A creature's long impact (its ASM state id, IMPACT_VARIANTS); absent: the directional one. */
+    impact?: number;
     /** Present when the attacker is a player who got rewarded for the kill (loot = item names added). */
     reward?: { xp: number; gold: number; loot?: string[] };
   };
@@ -238,6 +240,8 @@ export function isLayeredSwing(kind: AttackKind): boolean {
 }
 /** Entity flags bits 1-2: the layered swing playing (1 left, 2 right, 3 air); bit 3 flips per swing. */
 export const UPPER_SWING_CODES: readonly AttackKind[] = ['left', 'right', 'air'];
+/** The same bits on a creature: the swing it plays on the upper body during its forward hop. */
+export const MOB_UPPER_SWING_CODES: readonly AttackKind[] = ['normal', 'low', 'overhead'];
 
 /**
  * The original's attack selection, measured in the running game (executable-analysis.md §14):
