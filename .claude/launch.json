@@ -85,6 +85,19 @@
         "ARENA": "level:du1a"
       },
       "port": 8090
+    },
+    {
+      "name": "server-cs1a",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/server",
+        "dev"
+      ],
+      "env": {
+        "ARENA": "level:cs1a"
+      },
+      "port": 8090
     }
   ]
 }

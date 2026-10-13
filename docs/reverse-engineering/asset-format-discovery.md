@@ -312,7 +312,7 @@ Texture coordinates are u = U·(X − P), v = V·(X − P) in 32-texel units. Ev
 | Offset | Field |
 |---|---|
 | +0x04 | u16 indices into the cell's vertex pool |
-| +0x08 | lightmap UVs, float32 pairs, 0..1 inside the tile |
+| +0x08 | lightmap UVs, 16 bytes a vertex: float32 u, v (0..1 inside the tile, half a texel in from its edges) and 8 bytes of 0xCD padding — read at 8 bytes a vertex, every other vertex got the padding (−4.3e8) and the lighting came out as hard bright triangles on a dark level |
 | +0x0C | material pointer |
 | +0x18 | u16 lightmap index |
 | +0x1A | u8 vertex count |

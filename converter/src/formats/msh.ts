@@ -17,7 +17,8 @@ import { DclError, explode } from './dcl.ts';
  * Face: plane normal xyz + d (n.v + d = 0), +0x10 texture origin P, +0x1C texture axis U,
  *       +0x28 texture axis V (u = U.(X - P) in 32-texel units), +0x5C fragments, +0x60 u8 count.
  * Fragment (0x20, the engine's render polygon): +0x04 u16 vertex indices into the cell pool,
- *       +0x08 lightmap UVs (float32 pairs, 0..1 inside the tile), +0x0C material,
+ *       +0x08 lightmap UVs (16 bytes a vertex: float32 u, v, 0..1 inside the tile, then 8 bytes of
+ *       0xCD padding), +0x0C material,
  *       +0x18 u16 lightmap index, +0x1A u8 vertex count.
  */
 export class MshError extends Error {}
@@ -184,7 +185,8 @@ export function parseMsh(bytes: Uint8Array): MshLevel {
             const dx = x - P[0], dy = y - P[1], dz = z - P[2];
             poly.positions.push(x, y, z);
             poly.texels.push(U[0] * dx + U[1] * dy + U[2] * dz, V[0] * dx + V[1] * dy + V[2] * dz);
-            poly.lightUv.push(uvo >= 0 ? f32(uvo + 8 * v) : 0, uvo >= 0 ? f32(uvo + 8 * v + 4) : 0);
+            // 16 bytes a vertex: u, v (0..1, half a texel in from the tile's edge) and 8 bytes of padding.
+            poly.lightUv.push(uvo >= 0 ? f32(uvo + 16 * v) : 0, uvo >= 0 ? f32(uvo + 16 * v + 4) : 0);
           }
           if (!ok) {
             skipped++;
