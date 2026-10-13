@@ -300,13 +300,18 @@ const STROLL_PAUSE_MIN = 20 * 4;
 const STROLL_PAUSE_SPREAD = 20 * 8;
 
 /**
- * Citizens who see an assault (a player landing a blow within this many metres, on the same
- * floor) stand on the alert facing it, then run away from it for a while; the blow itself
- * plays no impact on them.
+ * Citizens and an assault (logged in the original, Cs1a): the one struck flinches (ASM_IMPACT_*),
+ * then it and every citizen within ~60 ft on the same floor stand on the alert facing it
+ * (ASM_COMBAT_STANDING, ~0.25 s) and run away from it (~7 s). Frightened, they stay wary: a
+ * player coming within ~30 ft sets them off again at once.
  */
-const WITNESS_RADIUS = 12;
-const ALERT_TICKS = 12;
-const FLEE_TICKS = 20 * 6;
+const WITNESS_RADIUS = 18;
+const ALERT_TICKS = 5;
+const FLEE_TICKS = 20 * 7;
+const WARY_RADIUS = 9;
+const REALERT_TICKS = 2;
+/** How long a frightened citizen stays wary (not measured: the capture ended first). */
+const WARY_TICKS = 20 * 60;
 
 /** Metres below the lowest level geometry at which a falling player is caught. */
 const FALL_MARGIN = 20;
@@ -428,6 +433,8 @@ interface Mob extends ActorBase {
   alertUntil: number;
   fleeUntil: number;
   fleeFrom: { x: number; z: number };
+  /** Frightened before: until this tick a player coming close sets it off again. */
+  waryUntil: number;
   input: InputFrame;
   stats: MovementStats;
 }
@@ -558,6 +565,7 @@ export class WorldZone {
       strollUntil: 0,
       alertUntil: 0,
       fleeUntil: 0,
+      waryUntil: 0,
       fleeFrom: { x: 0, z: 0 },
       input: createInputFrame(),
       // Creatures share the humanoid rig's root-motion speeds (run, walk); no jumping.
@@ -1207,6 +1215,7 @@ export class WorldZone {
     const fromSpawn = Math.hypot(pos.x - m.spawn.x, pos.z - m.spawn.z);
     m.input.flags = 0;
     // Peaceful creatures stand (or stroll) until hit; armed ones then fight like any creature.
+    if (arch.passive && m.state === 'idle' && m.waryUntil > this.tick) this.keepWary(m);
     if (arch.passive && m.state === 'idle') this.stroll(m);
     if (m.state === 'flee') this.flee(m);
 
@@ -1341,10 +1350,12 @@ export class WorldZone {
   /** A citizen who saw an assault: on the alert facing it, then running away; calm again after. */
   private flee(m: Mob): void {
     const pos = m.character.position;
+    if (m.hitUntil > this.tick) return; // the flinch plays out first
     if (this.tick >= m.fleeUntil) {
       m.state = 'idle';
       m.strollTo = null;
       m.strollAt = this.tick + STROLL_PAUSE_MIN;
+      m.waryUntil = this.tick + WARY_TICKS;
       return;
     }
     const away = yawTowards(m.fleeFrom.x, m.fleeFrom.z, pos.x, pos.z);
@@ -1362,10 +1373,24 @@ export class WorldZone {
       if (m.kind !== 'mob' || !alive(m) || !isCitizen(m)) continue;
       const p = m.character.position;
       if (Math.abs(p.y - at.y) > AGGRO_HEIGHT || Math.hypot(p.x - at.x, p.z - at.z) > WITNESS_RADIUS) continue;
-      if (m.state !== 'flee') m.alertUntil = this.tick + ALERT_TICKS;
+      if (m.state !== 'flee') m.alertUntil = Math.max(this.tick, m.hitUntil) + ALERT_TICKS;
       m.state = 'flee';
       m.fleeUntil = Math.max(m.alertUntil, this.tick) + FLEE_TICKS;
       m.fleeFrom = { x: at.x, z: at.z };
+    }
+  }
+
+  /** A wary citizen: a player coming close on its floor sets it running again. */
+  private keepWary(m: Mob): void {
+    const pos = m.character.position;
+    for (const p of this.players.values()) {
+      const q = p.character.position;
+      if (!alive(p) || Math.abs(q.y - pos.y) > AGGRO_HEIGHT || Math.hypot(q.x - pos.x, q.z - pos.z) > WARY_RADIUS) continue;
+      m.state = 'flee';
+      m.alertUntil = this.tick + REALERT_TICKS;
+      m.fleeUntil = m.alertUntil + FLEE_TICKS;
+      m.fleeFrom = { x: q.x, z: q.z };
+      return;
     }
   }
 
@@ -1611,8 +1636,7 @@ export class WorldZone {
     target.hp = Math.max(0, target.hp - damage);
     const killed = target.hp <= 0;
     if (killed) target.hp = 0;
-    const citizen = target.kind === 'mob' && isCitizen(target);
-    if (!killed && hpBefore > 0 && damage > 0 && target.character.grounded && !citizen) {
+    if (!killed && hpBefore > 0 && damage > 0 && target.character.grounded) {
       // Every landed hit interrupts with an impact (the original skips airborne targets). The
       // player rolls for a stun or a knock-down (confirmed live: v = 0.771 knocked Drake down,
       // 0.845 and 1.145 stunned him). Creatures only take the directional impact.

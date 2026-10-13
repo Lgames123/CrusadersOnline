@@ -62,26 +62,28 @@ describe('peaceful creatures (NPCs)', () => {
     expect(moved).toBeLessThan(4.5);
   });
 
-  it('a hit citizen does not flinch or fight back: on the alert, then it runs off', () => {
+  it('a hit citizen flinches, does not fight back, stands on the alert, then runs off', () => {
     const t = npcZone('npc_118', 20);
     t.zone.attack(1);
-    const anims = new Set<number>();
+    const anims: number[] = [];
     let far = 0;
     t.run(20 * 8, () => {
       const n = t.npc();
-      anims.add(n.anim);
+      if (anims.at(-1) !== n.anim) anims.push(n.anim);
       far = Math.max(far, Math.hypot(n.x, n.z));
     });
     expect(t.events().some((e) => e.target === t.npc().id && e.damage > 0)).toBe(true);
     expect(t.events().some((e) => e.target === t.me)).toBe(false);
-    expect(anims.has(ANIM.HIT)).toBe(false);
-    expect(anims.has(ANIM.ALERT)).toBe(true);
-    expect(anims.has(ANIM.RUN)).toBe(true);
+    // As logged: ASM_IMPACT_*, ASM_COMBAT_STANDING, ASM_RUNNING.
+    const hit = anims.indexOf(ANIM.HIT);
+    expect(hit).toBeGreaterThanOrEqual(0);
+    expect(anims.indexOf(ANIM.ALERT)).toBeGreaterThan(hit);
+    expect(anims.indexOf(ANIM.RUN)).toBeGreaterThan(anims.indexOf(ANIM.ALERT));
     expect(far).toBeGreaterThan(6);
   });
 
   it('citizens nearby run from an assault on someone else', () => {
-    const t = npcZone('npc_114', 250, false, { archetype: 'npc_118', x: 5, z: 0 });
+    const t = npcZone('npc_114', 250, false, { archetype: 'npc_118', x: 15, z: 0 });
     let far = 0;
     t.zone.attack(1);
     t.run(20 * 6, () => {
@@ -90,7 +92,7 @@ describe('peaceful creatures (NPCs)', () => {
     });
     expect(t.events().some((e) => e.target === t.npc().id && e.damage > 0)).toBe(true);
     expect(t.mobs()[1]!.hp).toBe(20);
-    expect(far).toBeGreaterThan(9);
+    expect(far).toBeGreaterThan(19);
   });
 
   it('a guard fights back once hit', () => {

@@ -15,7 +15,6 @@ import {
   attackTiming,
   LEVEL_PREFIX,
   NPC_VOICES,
-  isCitizenArchetype,
   PORTAL_OBJECT_BASE,
   PORTAL_USE_REACH,
   inPortal,
@@ -180,9 +179,7 @@ async function main(): Promise<void> {
             // Hit reaction from the attacker's side (ASM_IMPACT_FRONT/LEFT/RIGHT/BACK).
             const from = mine ? player?.object : remotes.byId.get(e.attacker)?.avatar.object;
             const avatar = isMe ? player?.avatar : target?.avatar;
-            // Citizens take the blow without flinching (they run off instead, server side).
-            const citizen = !isMe && isCitizenArchetype(target?.info.archetype);
-            if (from && avatar?.react && !e.blocked && !e.killed && e.damage > 0 && !citizen) avatar.react(impactSide(obj, from));
+            if (from && avatar?.react && !e.blocked && !e.killed && e.damage > 0) avatar.react(impactSide(obj, from));
             if (e.rush) {
               // Shield rush contact: the shield's thud and a blunt impact on the target's material.
               const sfx = CREATURE_SFX[target?.info.archetype ?? ''];
