@@ -178,7 +178,7 @@ async function main(): Promise<void> {
           spawn: (id, _name, info) => {
             remotes.spawn(id, info);
             const e = remotes.byId.get(id);
-            if (e) lighting.track(id, e.avatar.object, PLAYER_RADIUS * 1.3);
+            if (e) lighting.track(id, e.avatar.object, PLAYER_RADIUS * 1.3, false, true);
           },
           despawn: (id) => {
             remotes.despawn(id);
@@ -339,12 +339,15 @@ async function main(): Promise<void> {
     player = new LocalPlayer(character, selfAvatar, (f) => stepCharacter(offline, character, f, DEFAULT_MOVEMENT_STATS, TICK_DT));
   }
   const local = player;
-  lighting.track('me', local.avatar.object, PLAYER_RADIUS * 1.3);
+  lighting.track('me', local.avatar.object, PLAYER_RADIUS * 1.3, false, true);
+  lighting.playerKey = 'me';
   scene.add(local.object);
 
   const settings = new SettingsStore();
   music.volume = settings.current.musicVolume;
   settings.onChange((s) => (music.volume = s.musicVolume));
+  lighting.silhouettes = settings.current.silhouetteShadows;
+  settings.onChange((s) => (lighting.silhouettes = s.silhouetteShadows));
   // Footsteps on the original clips' own LEFT/RIGHT FOOTSTEP events, in step with the animation,
   // with the step sound of the surface underfoot.
   const stepSounds = (): readonly number[] => SFX.footsteps[levelView?.surfaceAt(local.object.position) ?? 'stone'];

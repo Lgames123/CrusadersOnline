@@ -3,7 +3,10 @@ import type { LevelLight } from './level_light.ts';
 
 /**
  * Characters, props and items lit like the level: unlit texture times the light of the floor
- * under them (LevelLight), eased as they move; and a soft blob shadow on that floor.
+ * under them (LevelLight), eased as they move; and a soft blob shadow on that floor. The player
+ * and the characters nearest to them can instead cast a silhouette shadow: their meshes drawn
+ * again, flattened onto the floor along a slightly slanted light (a stencil darkens each pixel
+ * once), animated with them.
  */
 
 /** Seconds between light samples of a moving thing, and how fast its light follows. */
@@ -12,6 +15,73 @@ const FOLLOW = 6;
 /** Light used before the first sample / off the level. */
 const DEFAULT_LIGHT = new THREE.Color(0.8, 0.8, 0.8);
 const SHADOW_OPACITY = 0.45;
+/** Silhouette shadows: how many characters besides the player, within what distance (m). */
+const SILHOUETTE_MAX = 6;
+const SILHOUETTE_RANGE = 14;
+const SILHOUETTE_OPACITY = 0.4;
+/** Direction the light travels (down and a little aside), for the flattened silhouettes. */
+const LIGHT_DIR = new THREE.Vector3(0.35, -1, 0.25).normalize();
+
+type SilhouetteMaterial = THREE.MeshBasicMaterial & { floor: { value: number } };
+
+/** A material that flattens a mesh onto the floor height `floor` along LIGHT_DIR. */
+function silhouetteMaterial(): SilhouetteMaterial {
+  const floor = { value: 0 };
+  const m = new THREE.MeshBasicMaterial({
+    color: 0x000000,
+    transparent: true,
+    opacity: SILHOUETTE_OPACITY,
+    depthWrite: false,
+    stencilWrite: true,
+    stencilRef: 1,
+    stencilFunc: THREE.NotEqualStencilFunc,
+    stencilZPass: THREE.ReplaceStencilOp,
+  }) as SilhouetteMaterial;
+  m.floor = floor;
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms['uFloor'] = floor;
+    shader.uniforms['uLight'] = { value: LIGHT_DIR };
+    shader.vertexShader = 'uniform float uFloor;\nuniform vec3 uLight;\n' + shader.vertexShader.replace(
+      '#include <project_vertex>',
+      [
+        'vec4 wp = modelMatrix * vec4(transformed, 1.0);',
+        'wp.xyz += uLight * ((uFloor - wp.y) / uLight.y);',
+        'wp.y = uFloor + 0.03;',
+        'vec4 mvPosition = viewMatrix * wp;',
+        'gl_Position = projectionMatrix * mvPosition;',
+      ].join('\n'),
+    );
+  };
+  m.customProgramCacheKey = () => 'silhouette-shadow';
+  return m;
+}
+
+/** Copies of a character's meshes on the same skeleton / mounts, with the flattening material. */
+function buildSilhouette(object: THREE.Object3D): { meshes: THREE.Mesh[]; material: SilhouetteMaterial } {
+  const material = silhouetteMaterial();
+  const sources: THREE.Mesh[] = [];
+  object.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh && !o.userData['silhouette']) sources.push(o as THREE.Mesh);
+  });
+  const meshes = sources.map((src) => {
+    let s: THREE.Mesh;
+    if ((src as THREE.SkinnedMesh).isSkinnedMesh) {
+      const skinned = src as THREE.SkinnedMesh;
+      const copy = new THREE.SkinnedMesh(skinned.geometry, material);
+      copy.bind(skinned.skeleton, skinned.bindMatrix);
+      s = copy;
+    } else s = new THREE.Mesh(src.geometry, material);
+    s.position.copy(src.position);
+    s.quaternion.copy(src.quaternion);
+    s.scale.copy(src.scale);
+    s.frustumCulled = false;
+    s.renderOrder = 2;
+    s.userData['silhouette'] = true;
+    src.parent?.add(s);
+    return s;
+  });
+  return { meshes, material };
+}
 
 /** Swaps an object's materials for unlit copies (once); returns them. */
 function unlitMaterials(object: THREE.Object3D): THREE.MeshBasicMaterial[] {
@@ -75,6 +145,9 @@ interface Tracked {
   next: number;
   /** Static things (props, items) are sampled once. */
   still: boolean;
+  /** Characters can cast a silhouette (built when first needed). */
+  character: boolean;
+  silhouette: { meshes: THREE.Mesh[]; material: SilhouetteMaterial } | null;
 }
 
 export class ModelLighting {
@@ -84,6 +157,10 @@ export class ModelLighting {
   private readonly at = new THREE.Vector3();
   private readonly shadowGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
   private readonly shadowMat: THREE.MeshBasicMaterial;
+  /** Silhouette shadows on (the setting). */
+  silhouettes = true;
+  /** The player's key: always given a silhouette when they are on. */
+  playerKey: unknown = null;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -100,7 +177,7 @@ export class ModelLighting {
    * Lights `object` by the place it stands in, with a blob shadow of `radius` metres (0: none).
    * `still`: it does not move (sampled once).
    */
-  track(key: unknown, object: THREE.Object3D, radius: number, still = false): void {
+  track(key: unknown, object: THREE.Object3D, radius: number, still = false, character = false): void {
     if (this.tracked.has(key)) return;
     let shadow: THREE.Mesh | null = null;
     if (radius > 0) {
@@ -111,13 +188,37 @@ export class ModelLighting {
       this.scene.add(shadow);
     }
     const light = DEFAULT_LIGHT.clone();
-    this.tracked.set(key, { object, materials: unlitMaterials(object), light, target: light.clone(), shadow, floor: null, next: 0, still });
+    this.tracked.set(key, { object, materials: unlitMaterials(object), light, target: light.clone(), shadow, floor: null, next: 0, still, character, silhouette: null });
+  }
+
+  /** The keys casting silhouettes this frame: the player and up to SILHOUETTE_MAX characters near them. */
+  private chooseSilhouettes(): Set<unknown> {
+    const out = new Set<unknown>();
+    if (!this.silhouettes || this.playerKey === null) return out;
+    const me = this.tracked.get(this.playerKey);
+    if (!me) return out;
+    out.add(this.playerKey);
+    const centre = me.object.getWorldPosition(new THREE.Vector3());
+    const near: { key: unknown; d: number }[] = [];
+    const p = new THREE.Vector3();
+    for (const [key, t] of this.tracked) {
+      if (!t.character || key === this.playerKey || !isShown(t.object)) continue;
+      const d = t.object.getWorldPosition(p).distanceTo(centre);
+      if (d <= SILHOUETTE_RANGE) near.push({ key, d });
+    }
+    near.sort((a, b) => a.d - b.d);
+    for (const n of near.slice(0, SILHOUETTE_MAX)) out.add(n.key);
+    return out;
   }
 
   forget(key: unknown): void {
     const t = this.tracked.get(key);
     if (!t) return;
     if (t.shadow) this.scene.remove(t.shadow);
+    if (t.silhouette) {
+      for (const s of t.silhouette.meshes) s.removeFromParent();
+      t.silhouette.material.dispose();
+    }
     this.tracked.delete(key);
   }
 
@@ -126,7 +227,8 @@ export class ModelLighting {
   }
 
   update(dt: number, now: number): void {
-    for (const t of this.tracked.values()) {
+    const cast = this.chooseSilhouettes();
+    for (const [key, t] of this.tracked) {
       const visible = isShown(t.object);
       if (t.shadow) t.shadow.visible = false;
       if (!visible) continue;
@@ -139,9 +241,16 @@ export class ModelLighting {
       }
       if (!t.still) t.light.lerp(t.target, Math.min(1, dt * FOLLOW));
       for (const m of t.materials) m.color.copy(t.light);
-      if (t.shadow && t.floor !== null && this.at.y - t.floor < 3) {
+      const grounded = t.floor !== null && this.at.y - t.floor < 3;
+      const silhouette = grounded && cast.has(key);
+      if (silhouette) {
+        const s = (t.silhouette ??= buildSilhouette(t.object));
+        s.material.floor.value = t.floor!;
+      }
+      if (t.silhouette) for (const s of t.silhouette.meshes) s.visible = silhouette;
+      if (t.shadow && grounded && !silhouette) {
         t.shadow.visible = true;
-        t.shadow.position.set(this.at.x, t.floor + 0.02, this.at.z);
+        t.shadow.position.set(this.at.x, t.floor! + 0.02, this.at.z);
       }
     }
   }

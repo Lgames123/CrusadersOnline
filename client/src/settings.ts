@@ -11,9 +11,11 @@ export interface Settings {
   invertMouseY: boolean;
   /** Level music volume, 0-1. */
   musicVolume: number;
+  /** Silhouette shadows (the player and characters nearby); off: round blob shadows only. */
+  silhouetteShadows: boolean;
 }
 
-export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false, musicVolume: 0.5 };
+export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false, musicVolume: 0.5, silhouetteShadows: true };
 
 const KEY = 'crusaders.settings';
 
@@ -26,6 +28,7 @@ function sanitize(raw: unknown): Settings {
     mouseSensitivity: Math.min(4, Math.max(0.25, sens)),
     invertMouseY: r.invertMouseY === true,
     musicVolume: typeof r.musicVolume === 'number' && Number.isFinite(r.musicVolume) ? Math.min(1, Math.max(0, r.musicVolume)) : CLASSIC_SETTINGS.musicVolume,
+    silhouetteShadows: r.silhouetteShadows !== false,
   };
 }
 

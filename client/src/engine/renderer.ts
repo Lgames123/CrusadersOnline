@@ -7,7 +7,8 @@ export interface RenderContext {
 
 /** WebGL2 renderer, lights and fog. */
 export function createRenderContext(container: HTMLElement): RenderContext {
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  // Stencil: silhouette shadows darken each covered pixel once.
+  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', stencil: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(container.clientWidth, container.clientHeight);
   renderer.shadowMap.enabled = true;

@@ -13,6 +13,7 @@ export class SettingsPanel {
           <input id="set-sens" type="range" min="0.25" max="4" step="0.05" value="${s.mouseSensitivity}" />
         </label>
         <label class="check"><input id="set-invert" type="checkbox"${s.invertMouseY ? ' checked' : ''} /> Invert mouse Y</label>
+        <label class="check"><input id="set-shadows" type="checkbox"${s.silhouetteShadows ? ' checked' : ''} /> Character silhouette shadows</label>
         <label>Music volume
           <input id="set-music" type="range" min="0" max="1" step="0.05" value="${s.musicVolume}" />
         </label>
@@ -29,6 +30,8 @@ export class SettingsPanel {
     });
     sens.addEventListener('input', () => store.update({ mouseSensitivity: Number(sens.value) }));
     invert.addEventListener('change', () => store.update({ invertMouseY: invert.checked }));
+    const shadows = root.querySelector<HTMLInputElement>('#set-shadows')!;
+    shadows.addEventListener('change', () => store.update({ silhouetteShadows: shadows.checked }));
     const music = root.querySelector<HTMLInputElement>('#set-music')!;
     music.addEventListener('input', () => store.update({ musicVolume: Number(music.value) }));
   }
