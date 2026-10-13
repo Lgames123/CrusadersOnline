@@ -250,6 +250,35 @@ export function clipSwingTiming(c: Readonly<ClipEvents>, weaponSpeed = 1): Swing
   return { startup, active, recovery };
 }
 
+/**
+ * The shove of a blow (0x0044D290): the victim gets an impulse of 10 (4 when its shield stops
+ * the blow) along the sweep of the attacker's blade tip (0x0048CDA0: the tip's previous minus
+ * current position, x -10), unless stunned. The physics (0x00492B70, 0x004920A0, 0x004923E0,
+ * 0x00491E20) turn it into one frame of velocity: twice 156.8 x 0.033 x the impulse, less the
+ * quadratic drag 0.5 x |v local| (whose vertical part is the grounded -5 ft/s) x dt; the next
+ * frame the clip's own speed bounds the velocity again. The physics constants assume 30 frames
+ * a second. The sweep at the damage frame, horizontal part of its unit vector in the attacker's
+ * frame (x right, z forward), measured on the clips with the Long Sword (local/re/tools/blade.ts).
+ */
+const SWEEP_PLAYER_COMBO: readonly (readonly [number, number])[] = [[0.18, 0.88], [-0.04, 0.88], [0.7, 0.1], [0.45, 0.89], [-0.94, 0.14]];
+const SWEEP: Readonly<Record<string, readonly [number, number]>> = {
+  level: [-0.04, 0.88], overhead: [-0.18, 0.56], low: [-0.19, 0.62], jump: [-0.24, 0.61], thrust: [-0.56, 0.17],
+};
+/** Horizontal sweep (x right, z forward) of an attack at its damage frame; null for the shield bash. */
+export function attackSweep(kind: string, combo: number): readonly [number, number] | null {
+  if (kind === 'normal') return SWEEP_PLAYER_COMBO[Math.min(Math.max(combo, 1), 5) - 1]!;
+  if (kind === 'left' || kind === 'right' || kind === 'air') return SWEEP.level!;
+  return SWEEP[kind] ?? null;
+}
+/** Distance (m) a blow shoves its victim, from the horizontal part `h` of the sweep's unit vector. */
+export function hitShove(h: number, blocked: boolean): number {
+  const dt = 1 / 30;
+  const c = 156.8 * 0.033;
+  const impulse = (blocked ? 4 : 10) * h;
+  const factor = 1 - 0.5 * Math.hypot(c * impulse, 5) * dt;
+  return factor > 0 ? 2 * c * impulse * factor * dt * 0.3048 : 0;
+}
+
 /** Inputs arriving during recovery (or this many ticks after it) continue the combo. */
 export const COMBO_WINDOW_TICKS = ticks(300);
 /** Five-hit combo; every step uses the normal attack mode (the 1.25 mode is a difficulty setting). */

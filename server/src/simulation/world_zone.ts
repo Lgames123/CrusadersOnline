@@ -77,6 +77,8 @@ import {
   encodeSnapshot,
   inMeleeArc,
   forwardXZ,
+  attackSweep,
+  hitShove,
   damageVector,
   levelForXp,
   originalDamageMultiplier,
@@ -1737,6 +1739,7 @@ export class WorldZone {
             op: SC.COMBAT_EVENT,
             d: { attacker: a.entityId, target: target.entityId, damage: 0, hp: Math.ceil(target.hp), killed: false, blocked: true },
           });
+          this.shove(a, target, s, true);
           continue;
         }
         if (s.kind === 'bash') {
@@ -1749,6 +1752,7 @@ export class WorldZone {
           continue;
         }
         this.applyDamage(a, target, this.rollDamage(a, s.combo));
+        if (alive(target)) this.shove(a, target, s, false);
         if (!alive(a)) return;
       }
       if (a.kind === 'player' && this.objects.size) this.hitBreakables(a, s, pos, yaw);
@@ -1786,6 +1790,31 @@ export class WorldZone {
     if (dist < 1e-6) return true;
     const f = forwardXZ(dequantizeAngle(p.yaw));
     return (dx * f.x + dz * f.z) / dist > ORIGINAL_BLOCK_COS;
+  }
+
+  /**
+   * The blow's shove (0x0044D290 → the physics' one-frame impulse): the victim is moved along the
+   * sweep of the attacker's blade (hitShove), against the level like any movement.
+   */
+  private shove(a: Actor, target: Actor, s: Swing, blocked: boolean): void {
+    const sweep = attackSweep(s.kind, s.combo);
+    if (!sweep) return;
+    const h = Math.hypot(sweep[0], sweep[1]);
+    const d = hitShove(h, blocked);
+    if (d <= 0) return;
+    const f = forwardXZ(dequantizeAngle(a.yaw));
+    // x right, z forward in the attacker's frame; right = (-f.z, f.x).
+    const ux = (sweep[0] * -f.z + sweep[1] * f.x) / h;
+    const uz = (sweep[0] * f.x + sweep[1] * f.z) / h;
+    const c = target.character;
+    this.mw.controller.computeColliderMovement(c.collider, { x: ux * d, y: 0, z: uz * d }, undefined, CHARACTER_GROUPS);
+    const moved = this.mw.controller.computedMovement();
+    const p = c.position;
+    // Everything but the position carries on (a timed action, a jump, the locomotion clip).
+    const air = { kind: c.airKind, velX: c.airVelX, velZ: c.airVelZ, travel: c.airTravel };
+    const length = c.actionLength;
+    setCharacterState(c, { x: p.x + moved.x, y: p.y, z: p.z + moved.z }, c.velocityY, c.grounded, c.rollDir, c.rollTicks, air, { state: c.locoState, frame: c.locoFrame });
+    c.actionLength = length;
   }
 
   /** Starts a hit reaction: the current swing / hop / retreat is interrupted. */

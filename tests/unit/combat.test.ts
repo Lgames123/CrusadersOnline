@@ -15,6 +15,8 @@ import {
   MOB_SHIELD_TICKS,
   MOB_SPECIAL_ROLL,
   chooseMobSequence,
+  attackSweep,
+  hitShove,
   chooseMobSpecial,
   mobBand,
   PLAYER_RADIUS,
@@ -563,6 +565,35 @@ describe('hit reactions (original rules)', () => {
     t.run(1); // replicated from the creature's next update
     expect(t.mob().swinging).toBe(false);
     expect(t.mob().anim).toBe(ANIM.HIT);
+  });
+});
+
+describe('the shove of a blow (0x0044D290, one frame of impulse)', () => {
+  it('turns the impulse into a shove of under a foot, a stopped blow included', () => {
+    const ft = 0.3048;
+    const level = attackSweep('normal', 2)!;
+    expect(hitShove(Math.hypot(...level), false) / ft).toBeCloseTo(0.68, 1);
+    expect(hitShove(Math.hypot(...level), true) / ft).toBeCloseTo(0.84, 1);
+    expect(attackSweep('bash', 1)).toBeNull();
+  });
+
+  it('moves a creature along the blade sweep when the blow lands', () => {
+    const t = setup();
+    t.run(APPROACH, INPUT.FORWARD, 0);
+    const shoves: number[] = [];
+    for (let i = 0; i < 600 && shoves.length < 3 && t.mob().alive; i++) {
+      const before = t.mob();
+      const n = t.events().length;
+      t.run(1, 0, 0, () => i % 7 === 0 && t.zone.attack(1));
+      const hit = t.events().slice(n).some((e) => e.target === before.id && e.damage > 0 && !e.killed);
+      // Ticks where the skeleton stood in its pause (no movement of its own) when the blow landed.
+      if (hit && before.brain === 'pause') shoves.push(Math.hypot(t.mob().x - before.x, t.mob().z - before.z));
+    }
+    expect(shoves.length).toBeGreaterThan(0);
+    for (const d of shoves) {
+      expect(d).toBeGreaterThan(0.15);
+      expect(d).toBeLessThan(0.4);
+    }
   });
 });
 
