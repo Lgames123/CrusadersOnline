@@ -52,24 +52,104 @@ export function buildLightmapAtlas(level: MshLevel): { image: DecodedImage; rect
   let height = 1;
   while (height < y + shelf) height *= 2;
   const data = new Uint8Array(ATLAS_WIDTH * height * 4);
-  const src = level.lightmapTexels;
+  const tiles = stitchLightmaps(level, decodeLightmaps(level));
   level.lightmaps.forEach((lm, i) => {
     const r = rects[i]!;
+    const tile = tiles[i]!;
     for (let ty = -PAD; ty < lm.height + PAD; ty++) {
       for (let tx = -PAD; tx < lm.width + PAD; tx++) {
         const sx = Math.min(lm.width - 1, Math.max(0, tx));
         const sy = Math.min(lm.height - 1, Math.max(0, ty));
-        const so = lm.offset + 2 * (sy * lm.width + sx);
-        const v = so + 1 < src.length ? src[so]! | (src[so + 1]! << 8) : 0;
+        const so = 3 * (sy * lm.width + sx);
         const o = 4 * ((r.y + ty) * ATLAS_WIDTH + (r.x + tx));
-        data[o] = (((v >> 10) & 31) * 255) / 31;
-        data[o + 1] = (((v >> 5) & 31) * 255) / 31;
-        data[o + 2] = ((v & 31) * 255) / 31;
+        data[o] = Math.round(tile[so]! * 255);
+        data[o + 1] = Math.round(tile[so + 1]! * 255);
+        data[o + 2] = Math.round(tile[so + 2]! * 255);
         data[o + 3] = 255;
       }
     }
   });
   return { image: { width: ATLAS_WIDTH, height, data, hasAlpha: false }, rects };
+}
+
+/** Each lightmap tile as RGB 0..1 (from RGB555). */
+function decodeLightmaps(level: MshLevel): Float32Array[] {
+  const src = level.lightmapTexels;
+  return level.lightmaps.map((lm) => {
+    const out = new Float32Array(lm.width * lm.height * 3);
+    for (let i = 0; i < lm.width * lm.height; i++) {
+      const so = lm.offset + 2 * i;
+      const v = so + 1 < src.length ? src[so]! | (src[so + 1]! << 8) : 0;
+      out[3 * i] = ((v >> 10) & 31) / 31;
+      out[3 * i + 1] = ((v >> 5) & 31) / 31;
+      out[3 * i + 2] = (v & 31) / 31;
+    }
+    return out;
+  });
+}
+
+/**
+ * Seam stitching: every polygon has its own small, coarse lightmap tile, so where a shadow edge
+ * falls on a polygon edge the two sides can disagree and draw a hard step. Along each edge shared
+ * by two near-coplanar polygons, the tile texels touching it take the mean of both sides; the
+ * bilinear filter then turns the step into a gradient. Creases (wall meets floor) keep theirs.
+ */
+function stitchLightmaps(level: MshLevel, tiles: Float32Array[]): Float32Array[] {
+  const key = (p: number[], i: number) => `${Math.round(p[i * 3]! * 4)},${Math.round(p[i * 3 + 1]! * 4)},${Math.round(p[i * 3 + 2]! * 4)}`;
+  const edges = new Map<string, { poly: number; a: number; b: number }[]>();
+  level.polygons.forEach((p, pi) => {
+    if (!level.lightmaps[p.lightmap]) return;
+    const n = p.positions.length / 3;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const ka = key(p.positions, i), kb = key(p.positions, j);
+      const k = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+      let list = edges.get(k);
+      if (!list) edges.set(k, (list = []));
+      list.push(ka < kb ? { poly: pi, a: i, b: j } : { poly: pi, a: j, b: i });
+    }
+  });
+  const sums = tiles.map((t) => new Float32Array(t.length));
+  const counts = tiles.map((t) => new Uint16Array(t.length / 3));
+  const texel = (pi: number, e: { a: number; b: number }, t: number): [number, number] => {
+    const p = level.polygons[pi]!;
+    const lm = level.lightmaps[p.lightmap]!;
+    const u = p.lightUv[2 * e.a]! + (p.lightUv[2 * e.b]! - p.lightUv[2 * e.a]!) * t;
+    const v = p.lightUv[2 * e.a + 1]! + (p.lightUv[2 * e.b + 1]! - p.lightUv[2 * e.a + 1]!) * t;
+    const x = Math.min(lm.width - 1, Math.max(0, Math.floor(u * lm.width)));
+    const y = Math.min(lm.height - 1, Math.max(0, Math.floor(v * lm.height)));
+    return [p.lightmap, y * lm.width + x];
+  };
+  for (const list of edges.values()) {
+    if (list.length !== 2) continue;
+    const [e1, e2] = list as [{ poly: number; a: number; b: number }, { poly: number; a: number; b: number }];
+    const n1 = level.polygons[e1.poly]!.normal, n2 = level.polygons[e2.poly]!.normal;
+    if (n1[0] * n2[0] + n1[1] * n2[1] + n1[2] * n2[2] < 0.85) continue;
+    const lm1 = level.lightmaps[level.polygons[e1.poly]!.lightmap]!, lm2 = level.lightmaps[level.polygons[e2.poly]!.lightmap]!;
+    const steps = 2 * Math.max(lm1.width, lm1.height, lm2.width, lm2.height);
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps;
+      const [t1, i1] = texel(e1.poly, e1, t);
+      const [t2, i2] = texel(e2.poly, e2, t);
+      if (t1 === t2) continue;
+      for (let c = 0; c < 3; c++) {
+        const mean = (tiles[t1]![3 * i1 + c]! + tiles[t2]![3 * i2 + c]!) / 2;
+        sums[t1]![3 * i1 + c] = sums[t1]![3 * i1 + c]! + mean;
+        sums[t2]![3 * i2 + c] = sums[t2]![3 * i2 + c]! + mean;
+      }
+      counts[t1]![i1]!++;
+      counts[t2]![i2]!++;
+    }
+  }
+  return tiles.map((t, ti) => {
+    const out = t.slice();
+    const cnt = counts[ti]!;
+    for (let i = 0; i < cnt.length; i++) {
+      if (!cnt[i]) continue;
+      for (let c = 0; c < 3; c++) out[3 * i + c] = sums[ti]![3 * i + c]! / cnt[i]!;
+    }
+    return out;
+  });
 }
 
 export function emitLevel(level: MshLevel, opts: LevelEmitOptions): LevelEmitResult {
