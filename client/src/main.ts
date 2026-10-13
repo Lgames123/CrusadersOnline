@@ -226,6 +226,8 @@ async function main(): Promise<void> {
             for (const o of d.objects as { id: number; state: 'present' | 'gone' | 'open'; by?: number; loot?: string[]; damage?: number; swing?: DoorMotion }[]) {
               const view = levelView?.objects.get(o.id);
               levelView?.setObjectState(o.id, o.state, o.swing ?? null);
+              // Someone else opening a door: its sound (our own plays on the key press).
+              if (!d.full && o.swing?.phase === 'opening' && o.by !== undefined && o.by !== session?.entityId) doorSounds(o.id);
               if (!view || d.full) continue;
               const mine = session !== null && o.by === session.entityId;
               const at = view.position;
@@ -404,7 +406,8 @@ async function main(): Promise<void> {
     }
     for (const [id, door] of levelView.doors) {
       const b = door.def.bounds!;
-      if (door.state !== 'present' || door.def.byLever || p.y < b[1] - 2 || p.y > b[4]) continue;
+      // Swinging doors stay in reach while open: Tab plays their sound again, as the original.
+      if ((door.state !== 'present' && !door.swing) || door.def.byLever || p.y < b[1] - 2 || p.y > b[4]) continue;
       const d = Math.hypot(Math.max(b[0] - p.x, 0, p.x - b[3]), Math.max(b[2] - p.z, 0, p.z - b[5]));
       if (d > DOOR_RANGE || (best && best.d < d)) continue;
       const lock = door.def.lock;
@@ -421,11 +424,22 @@ async function main(): Promise<void> {
     }
     return best;
   };
+  // A door's sound actions (Sound.ctx ids at its hinge): every use of the door plays them.
+  const doorSounds = (id: number) => {
+    const door = levelView?.doors.get(id);
+    if (!door?.def.sounds || !sounds) return;
+    const k = door.swing?.def.keys[0];
+    const at = k ? new THREE.Vector3(k.cx, door.def.bounds![1], k.cz) : new THREE.Vector3(door.def.x, door.def.y, door.def.z);
+    for (const s of door.def.sounds) sounds.play(s, at);
+  };
   input.onAction = (action) => {
     if (action === 'interact') {
       const target = nearestInteractable();
       if (target && target.id < 0) talk(-target.id);
-      else if (target && !target.key) session?.interact(target.id);
+      else if (target && !target.key) {
+        session?.interact(target.id);
+        doorSounds(target.id);
+      }
     } else if (action === 'useItem') {
       // Z: the key on a locked door in reach, otherwise the weakest healing potion.
       const target = nearestInteractable();

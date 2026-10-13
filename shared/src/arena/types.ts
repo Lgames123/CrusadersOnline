@@ -50,6 +50,8 @@ export interface WorldObjectDef {
   byLever?: boolean;
   /** Levers: the doors (object ids) pulling it opens. */
   opens?: number[];
+  /** Doors: Sound.ctx ids played at the hinge by the use key (the original's sound actions). */
+  sounds?: number[];
 }
 
 /**

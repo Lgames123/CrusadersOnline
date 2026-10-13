@@ -67,6 +67,8 @@ export interface LevelBrush {
   faces?: { texture: string; indices: number[]; texels: number[] }[];
   /** Its keyframe mover (doors, gates, lifts...). */
   motion?: LevelBrushMotion;
+  /** Sound.ctx ids the use key plays at its hinge (door opening sounds). */
+  sounds?: number[];
 }
 
 /** Door world-object ids start here (placement indices stay below). */
@@ -388,6 +390,7 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
         z: (min[2]! + max[2]!) / 2,
         bounds: [min[0]!, min[1]!, min[2]!, max[0]!, max[1]!, max[2]!],
         ...(lock ? { lock } : {}),
+        ...(b.sounds?.length ? { sounds: b.sounds } : {}),
       });
       brush.door = id;
     }

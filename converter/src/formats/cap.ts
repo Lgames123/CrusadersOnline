@@ -87,6 +87,11 @@ export interface CapBrush {
   faces: CapBrushFace[];
   /** Its keyframe mover, when the record has one (doors, gates, levers, lifts...). */
   motion?: CapBrushMotion;
+  /**
+   * Sound actions placed at its turn centre (Sound.ctx ids): what the use key plays on the door
+   * (the door opening sound; one door also has a guard's line).
+   */
+  sounds?: number[];
 }
 
 /**
@@ -224,6 +229,7 @@ function parseTrigger(data: Uint8Array, dv: DataView, at: number): CapPortal['tr
  */
 function parseBrushes(data: Uint8Array, dv: DataView): CapBrush[] {
   const out: CapBrush[] = [];
+  let pointers: Map<number, number[]> | null = null;
   for (let a = 0; a + 0x40 < data.length; a++) {
     if (data[a] !== 0x31 || data[a + 1] !== 0 || data[a + 2] !== 0 || data[a + 3] !== 0) continue;
     if (dv.getUint32(a + 8, true) !== 0x3f || dv.getUint32(a + 12, true) !== 2) continue;
@@ -245,11 +251,46 @@ function parseBrushes(data: Uint8Array, dv: DataView): CapBrush[] {
         points.every((p) => Math.hypot(p[0] - points[0]![0], p[1] - points[0]![1], p[2] - points[0]![2]) < 400);
       if (!ok) continue;
       const motion = parseBrushMotion(data, dv, a - 0x18);
-      out.push({ name, points, faces: parseBrushFaces(data, dv, ptr - CAP_BASE, nf, points), ...(motion ? { motion } : {}) });
+      const sounds = motion ? hingeSounds(data, dv, (pointers ??= pointerIndex(data, dv)), motion) : [];
+      out.push({ name, points, faces: parseBrushFaces(data, dv, ptr - CAP_BASE, nf, points), ...(motion ? { motion } : {}), ...(sounds.length ? { sounds } : {}) });
       break;
     }
   }
   return out;
+}
+
+/** Every offset holding a pointer into the act, by the offset it points to. */
+function pointerIndex(data: Uint8Array, dv: DataView): Map<number, number[]> {
+  const index = new Map<number, number[]>();
+  for (let o = 0; o + 4 <= data.length; o++) {
+    const p = dv.getUint32(o, true) - CAP_BASE;
+    if (p < 0 || p >= data.length) continue;
+    let list = index.get(p);
+    if (!list) index.set(p, (list = []));
+    list.push(o);
+  }
+  return index;
+}
+
+/**
+ * Sound actions (runtime vtable 0x4E1D58, fired by 0x461430 / played at 0x461500 through
+ * 0x4B13C0) whose position list (+0x40, x y z per entry) starts at a turning mover's centre:
+ * Sound.ctx id at +0x34, volume at +0x44 (1.0).
+ */
+function hingeSounds(data: Uint8Array, dv: DataView, pointers: Map<number, number[]>, m: CapBrushMotion): number[] {
+  if (!m.types.every((t) => t & 0x10)) return [];
+  const [, cx, cz] = m.keys[0]!;
+  const ids: number[] = [];
+  for (const [at, refs] of pointers) {
+    if (at + 12 > data.length || Math.abs(dv.getFloat32(at, true) - cx) > 0.01 || Math.abs(dv.getFloat32(at + 8, true) - cz) > 0.01) continue;
+    for (const ref of refs) {
+      const a = ref - 0x40;
+      if (a < 0 || a + 0x48 > data.length || dv.getFloat32(a + 0x44, true) !== 1) continue;
+      const id = dv.getUint16(a + 0x34, true);
+      if (id > 0 && id < 4096 && !ids.includes(id)) ids.push(id);
+    }
+  }
+  return ids;
 }
 
 /** The mover of the brush object at `obj` (its class-0x31 record is at +0x18), if any. */

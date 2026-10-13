@@ -64,7 +64,7 @@ export interface ConvertReport {
   warnings: string[];
 }
 
-const MANIFEST_VERSION = '1.8.0'; // 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers
+const MANIFEST_VERSION = '1.9.0'; // 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers; 1.9: door sounds
 /** Bump when level output changes so cached levels are rebuilt. */
 const LEVEL_EMIT_VERSION = '2';
 
@@ -384,6 +384,7 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
           points: b.points.map((p) => [p[0], p[1], -p[2]]),
           faces: b.faces,
           ...(b.motion ? { motion: { ...b.motion, keys: b.motion.keys.map(([a, x, z]) => [-a, x, -z]) } } : {}),
+          ...(b.sounds ? { sounds: b.sounds } : {}),
         })),
         creatures: cap.creatures.map((c) => ({ ...c, position: [c.position[0], c.position[1], -c.position[2]] })),
         portals: cap.portals
