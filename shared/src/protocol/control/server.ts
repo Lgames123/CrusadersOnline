@@ -198,7 +198,7 @@ export const ANIM = {
 } as const;
 
 /** Animation for a character's own movement state (roll, duck, airborne, locomotion, idle). */
-export function movementAnim(flags: number, grounded: boolean, rollDir: number): number {
+export function movementAnim(flags: number, grounded: boolean, rollDir: number, diagonalMoves = false): number {
   if (rollDir === 5) return ANIM.HOP_LEFT;
   if (rollDir === 6) return ANIM.HOP_RIGHT;
   if (rollDir === 7) return ANIM.SHIELD_IDLE; // stand after a side hop, shield still up
@@ -213,12 +213,12 @@ export function movementAnim(flags: number, grounded: boolean, rollDir: number):
   if (flags & INPUT.ROOTED) return ANIM.IDLE;
   if (flags & INPUT.BLOCK) {
     // Shield up: forward walks, back retreats (side hops come through rollDir above).
-    const fwd = (flags & INPUT.FORWARD ? 1 : 0) - (flags & INPUT.BACK ? 1 : 0);
+    const fwd = flags & INPUT.BACK ? -1 : flags & INPUT.FORWARD ? 1 : 0;
     if (fwd > 0) return ANIM.WALK;
     if (fwd < 0) return ANIM.RETREAT;
     return ANIM.SHIELD_IDLE;
   }
-  return locomotionAnim(flags);
+  return locomotionAnim(flags, diagonalMoves);
 }
 
 export type AttackKind = 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump' | 'thrust' | 'bash' | 'air';
@@ -268,22 +268,29 @@ export function isAttackAnim(anim: number): boolean {
 }
 
 /**
- * Body yaw offset from the view yaw while moving: on diagonals the character turns into the
- * direction of travel (running) or away from it (retreating), so the run / retreat cycle
- * matches the motion instead of sliding sideways.
+ * Body yaw offset from the view yaw while moving. The original keeps the body on the view
+ * heading (a diagonal plays the sidestep); with feature diagonalMoves (not original) the body
+ * turns into a diagonal's travel (running) or away from it (retreating).
  */
-export function movementFacingOffset(flags: number): number {
+export function movementFacingOffset(flags: number, diagonalMoves = false): number {
+  if (!diagonalMoves) return 0;
   const fwd = (flags & INPUT.FORWARD ? 1 : 0) - (flags & INPUT.BACK ? 1 : 0);
   const right = (flags & INPUT.RIGHT ? 1 : 0) - (flags & INPUT.LEFT ? 1 : 0);
   if (fwd === 0 || right === 0) return 0;
   return -Math.atan2(fwd * right, 1);
 }
 
-/** Ground locomotion animation for held movement flags (IDLE when none). */
-export function locomotionAnim(flags: number): number {
+/**
+ * Ground locomotion animation for held movement flags (IDLE when none): as the original's
+ * selector (0x42AFC0), a sideways key overrides forward / back (back wins over forward, left
+ * over right); feature diagonalMoves keeps the forward / back cycle on diagonals.
+ */
+export function locomotionAnim(flags: number, diagonalMoves = false): number {
   const walk = (flags & INPUT.WALK) !== 0;
-  const fwd = (flags & INPUT.FORWARD ? 1 : 0) - (flags & INPUT.BACK ? 1 : 0);
-  const right = (flags & INPUT.RIGHT ? 1 : 0) - (flags & INPUT.LEFT ? 1 : 0);
+  const fwd = flags & INPUT.BACK ? -1 : flags & INPUT.FORWARD ? 1 : 0;
+  const right = flags & INPUT.LEFT ? -1 : flags & INPUT.RIGHT ? 1 : 0;
+  if (!diagonalMoves && right > 0) return walk ? ANIM.WALK_STRAFE_RIGHT : ANIM.STRAFE_RIGHT;
+  if (!diagonalMoves && right < 0) return walk ? ANIM.WALK_STRAFE_LEFT : ANIM.STRAFE_LEFT;
   if (fwd > 0) return walk ? ANIM.WALK : ANIM.RUN;
   if (fwd < 0) return ANIM.RETREAT;
   if (right > 0) return walk ? ANIM.WALK_STRAFE_RIGHT : ANIM.STRAFE_RIGHT;

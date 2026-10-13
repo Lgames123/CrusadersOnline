@@ -1,4 +1,4 @@
-import { TICK_DT, TICK_MS, DEFAULT_MOVEMENT_STATS } from '../constants.ts';
+import { TICK_DT, TICK_MS, DEFAULT_MOVEMENT_STATS, type MovementStats } from '../constants.ts';
 import type { SpellId } from '../game/spells.ts';
 import { gameplayFeatures, type GameplayFeatures } from '../game/features.ts';
 import { dequantizeAngle, dequantizePosition } from '../math/quantize.ts';
@@ -88,6 +88,8 @@ export class ClientSession {
   readonly combatLog: CombatEvent[] = [];
   /** Gameplay rules of the server (SC_WORLD_ENTER features; the original's when none are on). */
   features: GameplayFeatures = gameplayFeatures();
+  /** Movement stats for prediction (the original's, plus feature diagonalMoves). */
+  private moveStats: MovementStats = DEFAULT_MOVEMENT_STATS;
   /** Latest inventory of the local player (null until the first INVENTORY_UPDATE). */
   inventory: Inventory | null = null;
   /** World object states (absent = present). */
@@ -230,6 +232,7 @@ export class ClientSession {
         if (this.pingTimer) clearInterval(this.pingTimer);
         this.entityId = msg.d.entityId;
         this.features = gameplayFeatures(msg.d.features ?? {});
+        this.moveStats = { ...DEFAULT_MOVEMENT_STATS, diagonalMoves: this.features.diagonalMoves };
         this.character = createCharacter(this.mw, msg.d.spawn);
         this.latestTick = this.serverTickEstimate = msg.d.serverTick;
         this.latestAt = performance.now();
@@ -358,7 +361,7 @@ export class ClientSession {
       if (!stepDoorMotion(d.def, d.motion, TICK_MS)) d.motion = null;
       if (!d.motion || d.motion.progress !== before) this.poseDoor(id);
     }
-    stepCharacter(this.mw, c, slot, DEFAULT_MOVEMENT_STATS, TICK_DT);
+    stepCharacter(this.mw, c, slot, this.moveStats, TICK_DT);
 
     const frames: InputFrame[] = [];
     for (let k = Math.min(MAX_INPUT_FRAMES, t) - 1; k >= 0; k--) frames.push(this.inputs[(t - k) % INPUT_HISTORY]!);
@@ -412,7 +415,7 @@ export class ClientSession {
     );
     const from = Math.max(header.lastProcessedInput + 1, this.clientTick - INPUT_HISTORY + 1);
     for (let t = from; t <= this.clientTick; t++) {
-      stepCharacter(this.mw, c, this.inputs[t % INPUT_HISTORY]!, DEFAULT_MOVEMENT_STATS, TICK_DT);
+      stepCharacter(this.mw, c, this.inputs[t % INPUT_HISTORY]!, this.moveStats, TICK_DT);
     }
     const dx = c.position.x - bx, dy = c.position.y - by, dz = c.position.z - bz;
     if (dx !== 0 || dy !== 0 || dz !== 0) {

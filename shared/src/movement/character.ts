@@ -1,5 +1,5 @@
 import type RAPIER from '@dimforge/rapier3d-deterministic-compat';
-import { ACTION_ATTACK, ACTION_BASH, ACTION_LUNGE, LUNGE_TICKS, ATTACK_CURVES, actionCurve, attackMotionTicks, curveTicks, hitReactionTicks, isAttackAction, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_TICKS, curveAtTick, ROLL_CURVES, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, MAX_SLOPE_DEG, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
+import { ACTION_ATTACK, ACTION_BASH, ACTION_LUNGE, LUNGE_TICKS, ATTACK_CURVES, actionCurve, attackMotionTicks, curveTicks, hitReactionTicks, isAttackAction, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_LEFT_FORWARD, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_RIGHT_FORWARD, shieldHopTicks, curveAtTick, ROLL_CURVES, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, MAX_SLOPE_DEG, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
 import type { Vec3 } from '../math/vec3.ts';
 import { dequantizeAngle } from '../math/quantize.ts';
 import { INPUT, INPUT_ATTACK_SHIFT } from '../protocol/opcodes.ts';
@@ -128,7 +128,7 @@ export function stepCharacter(
   // blocking); each hop is followed by a short stand.
   if (c.rollTicks === 0 && c.grounded && !(f & INPUT.ROOTED)) {
     const dir = f & INPUT.ROLL ? rollDirection(f) : 0;
-    const side = (f & INPUT.RIGHT ? 1 : 0) - (f & INPUT.LEFT ? 1 : 0);
+    const side = movementAxes(f)[1];
     if (dir) {
       c.rollDir = dir;
       c.rollTicks = ROLLS[dir - 1]!.ticks;
@@ -137,16 +137,13 @@ export function stepCharacter(
       startTimedAction(c, ACTION_BASH);
     } else if (f & INPUT.BLOCK && side !== 0) {
       c.rollDir = side > 0 ? ACTION_HOP_RIGHT : ACTION_HOP_LEFT;
-      c.rollTicks = SHIELD_HOP_TICKS;
+      c.rollTicks = shieldHopTicks(c.rollDir);
     }
   }
   const rolling = c.rollTicks > 0;
   // Attacking plants the feet (INPUT.ROOTED), so does ducking (C held); gravity still applies.
   if (!rolling && !(f & (INPUT.ROOTED | INPUT.DUCK))) {
-    if (f & INPUT.FORWARD) fwd += 1;
-    if (f & INPUT.BACK) fwd -= 1;
-    if (f & INPUT.RIGHT) right += 1;
-    if (f & INPUT.LEFT) right -= 1;
+    [fwd, right] = movementAxes(f);
   }
 
   let vx = 0;
@@ -157,10 +154,14 @@ export function stepCharacter(
     const co = Math.cos(yaw);
     // Side hops follow the clip's root-motion profile tick by tick.
     let hop = 0;
+    let hopForward = 0;
     if (c.rollDir === ACTION_HOP_LEFT || c.rollDir === ACTION_HOP_RIGHT) {
-      const curve = c.rollDir === ACTION_HOP_LEFT ? SHIELD_HOP_LEFT_CURVE : SHIELD_HOP_RIGHT_CURVE;
-      const done = SHIELD_HOP_TICKS - c.rollTicks;
+      const left = c.rollDir === ACTION_HOP_LEFT;
+      const curve = left ? SHIELD_HOP_LEFT_CURVE : SHIELD_HOP_RIGHT_CURVE;
+      const fwdCurve = left ? SHIELD_HOP_LEFT_FORWARD : SHIELD_HOP_RIGHT_FORWARD;
+      const done = shieldHopTicks(c.rollDir) - c.rollTicks;
       hop = (curveAtTick(curve, done + 1) - curveAtTick(curve, done)) / dt;
+      hopForward = (curveAtTick(fwdCurve, done + 1) - curveAtTick(fwdCurve, done)) / dt;
     }
     // Rolls follow their clip's root-motion profile too (lengthwise forward/back, sideways left/right).
     let roll = 0;
@@ -177,12 +178,12 @@ export function stepCharacter(
       const done = c.actionLength - c.rollTicks;
       roll = (curveAtTick(curve, done + 1) - curveAtTick(curve, done)) / dt;
     }
-    let along = c.rollDir === 1 || c.rollDir === 2 || curve ? roll : 0;
+    let along = c.rollDir === 1 || c.rollDir === 2 || curve ? roll : hopForward;
     let side = c.rollDir === 3 || c.rollDir === 4 ? roll : hop;
-    // Shield + a diagonal (forward / back with a side key): the side hop goes along that diagonal.
+    // Feature diagonalMoves (not original): shield + a diagonal hops along that diagonal.
     const lengthwise = (f & INPUT.FORWARD ? 1 : 0) - (f & INPUT.BACK ? 1 : 0);
-    if (hop !== 0 && lengthwise !== 0) {
-      along = Math.abs(hop) * lengthwise * Math.SQRT1_2;
+    if (stats.diagonalMoves && hop !== 0 && lengthwise !== 0) {
+      along = hop * (c.rollDir === ACTION_HOP_RIGHT ? 1 : -1) * lengthwise * Math.SQRT1_2;
       side = hop * Math.SQRT1_2;
     }
     vx = -s * along + co * side;
@@ -192,16 +193,31 @@ export function stepCharacter(
     const s = Math.sin(yaw);
     const co = Math.cos(yaw);
     // forward = (-sin, -cos), right = (cos, -sin)
-    // Straight: that direction's speed. Diagonal: the body turns into the motion
-    // (movementFacingOffset) and keeps the forward or backward cycle's speed.
-    const len = Math.hypot(fwd, right);
-    // Shield up: walk forward, retreat back (sideways keys start side hops above).
+    // The original's movement selector (0x42AFC0): a sideways key overrides forward / back and
+    // plays a sidestep (running: states 87 / 88; Shift: ASM_SIDE_STEP_L / R), which moves by its
+    // clip's root motion (sideways plus a forward drift); otherwise forward runs (Shift or the
+    // shield: walks) and back retreats. Shield + sideways hops (above).
     const shield = (f & INPUT.BLOCK) !== 0;
     const walk = (f & INPUT.WALK) !== 0 || shield;
-    const lengthwise = fwd > 0 ? (walk ? stats.walkSpeed : stats.runSpeed) : (walk ? stats.walkBackSpeed : stats.backSpeed);
-    const sideways = fwd !== 0 ? lengthwise : walk ? stats.walkStrafeSpeed : stats.strafeSpeed;
-    const along = (fwd / len) * lengthwise;
-    const side = (right / len) * sideways;
+    let along = 0;
+    let side = 0;
+    if (stats.diagonalMoves) {
+      // Feature diagonalMoves (not original): diagonals run along the diagonal (body turned 45°).
+      const len = Math.hypot(fwd, right);
+      const lengthwise = fwd > 0 ? (walk ? stats.walkSpeed : stats.runSpeed) : (walk ? stats.walkBackSpeed : stats.backSpeed);
+      const sideways = fwd !== 0 ? lengthwise : walk ? stats.walkStrafeSpeed : stats.strafeSpeed;
+      along = (fwd / len) * lengthwise;
+      side = (right / len) * sideways;
+    } else if (right !== 0) {
+      // Shield + sideways is only ever the side hop (a timed action), never a sidestep.
+      const step = right < 0 ? (walk ? stats.walkStrafeLeft : stats.strafeLeft) : (walk ? stats.walkStrafeRight : stats.strafeRight);
+      if (!shield) {
+        side = step ? step[0] : right * (walk ? stats.walkStrafeSpeed : stats.strafeSpeed);
+        along = step ? step[1] : 0;
+      }
+    } else {
+      along = fwd > 0 ? (walk ? stats.walkSpeed : stats.runSpeed) : -(walk ? stats.walkBackSpeed : stats.backSpeed);
+    }
     vx = -s * along + co * side;
     vz = -co * along - s * side;
   }
@@ -343,11 +359,24 @@ export function startHitReaction(c: Character, action: number): void {
   startTimedAction(c, action);
 }
 
-/** Roll direction for held movement flags: 1 forward, 2 back, 3 left, 4 right, 0 none. */
+/**
+ * Roll direction for held movement flags: 1 forward, 2 back, 3 left, 4 right, 0 none. The
+ * original checks forward, back, left, right in that order (0x42AFC0): the first held one rolls.
+ */
 export function rollDirection(flags: number): number {
-  if (flags & INPUT.FORWARD && !(flags & INPUT.BACK)) return 1;
-  if (flags & INPUT.BACK && !(flags & INPUT.FORWARD)) return 2;
-  if (flags & INPUT.LEFT && !(flags & INPUT.RIGHT)) return 3;
-  if (flags & INPUT.RIGHT && !(flags & INPUT.LEFT)) return 4;
+  if (flags & INPUT.FORWARD) return 1;
+  if (flags & INPUT.BACK) return 2;
+  if (flags & INPUT.LEFT) return 3;
+  if (flags & INPUT.RIGHT) return 4;
   return 0;
+}
+
+/**
+ * Held movement as the original reads the keys (0x492B70): back wins over forward, left over
+ * right. Returns [forward (+1 / -1 / 0), right (+1 / -1 / 0)].
+ */
+export function movementAxes(flags: number): [number, number] {
+  const fwd = flags & INPUT.BACK ? -1 : flags & INPUT.FORWARD ? 1 : 0;
+  const right = flags & INPUT.LEFT ? -1 : flags & INPUT.RIGHT ? 1 : 0;
+  return [fwd, right];
 }

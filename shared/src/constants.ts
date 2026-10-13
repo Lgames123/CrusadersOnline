@@ -47,29 +47,52 @@ export interface MovementStats {
   walkBackSpeed: number;
   /** Sideways while walking carefully. */
   walkStrafeSpeed: number;
+  /**
+   * Sidesteps per side as [sideways (+ right), forward] m/s: the original's sidestep clips drift
+   * forward and differ left / right. Absent: strafeSpeed / walkStrafeSpeed straight sideways.
+   */
+  strafeLeft?: readonly [number, number];
+  strafeRight?: readonly [number, number];
+  walkStrafeLeft?: readonly [number, number];
+  walkStrafeRight?: readonly [number, number];
   jumpVelocity: number;
+  /**
+   * Feature diagonalMoves (not original): a diagonal key pair runs (or retreats) along the
+   * diagonal with the body turned 45°, and shield + diagonal hops along it. The original's
+   * movement selector (0x42AFC0) lets a sideways key override forward / back.
+   */
+  diagonalMoves?: boolean;
 }
 
 const FT = 0.3048;
 
 /**
- * The player's speeds in the original game: locomotion there is driven by the animations'
- * root motion, so each speed is the root displacement of Drake's clip per loop played at the
- * engine's 1000/30 frames per second (executable-analysis.md §11, §14): run PA01 15.6 ft/s at
- * 30 fps × 10/9, retreat PA06 3.9, running sidestep PB01_w_side* 10.3 (left/right averaged),
- * walk PB01_w_fw 5.2, careful sidestep PB02/03 3.8 (all × 10/9);
- * the original has no careful-backward clip, so it uses the retreat speed.
- * The jump impulse comes from the physics code, not from the jump clips (§13).
+ * The player's speeds in the original game. Locomotion there is the clips' root motion (bone 0's
+ * X / Z per frame, 0x429810 / 0x422CF0) in the character's frame, so each speed is the root
+ * displacement of the clip the player's state plays (the player's state → clip table 0x4EC820
+ * over models.ctx's L list) per loop, at the engine's 1000/30 frames per second. A clip loops at
+ * its header +0x14 − 1 frames (§11; the root holds its last key past the clip's end):
+ * RUNNING PA01 13.0 ft / 25 frames, RETREAT PA06 5.04 ft / 41, WALKING PB01_w_fw 5.68 ft / 33;
+ * running sidesteps (states 87 / 88) PB01_w_sideleft 7.20 ft left + 1.11 forward / 22 and
+ * PB01_w_sideright 7.71 right + 0.85 forward / 22; careful sidesteps (Shift, ASM_SIDE_STEP_L / R)
+ * PB02 2.32 ft and PB03 2.75 ft per 33-frame loop (a 20-frame step, then still). Back with Shift is
+ * the retreat (no careful-backward state). The jump impulse comes from the physics code (§13).
  */
 /** Clips play at 1000/30 frames per second instead of their authored 30: speeds × 10/9. */
 const CLIP_RATE = 10 / 9;
+/** Feet over `frames` of a clip at the engine's 1000/30 frames per second, in metres per second. */
+const clipSpeed = (feet: number, frames: number) => (feet / frames) * 30 * CLIP_RATE * FT;
 export const DEFAULT_MOVEMENT_STATS: Readonly<MovementStats> = {
-  runSpeed: 15.6 * CLIP_RATE * FT,
-  backSpeed: 3.9 * CLIP_RATE * FT,
-  strafeSpeed: 10.3 * CLIP_RATE * FT,
-  walkSpeed: 5.2 * CLIP_RATE * FT,
-  walkBackSpeed: 3.9 * CLIP_RATE * FT,
-  walkStrafeSpeed: 3.8 * CLIP_RATE * FT,
+  runSpeed: clipSpeed(12.996, 25),
+  backSpeed: clipSpeed(5.044, 41),
+  strafeSpeed: (clipSpeed(7.199, 22) + clipSpeed(7.707, 22)) / 2,
+  walkSpeed: clipSpeed(5.676, 33),
+  walkBackSpeed: clipSpeed(5.044, 41),
+  walkStrafeSpeed: (clipSpeed(2.323, 33) + clipSpeed(2.754, 33)) / 2,
+  strafeLeft: [-clipSpeed(7.199, 22), clipSpeed(1.108, 22)],
+  strafeRight: [clipSpeed(7.707, 22), clipSpeed(0.848, 22)],
+  walkStrafeLeft: [-clipSpeed(2.323, 33), 0],
+  walkStrafeRight: [clipSpeed(2.754, 33), 0],
   // Jump impulse: 78.4 × 0.033 × 15 × 1.3 ft/s added on take-off (§13).
   jumpVelocity: 78.4 * 0.033 * 15 * 1.3 * FT,
 };
@@ -94,21 +117,25 @@ export const ROLLS: readonly { ticks: number; speed: number }[] = ORIGINAL_ROLLS
 
 /**
  * With the shield up (right mouse button) the original walks forward (ASM_WALKING), retreats
- * backwards (ASM_RETREAT) and moves sideways in discrete side hops (ASM_HOP_L / ASM_HOP_R:
- * PC09 5.75 ft and PC10 4.94 ft of root motion per 20-frame hop), each followed by a short
- * stand (~0.2 s) before the next one while the key is held (executable-analysis §14.2).
+ * backwards (ASM_RETREAT) and, with a sideways key (diagonals too: it overrides forward / back),
+ * moves in discrete side hops (ASM_HOP_L / ASM_HOP_R), each followed by a short stand (~0.2 s)
+ * while the key is held (executable-analysis §14.2). For the player those states play the combat
+ * sidesteps PB04_cm_stp_l (21 frames) and PB05_cm_stp_r (20 frames) (state → clip table 0x4EC820),
+ * not the creatures' PC09 / PC10 hops.
  */
-export const SHIELD_HOP_TICKS = Math.round((20 / (30 * CLIP_RATE)) * TICK_RATE);
 export const SHIELD_HOP_PAUSE_TICKS = Math.round(0.2 * TICK_RATE);
-export const SHIELD_HOP_LEFT_SPEED = (5.75 * FT) / (SHIELD_HOP_TICKS / TICK_RATE);
-export const SHIELD_HOP_RIGHT_SPEED = (4.94 * FT) / (SHIELD_HOP_TICKS / TICK_RATE);
 /**
- * Sideways root displacement of the hop clips at each of their frames 0-20, in feet (slow
- * wind-up, quick leap, settle, then still): the hop follows this profile instead of a constant
- * speed. Left is negative (PC09), right positive (PC10).
+ * Root displacement of PB04 / PB05 at each frame, in feet: sideways (left negative; a small
+ * counter-step first, then the step) and forward (out and back to 0). The hop follows these.
  */
-export const SHIELD_HOP_LEFT_CURVE: readonly number[] = [0, -0.127, -0.254, -0.381, -0.508, -1.573, -2.638, -3.376, -4.113, -4.85, -5.312, -5.565, -5.611, -5.656, -5.702, -5.748, -5.748, -5.748, -5.748, -5.748, -5.748];
-export const SHIELD_HOP_RIGHT_CURVE: readonly number[] = [0, 0.09, 0.18, 0.42, 0.659, 1.535, 2.412, 3.243, 3.678, 4.114, 4.549, 4.821, 4.859, 4.898, 4.937, 4.937, 4.937, 4.937, 4.937, 4.937, 4.937];
+export const SHIELD_HOP_LEFT_CURVE: readonly number[] = [0, 0.083, 0.167, 0.25, 0.334, 0.417, 0.501, -0.099, -0.698, -1.298, -1.897, -2.449, -2.941, -3.434, -3.926, -4.141, -4.356, -4.466, -4.577, -4.687, -4.797, -4.908];
+export const SHIELD_HOP_LEFT_FORWARD: readonly number[] = [0, 0.067, 0.135, 0.202, 0.27, 0.337, 0.405, 0.405, 0.405, 0.405, 0.405, 0.387, 0.358, 0.329, 0.299, 0.26, 0.22, 0.176, 0.132, 0.088, 0.044, 0];
+export const SHIELD_HOP_RIGHT_CURVE: readonly number[] = [0, -0.135, -0.269, -0.404, -0.115, 0.174, 0.463, 1.007, 1.55, 2.094, 2.638, 2.898, 3.158, 3.419, 3.679, 3.939, 4.129, 4.319, 4.379, 4.44, 4.5];
+export const SHIELD_HOP_RIGHT_FORWARD: readonly number[] = [0, 0.1, 0.2, 0.299, 0.316, 0.333, 0.35, 0.34, 0.33, 0.32, 0.31, 0.28, 0.251, 0.221, 0.191, 0.161, 0.129, 0.097, 0.065, 0.032, 0];
+/** Length of a side hop in ticks (left 21 frames, right 20). */
+export function shieldHopTicks(action: number): number {
+  return curveTicks(action === ACTION_HOP_LEFT ? SHIELD_HOP_LEFT_CURVE : SHIELD_HOP_RIGHT_CURVE);
+}
 
 /**
  * Root displacement of the roll clips per frame, in feet along their travel axis (forward PE03

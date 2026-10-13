@@ -158,17 +158,20 @@ const MODELS: Record<string, { file: string; texture?: string; clips: ClipMap | 
   self: {
     file: 'drake',
     equipment: BASIC_EQUIPMENT,
-    // Drake's ASM_SIDE_STEP states use the running sidesteps; Shift uses the careful ones.
-    // Plain clicks: Drake's combo sequence in models.ctx (COMBO 1-3). Forward + click: the
-    // overhead swing; left / right + click: the side swings (game Readme).
+    // The player's clips come from its own state → clip table (0x4EC820 over models.ctx's L list),
+    // not the Drake NPC's B lines: running sidesteps (states 87 / 88) PB01_w_side*, Shift the
+    // careful PB02 / PB03, shield side hops (ASM_HOP_L / R) the combat sidesteps PB04 / PB05, and
+    // side / air swings SWING_LEVEL (PN02) on the upper-body layer. Plain clicks: the combo clips.
     clips: {
       // Measured in the original: Drake stands in PA21 (idle combat, 170-frame header), not PA16.
       idle: 'pa21_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pc03_ru_fw_jmp', death: 'pi03_hp', block: 'pt01_rdy_shld',
       // The five-step combo plays models.ctx's COMBO clips in file order (damage frames captured
       // in play match their IMPACT events).
       attacks: ['pn25_combo_a', 'pn02_1_sw_lv', 'pn15_1_chn_atk_a', 'pn16_1_chn_atk_b', 'pn17_1_pwr_atk'],
-      attackOverhead: 'pn03_1_sw_ov', attackLeft: 'pn09_1_sw_l', attackRight: 'pn10_1_sw_r',
+      attackOverhead: 'pn03_1_sw_ov', attackLeft: 'pn02_1_sw_lv', attackRight: 'pn02_1_sw_lv',
+      strafeLeft: 'pb01_w_sideleft', strafeRight: 'pb01_w_sideright',
       walkStrafeLeft: 'pb02_sdstp_l', walkStrafeRight: 'pb03_sdstp_r',
+      hopLeft: 'pb04_cm_stp_l', hopRight: 'pb05_cm_stp_r',
     },
   },
   skeleton_ghost: { file: 'skeletonwarriorcollision', texture: 'walking_dead_ghost', clips: STANDARD_CLIPS, equipment: BASIC_EQUIPMENT },

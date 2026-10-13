@@ -17,11 +17,18 @@ export interface GameplayFeatures {
    * frees the layer before the next click counts (~0.91 s apart; executable-analysis §14.1b).
    */
   sideSwingRetrigger: boolean;
+  /**
+   * A diagonal key pair runs (or retreats) along the diagonal with the body turned 45°, and
+   * shield + diagonal hops along it (an earlier playtest reading). The original's selector
+   * (0x42AFC0) lets a sideways key override forward / back: a diagonal is a sidestep.
+   */
+  diagonalMoves: boolean;
 }
 
 export const ORIGINAL_FEATURES: Readonly<GameplayFeatures> = {
   reactiveBlock: false,
   sideSwingRetrigger: false,
+  diagonalMoves: false,
 };
 
 export type FeatureName = keyof GameplayFeatures;

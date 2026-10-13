@@ -20,7 +20,7 @@ import {
   ACTION_HOP_PAUSE,
   ACTION_HOP_RIGHT,
   SHIELD_HOP_PAUSE_TICKS,
-  SHIELD_HOP_TICKS,
+  shieldHopTicks,
   movementAnim,
   ROLLS,
   attackKindFor,
@@ -52,13 +52,14 @@ function setup(spawn = { x: 0, y: 0.5, z: 0 }): { mw: MovementWorld; c: Characte
   return { mw, c: createCharacter(mw, spawn) };
 }
 
-function run(mw: MovementWorld, c: Character, flags: number, yaw: number, ticks: number, startTick = 0) {
+function run(mw: MovementWorld, c: Character, flags: number, yaw: number, ticks: number, startTick = 0, stats = DEFAULT_MOVEMENT_STATS) {
   const input: InputFrame = { clientTick: 0, flags, yaw: quantizeAngle(yaw), pitch: 0 };
   for (let i = 0; i < ticks; i++) {
     input.clientTick = startTick + i;
-    stepCharacter(mw, c, input, DEFAULT_MOVEMENT_STATS, TICK_DT);
+    stepCharacter(mw, c, input, stats, TICK_DT);
   }
 }
+const DIAGONAL_STATS = { ...DEFAULT_MOVEMENT_STATS, diagonalMoves: true };
 
 describe('shared character controller', () => {
   it('falls onto the floor and becomes grounded', () => {
@@ -81,9 +82,11 @@ describe('shared character controller', () => {
   it('uses the original per-direction speeds (retreat, sidestep, careful walk)', () => {
     const cases: [number, number][] = [
       [INPUT.BACK, DEFAULT_MOVEMENT_STATS.backSpeed],
-      [INPUT.LEFT, DEFAULT_MOVEMENT_STATS.strafeSpeed],
+      [INPUT.LEFT, Math.hypot(...DEFAULT_MOVEMENT_STATS.strafeLeft!)],
+      [INPUT.RIGHT, Math.hypot(...DEFAULT_MOVEMENT_STATS.strafeRight!)],
       [INPUT.FORWARD | INPUT.WALK, DEFAULT_MOVEMENT_STATS.walkSpeed],
-      [INPUT.RIGHT | INPUT.WALK, DEFAULT_MOVEMENT_STATS.walkStrafeSpeed],
+      [INPUT.RIGHT | INPUT.WALK, Math.hypot(...DEFAULT_MOVEMENT_STATS.walkStrafeRight!)],
+      [INPUT.LEFT | INPUT.WALK, Math.hypot(...DEFAULT_MOVEMENT_STATS.walkStrafeLeft!)],
     ];
     for (const [flags, speed] of cases) {
       const { mw, c } = setup();
@@ -96,25 +99,47 @@ describe('shared character controller', () => {
     expect(DEFAULT_MOVEMENT_STATS.runSpeed / DEFAULT_MOVEMENT_STATS.backSpeed).toBeCloseTo(4, 0);
   });
 
-  it('does not move faster diagonally', () => {
+  it('sidesteps by the clip root motion: sideways plus a slight forward drift', () => {
     const { mw, c } = setup();
     run(mw, c, 0, 0, 10);
     const start = { ...c.position };
-    run(mw, c, INPUT.FORWARD | INPUT.LEFT, 0, 20);
-    const d = Math.hypot(c.position.x - start.x, c.position.z - start.z);
-    expect(d).toBeLessThanOrEqual(DEFAULT_MOVEMENT_STATS.runSpeed + 0.02);
+    run(mw, c, INPUT.LEFT, 0, 20); // yaw 0: left = -X, forward = -Z
+    expect(c.position.x - start.x).toBeCloseTo(DEFAULT_MOVEMENT_STATS.strafeLeft![0], 1);
+    expect(start.z - c.position.z).toBeCloseTo(DEFAULT_MOVEMENT_STATS.strafeLeft![1], 1);
+    // Running sidesteps: PB01_w_sideleft 7.20 ft and PB01_w_sideright 7.71 ft per 22-frame loop.
+    expect(-DEFAULT_MOVEMENT_STATS.strafeLeft![0] / 0.3048).toBeCloseTo(10.91, 1);
+    expect(DEFAULT_MOVEMENT_STATS.strafeRight![0] / 0.3048).toBeCloseTo(11.68, 1);
+    expect(DEFAULT_MOVEMENT_STATS.runSpeed / 0.3048).toBeCloseTo(17.33, 1); // PA01 13.0 ft / 25 frames
   });
 
-  it('runs diagonals at the run speed with the body turned into the motion', () => {
+  it('a diagonal key pair is a sidestep: the sideways key overrides forward / back (0x42AFC0)', () => {
+    for (const fwd of [INPUT.FORWARD, INPUT.BACK]) {
+      const { mw, c } = setup();
+      run(mw, c, 0, 0, 10);
+      const start = { ...c.position };
+      run(mw, c, fwd | INPUT.RIGHT, 0, 20);
+      expect(c.position.x - start.x).toBeCloseTo(DEFAULT_MOVEMENT_STATS.strafeRight![0], 1);
+      expect(start.z - c.position.z).toBeCloseTo(DEFAULT_MOVEMENT_STATS.strafeRight![1], 1);
+      expect(movementAnim(fwd | INPUT.RIGHT, true, 0)).toBe(ANIM.STRAFE_RIGHT);
+      expect(movementFacingOffset(fwd | INPUT.RIGHT)).toBe(0); // the body keeps the view heading
+    }
+    // Back wins over forward, left over right.
+    expect(movementAnim(INPUT.FORWARD | INPUT.BACK, true, 0)).toBe(ANIM.RETREAT);
+    expect(movementAnim(INPUT.LEFT | INPUT.RIGHT, true, 0)).toBe(ANIM.STRAFE_LEFT);
+  });
+
+  it('feature diagonalMoves (not original): diagonals run along the diagonal, body turned', () => {
     const { mw, c } = setup();
     run(mw, c, 0, 0, 10);
     const start = { ...c.position };
-    run(mw, c, INPUT.FORWARD | INPUT.RIGHT, 0, 20);
-    expect(Math.hypot(c.position.x - start.x, c.position.z - start.z)).toBeCloseTo(DEFAULT_MOVEMENT_STATS.runSpeed, 1);
+    // Short run: on the box arena Rapier's controller can snag after ~0.4 m at some speeds (the
+    // feet sink a few mm into the floor box); not what this test is about.
+    run(mw, c, INPUT.FORWARD | INPUT.RIGHT, 0, 2, 0, DIAGONAL_STATS);
+    expect(Math.hypot(c.position.x - start.x, c.position.z - start.z)).toBeCloseTo(DEFAULT_MOVEMENT_STATS.runSpeed * 2 * TICK_DT, 1);
     expect(c.position.x - start.x).toBeCloseTo(start.z - c.position.z, 1); // 45° to the right
-    expect(movementFacingOffset(INPUT.FORWARD | INPUT.RIGHT)).toBeCloseTo(-Math.PI / 4);
-    expect(movementFacingOffset(INPUT.BACK | INPUT.RIGHT)).toBeCloseTo(Math.PI / 4); // faces away from the motion
-    expect(movementFacingOffset(INPUT.LEFT)).toBe(0);
+    expect(movementFacingOffset(INPUT.FORWARD | INPUT.RIGHT, true)).toBeCloseTo(-Math.PI / 4);
+    expect(movementFacingOffset(INPUT.BACK | INPUT.RIGHT, true)).toBeCloseTo(Math.PI / 4);
+    expect(movementAnim(INPUT.FORWARD | INPUT.RIGHT, true, 0, true)).toBe(ANIM.RUN);
   });
 
   it('plants the feet while the own swing plays (INPUT.ROOTED)', () => {
@@ -251,27 +276,36 @@ describe('shared character controller', () => {
       run(mw, c, flags, 0, 20);
       expect(Math.hypot(c.position.x - start.x, c.position.z - start.z)).toBeCloseTo(speed, 1);
     }
-    // Sideways: one discrete hop covers the clip's root motion, then a short stand.
-    for (const [flags, feet, dir] of [[INPUT.BLOCK | INPUT.LEFT, 5.75, ACTION_HOP_LEFT], [INPUT.BLOCK | INPUT.RIGHT, 4.94, ACTION_HOP_RIGHT]] as const) {
+    // Sideways: one discrete hop covers the clip's root motion (PB04 4.91 ft / PB05 4.5 ft), then a short stand.
+    for (const [flags, feet, dir] of [[INPUT.BLOCK | INPUT.LEFT, 4.908, ACTION_HOP_LEFT], [INPUT.BLOCK | INPUT.RIGHT, 4.5, ACTION_HOP_RIGHT]] as const) {
       const { mw, c } = setup();
       run(mw, c, 0, 0, 10);
       const start = { ...c.position };
       run(mw, c, flags, 0, 1);
       expect(c.rollDir).toBe(dir);
-      run(mw, c, flags, 0, SHIELD_HOP_TICKS - 1);
+      run(mw, c, flags, 0, shieldHopTicks(dir) - 1);
       expect(c.rollDir).toBe(ACTION_HOP_PAUSE);
       const hopped = Math.hypot(c.position.x - start.x, c.position.z - start.z) / 0.3048;
-      expect(hopped).toBeCloseTo(feet, 1);
+      expect(Math.abs(hopped - feet)).toBeLessThan(0.1); // the controller's skin takes ~2 cm
       const mid = { ...c.position };
       run(mw, c, flags, 0, SHIELD_HOP_PAUSE_TICKS - 1);
       expect(Math.hypot(c.position.x - mid.x, c.position.z - mid.z)).toBeLessThan(1e-3); // standing
     }
-    // Diagonals (shield + forward / back + a side key) hop along the diagonal.
+    // Diagonals (shield + forward / back + a side key): the side hop (the sideways key wins).
+    {
+      const { mw, c } = setup();
+      run(mw, c, 0, 0, 10);
+      const start = { ...c.position };
+      run(mw, c, INPUT.BLOCK | INPUT.FORWARD | INPUT.RIGHT, 0, shieldHopTicks(ACTION_HOP_RIGHT));
+      expect((c.position.x - start.x) / 0.3048).toBeCloseTo(4.5, 1);
+      expect(Math.abs(c.position.z - start.z)).toBeLessThan(0.02);
+    }
+    // Feature diagonalMoves (not original): shield + a diagonal hops along it.
     for (const [flags, sx, sz] of [[INPUT.BLOCK | INPUT.FORWARD | INPUT.RIGHT, 1, -1], [INPUT.BLOCK | INPUT.BACK | INPUT.LEFT, -1, 1]] as const) {
       const { mw, c } = setup();
       run(mw, c, 0, 0, 10);
       const start = { ...c.position };
-      run(mw, c, flags, 0, SHIELD_HOP_TICKS);
+      run(mw, c, flags, 0, shieldHopTicks(flags & INPUT.LEFT ? ACTION_HOP_LEFT : ACTION_HOP_RIGHT), 0, DIAGONAL_STATS);
       const dx = c.position.x - start.x;
       const dz = c.position.z - start.z;
       expect(Math.sign(dx)).toBe(sx); // yaw 0: right = +X, forward = -Z

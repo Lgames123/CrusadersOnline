@@ -23,7 +23,8 @@ The parity audit (`docs/reverse-engineering/parity-audit.md`) lists every system
 original. Behaviours that differ are kept switched off rather than deleted:
 
 - Gameplay (server): `shared/src/game/features.ts` — `reactiveBlock` (creatures block in reaction
-  to swings), `sideSwingRetrigger` (side swings re-trigger 0.3 s in, alternating). Enable with
-  `GAME_FEATURES=reactiveBlock,sideSwingRetrigger`; the client receives them in SC_WORLD_ENTER.
+  to swings), `sideSwingRetrigger` (side swings re-trigger 0.3 s in, alternating), `diagonalMoves` (diagonals
+  run along the diagonal with the body turned). Enable with
+  `GAME_FEATURES=reactiveBlock,sideSwingRetrigger,diagonalMoves`; the client receives them in SC_WORLD_ENTER.
 - Presentation (client settings, marked "not original"): silhouette shadows, smaller hit effects,
   the modern camera.

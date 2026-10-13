@@ -474,6 +474,8 @@ export class WorldZone {
   private readonly difficulty: Difficulty;
   private readonly reactiveBlock: boolean;
   private readonly features: GameplayFeatures;
+  /** Players' movement stats (the original's, plus feature diagonalMoves). */
+  private readonly playerStats: MovementStats;
   private readonly spells: SpellTable;
   private readonly items: ItemCatalog;
   private readonly grid = new SpatialHashGrid(32);
@@ -498,6 +500,7 @@ export class WorldZone {
     this.difficulty = opts.difficulty ?? 'medium';
     this.features = gameplayFeatures({ ...opts.features, ...(opts.reactiveBlock ? { reactiveBlock: true } : {}) });
     this.reactiveBlock = this.features.reactiveBlock;
+    this.playerStats = { ...DEFAULT_MOVEMENT_STATS, diagonalMoves: this.features.diagonalMoves };
     this.spells = opts.spells ?? BUILTIN_SPELLS;
     this.items = opts.items ?? BUILTIN_ITEMS;
     this.mw = createMovementWorld(rapier, arena);
@@ -1175,7 +1178,7 @@ export class WorldZone {
         // The client roots itself during its own swing (INPUT.ROOTED, same tick on both
         // sides); the dead do not act. The client mirrors the dead rule.
         if (!alive(p)) this.frame.flags = 0;
-        stepCharacter(this.mw, p.character, this.frame, DEFAULT_MOVEMENT_STATS, TICK_DT);
+        stepCharacter(this.mw, p.character, this.frame, this.playerStats, TICK_DT);
         p.lastProcessedInput = this.frame.clientTick;
         if (alive(p)) p.yaw = this.frame.yaw;
         this.checkPortals(p);
@@ -1184,9 +1187,9 @@ export class WorldZone {
         p.blocking = alive(p) && p.shield !== null && (this.frame.flags & INPUT.BLOCK) !== 0 && !p.swing && p.hitUntil <= tick && p.character.rollDir !== ACTION_BASH;
         if (alive(p) && p.character.rollDir === ACTION_BASH) this.rushContact(p);
         // On diagonals the body turns into the motion, except with the shield up (it faces the view).
-        p.facingOffset = moving && !(this.frame.flags & INPUT.BLOCK) ? movementFacingOffset(this.frame.flags) : 0;
+        p.facingOffset = moving && !(this.frame.flags & INPUT.BLOCK) ? movementFacingOffset(this.frame.flags, this.features.diagonalMoves) : 0;
         // Hit reactions are timed movement actions, so movementAnim() covers them too.
-        p.anim = movementAnim(p.blocking ? this.frame.flags : this.frame.flags & ~INPUT.BLOCK, looksGrounded(p.character), p.character.rollDir);
+        p.anim = movementAnim(p.blocking ? this.frame.flags : this.frame.flags & ~INPUT.BLOCK, looksGrounded(p.character), p.character.rollDir, this.features.diagonalMoves);
         if (p.cast) p.anim = ANIM.SPELL_CONJURE;
       }
       if (alive(p)) this.updateMagic(p);

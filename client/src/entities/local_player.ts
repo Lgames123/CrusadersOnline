@@ -75,10 +75,10 @@ export class LocalPlayer {
     }
     const moving = !this.dead && (input.flags & MOVE_MASK) !== 0 && !(input.flags & INPUT.ROOTED);
     // On diagonals the body turns into the direction of travel (as the server replicates it).
-    if (moving) this.targetFacing = dequantizeAngle(input.yaw) + movementFacingOffset(input.flags);
+    if (moving) this.targetFacing = dequantizeAngle(input.yaw) + movementFacingOffset(input.flags, this.features.diagonalMoves);
     this.blocking = !this.dead && (input.flags & INPUT.BLOCK) !== 0;
     if (this.blocking) this.targetFacing = dequantizeAngle(input.yaw);
-    this.moveAnim = this.dead ? ANIM.IDLE : movementAnim(input.flags, looksGrounded(this.character), this.character.rollDir);
+    this.moveAnim = this.dead ? ANIM.IDLE : movementAnim(input.flags, looksGrounded(this.character), this.character.rollDir, this.features.diagonalMoves);
   }
 
   setWeaponSpeed(speed: number): void {
