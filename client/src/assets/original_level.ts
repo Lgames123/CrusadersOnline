@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { LevelLight } from '../engine/level_light.ts';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, type ArenaDef, type LevelObject, type LevelBrush, type LevelPlacements, type WorldObjectDef, type WorldObjectState, type DoorMotion, type DoorSwing, stepDoorMotion, swingPose } from '@crusaders/shared';
@@ -94,6 +95,8 @@ export interface OriginalLevel {
   doors: Map<number, DoorView>;
   /** Torch flame positions (metres), e.g. for ambient fire sounds. */
   torches: THREE.Vector3[];
+  /** The baked light of the level's floors (characters and props take it), if it has a lightmap. */
+  light: LevelLight | null;
   /** `swing`: a swinging door's motion as of now (from the server). */
   setObjectState(id: number, state: WorldObjectState, swing?: DoorMotion | null): void;
   /** Surface under a point (metres), for footsteps; null off the level. */
@@ -254,6 +257,10 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
     lightMap.channel = 1;
     lightMap.flipY = false;
     lightMap.colorSpace = THREE.SRGBColorSpace;
+    // Each polygon has its own small tile: mipmaps would blend neighbouring tiles into its light.
+    lightMap.generateMipmaps = false;
+    lightMap.minFilter = THREE.LinearFilter;
+    lightMap.needsUpdate = true;
   }
 
   const level = new THREE.Group();
@@ -289,6 +296,8 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
     }
   }
   level.scale.setScalar(LEVEL_UNIT_METRES);
+  level.updateMatrixWorld(true);
+  const light = lightMap ? LevelLight.build(level.children.filter((c): c is THREE.Mesh => (c as THREE.Mesh).isMesh), lightMap, LIGHTMAP_GAIN) : null;
 
   // The sky box is a small cube modelled away from the map; draw it around the camera.
   // Scaled to a fixed size (its corners SKY_RADIUS away), inside the camera's far plane.
@@ -419,6 +428,7 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
       return s;
     },
     arena,
+    light,
     ...(placements.music ? { music: placements.music } : {}),
     object: root,
     objects,

@@ -23,7 +23,7 @@ const MAX_PIECES = 160;
 
 interface Piece {
   object: THREE.Object3D;
-  materials: THREE.Material[];
+  materials: THREE.MeshBasicMaterial[];
   velocity: THREE.Vector3;
   spin: THREE.Vector3;
   floor: number;
@@ -62,19 +62,19 @@ export class Debris {
    * Throws `count` pieces wearing `source`'s texture, placed in the box of half extents `half`
    * (metres) about `centre` (only above `floor`), at (place - centre) x `speed` per second.
    */
-  spawn(source: THREE.Object3D, count: number, half: THREE.Vector3, centre: THREE.Vector3, speed: number, floor: number): void {
+  spawn(source: THREE.Object3D, count: number, half: THREE.Vector3, centre: THREE.Vector3, speed: number, floor: number, light?: THREE.Color): void {
     const map = textureOf(source);
     for (let i = 0; i < count; i++) {
       const model = this.models[Math.floor(Math.random() * this.models.length)];
       if (!model) continue;
       const object = model.clone(true);
-      const materials: THREE.Material[] = [];
+      const materials: THREE.MeshBasicMaterial[] = [];
       object.traverse((o) => {
         const mesh = o as THREE.Mesh;
         if (!mesh.isMesh) return;
-        const m = (mesh.material as THREE.MeshStandardMaterial).clone();
-        if (map) m.map = map;
-        m.transparent = true;
+        // Unlit, in the light of the floor they fall on (like the props themselves).
+        const m = new THREE.MeshBasicMaterial({ map: map ?? (mesh.material as THREE.MeshStandardMaterial).map ?? null, transparent: true });
+        if (light) m.color.copy(light);
         mesh.material = m;
         materials.push(m);
       });

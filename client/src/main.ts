@@ -15,6 +15,7 @@ import {
   attackTiming,
   LEVEL_PREFIX,
   NPC_VOICES,
+  PLAYER_RADIUS,
   LEVEL_UNIT_METRES,
   PORTAL_OBJECT_BASE,
   PORTAL_USE_REACH,
@@ -52,6 +53,7 @@ import { MusicPlayer } from './audio/music.ts';
 import { Effects } from './engine/effects.ts';
 import { Debris } from './engine/debris.ts';
 import { SwingTrails } from './engine/swing_trail.ts';
+import { ModelLighting } from './engine/model_light.ts';
 import { TORCH_LIGHT_COLOR, TORCH_LIGHT_HEIGHT, TORCH_LIGHT_INTENSITY } from './entities/torch_light.ts';
 import { connectToWorld } from './network/connect.ts';
 import { CombatUi } from './ui/combat_ui.ts';
@@ -100,6 +102,10 @@ async function main(): Promise<void> {
   /** Loads an arena into the scene, replacing the previous one. Null if it cannot be shown. */
   /** The level act's music (the original's CD tracks, looped). */
   const music = new MusicPlayer(CLASSIC_SETTINGS.musicVolume);
+  // Characters, props and items lit by the floor under them, with blob shadows.
+  const lighting = new ModelLighting(scene);
+  const lightingKeys = new Set<unknown>();
+  const PROP_KEY = 'prop:';
   const showArena = async (name: string): Promise<ArenaDef | null> => {
     let next: ArenaDef;
     let view: OriginalLevel | null = null;
@@ -121,6 +127,14 @@ async function main(): Promise<void> {
     scene.add(arenaObject);
     view?.applyAtmosphere(scene);
     levelView = view;
+    lighting.setLevel(view?.light ?? null);
+    for (const k of [...lightingKeys]) if (typeof k === 'string' && k.startsWith(PROP_KEY)) (lighting.forget(k), lightingKeys.delete(k));
+    for (const [id, v] of view?.objects ?? []) {
+      const size = new THREE.Box3().setFromObject(v.object).getSize(new THREE.Vector3());
+      const key = `${PROP_KEY}${id}`;
+      lighting.track(key, v.object, v.def.kind === 'item' ? 0.25 : Math.min(1.5, Math.max(size.x, size.z) * 0.55), true);
+      lightingKeys.add(key);
+    }
     void music.play(view?.music);
     arena = next;
     return next;
@@ -161,10 +175,15 @@ async function main(): Promise<void> {
     auth.kind === 'offline'
       ? null
       : await connectToWorld(rapier, arena, auth.kind, {
-          spawn: (id, _name, info) => remotes.spawn(id, info),
+          spawn: (id, _name, info) => {
+            remotes.spawn(id, info);
+            const e = remotes.byId.get(id);
+            if (e) lighting.track(id, e.avatar.object, PLAYER_RADIUS * 1.3);
+          },
           despawn: (id) => {
             remotes.despawn(id);
             trails.forget(id);
+            lighting.forget(id);
           },
           correction: (dx, dy, dz) => player?.correct(dx, dy, dz),
           stats: (s) => {
@@ -251,11 +270,13 @@ async function main(): Promise<void> {
                 fxPos.copy(centre);
                 fxBurst('SWORD_STONE', 5, fxPos.clone(), new THREE.Vector3(0, -0.2, 0), new THREE.Vector3(0, 1, 0));
                 const chip = 1.2 * LEVEL_UNIT_METRES;
-                debris?.spawn(view.object, 5, new THREE.Vector3(chip, chip, chip), centre, 40, box.min.y);
+                const light = new THREE.Color(0.8, 0.8, 0.8);
+                levelView?.light?.sample(centre, light);
+                debris?.spawn(view.object, 5, new THREE.Vector3(chip, chip, chip), centre, 40, box.min.y, light);
                 sounds?.play(SFX.impact.flesh[mine ? myEdge : 'sharp'], centre);
                 if (o.state === 'gone') {
                   const base = new THREE.Vector3(centre.x, box.min.y, centre.z);
-                  debris?.spawn(view.object, 3 + Math.floor(Math.random() * 10), size.clone().multiplyScalar(0.5), base, 1, box.min.y);
+                  debris?.spawn(view.object, 3 + Math.floor(Math.random() * 10), size.clone().multiplyScalar(0.5), base, 1, box.min.y, light);
                   window.setTimeout(() => sounds?.play(SFX.debrisLand, base), 300);
                 }
               }
@@ -275,6 +296,7 @@ async function main(): Promise<void> {
           zone: (name) => {
             // Portal transitions (and the first entry): swap the level, then tell the server.
             errorBox.textContent = `Entering ${name.replace(LEVEL_PREFIX, '').toUpperCase()}…`;
+            for (const id of remotes.byId.keys()) (lighting.forget(id), trails.forget(id));
             remotes.clear();
             void showArena(name).then((next) => {
               if (!next || !live) return;
@@ -317,6 +339,7 @@ async function main(): Promise<void> {
     player = new LocalPlayer(character, selfAvatar, (f) => stepCharacter(offline, character, f, DEFAULT_MOVEMENT_STATS, TICK_DT));
   }
   const local = player;
+  lighting.track('me', local.avatar.object, PLAYER_RADIUS * 1.3);
   scene.add(local.object);
 
   const settings = new SettingsStore();
@@ -561,6 +584,7 @@ async function main(): Promise<void> {
     if (session) remotes.update(session, dt);
     effects?.update(dt);
     debris?.update(dt);
+    lighting.update(dt, now / 1000);
     // Players' sword trails (every swing but the ducking chop).
     trails.update(dt);
     trails.track('me', (b, t) => local.avatar.blade?.(b, t) ?? false, dt);
