@@ -596,8 +596,8 @@ async function main(): Promise<void> {
     lighting.update(dt, now / 1000);
     // Players' sword trails (every swing but the ducking chop).
     trails.update(dt);
-    trails.track('me', (b, t) => local.avatar.blade?.(b, t) ?? false, dt);
-    for (const [id, e] of remotes.byId) if (e.info.kind !== 'mob') trails.track(id, (b, t) => (e.visible && e.avatar.blade?.(b, t)) ?? false, dt);
+    trails.track('me', (a, b) => local.avatar.blade?.(a, b) ?? null, dt);
+    for (const [id, e] of remotes.byId) if (e.info.kind !== 'mob') trails.track(id, (a, b) => (e.visible ? e.avatar.blade?.(a, b) ?? null : null), dt);
     // A swing that reaches a wall throws sparks off it at its impact frame (SWORD_DAMAGE + SWORD_METAL x3).
     for (let i = wallChecks.length - 1; i >= 0; i--) {
       const w = wallChecks[i]!;

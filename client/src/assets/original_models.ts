@@ -201,17 +201,17 @@ class OriginalAvatar implements Avatar {
   /** The right-hand weapon's blade in its mount's frame (undefined: not looked up yet). */
   private bladeLocal: { mount: THREE.Object3D; held: THREE.Object3D | undefined; base: THREE.Vector3; tip: THREE.Vector3 } | null | undefined;
 
-  blade(base: THREE.Vector3, tip: THREE.Vector3): boolean {
+  blade(base: THREE.Vector3, tip: THREE.Vector3): { key: string; seconds: number } | null {
     // Every sword swing leaves one but the low chop while ducking (playtest); side and air
     // swings play on the upper body over the legs' clip.
     const a = this.anim;
-    if (!((isAttackAnim(a) && a !== ANIM.ATTACK_LOW && a !== ANIM.ATTACK_BASH) || this.upperSwing)) return false;
+    if (!((isAttackAnim(a) && a !== ANIM.ATTACK_LOW && a !== ANIM.ATTACK_BASH) || this.upperSwing)) return null;
     let b = this.bladeLocal;
     if (b === undefined || (b && b.held !== b.mount.children[0])) b = this.bladeLocal = findBlade(this.object);
-    if (!b) return false;
+    if (!b) return null;
     base.copy(b.base).applyMatrix4(b.mount.matrixWorld);
     tip.copy(b.tip).applyMatrix4(b.mount.matrixWorld);
-    return true;
+    return { key: this.upperSwing ? `u${this.upperSwingKey}` : `${a}:${this.swingId}`, seconds: this.swingSeconds > 0 ? this.swingSeconds : 0.7 };
   }
 
   constructor(source: GLTF, map: ClipMap, texture?: THREE.Texture, equipment?: { right?: THREE.Object3D; left?: THREE.Object3D }) {
@@ -536,8 +536,9 @@ function attachEquipment(model: THREE.Object3D, equipment: { right?: THREE.Objec
 }
 
 /**
- * The weapon held at the right-hand dummy, as a segment in the mount's frame: along the item's
- * longest extent, from a quarter of the way out of the hand to the far end (the tip).
+ * The weapon held at the right-hand dummy, as a segment in the mount's frame: the weapon
+ * model's line (MDL "DMY LINE ...", start and end of the blade, kept in the node's extras; the
+ * swing component reads it for the trail), else its longest extent from the hand outwards.
  */
 function findBlade(model: THREE.Object3D): { mount: THREE.Object3D; held: THREE.Object3D | undefined; base: THREE.Vector3; tip: THREE.Vector3 } | null {
   let mount: THREE.Object3D | undefined;
@@ -545,6 +546,9 @@ function findBlade(model: THREE.Object3D): { mount: THREE.Object3D; held: THREE.
     if (!mount && o.name.endsWith('WPN RIGHT')) mount = o;
   });
   if (!mount || !mount.children.length) return null;
+  let line: { a: number[]; b: number[] } | undefined;
+  mount.traverse((o) => (line ??= (o.userData as { lines?: { a: number[]; b: number[] }[] }).lines?.[0]));
+  if (line) return { mount, held: mount.children[0], base: new THREE.Vector3(...line.a), tip: new THREE.Vector3(...line.b) };
   model.updateMatrixWorld(true);
   const toMount = new THREE.Matrix4().copy(mount.matrixWorld).invert();
   const box = new THREE.Box3();
@@ -563,7 +567,7 @@ function findBlade(model: THREE.Object3D): { mount: THREE.Object3D; held: THREE.
   lo[axis] = box.min[axis];
   hi[axis] = box.max[axis];
   const [near, far] = lo.length() <= hi.length() ? [lo, hi] : [hi, lo];
-  return { mount, held: mount.children[0], base: near.lerp(far, 0.25), tip: far };
+  return { mount, held: mount.children[0], base: near, tip: far };
 }
 
 export type AvatarFactory = (kind: AvatarKind) => Avatar | null;

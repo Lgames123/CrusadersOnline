@@ -32,10 +32,11 @@ export interface Avatar {
   /** Upper-body swing over the legs' clip (side swings, air swing); `id` changes per swing. */
   setUpperSwing?(kind: AttackKind | null, id: number): void;
   /**
-   * The held weapon's blade, world space (near the hilt and the tip), while in a swing that
-   * leaves a trail (every swing but the low chop while ducking); false otherwise or without a weapon.
+   * The held weapon's line (its model's DMY LINE: blade start and end, world space) while in a
+   * swing that leaves a trail (every swing but the low chop while ducking): the swing's key
+   * (new per swing) and length; null otherwise or without a weapon.
    */
-  blade?(base: THREE.Vector3, tip: THREE.Vector3): boolean;
+  blade?(a: THREE.Vector3, b: THREE.Vector3): { key: string; seconds: number } | null;
   /** Whether this avatar reports clip events through onEvent. */
   readonly hasEvents?: boolean;
   update(dt: number): void;
