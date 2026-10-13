@@ -2,6 +2,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { WorldZone, type PersistRecord } from '@crusaders/server/simulation/world_zone';
 import {
   ANIM,
+  SIDE_SWING_RECHAIN_TICKS,
+  type GameplayFeatures,
   THRUST_WALL_DISTANCE,
   THRUST_WALL_HEIGHT,
   attackKindFor,
@@ -46,7 +48,7 @@ beforeAll(async () => {
 const SKELETON = MOB_ARCHETYPES['skeleton_warrior']!;
 
 /** In-process zone with one player; captures JSON messages and persist requests. */
-function setup(opts: { experience?: number; inventory?: InventoryEntry[]; random?: () => number; reactiveBlock?: boolean } = {}) {
+function setup(opts: { experience?: number; inventory?: InventoryEntry[]; random?: () => number; reactiveBlock?: boolean; features?: Partial<GameplayFeatures> } = {}) {
   const messages: ServerControlMsg[] = [];
   const persisted: { records: PersistRecord[]; reason: string }[] = [];
   const zone = new WorldZone(rapier, 'test', createSyntheticArena(), {
@@ -54,7 +56,7 @@ function setup(opts: { experience?: number; inventory?: InventoryEntry[]; random
       if (typeof data === 'string') messages.push(JSON.parse(data) as ServerControlMsg);
     },
     persist: (records, reason) => persisted.push({ records, reason }),
-  }, { random: opts.random ?? (() => 0), reactiveBlock: opts.reactiveBlock });
+  }, { random: opts.random ?? (() => 0), reactiveBlock: opts.reactiveBlock, features: opts.features });
   const entityId = zone.join(1, { name: 'Tester', characterId: 'c1', position: { x: 0, y: 0.5, z: 0 }, ...opts });
   const buf = new DataView(new ArrayBuffer(INPUT_PACKET_MAX_BYTES));
   let clientTick = 0;
@@ -72,7 +74,7 @@ function setup(opts: { experience?: number; inventory?: InventoryEntry[]; random
   const events = () => messages.filter((m) => m.op === SC.COMBAT_EVENT).map((m) => m.d as Extract<ServerControlMsg, { op: typeof SC.COMBAT_EVENT }>['d']);
   const stats = () => messages.filter((m) => m.op === SC.PLAYER_STATS).map((m) => m.d as Extract<ServerControlMsg, { op: typeof SC.PLAYER_STATS }>['d']);
   const inventories = () => messages.filter((m) => m.op === SC.INVENTORY_UPDATE).map((m) => m.d as Extract<ServerControlMsg, { op: typeof SC.INVENTORY_UPDATE }>['d']);
-  return { zone, run, mob, me, events, stats, inventories, persisted, entityId };
+  return { zone, run, mob, me, events, stats, inventories, persisted, entityId, messages };
 }
 
 /** Ticks of running that cover 6 m (towards the skeleton's aggro range). */
@@ -202,7 +204,7 @@ describe('authoritative melee', () => {
 });
 
 describe('directional attacks (original controls)', () => {
-  it('plays side swings on the upper body (legs keep moving), one at a time, and keeps them out of the combo', () => {
+  it('plays side swings on the upper body (legs keep moving), re-triggers them 0.3 s in, keeps them out of the combo', () => {
     const t = setup();
     t.run(5); // away from the skeleton: a hit would interrupt the swing
     t.zone.attack(1, 'left');
@@ -211,11 +213,9 @@ describe('directional attacks (original controls)', () => {
     expect(t.me().anim).toBe(ANIM.STRAFE_LEFT);
     expect((t.me().flags >> 1) & 3).toBe(1);
     const parity = (t.me().flags >> 3) & 1;
-    t.zone.attack(1, 'right'); // mid-swing: not started at once (balance), queued after the impact
-    t.run(1);
-    expect((t.me().flags >> 1) & 3).toBe(1);
-    t.run(20);
-    t.zone.attack(1, 'right');
+    t.zone.attack(1, 'right'); // too early: ignored (queued for after the swing)
+    t.run(SIDE_SWING_RECHAIN_TICKS);
+    t.zone.attack(1, 'right'); // 0.3 s in: the next side swing starts at once
     t.run(1);
     expect((t.me().flags >> 1) & 3).toBe(2);
     expect((t.me().flags >> 3) & 1).not.toBe(parity);
@@ -223,6 +223,31 @@ describe('directional attacks (original controls)', () => {
     t.zone.attack(1); // a plain click right after starts the combo at hit 1
     t.run(1);
     expect(t.me().anim).toBe(ANIM.ATTACK);
+  });
+
+  it('feature sideSwingFullClip (not original): each side swing plays its whole clip', () => {
+    const t = setup({ features: { sideSwingFullClip: true } });
+    t.run(5);
+    t.zone.attack(1, 'left');
+    t.run(1, INPUT.LEFT, 0);
+    expect((t.me().flags >> 1) & 3).toBe(1);
+    t.run(SIDE_SWING_RECHAIN_TICKS);
+    t.zone.attack(1, 'right'); // mid-swing: not started at once, queued after the impact
+    t.run(1);
+    expect((t.me().flags >> 1) & 3).toBe(1);
+    t.run(20);
+    t.zone.attack(1, 'right');
+    t.run(1);
+    expect((t.me().flags >> 1) & 3).toBe(2);
+  });
+
+  it('tells the client which non-original features are on (none by default)', () => {
+    const plain = setup();
+    const enter = plain.messages.find((m) => m.op === SC.WORLD_ENTER);
+    expect(enter && 'features' in enter.d).toBe(false);
+    const on = setup({ features: { sideSwingFullClip: true } });
+    const msg = on.messages.find((m) => m.op === SC.WORLD_ENTER);
+    expect(msg?.op === SC.WORLD_ENTER && msg.d.features).toEqual({ sideSwingFullClip: true });
   });
 });
 

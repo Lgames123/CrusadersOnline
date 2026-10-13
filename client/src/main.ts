@@ -50,7 +50,7 @@ import { registerAssetServiceWorker } from './assets/game_files.ts';
 import { GameFilesPanel } from './ui/game_files_panel.ts';
 import { InputManager } from './input/input_manager.ts';
 import { MusicPlayer } from './audio/music.ts';
-import { Effects } from './engine/effects.ts';
+import { EFFECTS_SCALE, Effects, SMALL_EFFECTS_SCALE } from './engine/effects.ts';
 import { Debris } from './engine/debris.ts';
 import { SwingTrails } from './engine/swing_trail.ts';
 import { ModelLighting } from './engine/model_light.ts';
@@ -149,7 +149,10 @@ async function main(): Promise<void> {
   let lastStats: { level: number; dead: boolean } | null = null;
   /** The original's special effects (sparks, blood, bone chips), when the game files are imported. */
   let effects: Effects | null = null;
-  void Effects.load(scene).then((e) => (effects = e));
+  void Effects.load(scene).then((e) => {
+    effects = e;
+    if (e) e.scale = settings.current.smallEffects ? SMALL_EFFECTS_SCALE : EFFECTS_SCALE;
+  });
   let debris: Debris | null = null;
   const trails = new SwingTrails(scene);
   void Debris.load(scene).then((d) => (debris = d));
@@ -308,6 +311,7 @@ async function main(): Promise<void> {
             errorBox.textContent = '';
             if (!live || !player) return; // first entry: the player is created below
             player.character = live.character!;
+            player.features = live.features;
             chase.mw = live.mw;
             chase.snap();
             for (const [id, state] of live.objectStates) levelView?.setObjectState(id, state, live.swings.get(id)?.motion ?? null);
@@ -328,6 +332,7 @@ async function main(): Promise<void> {
   if (session) {
     mw = session.mw;
     player = new LocalPlayer(session.character!, selfAvatar, (f) => session.tick(f));
+    player.features = session.features;
     if (session.playerStats) {
       hud.stats(session.playerStats);
       lastStats = { level: session.playerStats.level, dead: session.playerStats.dead };
@@ -353,7 +358,10 @@ async function main(): Promise<void> {
   music.volume = settings.current.musicVolume;
   settings.onChange((s) => (music.volume = s.musicVolume));
   lighting.silhouettes = settings.current.silhouetteShadows;
-  settings.onChange((s) => (lighting.silhouettes = s.silhouetteShadows));
+  settings.onChange((s) => {
+    lighting.silhouettes = s.silhouetteShadows;
+    if (effects) effects.scale = s.smallEffects ? SMALL_EFFECTS_SCALE : EFFECTS_SCALE;
+  });
   // Footsteps on the original clips' own LEFT/RIGHT FOOTSTEP events, in step with the animation,
   // with the step sound of the surface underfoot.
   const stepSounds = (): readonly number[] => SFX.footsteps[levelView?.surfaceAt(local.object.position) ?? 'stone'];

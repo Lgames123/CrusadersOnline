@@ -16,3 +16,14 @@ To convert a 1999 single-player desktop game into a secure, persistent browser M
 4. **Synthetic Fallback Mode vs Mandatory CD-ROM Files:**
    - *Original:* The game required CD-ROM or local GOG files to boot.
    - *CrusadersOnline:* The browser client runs immediately with synthetic procedural geometry, ensuring zero legal risk and total accessibility.
+
+## 2. Non-Original Behaviours Kept as Features
+
+The parity audit (`docs/reverse-engineering/parity-audit.md`) lists every system against the
+original. Behaviours that differ are kept switched off rather than deleted:
+
+- Gameplay (server): `shared/src/game/features.ts` — `reactiveBlock` (creatures block in reaction
+  to swings), `sideSwingFullClip` (side swings play their whole clip). Enable with
+  `GAME_FEATURES=reactiveBlock,sideSwingFullClip`; the client receives them in SC_WORLD_ENTER.
+- Presentation (client settings, marked "not original"): silhouette shadows, smaller hit effects,
+  the modern camera.

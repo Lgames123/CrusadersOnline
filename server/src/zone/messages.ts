@@ -45,6 +45,8 @@ export interface ZoneWorkerData {
   zone: string;
   arena: string;
   difficulty: 'easy' | 'medium' | 'hard';
+  /** Non-original gameplay features switched on (GAME_FEATURES). */
+  features?: string[];
   /** Converted items.json to use instead of the built-in catalog. */
   itemRulesPath: string | null;
   /** Converter output directory, for "level:<act>" arenas. */

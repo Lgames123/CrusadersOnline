@@ -1,5 +1,6 @@
 import { TICK_DT, TICK_MS, DEFAULT_MOVEMENT_STATS } from '../constants.ts';
 import type { SpellId } from '../game/spells.ts';
+import { gameplayFeatures, type GameplayFeatures } from '../game/features.ts';
 import { dequantizeAngle, dequantizePosition } from '../math/quantize.ts';
 import { CS, SC } from '../protocol/opcodes.ts';
 import { INPUT_PACKET_MAX_BYTES, MAX_INPUT_FRAMES, createInputFrame, encodeInput, type InputFrame } from '../protocol/binary/input.ts';
@@ -85,6 +86,8 @@ export class ClientSession {
   readonly entities = new Map<number, EntityInfo>();
   stats_: PlayerStats | null = null;
   readonly combatLog: CombatEvent[] = [];
+  /** Gameplay rules of the server (SC_WORLD_ENTER features; the original's when none are on). */
+  features: GameplayFeatures = gameplayFeatures();
   /** Latest inventory of the local player (null until the first INVENTORY_UPDATE). */
   inventory: Inventory | null = null;
   /** World object states (absent = present). */
@@ -226,6 +229,7 @@ export class ClientSession {
       case SC.WORLD_ENTER:
         if (this.pingTimer) clearInterval(this.pingTimer);
         this.entityId = msg.d.entityId;
+        this.features = gameplayFeatures(msg.d.features ?? {});
         this.character = createCharacter(this.mw, msg.d.spawn);
         this.latestTick = this.serverTickEstimate = msg.d.serverTick;
         this.latestAt = performance.now();

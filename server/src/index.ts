@@ -51,7 +51,7 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
   };
   // One zone worker per arena, started on demand (login into a saved zone, portals).
   const zones = new ZoneManager(
-    { difficulty: config.difficulty, itemRulesPath: config.itemRulesPath, generatedDir: config.generatedDir },
+    { difficulty: config.difficulty, features: config.features, itemRulesPath: config.itemRulesPath, generatedDir: config.generatedDir },
     {
       deliver: (connId, data) => sessions?.deliver(connId, data),
       metrics: (m) => log.debug(m, 'zone tick metrics'),

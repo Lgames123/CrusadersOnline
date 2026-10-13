@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ANIM, INPUT, TICK_DT, SIDE_SWING_CHAIN_SECONDS, attackAnim, attackMotion, isHitAction, isLayeredSwing, dequantizeAngle, movementAnim, looksGrounded, movementFacingOffset, type AttackKind, attackTiming, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
+import { ANIM, INPUT, TICK_DT, SIDE_SWING_CHAIN_SECONDS, SIDE_SWING_RECHAIN_TICKS, gameplayFeatures, type GameplayFeatures, attackAnim, attackMotion, isHitAction, isLayeredSwing, dequantizeAngle, movementAnim, looksGrounded, movementFacingOffset, type AttackKind, attackTiming, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
 import type { Avatar } from './avatar.ts';
 
 /**
@@ -48,6 +48,8 @@ export class LocalPlayer {
   /** Swing duration of the equipped weapon (server INVENTORY_UPDATE weaponSpeed). */
   private swingTime = swingSeconds('normal', 1, 1);
   private weaponSpeed = 1;
+  /** The server's gameplay rules (prediction follows them). */
+  features: GameplayFeatures = gameplayFeatures();
   dead = false;
 
   constructor(character: Character, avatar: Avatar, step: (input: Readonly<InputFrame>) => void) {
@@ -88,10 +90,15 @@ export class LocalPlayer {
    * Returns the attack actually started (side swings alternate), or null.
    */
   swing(cameraYaw: number, kind: AttackKind = 'normal'): AttackKind | null {
-    if (this.dead || this.swingLeft > 0 || this.castLeft > 0 || isHitAction(this.character.rollDir)) return null;
-    // Consecutive side swings alternate sides (the first one follows the held key).
+    if (this.dead || this.castLeft > 0 || isHitAction(this.character.rollDir)) return null;
     const side = (k: AttackKind) => k === 'left' || k === 'right';
-    if (side(kind) && side(this.kind) && this.sinceSwing < SIDE_SWING_CHAIN_SECONDS) kind = this.kind === 'left' ? 'right' : 'left';
+    if (this.swingLeft > 0) {
+      // Only a side swing re-triggers mid-swing, 0.3 s into the previous side swing (unless the
+      // server plays side swings whole: feature sideSwingFullClip).
+      if (this.features.sideSwingFullClip || !(side(kind) && side(this.kind) && this.swingTime - this.swingLeft >= SIDE_SWING_RECHAIN_TICKS * TICK_DT)) return null;
+    }
+    // Consecutive side swings alternate sides (the first one follows the held key).
+    if (side(kind) && side(this.kind) && (this.swingLeft > 0 || this.sinceSwing < SIDE_SWING_CHAIN_SECONDS)) kind = this.kind === 'left' ? 'right' : 'left';
     // Directional attacks are single hits; plain clicks chain the combo.
     this.combo = kind === 'normal' && this.kind === 'normal' && this.sinceSwing < 0.3 && this.combo < 5 ? this.combo + 1 : 1;
     this.kind = kind;

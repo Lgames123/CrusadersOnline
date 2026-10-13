@@ -47,6 +47,10 @@ import {
   type SpellId,
   type SpellTable,
   isLayeredSwing,
+  SIDE_SWING_RECHAIN_TICKS,
+  enabledFeatures,
+  gameplayFeatures,
+  type GameplayFeatures,
   UPPER_SWING_CODES,
   type AttackKind,
   INPUT,
@@ -213,10 +217,9 @@ export interface WorldZoneOptions {
   difficulty?: Difficulty;
   /** Item definitions (default: the built-in catalog). */
   items?: ItemCatalog;
-  /**
-   * Optional feature (not original, default off): shielded creatures may raise the shield in
-   * reaction to a player's swing (archetype blockChance / blockTicks / blockCooldown).
-   */
+  /** Non-original gameplay features to switch on (features.ts; default: none, the original). */
+  features?: Partial<GameplayFeatures>;
+  /** Shorthand for features.reactiveBlock. */
   reactiveBlock?: boolean;
   /** Drake's spell table (default.ctx S rows; default: the slice values). */
   spells?: SpellTable;
@@ -470,6 +473,7 @@ export class WorldZone {
   private readonly random: () => number;
   private readonly difficulty: Difficulty;
   private readonly reactiveBlock: boolean;
+  private readonly features: GameplayFeatures;
   private readonly spells: SpellTable;
   private readonly items: ItemCatalog;
   private readonly grid = new SpatialHashGrid(32);
@@ -492,7 +496,8 @@ export class WorldZone {
     this.outbox = outbox;
     this.random = opts.random ?? Math.random;
     this.difficulty = opts.difficulty ?? 'medium';
-    this.reactiveBlock = opts.reactiveBlock ?? false;
+    this.features = gameplayFeatures({ ...opts.features, ...(opts.reactiveBlock ? { reactiveBlock: true } : {}) });
+    this.reactiveBlock = this.features.reactiveBlock;
     this.spells = opts.spells ?? BUILTIN_SPELLS;
     this.items = opts.items ?? BUILTIN_ITEMS;
     this.mw = createMovementWorld(rapier, arena);
@@ -655,7 +660,10 @@ export class WorldZone {
     }
     this.sendJson(connId, {
       op: SC.WORLD_ENTER,
-      d: { entityId: p.entityId, zone: this.name, arena: this.arena.name, serverTick: this.tick, spawn: { ...p.character.position } },
+      d: {
+        entityId: p.entityId, zone: this.name, arena: this.arena.name, serverTick: this.tick, spawn: { ...p.character.position },
+        ...(Object.keys(enabledFeatures(this.features)).length ? { features: enabledFeatures(this.features) } : {}),
+      },
     });
     this.sendStats(p);
     this.sendInventory(p);
@@ -1112,6 +1120,12 @@ export class WorldZone {
     if (!p || !alive(p) || p.hitUntil > this.tick || p.cast) return;
     p.blocking = false; // swinging lowers the shield until the next input re-raises it
     if (p.swing) {
+      // Side swings re-trigger 0.3 s into the previous one (the client alternates the side).
+      const side = (k: AttackKind) => k === 'left' || k === 'right';
+      if (!this.features.sideSwingFullClip && side(p.swing.kind) && side(kind) && this.tick - p.swing.start >= SIDE_SWING_RECHAIN_TICKS) {
+        this.startPlayerSwing(p, kind);
+        return;
+      }
       const t = p.swing.timing;
       if (this.tick - p.swing.start >= t.startup + t.active) {
         p.queuedAttack = true;

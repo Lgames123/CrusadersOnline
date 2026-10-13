@@ -17,6 +17,11 @@ export interface ServerConfig {
   /** Auth/ticket endpoints: requests per second per IP, and burst. */
   httpRate: number;
   httpBurst: number;
+  /**
+   * Non-original gameplay features to switch on (GAME_FEATURES, comma-separated names from
+   * shared features.ts). Default: none, the original's rules.
+   */
+  features: string[];
   /** Original difficulty column for attributes and resists. */
   difficulty: 'easy' | 'medium' | 'hard';
   /**
@@ -64,6 +69,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     sessionTtlHours: Number(process.env['SESSION_TTL_HOURS'] ?? 168),
     cookieSecure: (process.env['COOKIE_SECURE'] ?? (env === 'production' ? 'true' : 'false')) === 'true',
     difficulty: (['easy', 'medium', 'hard'].includes(process.env['DIFFICULTY'] ?? '') ? process.env['DIFFICULTY'] : 'medium') as ServerConfig['difficulty'],
+    features: (process.env['GAME_FEATURES'] ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     httpRate: 1,
     httpBurst: 10,
     itemRulesPath: resolveItemRules(env),

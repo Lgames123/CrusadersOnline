@@ -43,8 +43,11 @@ interface Table {
 
 /** One original unit, metres (a tenth of a foot). */
 const UNIT = 0.03048;
-/** Sprite sizes against the original, by eye (playtests: 15 %, then half again). */
-const SIZE_SCALE = 0.425;
+/** Sprite sizes against the original, by eye (playtest: 15 % smaller). */
+const SIZE_SCALE = 0.85;
+/** Setting smallEffects (not original): half that again. */
+export const SMALL_EFFECTS_SCALE = SIZE_SCALE * 0.5;
+export const EFFECTS_SCALE = SIZE_SCALE;
 /** The engine's tick rate for MOVE / GRAVITY (per tick). */
 const ENGINE_HZ = 30;
 const MAX_LIVE = 600;
@@ -75,6 +78,8 @@ export class Effects {
   private readonly textures = new Map<string, THREE.Texture | null>();
   private readonly loader = new THREE.TextureLoader();
   private readonly live: Live[] = [];
+  /** Size factor: SIZE_SCALE, or half of it with the smallEffects setting. */
+  scale = SIZE_SCALE;
 
   private constructor(scene: THREE.Scene, table: Table, textureUrl: (name: string) => string | null) {
     this.scene = scene;
@@ -161,10 +166,10 @@ export class Effects {
       age: 0,
       life: life > 0 ? life : 0.1,
       alpha: c[3] / 255,
-      h: (flash.startHeight + size) * UNIT * SIZE_SCALE,
-      w: (flash.startWidth + size) * UNIT * SIZE_SCALE,
-      vh: flash.deltaHeight * UNIT * SIZE_SCALE,
-      vw: flash.deltaWidth * UNIT * SIZE_SCALE,
+      h: (flash.startHeight + size) * UNIT * this.scale,
+      w: (flash.startWidth + size) * UNIT * this.scale,
+      vh: flash.deltaHeight * UNIT * this.scale,
+      vw: flash.deltaWidth * UNIT * this.scale,
       vel: local(flash.move, flash.randomizeMove).multiplyScalar(UNIT * ENGINE_HZ),
       grav: new THREE.Vector3(...flash.gravity).multiplyScalar(UNIT * ENGINE_HZ),
       spin: flash.rotating ? (flash.rotationSpeed * Math.PI) / 180 : 0,
@@ -194,8 +199,8 @@ export class Effects {
       // Alpha envelope: attack (fade in), sustain, decay (fade out).
       const a = p.age < f.attack ? p.age / f.attack : p.age < f.attack + f.sustain ? 1 : f.decay > 0 ? 1 - (p.age - f.attack - f.sustain) / f.decay : 1;
       p.sprite.material.opacity = Math.max(0, Math.min(1, a)) * p.alpha;
-      p.vh += f.heightAcceleration * UNIT * SIZE_SCALE * dt;
-      p.vw += f.widthAcceleration * UNIT * SIZE_SCALE * dt;
+      p.vh += f.heightAcceleration * UNIT * this.scale * dt;
+      p.vw += f.widthAcceleration * UNIT * this.scale * dt;
       p.h = Math.max(0.001, p.h + p.vh * dt);
       p.w = Math.max(0.001, p.w + p.vw * dt);
       p.sprite.scale.set(p.w, p.h, 1);

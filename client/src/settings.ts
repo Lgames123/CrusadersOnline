@@ -11,13 +11,22 @@ export interface Settings {
   invertMouseY: boolean;
   /** Level music volume, 0-1. */
   musicVolume: number;
-  /** Silhouette shadows (the player and characters nearby); off: round blob shadows only. */
+  /**
+   * Silhouette shadows (the player and characters nearby; not original). Off: the round shadow
+   * under each character, like the original's projected shadow texture.
+   */
   silhouetteShadows: boolean;
+  /** Hit effects at half the original's size (not original; a playtest preference). */
+  smallEffects: boolean;
+  /** Settings schema version (see OPTIONS_VERSION). */
+  optionsVersion?: number;
 }
 
-export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false, musicVolume: 0.5, silhouetteShadows: true };
+export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false, musicVolume: 0.5, silhouetteShadows: false, smallEffects: false };
 
 const KEY = 'crusaders.settings';
+/** Bumped when a default moves back to the original, so earlier stored values reset once. */
+const OPTIONS_VERSION = 2;
 
 function sanitize(raw: unknown): Settings {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<keyof Settings | 'camera', unknown>>;
@@ -28,7 +37,10 @@ function sanitize(raw: unknown): Settings {
     mouseSensitivity: Math.min(4, Math.max(0.25, sens)),
     invertMouseY: r.invertMouseY === true,
     musicVolume: typeof r.musicVolume === 'number' && Number.isFinite(r.musicVolume) ? Math.min(1, Math.max(0, r.musicVolume)) : CLASSIC_SETTINGS.musicVolume,
-    silhouetteShadows: r.silhouetteShadows !== false,
+    // Stored before it became optional (default on then): back to the original unless chosen again.
+    silhouetteShadows: r.silhouetteShadows === true && r.optionsVersion === OPTIONS_VERSION,
+    smallEffects: r.smallEffects === true,
+    optionsVersion: OPTIONS_VERSION,
   };
 }
 

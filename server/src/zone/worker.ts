@@ -2,7 +2,7 @@ import { parentPort, workerData } from 'node:worker_threads';
 import { performance } from 'node:perf_hooks';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { BUILTIN_ITEMS, LEVEL_PREFIX, buildLevelArena, catalogFromItemRules, createSyntheticArena, initPhysics, spellTableFromRules, type ArenaDef, type ItemCatalog, type LevelPlacements, type SpellTable } from '@crusaders/shared';
+import { BUILTIN_ITEMS, LEVEL_PREFIX, buildLevelArena, catalogFromItemRules, gameplayFeatures, createSyntheticArena, initPhysics, spellTableFromRules, type ArenaDef, type ItemCatalog, type LevelPlacements, type SpellTable } from '@crusaders/shared';
 import { SimulationClock, TickStats } from '../simulation/clock.ts';
 import { WorldZone } from '../simulation/world_zone.ts';
 import type { FromZone, ToZone, ZoneWorkerData } from './messages.ts';
@@ -11,7 +11,7 @@ const METRICS_EVERY_TICKS = 100; // 5 s
 const PERSIST_EVERY_TICKS = 20 * 60; // 60 s (persistence.md §2)
 
 const port = parentPort!;
-const { zone: zoneName, arena: arenaName, difficulty, itemRulesPath, generatedDir } = workerData as ZoneWorkerData;
+const { zone: zoneName, arena: arenaName, difficulty, features, itemRulesPath, generatedDir } = workerData as ZoneWorkerData;
 
 function loadItems(file: string | null): ItemCatalog {
   if (!file) return BUILTIN_ITEMS;
@@ -59,7 +59,7 @@ const zone = new WorldZone(rapier, zoneName, loadArena(arenaName), {
   portal(connId, target) {
     post({ t: 'portal', connId, target });
   },
-}, { difficulty, items: loadItems(itemRulesPath), spells: loadSpells(generatedDir) });
+}, { difficulty, features: gameplayFeatures(features ?? []), items: loadItems(itemRulesPath), spells: loadSpells(generatedDir) });
 
 const flush = () => {
   if (batch.length === 0) return;

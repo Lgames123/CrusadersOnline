@@ -2,6 +2,7 @@ import type { DoorMotion } from '../../arena/door_swing.ts';
 import { INPUT, SC } from '../opcodes.ts';
 import type { SpellId } from '../../game/spells.ts';
 import type { ItemType } from '../../game/items.ts';
+import type { GameplayFeatures } from '../../game/features.ts';
 
 /** JSON control messages sent by the server. Trusted direction, so plain types (no Zod). */
 
@@ -23,6 +24,8 @@ export interface WorldEnterMsg {
     arena: string;
     serverTick: number;
     spawn: { x: number; y: number; z: number };
+    /** Non-original gameplay features this server has on (features.ts); absent: none. */
+    features?: Partial<GameplayFeatures>;
   };
 }
 
