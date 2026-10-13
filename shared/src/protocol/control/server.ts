@@ -190,6 +190,8 @@ export const ANIM = {
   SPELL_CONJURE: 35,
   /** On the alert (ASM_COMBAT_STANDING): a citizen who just saw an assault, before running off. */
   ALERT: 36,
+  /** Talking (ASM_GESTURE_POLITE_CONVERSATION): a peaceful creature gesturing through its line. */
+  GESTURE: 37,
 } as const;
 
 /** Animation for a character's own movement state (roll, duck, airborne, locomotion, idle). */

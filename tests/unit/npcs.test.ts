@@ -102,4 +102,26 @@ describe('peaceful creatures (NPCs)', () => {
     expect(t.events().some((e) => e.target === t.npc().id && e.damage > 0)).toBe(true);
     expect(t.events().some((e) => e.target === t.me)).toBe(true);
   });
+
+  it('talked to, a citizen stops, gestures through the line and turns to face the player', () => {
+    const t = npcZone('npc_118', 20, true, { archetype: 'npc_118', x: 30, z: 30 });
+    t.run(5);
+    t.zone.talk(1, t.npc().id, 2000);
+    t.run(1);
+    const at = { x: t.npc().x, z: t.npc().z };
+    const anims = new Set<number>();
+    t.run(20 * 2 - 3, () => anims.add(t.npc().anim));
+    expect([...anims]).toEqual([ANIM.GESTURE]);
+    expect(Math.hypot(t.npc().x - at.x, t.npc().z - at.z)).toBeLessThan(0.05); // stands still
+    // Turned to face the player at the origin (yaw 0 faces -Z).
+    const n = t.npc();
+    const want = Math.atan2(-(0 - n.x), -(0 - n.z));
+    expect(Math.abs(Math.atan2(Math.sin(n.yaw - want), Math.cos(n.yaw - want)))).toBeLessThan(0.1);
+    t.run(10);
+    expect(t.npc().anim).not.toBe(ANIM.GESTURE);
+    // Out of reach: no talk.
+    t.zone.talk(1, t.mobs()[1]!.id, 2000);
+    t.run(2);
+    expect(t.mobs()[1]!.anim).not.toBe(ANIM.GESTURE);
+  });
 });

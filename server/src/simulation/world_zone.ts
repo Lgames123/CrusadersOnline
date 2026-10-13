@@ -310,6 +310,9 @@ const ALERT_TICKS = 5;
 const FLEE_TICKS = 20 * 7;
 const WARY_RADIUS = 9;
 const REALERT_TICKS = 2;
+/** Talking: reach (the client's Tab range plus slack) and turn rate (logged ~90 degrees a second). */
+const TALK_REACH = 3;
+const TALK_TURN_RATE = Math.PI / 2;
 /** How long a frightened citizen stays wary (not measured: the capture ended first). */
 const WARY_TICKS = 20 * 60;
 
@@ -409,7 +412,7 @@ interface Mob extends ActorBase {
   blockUntil: number;
   nextBlockTick: number;
   spawn: { x: number; y: number; z: number };
-  state: 'idle' | 'chase' | 'return' | 'flee';
+  state: 'idle' | 'chase' | 'return' | 'flee' | 'talk';
   threat: Map<number, number>;
   nextSwingTick: number;
   /** Ticks of a forward hop still to run before the swing it leads into. */
@@ -435,6 +438,9 @@ interface Mob extends ActorBase {
   fleeFrom: { x: number; z: number };
   /** Frightened before: until this tick a player coming close sets it off again. */
   waryUntil: number;
+  /** Talking: to this player (entity id) until this tick. */
+  talkTo: number;
+  talkUntil: number;
   input: InputFrame;
   stats: MovementStats;
 }
@@ -566,6 +572,8 @@ export class WorldZone {
       alertUntil: 0,
       fleeUntil: 0,
       waryUntil: 0,
+      talkTo: 0,
+      talkUntil: 0,
       fleeFrom: { x: 0, z: 0 },
       input: createInputFrame(),
       // Creatures share the humanoid rig's root-motion speeds (run, walk); no jumping.
@@ -1218,6 +1226,7 @@ export class WorldZone {
     if (arch.passive && m.state === 'idle' && m.waryUntil > this.tick) this.keepWary(m);
     if (arch.passive && m.state === 'idle') this.stroll(m);
     if (m.state === 'flee') this.flee(m);
+    if (m.state === 'talk') this.keepTalking(m);
 
     if (m.state === 'idle' && !arch.passive) {
       let best: Player | null = null;
@@ -1339,6 +1348,8 @@ export class WorldZone {
       ? ANIM.BLOCK
       : m.state === 'flee' && m.alertUntil > this.tick
       ? ANIM.ALERT
+      : m.state === 'talk'
+      ? ANIM.GESTURE
       : m.hopTicks > 0
       ? ANIM.HOP_FORWARD
       : m.retreatUntil > this.tick && m.input.flags & INPUT.BACK
@@ -1378,6 +1389,40 @@ export class WorldZone {
       m.fleeUntil = Math.max(m.alertUntil, this.tick) + FLEE_TICKS;
       m.fleeFrom = { x: at.x, z: at.z };
     }
+  }
+
+  /**
+   * A player talks to a peaceful creature in reach: it stops and gestures through the line
+   * (logged: ASM_GESTURE_POLITE_CONVERSATION for exactly the line's length), turning to face the
+   * player at ~90 degrees a second and following them while the line lasts.
+   */
+  talk(connId: number, entity: number, ms: number): void {
+    const p = this.players.get(connId);
+    const m = this.actors.get(entity);
+    if (!p || !alive(p) || !m || m.kind !== 'mob' || !alive(m) || !m.archetype.passive) return;
+    if (m.state !== 'idle' && m.state !== 'talk') return;
+    const a = p.character.position;
+    const b = m.character.position;
+    if (Math.hypot(a.x - b.x, a.z - b.z) > TALK_REACH || Math.abs(a.y - b.y) > AGGRO_HEIGHT) return;
+    m.state = 'talk';
+    m.talkTo = p.entityId;
+    m.talkUntil = this.tick + Math.ceil(ms / TICK_MS);
+    m.strollTo = null;
+  }
+
+  private keepTalking(m: Mob): void {
+    const p = this.actors.get(m.talkTo);
+    if (!p || !alive(p) || this.tick >= m.talkUntil) {
+      m.state = 'idle';
+      m.strollAt = this.tick + STROLL_PAUSE_MIN;
+      return;
+    }
+    const pos = m.character.position;
+    const want = yawTowards(pos.x, pos.z, p.character.position.x, p.character.position.z);
+    const have = dequantizeAngle(m.yaw);
+    const diff = Math.atan2(Math.sin(want - have), Math.cos(want - have));
+    const step = TALK_TURN_RATE * TICK_DT;
+    m.yaw = quantizeAngle(have + Math.max(-step, Math.min(step, diff)));
   }
 
   /** A wary citizen: a player coming close on its floor sets it running again. */
@@ -1820,7 +1865,7 @@ export class WorldZone {
   }
 
   /** Debug/test view of every actor. */
-  inspect(): { id: number; kind: Actor['kind']; hp: number; alive: boolean; state?: Mob['state']; swinging: boolean; anim: number; shield: boolean; flags: number; x: number; z: number }[] {
+  inspect(): { id: number; kind: Actor['kind']; hp: number; alive: boolean; state?: Mob['state']; swinging: boolean; anim: number; shield: boolean; flags: number; x: number; z: number; yaw: number }[] {
     return [...this.actors.values()].map((a) => ({
       id: a.entityId,
       kind: a.kind,
@@ -1831,6 +1876,7 @@ export class WorldZone {
       anim: this.states.get(a.entityId)?.anim ?? 0,
       shield: ((this.states.get(a.entityId)?.flags ?? 0) & 1) !== 0,
       flags: this.states.get(a.entityId)?.flags ?? 0,
+      yaw: dequantizeAngle(a.yaw),
       x: a.character.position.x,
       z: a.character.position.z,
     }));

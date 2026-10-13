@@ -307,6 +307,12 @@ export class ClientSession {
     this.sendJson({ op: CS.INTERACT, seq: ++this.seq, d: key ? { object, key } : { object } });
   }
 
+  /** Talking to a peaceful creature: it faces the player and gestures for `ms` (its line). */
+  talk(entity: number, ms: number): void {
+    if (!this.connected || this.dead) return;
+    this.sendJson({ op: CS.INTERACT, seq: ++this.seq, d: { object: entity, talk: Math.max(0, Math.min(20_000, Math.round(ms))) } });
+  }
+
   /** Casts the selected spell (the server checks mana, state and conjures it). */
   castSpell(): void {
     if (!this.connected || this.dead) return;

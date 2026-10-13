@@ -57,6 +57,8 @@ interface ClipMap {
   deaths?: string[];
   /** Idle variations played now and then while standing (peaceful creatures: gestures, ALT stands). */
   gestures?: string[];
+  /** Talking (ASM_GESTURE_POLITE_CONVERSATION). */
+  talk?: string;
 }
 
 /**
@@ -78,6 +80,7 @@ function withStates(base: ClipMap, states: Record<string, string> | undefined): 
     block: st['ASM_BLOCK'] ?? base.block,
     hop: base.hop ?? st['ASM_HOP_F'] ?? base.run,
     shieldIdle: base.shieldIdle ?? st['ASM_COMBAT_STANDING'] ?? base.idle,
+    talk: base.talk ?? st['ASM_GESTURE_POLITE_CONVERSATION'] ?? base.idle,
     hopLeft: base.hopLeft ?? st['ASM_HOP_L'] ?? base.strafeLeft ?? base.run,
     hopRight: base.hopRight ?? st['ASM_HOP_R'] ?? base.strafeRight ?? base.run,
     impacts: base.impacts ?? ['FRONT', 'LEFT', 'RIGHT', 'BACK'].map((k) => st[`ASM_IMPACT_${k}`]).filter((c): c is string => !!c),
@@ -243,6 +246,7 @@ class OriginalAvatar implements Avatar {
     if (anim === ANIM.HOP_FORWARD) return { name: m.hop ?? m.run, loop: false };
     if (anim === ANIM.SHIELD_IDLE) return { name: m.idle, loop: true };
     if (anim === ANIM.ALERT) return { name: m.shieldIdle ?? m.idle, loop: true };
+    if (anim === ANIM.GESTURE) return { name: m.talk ?? m.idle, loop: true };
     if (anim === ANIM.HOP_LEFT) return { name: m.hopLeft ?? m.run, loop: false };
     if (anim === ANIM.HOP_RIGHT) return { name: m.hopRight ?? m.run, loop: false };
     if (anim === ANIM.ATTACK_OVERHEAD) return { name: m.attackOverhead ?? m.attacks[0]!, loop: false };

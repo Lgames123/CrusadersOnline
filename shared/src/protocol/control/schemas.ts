@@ -58,7 +58,8 @@ export const EquipItemPacketSchema = z.object({
 export const InteractPacketSchema = z.object({
   op: z.literal(CS.INTERACT),
   seq: z.number().int().positive(),
-  d: z.object({ object: z.number().int().min(0).max(1_000_000), key: z.boolean().optional() }),
+  /** `talk`: talking to a peaceful creature (`object` is then its entity id) for that many ms (its line). */
+  d: z.object({ object: z.number().int().min(0).max(1_000_000), key: z.boolean().optional(), talk: z.number().int().min(0).max(20_000).optional() }),
 });
 
 export const UseItemPacketSchema = z.object({

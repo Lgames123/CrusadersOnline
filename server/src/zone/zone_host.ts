@@ -94,6 +94,10 @@ export class ZoneHost {
     this.post({ t: 'interact', connId, object, key });
   }
 
+  talk(connId: number, entity: number, ms: number): void {
+    this.post({ t: 'talk', connId, entity, ms });
+  }
+
   useItem(connId: number, slot: number): void {
     this.post({ t: 'use', connId, slot });
   }

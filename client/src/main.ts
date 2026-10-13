@@ -394,6 +394,8 @@ async function main(): Promise<void> {
     const line = sounds.lines.get(id);
     if (!line) return;
     sounds.play(id, e.avatar.object.position, { volume: 1 });
+    // The creature faces Drake and gestures through the line (server side, seen by everyone).
+    session?.talk(entityId, line.ms);
     subtitle.replaceChildren(Object.assign(document.createElement('span'), { className: 'who', textContent: `${e.info.name}:` }), document.createTextNode(line.text));
     subtitle.hidden = false;
     clearTimeout(subtitleTimer);

@@ -13,6 +13,7 @@ export type ToZone =
   | { t: 'selectSpell'; connId: number; spell: SpellId }
   | { t: 'equip'; connId: number; slot: number; equip: boolean }
   | { t: 'interact'; connId: number; object: number; key: boolean }
+  | { t: 'talk'; connId: number; entity: number; ms: number }
   | { t: 'use'; connId: number; slot: number }
   /** Remove the player for a zone transfer; answered with 'transferred'. */
   | { t: 'transfer'; connId: number }

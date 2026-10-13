@@ -101,6 +101,9 @@ port.on('message', (msg: ToZone) => {
       zone.interact(msg.connId, msg.object, msg.key);
       flush();
       break;
+    case 'talk':
+      zone.talk(msg.connId, msg.entity, msg.ms);
+      break;
     case 'use':
       zone.useItem(msg.connId, msg.slot);
       flush();
