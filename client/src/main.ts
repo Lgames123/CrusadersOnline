@@ -242,7 +242,15 @@ async function main(): Promise<void> {
                   debris?.spawn(obj, 5, new THREE.Vector3(chip, chip, chip), at, 40, obj.position.y, light);
                   fxBurst('BONE', 3 + Math.floor(Math.random() * 5), at, step.clone().multiplyScalar(-1));
                 }
-                else fxBurst('BLOOD', 2 + Math.floor(Math.random() * 2), at, step.clone().multiplyScalar(-1));
+                else {
+                  // Living victims: the chips are blood (texture BLOODHIT, ±0.2 ft, speed 40).
+                  const blood = debris?.texture('bloodhit');
+                  if (blood) {
+                    const r = 0.2 * LEVEL_UNIT_METRES;
+                    debris?.spawn(blood, 5, new THREE.Vector3(r, r, r), at, 40, obj.position.y);
+                  }
+                  fxBurst('BLOOD', 2 + Math.floor(Math.random() * 2), at, step.clone().multiplyScalar(-1));
+                }
               }
             }
             // Original impact / cry sounds (executable sound tables, Sound.ctx ids).

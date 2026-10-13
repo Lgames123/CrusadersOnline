@@ -14,12 +14,17 @@ import { LEVEL_UNIT_METRES } from '@crusaders/shared';
  * Each piece (setup 0x4108B0) is shrunk to fit (0.4 / count)^(1/3) x the half extents per axis
  * (never enlarged), spins at 60-150 / 50-150 / 40-150 degrees a second about its axes and lives
  * 5-10 s, or 1.5 s when that box is under 2 cubic feet (the chips of a blow).
+ *
+ * Flight, measured in the running game (Frida, 77 blows on skeletons and on Drake): gravity
+ * ~70 ft/s^2, each landing keeps ~49 % of the vertical speed (2-3 small bounces) and ~54 % of the
+ * horizontal; chips of a skeleton leave at up to ~48 ft/s and land up to ~20 ft away, at rest
+ * within ~1 s. Blows on living victims throw the chips in the BLOODHIT texture, +-0.2 ft.
  */
 const TABLE = ['debriswood01', 'debriswood02', 'wddbs1', 'wd1lrg', 'wddbs2', 'wd1lrg', 'wdpcs1', 'wd1sml', 'wddbs1', 'debriswood01', 'stndbs', 'debrisstone01', 'wddbs1', 'wddbs2', 'stndbs', 'debrisstone01'];
-const GRAVITY = 9.8;
+const GRAVITY = 70 * LEVEL_UNIT_METRES;
 /** Kept share of the vertical speed at a bounce, and of the horizontal one. */
-const BOUNCE = 0.3;
-const FRICTION = 0.5;
+const BOUNCE = 0.49;
+const FRICTION = 0.54;
 /** Life of a piece (5-10 s; 1.5 s for small ones) and the fade at its end. */
 const LIFE_MIN = 5;
 const LIFE_SPREAD = 5;
@@ -44,15 +49,32 @@ export class Debris {
   private readonly pieces: Piece[] = [];
   private readonly scene: THREE.Scene;
   private readonly models: (THREE.Object3D | null)[];
+  private readonly textureUrls: Record<string, string>;
+  private readonly named = new Map<string, THREE.Texture | null>();
 
-  private constructor(scene: THREE.Scene, models: (THREE.Object3D | null)[]) {
+  private constructor(scene: THREE.Scene, models: (THREE.Object3D | null)[], textureUrls: Record<string, string>) {
     this.scene = scene;
     this.models = models;
+    this.textureUrls = textureUrls;
+  }
+
+  /** A converted texture by name (e.g. "bloodhit"), loaded once. */
+  texture(name: string): THREE.Texture | null {
+    if (!this.named.has(name)) {
+      const url = this.textureUrls[name];
+      const tex = url ? new THREE.TextureLoader().load(`/generated/${url}`) : null;
+      if (tex) {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.flipY = false;
+      }
+      this.named.set(name, tex);
+    }
+    return this.named.get(name) ?? null;
   }
 
   static async load(scene: THREE.Scene): Promise<Debris | null> {
     try {
-      const manifest = (await (await fetch('/generated/manifest.json')).json()) as { models?: Record<string, string> };
+      const manifest = (await (await fetch('/generated/manifest.json')).json()) as { models?: Record<string, string>; textures?: Record<string, string> };
       const loader = new GLTFLoader();
       const byName = new Map<string, Promise<THREE.Object3D | null>>();
       const models = await Promise.all(TABLE.map((name) => {
@@ -62,7 +84,7 @@ export class Debris {
         if (!p) byName.set(name, (p = loader.loadAsync(`/generated/${url}`).then((g) => g.scene as THREE.Object3D, () => null)));
         return p;
       }));
-      return models.some(Boolean) ? new Debris(scene, models) : null;
+      return models.some(Boolean) ? new Debris(scene, models, manifest.textures ?? {}) : null;
     } catch {
       return null;
     }
@@ -72,8 +94,8 @@ export class Debris {
    * Throws `count` pieces wearing `source`'s texture, placed in the box of half extents `half`
    * (metres) about `centre` (only above `floor`), at (place - centre) x `speed` per second.
    */
-  spawn(source: THREE.Object3D, count: number, half: THREE.Vector3, centre: THREE.Vector3, speed: number, floor: number, light?: THREE.Color): void {
-    const map = textureOf(source);
+  spawn(source: THREE.Object3D | THREE.Texture, count: number, half: THREE.Vector3, centre: THREE.Vector3, speed: number, floor: number, light?: THREE.Color): void {
+    const map = source instanceof THREE.Texture ? source : textureOf(source);
     // Piece box, feet: (0.4 / count)^(1/3) x the half extents.
     const fit = Math.cbrt(0.4 / Math.max(1, count)) / LEVEL_UNIT_METRES;
     const box = new THREE.Vector3(half.x * fit, half.y * fit, half.z * fit);
