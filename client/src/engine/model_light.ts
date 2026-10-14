@@ -19,7 +19,12 @@ const SHADOW_OPACITY = 0.45;
 /** Silhouette shadows: how many characters besides the player, within what distance (m). */
 const SILHOUETTE_MAX = 6;
 const SILHOUETTE_RANGE = 14;
-const SILHOUETTE_OPACITY = 0.4;
+const SILHOUETTE_OPACITY = 0.55;
+/**
+ * The enhanced lighting blends in linear light (its HDR target), where the same opacity darkens
+ * far less once shown in sRGB: the opacity that darkens the picture as much as `o` does on screen.
+ */
+const linearOpacity = (o: number) => 1 - Math.pow(1 - o, 2.2);
 /** Direction the light travels (down and a little aside), for the flattened silhouettes. */
 const LIGHT_DIR = new THREE.Vector3(0.35, -1, 0.25).normalize();
 
@@ -250,6 +255,9 @@ export class ModelLighting {
   }
 
   update(dt: number, now: number): void {
+    const linear = dynamicLights.enabled;
+    this.shadowMat.opacity = linear ? linearOpacity(SHADOW_OPACITY) : SHADOW_OPACITY;
+    const silhouetteOpacity = linear ? linearOpacity(SILHOUETTE_OPACITY) : SILHOUETTE_OPACITY;
     const cast = this.chooseSilhouettes();
     for (const [key, t] of this.tracked) {
       const visible = isShown(t.object);
@@ -277,6 +285,7 @@ export class ModelLighting {
       if (silhouette) {
         const s = (t.silhouette ??= buildSilhouette(t.object));
         s.material.floor.value = t.floor!;
+        s.material.opacity = silhouetteOpacity;
       }
       if (t.silhouette) for (const s of t.silhouette.meshes) s.visible = silhouette;
       if (t.shadow && grounded && !silhouette) {

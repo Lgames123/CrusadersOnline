@@ -101,7 +101,16 @@ export class PostFx {
   private build(): EffectComposer {
     const size = this.renderer.getSize(new THREE.Vector2());
     const pr = this.renderer.getPixelRatio();
-    const target = new THREE.WebGLRenderTarget(size.x * pr, size.y * pr, { type: THREE.HalfFloatType, samples: 4 });
+    // Stencil: silhouette shadows darken each covered pixel once (without it, overlapping parts show).
+    // Only the colour is resolved from the MSAA buffers: no pass after the scene reads depth or
+    // stencil, and resolving them costs ~20 ms a frame at 1080p on ANGLE / D3D11.
+    const target = new THREE.WebGLRenderTarget(size.x * pr, size.y * pr, {
+      type: THREE.HalfFloatType,
+      samples: 4,
+      stencilBuffer: true,
+      resolveDepthBuffer: false,
+      resolveStencilBuffer: false,
+    });
     const composer = new EffectComposer(this.renderer, target);
     composer.setPixelRatio(pr);
     composer.setSize(size.x, size.y);
