@@ -1,0 +1,108 @@
+import { describe, expect, it } from 'vitest';
+import { addItem, BUILTIN_ITEMS, canPlaceGrid, catalogFromItemRules, firstFreeGridPosition, fitsGrid, INVENTORY_GRID, layoutInventoryGrid, layoutLegacyGrid, mergeInventoryStacks, moveInventoryGridItem, overlapsGrid, setEquipped, splitInventoryStack } from '@crusaders/shared';
+
+describe('inventory grid geometry', () => {
+  it('uses the original dimensions, including inherited fields from item rules', () => {
+    expect(BUILTIN_ITEMS.get('long_sword')).toMatchObject({ width: 1, height: 3, model: 8 });
+    expect(BUILTIN_ITEMS.get('wooden_shield')).toMatchObject({ width: 2, height: 2, model: 86 });
+    expect(BUILTIN_ITEMS.get('scale_armor')).toMatchObject({ width: 2, height: 3, model: 80 });
+    const catalog = catalogFromItemRules({ items: [
+      { name: 'Base Sword', fields: { Type: 'WEAPON', SubType: 'MELEE', Width: 1, Height: 3, Model: 8, Price: 1 }, damage: {}, protection: {} },
+      { name: 'Inherited Sword', fields: { Type: 'WEAPON', SubType: 'MELEE', Width: 1, Height: 3, Model: 9, Price: 2 }, damage: {}, protection: {} },
+    ] });
+    expect(catalog.get('inherited_sword')).toMatchObject({ width: 1, height: 3, model: 9 });
+  });
+
+  it('recognises the original sword, shield and armour shapes at the grid edges', () => {
+    expect(fitsGrid(INVENTORY_GRID, { x: 7, y: 1, width: 1, height: 3 })).toBe(true); // sword 1×3
+    expect(fitsGrid(INVENTORY_GRID, { x: 6, y: 4, width: 2, height: 2 })).toBe(true); // shield 2×2
+    expect(fitsGrid(INVENTORY_GRID, { x: 6, y: 3, width: 2, height: 3 })).toBe(true); // armour 2×3
+    expect(fitsGrid(INVENTORY_GRID, { x: 7, y: 2, width: 2, height: 3 })).toBe(false);
+    expect(fitsGrid(INVENTORY_GRID, { x: 6, y: 4, width: 2, height: 3 })).toBe(false);
+  });
+
+  it('rejects overlapping placements and finds the next area that fits', () => {
+    const sword = { x: 0, y: 0, width: 1, height: 3 };
+    const shield = { x: 1, y: 0, width: 2, height: 2 };
+    expect(overlapsGrid(sword, shield)).toBe(false);
+    expect(canPlaceGrid(INVENTORY_GRID, { x: 0, y: 2, width: 2, height: 3 }, [sword, shield])).toBe(false);
+    expect(firstFreeGridPosition({ columns: 3, rows: 3 }, { width: 2, height: 2 }, [sword])).toEqual({ x: 1, y: 0 });
+  });
+
+  it('lays out legacy records deterministically without overlap', () => {
+    const placed = layoutLegacyGrid([{ width: 1, height: 3 }, { width: 2, height: 2 }, { width: 2, height: 3 }]);
+    expect(placed).toEqual([
+      { item: { width: 1, height: 3 }, x: 0, y: 0 },
+      { item: { width: 2, height: 2 }, x: 1, y: 0 },
+      { item: { width: 2, height: 3 }, x: 3, y: 0 },
+    ]);
+  });
+
+  it('moves only a carried item into a server-valid empty rectangle', () => {
+    const inv = [
+      { slot: 0, itemId: 'long_sword', equipped: false, x: 0, y: 0 },
+      { slot: 1, itemId: 'wooden_shield', equipped: false, x: 1, y: 0 },
+      { slot: 2, itemId: 'scale_armor', equipped: true },
+    ];
+    expect(moveInventoryGridItem(inv, 0, 1, 0, BUILTIN_ITEMS)).toBe(false); // shield occupies it
+    expect(moveInventoryGridItem(inv, 2, 4, 0, BUILTIN_ITEMS)).toBe(false); // equipped
+    expect(moveInventoryGridItem(inv, 0, 3, 0, BUILTIN_ITEMS)).toBe(true);
+    expect(inv[0]).toMatchObject({ x: 3, y: 0 });
+    expect(layoutInventoryGrid(inv, BUILTIN_ITEMS).get(0)).toMatchObject({ x: 3, y: 0, width: 1, height: 3 });
+  });
+
+  it('merges only compatible carried stacks without exceeding 99', () => {
+    const inv = [{ slot: 0, itemId: 'healing_potion', equipped: false, quantity: 40 }, { slot: 1, itemId: 'healing_potion', equipped: false, quantity: 50 }];
+    expect(mergeInventoryStacks(inv, 0, 1, BUILTIN_ITEMS)).toBe(true);
+    expect(inv).toEqual([{ slot: 1, itemId: 'healing_potion', equipped: false, quantity: 90 }]);
+    inv.push({ slot: 2, itemId: 'healing_potion', equipped: false, quantity: 10 });
+    expect(mergeInventoryStacks(inv, 2, 1, BUILTIN_ITEMS)).toBe(false);
+  });
+
+  it('splits only when a new stack and its full rectangle fit', () => {
+    const inv = [{ slot: 0, itemId: 'healing_potion', equipped: false, quantity: 9, x: 0, y: 0 }];
+    expect(splitInventoryStack(inv, 0, 4, BUILTIN_ITEMS)).toBe(true);
+    expect(inv).toEqual([
+      { slot: 0, itemId: 'healing_potion', equipped: false, quantity: 5, x: 0, y: 0 },
+      { slot: 1, itemId: 'healing_potion', equipped: false, quantity: 4, x: 1, y: 0 },
+    ]);
+    expect(splitInventoryStack(inv, 0, 5, BUILTIN_ITEMS)).toBe(false);
+  });
+
+  it('reserves space and swaps atomically when equipping and unequipping', () => {
+    const inv = [
+      { slot: 0, itemId: 'long_sword', equipped: true },
+      { slot: 1, itemId: 'axe', equipped: false, x: 0, y: 0 },
+    ];
+    expect(setEquipped(inv, 1, true, BUILTIN_ITEMS)).toBe(true);
+    expect(inv.find((e) => e.slot === 1)?.equipped).toBe(true);
+    expect(inv.find((e) => e.slot === 0)?.equipped).toBe(false);
+    expect(inv.find((e) => e.slot === 0)?.x).toBe(0);
+    expect(inv.find((e) => e.slot === 0)?.y).toBe(0);
+
+    expect(setEquipped(inv, 1, false, BUILTIN_ITEMS)).toBe(true);
+    expect(inv.find((e) => e.slot === 1)?.equipped).toBe(false);
+
+    // Full bag rejecting unequip of 2x3 scale_armor
+    const packed = [
+      { slot: 0, itemId: 'scale_armor', equipped: true },
+      ...Array.from({ length: 48 }, (_, i) => ({
+        slot: i + 1,
+        itemId: 'healing_potion',
+        equipped: false,
+        x: i % 8,
+        y: Math.floor(i / 8),
+      })),
+    ];
+    expect(setEquipped(packed, 0, false, BUILTIN_ITEMS)).toBe(false);
+    expect(packed[0]?.equipped).toBe(true);
+  });
+
+  it('allocates grid origins on addItem and rejects when no rectangle fits', () => {
+    const inv: any[] = [];
+    expect(addItem(inv, 'long_sword', 1, BUILTIN_ITEMS)).toBe(0);
+    expect(inv[0]).toMatchObject({ slot: 0, itemId: 'long_sword', x: 0, y: 0 });
+    expect(addItem(inv, 'long_sword', 1, BUILTIN_ITEMS)).toBe(1);
+    expect(inv[1]).toMatchObject({ slot: 1, itemId: 'long_sword', x: 1, y: 0 });
+  });
+});

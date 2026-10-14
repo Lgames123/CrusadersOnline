@@ -102,6 +102,8 @@ export interface OriginalLevel {
   light: LevelLight | null;
   /** `swing`: a swinging door's motion as of now (from the server). */
   setObjectState(id: number, state: WorldObjectState, swing?: DoorMotion | null, mover?: MoverMotion | null): void;
+  /** Dynamically spawns a dropped item object in the world. */
+  spawnDynamicObject(def: WorldObjectDef): void;
   /** Sets a brush's mover going here (a cutscene's relay; the server's state follows). */
   useBrush(name: string): void;
   /** Surface under a point (metres), for footsteps; null off the level. */
@@ -541,6 +543,29 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
       if (!v) return;
       v.state = state;
       v.object.visible = state !== 'gone';
+    },
+    spawnDynamicObject(def: WorldObjectDef) {
+      if (objects.has(def.id)) return;
+      const viewPos = new THREE.Vector3(def.x, def.y, def.z);
+      const geom = new THREE.DodecahedronGeometry(0.2);
+      const mat = new THREE.MeshStandardMaterial({ color: 0xd9b45a, emissive: 0x3d3010, roughness: 0.3 });
+      const obj = new THREE.Mesh(geom, mat);
+      obj.position.copy(viewPos);
+      props.add(obj);
+      objects.set(def.id, {
+        def: {
+          kind: 'item',
+          name: def.item?.name ?? 'Item',
+          modelId: 0,
+          rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+          hp: 0,
+          position: [def.x / LEVEL_UNIT_METRES, def.y / LEVEL_UNIT_METRES, def.z / LEVEL_UNIT_METRES],
+          item: def.item ? { name: def.item.name, quantity: def.item.quantity } : undefined,
+        },
+        object: obj,
+        position: viewPos,
+        state: 'present',
+      });
     },
     applyAtmosphere(scene) {
       scene.background = new THREE.Color(0x000000);

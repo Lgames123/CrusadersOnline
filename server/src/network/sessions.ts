@@ -233,6 +233,18 @@ export class SessionManager implements TransportHandlers {
       case CS.EQUIP_ITEM:
         if (s.state === 'in_world') this.zoneOf(s)?.equip(conn.id, msg.d.slot, msg.d.equip);
         return;
+      case CS.MOVE_INVENTORY_ITEM:
+        if (s.state === 'in_world') this.zoneOf(s)?.moveInventoryItem(conn.id, msg.d.slot, msg.d.x, msg.d.y);
+        return;
+      case CS.MERGE_INVENTORY_STACK:
+        if (s.state === 'in_world') this.zoneOf(s)?.mergeInventoryStacks(conn.id, msg.d.fromSlot, msg.d.toSlot);
+        return;
+      case CS.SPLIT_INVENTORY_STACK:
+        if (s.state === 'in_world') this.zoneOf(s)?.splitInventoryStack(conn.id, msg.d.slot, msg.d.quantity);
+        return;
+      case CS.DROP_INVENTORY_ITEM:
+        if (s.state === 'in_world') this.zoneOf(s)?.dropInventoryItem(conn.id, msg.d.slot);
+        return;
       case CS.CAST_SPELL:
         if (s.state === 'in_world') this.zoneOf(s)?.castSpell(conn.id);
         return;

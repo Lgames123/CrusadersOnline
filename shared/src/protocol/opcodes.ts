@@ -15,6 +15,12 @@ export const CS = {
   SELECT_SPELL: 0x0d,
   /** The client finished playing a scripted sequence (or skipped it). */
   CUTSCENE_DONE: 0x0e,
+  /** Move one carried item to a grid origin. */
+  MOVE_INVENTORY_ITEM: 0x0f,
+  MERGE_INVENTORY_STACK: 0x10,
+  SPLIT_INVENTORY_STACK: 0x11,
+  /** Drop one carried item to the ground. */
+  DROP_INVENTORY_ITEM: 0x12,
 } as const;
 
 /** Server -> client opcodes. */

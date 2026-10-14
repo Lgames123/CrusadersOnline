@@ -97,6 +97,22 @@ port.on('message', (msg: ToZone) => {
       zone.equip(msg.connId, msg.slot, msg.equip);
       flush();
       break;
+    case 'moveInventoryItem':
+      zone.moveInventoryItem(msg.connId, msg.slot, msg.x, msg.y);
+      flush();
+      break;
+    case 'mergeInventoryStacks':
+      zone.mergeInventoryStacks(msg.connId, msg.fromSlot, msg.toSlot);
+      flush();
+      break;
+    case 'splitInventoryStack':
+      zone.splitInventoryStack(msg.connId, msg.slot, msg.quantity);
+      flush();
+      break;
+    case 'dropInventoryItem':
+      zone.dropInventoryItem(msg.connId, msg.slot);
+      flush();
+      break;
     case 'interact':
       zone.interact(msg.connId, msg.object, msg.key);
       flush();

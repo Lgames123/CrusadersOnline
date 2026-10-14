@@ -42,6 +42,7 @@ import {
   type MoverMotion,
   type InventoryItemView,
   type CharacterLook,
+  type WorldObjectDef,
 } from '@crusaders/shared';
 import { outfitFor, lookFromInventory } from './assets/item_models.ts';
 import { createRenderContext } from './engine/renderer.ts';
@@ -71,7 +72,7 @@ import { TORCH_LIGHT_COLOR, TORCH_LIGHT_HEIGHT, TORCH_LIGHT_INTENSITY, TORCH_DYN
 import { connectToWorld } from './network/connect.ts';
 import { CombatUi } from './ui/combat_ui.ts';
 import { Hud } from './ui/hud.ts';
-import { InventoryPanel } from './ui/inventory.ts';
+import { InventoryPanels, type InventoryPanelKind } from './ui/inventory_panels.ts';
 import { logout } from './frontend/api.ts';
 import { CHARACTER_SCREEN_FLAG, runFrontEnd } from './frontend/front_end.ts';
 import { TitleScene } from './frontend/title_scene.ts';
@@ -157,7 +158,7 @@ async function main(): Promise<void> {
   };
   const combatUi = new CombatUi(document.getElementById('world-ui')!);
   const hud = new Hud(document.getElementById('hud')!, document.getElementById('player-panel')!, document.getElementById('death')!);
-  const inventoryPanel = new InventoryPanel(document.getElementById('inventory')!);
+  const inventoryPanel = new InventoryPanels(document.getElementById('inventory')!);
   const questBook = new QuestBook(document.getElementById('quest-book')!, assetManifest?.textures ?? {});
   questBook.setStrings(gameStrings);
   // Scripted sequences (cutscenes): played here, the server waits for the end (CS_CUTSCENE_DONE).
@@ -418,7 +419,10 @@ async function main(): Promise<void> {
             }
           },
           objects: (d) => {
-            for (const o of d.objects as { id: number; state: 'present' | 'gone' | 'open'; by?: number; loot?: string[]; damage?: number; swing?: DoorMotion; mover?: MoverMotion }[]) {
+            for (const o of d.objects as { id: number; state: 'present' | 'gone' | 'open'; def?: WorldObjectDef; by?: number; loot?: string[]; damage?: number; swing?: DoorMotion; mover?: MoverMotion }[]) {
+              if (o.def && !levelView?.objects.has(o.id) && o.state === 'present') {
+                levelView?.spawnDynamicObject(o.def);
+              }
               const view = levelView?.objects.get(o.id);
               levelView?.setObjectState(o.id, o.state, o.swing ?? null, o.mover ?? null);
               // Someone else opening a door: its sound (our own plays on the key press).
@@ -625,7 +629,7 @@ async function main(): Promise<void> {
         if (own) puppets.set(index, own);
       }
     });
-    setInventoryOpen(false);
+    closeInventoryPanels();
     setQuestBookOpen(false);
     cutsceneUi.hidden = false;
     prompt.hidden = true;
@@ -770,7 +774,7 @@ async function main(): Promise<void> {
     gameFiles.visible = open;
     if (open) {
       optionsAt = performance.now();
-      setInventoryOpen(false);
+      closeInventoryPanels();
       setQuestBookOpen(false);
       if (input.locked) {
         releasing = true;
@@ -859,6 +863,25 @@ async function main(): Promise<void> {
       best = { id, label: `Tab — ${label}`, d };
     }
     return best;
+  };
+  /** The ground panel is a view of the same level objects used by Tab; pickup stays authoritative. */
+  const updateGroundItems = () => {
+    if (!inventoryPanel.isOpen('ground') || !levelView) return;
+    const p = local.object.position;
+    inventoryPanel.setGroundItems(
+      [...levelView.objects]
+        .filter(([, view]) => view.state === 'present' && view.def.kind === 'item' && !!view.def.item)
+        .map(([id, view]) => ({
+          id,
+          name: view.def.item!.name,
+          quantity: Math.max(1, view.def.item!.quantity),
+          distance: Math.hypot(view.position.x - p.x, view.position.z - p.z),
+          vertical: Math.abs(view.position.y - p.y),
+        }))
+        .filter((item) => item.distance <= INTERACT_RANGE && item.vertical <= 2)
+        .sort((a, b) => a.distance - b.distance || a.id - b.id)
+        .map(({ vertical: _vertical, ...item }) => item),
+    );
   };
   // A door's sound actions (Sound.ctx ids at its hinge): every use of the door plays them.
   const doorSounds = (id: number) => {
@@ -982,14 +1005,23 @@ async function main(): Promise<void> {
     updateHint();
   };
 
-  // Inventory (online only): I toggles it, releasing the pointer so items can be clicked.
-  function setInventoryOpen(open: boolean): void {
-    if (!session || open === inventoryPanel.open) return;
-    inventoryPanel.open = open;
+  // Inventory panels (online only): each can be toggled without closing the other two.
+  function setInventoryPanelOpen(kind: InventoryPanelKind, open: boolean): void {
+    if (!session || open === inventoryPanel.isOpen(kind)) return;
+    inventoryPanel.setOpen(kind, open);
     if (open && input.locked) {
       releasing = true;
       document.exitPointerLock();
-    } else if (!open && !optionsOpen) input.requestLock();
+    } else if (!open && !inventoryPanel.open && !optionsOpen) input.requestLock();
+    updateHint();
+  }
+  function setInventoryOpen(open: boolean): void {
+    setInventoryPanelOpen('bag', open);
+  }
+  function closeInventoryPanels(): void {
+    if (!inventoryPanel.open) return;
+    inventoryPanel.closeAll();
+    if (!optionsOpen) input.requestLock();
     updateHint();
   }
   inventoryPanel.onToggleEquip = (slot, equip) => {
@@ -997,7 +1029,12 @@ async function main(): Promise<void> {
     if (item?.type === 'potion') session?.useItem(slot);
     else session?.equip(slot, equip);
   };
-  inventoryPanel.onClose = () => setInventoryOpen(false);
+  inventoryPanel.onMove = (slot, x, y) => session?.moveInventoryItem(slot, x, y);
+  inventoryPanel.onMerge = (fromSlot, toSlot) => session?.mergeInventoryStacks(fromSlot, toSlot);
+  inventoryPanel.onSplit = (slot, quantity) => session?.splitInventoryStack(slot, quantity);
+  inventoryPanel.onDrop = (slot) => session?.dropInventoryItem(slot);
+  inventoryPanel.onPickup = (object) => session?.interact(object);
+  inventoryPanel.onClose = (kind) => setInventoryPanelOpen(kind, false);
   // Quest book (F2, the original's key), online only.
   function setQuestBookOpen(open: boolean): void {
     if (!session || open === questBook.open) return;
@@ -1021,13 +1058,18 @@ async function main(): Promise<void> {
       // The Esc that released the pointer may arrive too: it opened the menu already.
       if (optionsOpen) {
         if (performance.now() - optionsAt > 250) setOptionsOpen(false);
-      } else if (inventoryPanel.open) setInventoryOpen(false);
+      } else if (inventoryPanel.open) closeInventoryPanels();
       else if (questBook.open) setQuestBookOpen(false);
       else setOptionsOpen(true);
       return;
     }
     if (optionsOpen) return;
-    if ((input.isKeyForAction('inventory', e.code) || e.code === 'KeyI') && !e.repeat) setInventoryOpen(!inventoryPanel.open);
+    const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target as HTMLElement | null)?.isContentEditable;
+    if (!typing && e.shiftKey && !e.repeat && (e.code === 'KeyI' || e.code === 'KeyC' || e.code === 'KeyG')) {
+      e.preventDefault();
+      const kind: InventoryPanelKind = e.code === 'KeyI' ? 'bag' : e.code === 'KeyC' ? 'character' : 'ground';
+      setInventoryPanelOpen(kind, !inventoryPanel.isOpen(kind));
+    } else if ((input.isKeyForAction('inventory', e.code) || e.code === 'KeyI') && !e.repeat) setInventoryOpen(!inventoryPanel.isOpen('bag'));
     else if ((input.isKeyForAction('questBook', e.code) || e.code === 'F2') && !e.repeat) {
       e.preventDefault();
       setQuestBookOpen(!questBook.open);
@@ -1144,6 +1186,7 @@ async function main(): Promise<void> {
       prompt.hidden = !t;
       if (t) prompt.textContent = t.label;
     }
+    updateGroundItems();
     dynamicLights.update(viewCamera, dt);
     postFx.render(viewCamera, dt);
     combatUi.update(dt, viewCamera, remotes, container.clientWidth, container.clientHeight);

@@ -41,6 +41,9 @@ import {
   itemSlug,
   takeOne,
   addItem,
+  mergeInventoryStacks,
+  splitInventoryStack,
+  moveInventoryGridItem,
   equipmentOf,
   sanitizeInventory,
   setEquipped,
@@ -277,6 +280,8 @@ const OBJECT_RESPAWN_TICKS = 20 * 300; // 5 min, so a persistent world refills
 const BREAKABLE_RADIUS = 0.5;
 /** Hit-set key offset so swings can record breakables next to entity ids. */
 const OBJECT_HIT_KEY = 1_000_000;
+/** Base ID for dynamically spawned objects in the world (e.g. dropped items). */
+export const DYNAMIC_OBJECT_BASE = 2_000_000;
 
 interface WorldObject {
   def: WorldObjectDef;
@@ -287,12 +292,15 @@ interface WorldObject {
   swing?: { def: DoorSwing; points: Float32Array; hull: [number, number][]; motion: DoorMotion | null; blocked: boolean };
   /** Other movers (gates, cell doors, levers): the original's keyframe mover and its motion. */
   mover?: { def: MoverDef; motion: MoverMotion };
+  /** Dynamically dropped item in the world: never respawns, removed upon pickup. */
+  dynamic?: boolean;
 }
 
 /** One change in an OBJECT_STATE message. */
 interface ObjectChange {
   id: number;
   state: WorldObjectState;
+  def?: WorldObjectDef;
   /** Entity that caused it (pickup, opening, destruction). */
   by?: number;
   /** Item names granted to `by`. */
@@ -555,6 +563,7 @@ export class WorldZone {
   private readonly scratchFrames: InputFrame[] = Array.from({ length: MAX_INPUT_FRAMES }, createInputFrame);
   private readonly frame = createInputFrame();
   private readonly objects = new Map<number, WorldObject>();
+  private nextDynamicObjectId = 2_000_000;
   /** Height below which a player has fallen out of the level (catchFall). */
   private readonly fallLimit: number;
 
@@ -750,7 +759,15 @@ export class WorldZone {
     this.sendInventory(p);
     this.sendJson(connId, { op: SC.QUEST_LOG, d: { log: p.story.quests } });
     if (this.objects.size) {
-      const changed = [...this.objects.values()].filter((o) => o.state !== 'present').map((o) => ({ id: o.def.id, state: o.state, ...(o.swing?.motion ? { swing: { ...o.swing.motion } } : {}), ...(o.mover ? { mover: { ...o.mover.motion } } : {}) }));
+      const changed = [...this.objects.values()]
+        .filter((o) => o.state !== 'present' || o.dynamic)
+        .map((o) => ({
+          id: o.def.id,
+          state: o.state,
+          ...(o.dynamic ? { def: o.def } : {}),
+          ...(o.swing?.motion ? { swing: { ...o.swing.motion } } : {}),
+          ...(o.mover ? { mover: { ...o.mover.motion } } : {}),
+        }));
       this.sendJson(connId, { op: SC.OBJECT_STATE, d: { objects: changed, full: true } });
     }
     return p.entityId;
@@ -762,7 +779,7 @@ export class WorldZone {
    */
   interact(connId: number, id: number, key = false): void {
     const p = this.players.get(connId);
-    if (p && id >= PORTAL_OBJECT_BASE) {
+    if (p && id >= PORTAL_OBJECT_BASE && id < DYNAMIC_OBJECT_BASE) {
       // A door exit in reach (its trigger, widened by PORTAL_USE_REACH).
       const portal = this.arena.portals?.find((q) => q.id === id - PORTAL_OBJECT_BASE);
       if (portal?.use && alive(p) && inPortal(portal, p.character.position, PORTAL_USE_REACH)) this.outbox.portal?.(p.connId, portal.target);
@@ -786,9 +803,14 @@ export class WorldZone {
       this.sendJson(connId, { op: SC.ERROR, d: { code: 'bag_full', message: 'Your bag is full.' } }); // leave it there
       return;
     }
-    o.state = o.def.kind === 'chest' ? 'open' : 'gone';
-    o.respawnAt = this.tick + OBJECT_RESPAWN_TICKS;
-    this.broadcastObjects([{ id, state: o.state, by: p.entityId, loot }]);
+    if (o.dynamic) {
+      this.objects.delete(id);
+      this.broadcastObjects([{ id, state: 'gone', by: p.entityId, loot }]);
+    } else {
+      o.state = o.def.kind === 'chest' ? 'open' : 'gone';
+      o.respawnAt = this.tick + OBJECT_RESPAWN_TICKS;
+      this.broadcastObjects([{ id, state: o.state, by: p.entityId, loot }]);
+    }
     const record = this.persistRecord(p);
     if (record) this.outbox.persist?.([record], 'progress');
   }
@@ -1085,6 +1107,70 @@ export class WorldZone {
     this.applyEquipRequest(p, slot, equip);
   }
 
+  /** Server-authoritative bag move; invalid bounds, collisions and equipped items are rejected. */
+  moveInventoryItem(connId: number, slot: number, x: number, y: number): void {
+    const p = this.players.get(connId);
+    if (!p || !alive(p) || p.swing || !moveInventoryGridItem(p.inventory, slot, x, y, this.items)) return;
+    p.inventoryDirty = true;
+    this.sendInventory(p);
+    const record = this.persistRecord(p);
+    if (record) this.outbox.persist?.([record], 'progress');
+  }
+
+  mergeInventoryStacks(connId: number, fromSlot: number, toSlot: number): void {
+    const p = this.players.get(connId);
+    if (!p || !alive(p) || p.swing || !mergeInventoryStacks(p.inventory, fromSlot, toSlot, this.items)) return;
+    p.inventoryDirty = true;
+    this.sendInventory(p);
+    const record = this.persistRecord(p);
+    if (record) this.outbox.persist?.([record], 'progress');
+  }
+
+  splitInventoryStack(connId: number, slot: number, quantity: number): void {
+    const p = this.players.get(connId);
+    if (!p || !alive(p) || p.swing || !splitInventoryStack(p.inventory, slot, quantity, this.items)) return;
+    p.inventoryDirty = true;
+    this.sendInventory(p);
+    const record = this.persistRecord(p);
+    if (record) this.outbox.persist?.([record], 'progress');
+  }
+
+  /** Server-authoritative item drop: removes from inventory and spawns a dynamic ground item. */
+  dropInventoryItem(connId: number, slot: number): void {
+    const p = this.players.get(connId);
+    if (!p || !alive(p) || p.swing) return;
+    const idx = p.inventory.findIndex((e) => e.slot === slot && !e.equipped);
+    if (idx === -1) return;
+    const entry = p.inventory[idx]!;
+    const def = this.items.get(entry.itemId);
+    if (!def) return;
+
+    p.inventory.splice(idx, 1);
+    p.inventoryDirty = true;
+    this.sendInventory(p);
+    const record = this.persistRecord(p);
+    if (record) this.outbox.persist?.([record], 'progress');
+
+    const id = this.nextDynamicObjectId++;
+    const pos = p.character.position;
+    const objDef: WorldObjectDef = {
+      id,
+      kind: 'item',
+      x: pos.x,
+      y: pos.y,
+      z: pos.z,
+      item: { name: def.name, quantity: entry.quantity ?? 1 },
+    };
+    this.objects.set(id, {
+      def: objDef,
+      state: 'present',
+      hp: 0,
+      respawnAt: 0,
+      dynamic: true,
+    });
+    this.broadcastObjects([{ id, state: 'present', def: objDef }]);
+  }
+
   private applyEquipRequest(p: Player, slot: number, equip: boolean): void {
     if (!setEquipped(p.inventory, slot, equip, this.items)) return;
     this.applyEquipment(p);
@@ -1112,7 +1198,11 @@ export class WorldZone {
         itemId: e.itemId,
         name: def.name,
         type: def.type,
+        width: def.width,
+        height: def.height,
         equipped: e.equipped,
+        ...(!e.equipped && e.x !== undefined && e.y !== undefined ? { x: e.x, y: e.y } : {}),
+        ...(def.model !== undefined ? { model: def.model } : {}),
         ...(def.damage ? { damage: def.damage } : {}),
         ...(def.speed !== undefined ? { speed: def.speed } : {}),
         ...(def.protection ? { protection: def.protection } : {}),

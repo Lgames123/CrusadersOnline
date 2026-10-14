@@ -70,7 +70,7 @@ describe('doors', () => {
 
   function zone(lock?: string, carry = false) {
     const items = new Map(BUILTIN_ITEMS);
-    items.set('room_2_key', { id: 'room_2_key', name: 'Room 2 Key', type: 'key', price: 0 });
+    items.set('room_2_key', { id: 'room_2_key', name: 'Room 2 Key', type: 'key', width: 1, height: 1, price: 0 });
     const messages: ServerControlMsg[] = [];
     const z = new WorldZone(rapier, 'doors', doorArena(lock), {
       send: (_c, data) => { if (typeof data === 'string') messages.push(JSON.parse(data) as ServerControlMsg); },

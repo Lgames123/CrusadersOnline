@@ -90,6 +90,22 @@ export class ZoneHost {
     this.post({ t: 'equip', connId, slot, equip });
   }
 
+  moveInventoryItem(connId: number, slot: number, x: number, y: number): void {
+    this.post({ t: 'moveInventoryItem', connId, slot, x, y });
+  }
+
+  mergeInventoryStacks(connId: number, fromSlot: number, toSlot: number): void {
+    this.post({ t: 'mergeInventoryStacks', connId, fromSlot, toSlot });
+  }
+
+  splitInventoryStack(connId: number, slot: number, quantity: number): void {
+    this.post({ t: 'splitInventoryStack', connId, slot, quantity });
+  }
+
+  dropInventoryItem(connId: number, slot: number): void {
+    this.post({ t: 'dropInventoryItem', connId, slot });
+  }
+
   interact(connId: number, object: number, key = false): void {
     this.post({ t: 'interact', connId, object, key });
   }

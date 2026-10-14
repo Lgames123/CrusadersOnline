@@ -59,6 +59,8 @@ export interface InventoryItemsTable {
   character_id: string;
   item_id: string;
   slot_index: number;
+  grid_x: number | null;
+  grid_y: number | null;
   is_equipped: Generated<boolean>;
   quantity: Generated<number>;
   durability: Generated<number>;

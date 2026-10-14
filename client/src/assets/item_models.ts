@@ -8,12 +8,21 @@ import { itemSlug, type CharacterLook } from '@crusaders/shared';
  * and DrakeArmor05fixed.mdl (heavy plate), both on Drake's skeleton.
  */
 const MODEL_FILES: Readonly<Record<number, string>> = {
-  8: 'longsword', 28: 'metalshield02', 71: 'standardaxe', 72: 'battleaxe', 73: 'standardmace', 74: 'heavymace',
-  75: 'morningstar', 76: 'hammer', 77: 'broadsword03', 78: 'xucotal', 79: 'handbow001', 86: 'woodshield',
-  98: 'ironclub', 99: 'halberd', 116: 'bluntclub', 117: 'soulsucker', 127: 'bolgahammer', 128: 'ceremswd', 129: 'cursedsword',
+  2: 'magicring', 4: 'ring', 8: 'longsword', 11: 'bottle01', 27: 'bottle02', 28: 'metalshield02',
+  62: 'potion', 63: 'book1', 71: 'standardaxe', 72: 'battleaxe', 73: 'standardmace', 74: 'heavymace',
+  75: 'morningstar', 76: 'hammer', 77: 'broadsword03', 78: 'xucotal', 79: 'handbow001',
+  80: 'drakearmor_i', 81: 'drakearmor2_i', 82: 'drakearmor3_i', 83: 'drakearmor4_i',
+  86: 'woodshield', 91: 'bookshelf01', 98: 'ironclub', 99: 'halberd', 116: 'bluntclub', 117: 'soulsucker',
+  118: 'magicring', 127: 'bolgahammer', 128: 'ceremswd', 129: 'cursedsword',
   130: 'cursedwaxe', 131: 'dfamshield', 132: 'durinhammer', 133: 'dwaxe', 134: 'famtreeswd', 135: 'pickaxe',
-  243: 'bluntclub01lrg', 244: 'ironclub_big',
+  137: 'book1', 138: 'book1', 139: 'book1', 140: 'book1', 141: 'potion',
+  243: 'bluntclub01lrg', 244: 'ironclub_big', 247: 'dragonarmor_icon',
 };
+
+/** File-key for a handheld inventory preview, or undefined when the item has no standalone mesh. */
+export function itemPreviewModelFile(model: number | undefined): string | undefined {
+  return model === undefined ? undefined : MODEL_FILES[model];
+}
 
 /** Armour item model id -> Drake's body model and its texture (models.ctx 80-83, 247 / 121, 124). */
 const ARMOR_BODIES: Readonly<Record<number, { model: string; texture: string }>> = {

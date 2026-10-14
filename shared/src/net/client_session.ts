@@ -350,6 +350,28 @@ export class ClientSession {
     this.sendJson({ op: CS.EQUIP_ITEM, seq: ++this.seq, d: { slot, equip } });
   }
 
+  /** Requests an authoritative move of a carried item to an 8×4 grid origin. */
+  moveInventoryItem(slot: number, x: number, y: number): void {
+    if (!this.connected || this.dead) return;
+    this.sendJson({ op: CS.MOVE_INVENTORY_ITEM, seq: ++this.seq, d: { slot, x, y } });
+  }
+
+  mergeInventoryStacks(fromSlot: number, toSlot: number): void {
+    if (!this.connected || this.dead) return;
+    this.sendJson({ op: CS.MERGE_INVENTORY_STACK, seq: ++this.seq, d: { fromSlot, toSlot } });
+  }
+
+  splitInventoryStack(slot: number, quantity: number): void {
+    if (!this.connected || this.dead) return;
+    this.sendJson({ op: CS.SPLIT_INVENTORY_STACK, seq: ++this.seq, d: { slot, quantity } });
+  }
+
+  /** Drops an inventory item to the ground at the player's position. */
+  dropInventoryItem(slot: number): void {
+    if (!this.connected || this.dead) return;
+    this.sendJson({ op: CS.DROP_INVENTORY_ITEM, seq: ++this.seq, d: { slot } });
+  }
+
   /**
    * Picks up an item, opens a chest or a door (the server checks distance and state); `key`
    * unlocks a locked door with the key carried.

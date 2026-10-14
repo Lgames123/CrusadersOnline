@@ -375,7 +375,7 @@ describe('inventory and equipment', () => {
     expect(equipmentOf(inv, BUILTIN_ITEMS).weapon.name).toBe('Axe');
     expect(setEquipped(inv, 2, true, BUILTIN_ITEMS)).toBe(false); // no-op
     expect(setEquipped(inv, 9, true, BUILTIN_ITEMS)).toBe(false); // empty slot
-    const full: InventoryEntry[] = Array.from({ length: 32 }, (_, slot) => ({ slot, itemId: 'axe', equipped: false }));
+    const full: InventoryEntry[] = Array.from({ length: 48 }, (_, slot) => ({ slot, itemId: 'axe', equipped: false }));
     expect(addItem(full, 'mace')).toBeNull();
   });
 
@@ -385,7 +385,7 @@ describe('inventory and equipment', () => {
       { slot: 1, itemId: 'mace', equipped: true },
       { slot: 1, itemId: 'long_sword', equipped: false },
       { slot: 2, itemId: 'excalibur', equipped: true },
-      { slot: 40, itemId: 'mace', equipped: false },
+      { slot: 99, itemId: 'mace', equipped: false },
     ], BUILTIN_ITEMS);
     expect(clean).toEqual([
       { slot: 0, itemId: 'axe', equipped: true },
@@ -578,7 +578,7 @@ describe('the shove of a blow (0x0044D290, one frame of impulse)', () => {
   });
 
   it('moves a creature along the blade sweep when the blow lands', () => {
-    const t = setup();
+    const t = setup({ inventory: [{ slot: 0, itemId: 'axe', equipped: true }, { slot: 1, itemId: 'wooden_shield', equipped: true }] });
     t.run(APPROACH, INPUT.FORWARD, 0);
     const shoves: number[] = [];
     for (let i = 0; i < 600 && shoves.length < 3 && t.mob().alive; i++) {
@@ -647,7 +647,7 @@ describe('world objects (original level placements)', () => {
     const zone = new WorldZone(rapier, 'objects', arena, {
       send: (_c, data) => { if (typeof data === 'string') messages.push(JSON.parse(data) as ServerControlMsg); },
     }, { random: () => 0 });
-    zone.join(1, { name: 'Looter', characterId: null, position: { x: 0, y: 0.5, z: 0 } });
+    zone.join(1, { name: 'Looter', characterId: null, position: { x: 0, y: 0.5, z: 0 }, inventory: [{ slot: 0, itemId: 'axe', equipped: true }, { slot: 1, itemId: 'wooden_shield', equipped: true }] });
     const last = <T extends ServerControlMsg['op']>(op: T) => messages.filter((m) => m.op === op).at(-1) as Extract<ServerControlMsg, { op: T }> | undefined;
     return { zone, messages, last };
   }
@@ -710,5 +710,46 @@ describe('world objects (original level placements)', () => {
     run(20 * 300 + 40);
     const back = t.messages.filter((m) => m.op === SC.OBJECT_STATE).flatMap((m) => (m as Extract<ServerControlMsg, { op: typeof SC.OBJECT_STATE }>).d.objects).filter((o) => o.id === 4).at(-1);
     expect(back?.state).toBe('present');
+  });
+
+  it('drops an item onto the ground dynamically and picks it back up without respawning', () => {
+    const t = objectZone();
+    // Give player a potion in slot 2
+    t.zone.interact(1, 1);
+    t.zone.step();
+    const potion = t.last(SC.INVENTORY_UPDATE)!.d.items.find((i) => i.itemId === 'healing_potion')!;
+    expect(potion).toBeDefined();
+
+    // Drop it to the ground
+    t.zone.dropInventoryItem(1, potion.slot);
+    t.zone.step();
+
+    // Verify it was removed from inventory
+    const afterDrop = t.last(SC.INVENTORY_UPDATE)!.d.items;
+    expect(afterDrop.some((i) => i.itemId === 'healing_potion')).toBe(false);
+
+    // Verify dynamic object state broadcast
+    const droppedObjMsg = t.messages.filter((m) => m.op === SC.OBJECT_STATE && !m.d.full).flatMap((m) => (m as Extract<ServerControlMsg, { op: typeof SC.OBJECT_STATE }>).d.objects).find((o) => o.id >= 2_000_000);
+    expect(droppedObjMsg).toBeDefined();
+    expect(droppedObjMsg?.state).toBe('present');
+    expect(droppedObjMsg?.def?.item?.name).toBe('Healing Potion');
+
+    const droppedId = droppedObjMsg!.id;
+
+    // Pick it back up
+    t.zone.interact(1, droppedId);
+    t.zone.step();
+
+    // Verify it is back in inventory
+    const pickedUp = t.last(SC.INVENTORY_UPDATE)!.d.items.find((i) => i.itemId === 'healing_potion')!;
+    expect(pickedUp).toBeDefined();
+
+    // Step far into the future (beyond respawn window)
+    for (let i = 0; i < 20 * 350; i++) t.zone.step();
+
+    // Verify it never respawned
+    const respawnMsgs = t.messages.filter((m) => m.op === SC.OBJECT_STATE && !m.d.full).flatMap((m) => (m as Extract<ServerControlMsg, { op: typeof SC.OBJECT_STATE }>).d.objects).filter((o) => o.id === droppedId && o.state === 'present');
+    // Only the initial drop 'present' state should exist, no respawn
+    expect(respawnMsgs).toHaveLength(1);
   });
 });

@@ -50,9 +50,33 @@ export const EquipItemPacketSchema = z.object({
   op: z.literal(CS.EQUIP_ITEM),
   seq: z.number().int().positive(),
   d: z.object({
-    slot: z.number().int().min(0).max(31),
+    slot: z.number().int().min(0).max(63),
     equip: z.boolean(),
   }),
+});
+
+export const MoveInventoryItemPacketSchema = z.object({
+  op: z.literal(CS.MOVE_INVENTORY_ITEM),
+  seq: z.number().int().positive(),
+  d: z.object({ slot: z.number().int().min(0).max(63), x: z.number().int().min(0).max(7), y: z.number().int().min(0).max(5) }),
+});
+
+export const MergeInventoryStackPacketSchema = z.object({
+  op: z.literal(CS.MERGE_INVENTORY_STACK),
+  seq: z.number().int().positive(),
+  d: z.object({ fromSlot: z.number().int().min(0).max(63), toSlot: z.number().int().min(0).max(63) }),
+});
+
+export const SplitInventoryStackPacketSchema = z.object({
+  op: z.literal(CS.SPLIT_INVENTORY_STACK),
+  seq: z.number().int().positive(),
+  d: z.object({ slot: z.number().int().min(0).max(63), quantity: z.number().int().min(1).max(98) }),
+});
+
+export const DropInventoryItemPacketSchema = z.object({
+  op: z.literal(CS.DROP_INVENTORY_ITEM),
+  seq: z.number().int().positive(),
+  d: z.object({ slot: z.number().int().min(0).max(63) }),
 });
 
 export const InteractPacketSchema = z.object({
@@ -65,7 +89,7 @@ export const InteractPacketSchema = z.object({
 export const UseItemPacketSchema = z.object({
   op: z.literal(CS.USE_ITEM),
   seq: z.number().int().positive(),
-  d: z.object({ slot: z.number().int().min(0).max(31) }),
+  d: z.object({ slot: z.number().int().min(0).max(63) }),
 });
 
 export const CastSpellPacketSchema = z.object({
@@ -97,6 +121,10 @@ export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   SelectCharacterPacketSchema,
   PlayerAttackPacketSchema,
   EquipItemPacketSchema,
+  MoveInventoryItemPacketSchema,
+  MergeInventoryStackPacketSchema,
+  SplitInventoryStackPacketSchema,
+  DropInventoryItemPacketSchema,
   InteractPacketSchema,
   UseItemPacketSchema,
   ZoneReadyPacketSchema,
