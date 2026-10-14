@@ -117,8 +117,9 @@ export interface CapBrush {
  * A brush's keyframe mover (object +0x4C -> a 0x230-byte record; update 0x48EFC0): mode flags
  * (+0x100: low 3 bits the end-of-path mode, 8 = return after the delay, 0x2000 = eased speed),
  * key count (+0x105), starting key (+0x106), delay before returning (+0x11E, ms), and three arrays:
- * segment types (+0x120, a byte per key: 0x10 = turn about the vertical axis), keys (+0x124,
- * three floats per key: degrees and the turn centre x, z) and speeds (+0x128, 2 x count floats:
+ * segment types (+0x120, a byte per key: low 3 bits = move by (dx, dy, dz), 0x08 / 0x10 / 0x20 =
+ * turn about X / Y / Z), keys (+0x124, three floats per key: the move, or degrees and the turn
+ * centre (y, z) / (x, z) / (x, y)) and speeds (+0x128, 2 x count floats:
  * progress per ms at the ends and, eased, at the middle of a segment).
  */
 export interface CapBrushMotion {
@@ -134,7 +135,7 @@ export interface CapBrushMotion {
 export interface CapBrushFace {
   texture: string;
   indices: number[];
-  /** U.(X - P), V.(X - P) per vertex, in the level mesh's texture units (×32 texels). */
+  /** U.(X - P), V.(X - P) per vertex, in texture units (one picture every 15). */
   texels: number[];
 }
 

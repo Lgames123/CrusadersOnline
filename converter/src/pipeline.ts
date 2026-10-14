@@ -66,7 +66,21 @@ export interface ConvertReport {
   warnings: string[];
 }
 
-const MANIFEST_VERSION = '1.15.0'; // 1.15: level start points; 1.14: story (triggers, sequences, cameras), rules/strings.json; 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers; 1.9: door sounds; 1.10: lightmap UVs at 16 bytes a vertex; 1.11: lightmap seams stitched; 1.12: prop model boxes, model names in lower case; 1.13: creature facing
+/**
+ * A mover key in the mirrored frame (z -> -z). Segment types (dispatch 0x490210): low 3 bits a
+ * move by (dx, dy, dz) (0x48F350); 0x08 a turn about X through (y, z) (0x48F630); 0x10 about Y
+ * through (x, z) (0x48F960); 0x20 about Z through (x, y) (0x48FC90); keys are (degrees, centre)
+ * for turns. Mirroring negates turns about X and Y and every z; turns about Z keep their angle.
+ */
+function mirrorMoverKey(type: number, [a, b, c]: [number, number, number]): [number, number, number] {
+  if (type & 7) return [a, b, -c];
+  if (type & 0x08) return [-a, b, -c];
+  if (type & 0x10) return [-a, b, -c];
+  if (type & 0x20) return [a, b, c];
+  return [a, b, c];
+}
+
+const MANIFEST_VERSION = '1.17.0'; // 1.17: level texture v from the picture's bottom; mover keys mirrored by segment type; 1.16: level textures one picture every 15 units; 1.15: level start points; 1.14: story (triggers, sequences, cameras), rules/strings.json; 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers; 1.9: door sounds; 1.10: lightmap UVs at 16 bytes a vertex; 1.11: lightmap seams stitched; 1.12: prop model boxes, model names in lower case; 1.13: creature facing
 /** Bump when level output changes so cached levels are rebuilt. */
 const LEVEL_EMIT_VERSION = '2';
 
@@ -399,12 +413,12 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
       await sink.writeFile(out, JSON.stringify({
         mesh: cap.mesh.toLowerCase(),
         ...(cap.music > 0 ? { music: cap.music + 1 } : {}),
-        // Mover keys mirrored too: turn centres (x, -z), turn angles negated.
+        // Mover keys mirrored too, by segment type (see mirrorMoverKey).
         brushes: cap.brushes.map((b) => ({
           name: b.name,
           points: b.points.map((p) => [p[0], p[1], -p[2]]),
           faces: b.faces,
-          ...(b.motion ? { motion: { ...b.motion, keys: b.motion.keys.map(([a, x, z]) => [-a, x, -z]) } } : {}),
+          ...(b.motion ? { motion: { ...b.motion, keys: b.motion.keys.map((k, i) => mirrorMoverKey(b.motion!.types[i] ?? 0, k)) } } : {}),
           ...(b.sounds ? { sounds: b.sounds } : {}),
         })),
         creatures: cap.creatures.map((c) => ({ ...c, position: [c.position[0], c.position[1], -c.position[2]], facing: [c.facing[0], -c.facing[1]] })),

@@ -38,7 +38,7 @@ export interface LevelObjectView {
 
 /**
  * A door or lever brush: its world object and the drawn piece (swinging doors turn about their
- * hinge, other doors slide up, levers tip over).
+ * hinge, other doors slide up, levers turn about their mover's axis).
  */
 export interface DoorView {
   def: WorldObjectDef;
@@ -46,6 +46,8 @@ export interface DoorView {
   state: WorldObjectState;
   /** 0 closed .. 1 open. */
   open: number;
+  /** Levers: the full turn about +Z (radians) of their mover (segment 0x20, 0x48FC90). */
+  tip?: number;
   /** Swinging doors: the swing and its motion (null = shut), stepped every frame. */
   swing?: { def: DoorSwing; motion: DoorMotion | null };
 }
@@ -142,7 +144,7 @@ function texturedBrushMesh(brush: LevelBrush, texture: (name: string) => { map: 
     const vert = (i: number) => {
       const p = brush.points[f.indices[i]!]!;
       g.pos.push(p[0] * s, p[1] * s, p[2] * s);
-      // Brush V runs upwards (the level faces' downwards): flipped, the picture stands upright.
+      // v = 0 is the picture's bottom row (the TGA rows as stored), as on the level faces.
       g.uv.push(f.texels[2 * i]! / BRUSH_UNITS_PER_PICTURE, 1 - f.texels[2 * i + 1]! / BRUSH_UNITS_PER_PICTURE);
     };
     for (let i = 1; i + 1 < f.indices.length; i++) {
@@ -192,6 +194,52 @@ function brushMesh(points: Float32Array, name: string): THREE.Mesh | null {
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colours, 3));
   return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true }));
+}
+
+/**
+ * How a level texture's alpha is drawn: 17 of the ~600 level textures carry one (cobwebs, grates,
+ * foliage, cut-out edges), the rest are opaque. Read from the texture itself (once per texture).
+ * 'cutout': alpha only fully on or off (grates); 'blend': soft edges (cobwebs, leaves).
+ */
+const alphaKinds = new WeakMap<object, 'opaque' | 'cutout' | 'blend'>();
+function textureAlpha(map: THREE.Texture): 'opaque' | 'cutout' | 'blend' {
+  const image = map.image as (CanvasImageSource & { width: number; height: number }) | undefined;
+  if (!image?.width) return 'opaque';
+  const known = alphaKinds.get(image);
+  if (known) return known;
+  let kind: 'opaque' | 'cutout' | 'blend' = 'opaque';
+  try {
+    const c = document.createElement('canvas');
+    c.width = image.width;
+    c.height = image.height;
+    const g = c.getContext('2d', { willReadFrequently: true })!;
+    g.drawImage(image, 0, 0);
+    const d = g.getImageData(0, 0, c.width, c.height).data;
+    let clear = 0, partial = 0;
+    for (let i = 3; i < d.length; i += 4) {
+      if (d[i]! < 8) clear++;
+      else if (d[i]! < 248) partial++;
+    }
+    const n = d.length / 4;
+    if (partial > n * 0.02) kind = 'blend';
+    else if (clear + partial > 0) kind = 'cutout';
+  } catch {
+    /* unreadable: drawn opaque */
+  }
+  alphaKinds.set(image, kind);
+  return kind;
+}
+
+function applyTextureAlpha(material: THREE.MeshBasicMaterial): void {
+  if (!material.map) return;
+  const kind = textureAlpha(material.map);
+  if (kind === 'cutout') material.alphaTest = 0.5;
+  else if (kind === 'blend') {
+    material.transparent = true;
+    material.depthWrite = false;
+    // Fully clear texels are dropped, so they never hide what is drawn after them.
+    material.alphaTest = 0.02;
+  }
 }
 
 function flameTexture(): THREE.Texture {
@@ -282,6 +330,7 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
       material.lightMap = lightMap;
       material.lightMapIntensity = LIGHTMAP_GAIN;
     }
+    if (!isSky) applyTextureAlpha(material);
     if (!isSky) dynamicLights.enhance(material);
     old.dispose();
     mesh.material = material;
@@ -382,9 +431,16 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
     mesh.name = b.name;
     root.add(mesh);
     const def = b.door !== undefined ? doorDefs.get(b.door) : undefined;
+    let tip: number | undefined;
     if (def?.kind === 'lever') {
-      // Pivot at its centre so it can tip over when pulled.
-      const c = new THREE.Box3().setFromObject(mesh).getCenter(new THREE.Vector3());
+      // Its mover turns it about Z through (x, y) (segment 0x20; the angle keeps its sign under
+      // the Z mirror). Without one: about its centre, as before.
+      const m = source?.motion;
+      const k = m?.keys.find((_, j) => ((m.types[j] ?? 0) & 0x3f) === 0x20);
+      const c = k
+        ? new THREE.Vector3(k[1] * LEVEL_UNIT_METRES, k[2] * LEVEL_UNIT_METRES, 0)
+        : new THREE.Box3().setFromObject(mesh).getCenter(new THREE.Vector3());
+      tip = k ? (k[0] * Math.PI) / 180 : -Math.PI / 3;
       mesh.geometry.translate(-c.x, -c.y, -c.z);
       mesh.position.copy(c);
     }
@@ -394,7 +450,7 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
       mesh.geometry.translate(-k.cx, 0, -k.cz);
       mesh.position.set(k.cx, 0, k.cz);
       doors.set(def.id, { def, mesh, state: 'present', open: 0, swing: { def: b.swing, motion: null } });
-    } else if (def) doors.set(def.id, { def, mesh, state: 'present', open: 0 });
+    } else if (def) doors.set(def.id, { def, mesh, state: 'present', open: 0, ...(tip !== undefined ? { tip } : {}) });
   });
 
   const lights: THREE.PointLight[] = [];
@@ -471,7 +527,7 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
         if (d.open === target) continue;
         d.open = target > d.open ? Math.min(1, d.open + dt / DOOR_OPEN_SECONDS) : 0;
         const b = d.def.bounds!;
-        if (d.def.kind === 'lever') d.mesh.rotation.z = (-Math.PI / 3) * d.open;
+        if (d.def.kind === 'lever') d.mesh.rotation.z = (d.tip ?? 0) * d.open;
         else d.mesh.position.y = (b[4] - b[1]) * 0.95 * d.open;
       }
       flames.forEach((f, i) => f.scale.setScalar(1.4 + 0.25 * Math.sin(t * 13 + i * 1.7) + 0.15 * Math.sin(t * 29 + i)));

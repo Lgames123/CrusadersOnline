@@ -35,7 +35,11 @@ export interface LevelBrushMotion {
   start: number;
   delayMs: number;
   types: number[];
-  /** Per key: degrees, turn centre x, z (placements frame: mirrored like the points). */
+  /**
+   * Per key, by segment type (placements frame, mirrored like the points): a move (dx, dy, dz);
+   * or degrees and the turn centre: (y, z) about X (0x08), (x, z) about Y (0x10), (x, y) about Z
+   * (0x20, levers).
+   */
   keys: [number, number, number][];
   speeds: number[];
 }

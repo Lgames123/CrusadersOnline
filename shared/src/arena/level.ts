@@ -68,7 +68,7 @@ export const PORTAL_USE_REACH = 1.5;
 export interface LevelBrush {
   name: string;
   points: [number, number, number][];
-  /** Textured polygons: indices into `points`, texel coordinates (×32 texels) per vertex. */
+  /** Textured polygons: indices into `points`, texture coordinates per vertex (one picture every 15 units). */
   faces?: { texture: string; indices: number[]; texels: number[] }[];
   /** Its keyframe mover (doors, gates, lifts...). */
   motion?: LevelBrushMotion;

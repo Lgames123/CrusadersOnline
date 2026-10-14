@@ -27,10 +27,11 @@ export interface LevelEmitResult {
 
 const ATLAS_WIDTH = 2048;
 /**
- * Face texture axes give U.(X - P) in units of 32 texels: every level texture is 128 px and
- * the brick floors then come out at a realistic ~4 ft per repeat (asset-format-discovery.md §6.3).
+ * Face texture axes give U.(X - P) in texture units, one picture every 15 (as the brushes): faces
+ * of every level start and end on multiples of 15 (cobwebs, the cells' four-square grates and the
+ * path pieces span exactly one), asset-format-discovery.md §6.3.
  */
-const TEXELS_PER_UNIT = 32;
+const UNITS_PER_PICTURE = 15;
 const PAD = 1;
 
 /** Shelf-packs the lightmap tiles (1-texel replicated border) and decodes RGB555 to RGBA8. */
@@ -198,7 +199,9 @@ export function emitLevel(level: MshLevel, opts: LevelEmitOptions): LevelEmitRes
     for (let i = 0; i < n; i++) {
       g.pos.push(v[3 * i]!, v[3 * i + 1]!, v[3 * i + 2]!);
       g.nrm.push(nx, ny, nz);
-      g.uv0.push(tex ? (uvT[2 * i]! * TEXELS_PER_UNIT) / tex.width : 0, tex ? (uvT[2 * i + 1]! * TEXELS_PER_UNIT) / tex.height : 0);
+      // The original samples the TGA rows as stored, bottom row first: v = 0 is the picture's
+      // bottom (glTF's is its top). Floors' path pieces only join up this way (Ws_a's T and bend).
+      g.uv0.push(tex ? uvT[2 * i]! / UNITS_PER_PICTURE : 0, tex ? 1 - uvT[2 * i + 1]! / UNITS_PER_PICTURE : 0);
       if (r) g.uv1.push((r.x + uvL[2 * i]! * r.w) / atlas.width, (r.y + uvL[2 * i + 1]! * r.h) / atlas.height);
       else g.uv1.push(0, 0);
     }

@@ -15,7 +15,7 @@ import { DclError, explode } from './dcl.ts';
  * Cell: +0x3C vertex pool (float32 xyz), +0x40 u16 vertex count, +0x42 u16 face count,
  *       +0x44 faces (0x68 bytes each).
  * Face: plane normal xyz + d (n.v + d = 0), +0x10 texture origin P, +0x1C texture axis U,
- *       +0x28 texture axis V (u = U.(X - P) in 32-texel units), +0x5C fragments, +0x60 u8 count.
+ *       +0x28 texture axis V (u = U.(X - P), one picture every 15 units), +0x5C fragments, +0x60 u8 count.
  * Fragment (0x20, the engine's render polygon): +0x04 u16 vertex indices into the cell pool,
  *       +0x08 lightmap UVs (16 bytes a vertex: float32 u, v, 0..1 inside the tile, then 8 bytes of
  *       0xCD padding), +0x0C material,
@@ -31,7 +31,7 @@ export interface MshPolygon {
   normal: [number, number, number];
   /** xyz per vertex, original units, original (left-handed) axes. */
   positions: number[];
-  /** Texture coordinates U.(X - P), V.(X - P): multiply by 32 texels, divide by the texture size. */
+  /** Texture coordinates U.(X - P), V.(X - P): one picture every 15 units. */
   texels: number[];
   /** Lightmap coordinates, 0..1 inside the lightmap tile. */
   lightUv: number[];
