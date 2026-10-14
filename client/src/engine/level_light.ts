@@ -100,13 +100,118 @@ export class LevelLight {
       bv = w0 * t[o + 10]! + w1 * t[o + 12]! + w2 * t[o + 14]!;
     }
     if (bestY === -Infinity) return null;
-    const x = Math.min(this.width - 1, Math.max(0, Math.floor(bu * this.width)));
-    const y = Math.min(this.height - 1, Math.max(0, Math.floor(bv * this.height)));
-    const p = (y * this.width + x) * 4;
-    // sRGB texel to linear, times the level's gain.
-    color.setRGB(this.pixels[p]! / 255, this.pixels[p + 1]! / 255, this.pixels[p + 2]! / 255, THREE.SRGBColorSpace).multiplyScalar(this.gain);
+    this.texel(bu, bv, color);
     return bestY;
+  }
+
+  /** The lightmap at (u, v): sRGB texel to linear, times the level's gain. */
+  private texel(u: number, v: number, color: THREE.Color): void {
+    const x = Math.min(this.width - 1, Math.max(0, Math.floor(u * this.width)));
+    const y = Math.min(this.height - 1, Math.max(0, Math.floor(v * this.height)));
+    const p = (y * this.width + x) * 4;
+    color.setRGB(this.pixels[p]! / 255, this.pixels[p + 1]! / 255, this.pixels[p + 2]! / 255, THREE.SRGBColorSpace).multiplyScalar(this.gain);
+  }
+
+  /**
+   * Enhanced lighting (not original): the light reaching a model at `feet` from each side, as an
+   * ambient cube (+X, -X, +Y, -Y, +Z, -Z: the light on a surface facing that way). +Y is the floor's
+   * light, as the classic lighting takes; each other side is the baked light of the nearby level
+   * surfaces facing that way (walls lit by a torch light the side of a model facing the same way),
+   * found by short rays from chest height. Cached in 1 m cells. False off the level.
+   */
+  ambientCube(feet: THREE.Vector3, out: THREE.Color[]): boolean {
+    const ck = cubeKey(feet);
+    let cube = this.cubes.get(ck);
+    if (cube === undefined) {
+      if (this.cubes.size > CUBE_CACHE_MAX) this.cubes.clear();
+      cube = this.buildCube(feet);
+      this.cubes.set(ck, cube);
+    }
+    if (!cube) return false;
+    for (let i = 0; i < 6; i++) out[i]!.copy(cube[i]!);
+    return true;
+  }
+
+  private readonly cubes = new Map<string, THREE.Color[] | null>();
+
+  private buildCube(feet: THREE.Vector3): THREE.Color[] | null {
+    const floor = new THREE.Color();
+    if (this.sample(feet, floor) === null) return null;
+    const chest = new THREE.Vector3(feet.x, feet.y + CHEST, feet.z);
+    const cube = AXES.map(() => new THREE.Color());
+    const hit = new THREE.Color();
+    const sum = new THREE.Color();
+    const dir = new THREE.Vector3();
+    AXES.forEach((axis, face) => {
+      if (face === 2) return void cube[face]!.copy(floor);
+      // A surface facing `axis` lies the other way.
+      let hits = 0;
+      sum.setRGB(0, 0, 0);
+      for (const [p, q] of SPREAD) {
+        dir.copy(axis).negate().addScaledVector(PERP[face]![0]!, p).addScaledVector(PERP[face]![1]!, q).normalize();
+        if (this.raycast(chest, dir, axis, hit)) (sum.add(hit), hits++);
+      }
+      if (hits) cube[face]!.copy(sum.multiplyScalar(1 / hits));
+      // Nothing that way (open sky above, open ground around): the floor's light, less from below.
+      else cube[face]!.copy(floor).multiplyScalar(face === 3 ? 0.5 : 1);
+    });
+    return cube;
+  }
+
+  /**
+   * The baked light of the nearest level surface along `dir` within RAY_LENGTH, if it faces
+   * roughly `facing` (a wall seen edge-on says little about the light on that side).
+   */
+  private raycast(from: THREE.Vector3, dir: THREE.Vector3, facing: THREE.Vector3, color: THREE.Color): boolean {
+    const cells = new Set<number>();
+    const steps = Math.ceil((RAY_LENGTH * Math.hypot(dir.x, dir.z)) / (CELL / 2));
+    for (let s = 0; s <= steps; s++) {
+      const k = (RAY_LENGTH * s) / Math.max(1, steps);
+      cells.add(key(Math.floor((from.x + dir.x * k) / CELL), Math.floor((from.z + dir.z * k) / CELL)));
+    }
+    const t = this.tris;
+    let best = RAY_LENGTH;
+    let bu = 0, bv = 0, found = false;
+    for (const c of cells) {
+      for (const i of this.grid.get(c) ?? []) {
+        const o = i * 15;
+        // Möller-Trumbore.
+        const e1x = t[o + 3]! - t[o]!, e1y = t[o + 4]! - t[o + 1]!, e1z = t[o + 5]! - t[o + 2]!;
+        const e2x = t[o + 6]! - t[o]!, e2y = t[o + 7]! - t[o + 1]!, e2z = t[o + 8]! - t[o + 2]!;
+        const px = dir.y * e2z - dir.z * e2y, py = dir.z * e2x - dir.x * e2z, pz = dir.x * e2y - dir.y * e2x;
+        const det = e1x * px + e1y * py + e1z * pz;
+        if (Math.abs(det) < 1e-9) continue;
+        const inv = 1 / det;
+        const sx = from.x - t[o]!, sy = from.y - t[o + 1]!, sz = from.z - t[o + 2]!;
+        const u = (sx * px + sy * py + sz * pz) * inv;
+        if (u < 0 || u > 1) continue;
+        const qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x;
+        const v = (dir.x * qx + dir.y * qy + dir.z * qz) * inv;
+        if (v < 0 || u + v > 1) continue;
+        const d = (e2x * qx + e2y * qy + e2z * qz) * inv;
+        if (d <= 1e-3 || d >= best) continue;
+        best = d;
+        // Either winding: only how squarely the surface faces that way matters.
+        const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
+        found = Math.abs(nx * facing.x + ny * facing.y + nz * facing.z) / (Math.hypot(nx, ny, nz) || 1) > 0.4;
+        const w0 = 1 - u - v;
+        bu = w0 * t[o + 9]! + u * t[o + 11]! + v * t[o + 13]!;
+        bv = w0 * t[o + 10]! + u * t[o + 12]! + v * t[o + 14]!;
+      }
+    }
+    if (found) this.texel(bu, bv, color);
+    return found;
   }
 }
 
 const key = (cx: number, cz: number) => (cx + 32768) * 65536 + (cz + 32768);
+
+/** Ambient cubes: chest height above the feet, ray reach and cache size (metres, cubes). */
+const CHEST = 1;
+const RAY_LENGTH = 8;
+const CUBE_CACHE_MAX = 8192;
+const AXES = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1)];
+/** Two axes across each face's direction, and the spread of its rays over them. */
+const PERP = AXES.map((a) => (Math.abs(a.y) > 0.5 ? [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 1)] : [new THREE.Vector3(0, 1, 0), new THREE.Vector3(-a.z, 0, a.x)]));
+const SPREAD: [number, number][] = [[0, 0], [0.5, 0], [-0.5, 0], [0, 0.5], [0, -0.5]];
+const cubeKey = (p: THREE.Vector3) => `${Math.round(p.x)},${Math.round(p.y)},${Math.round(p.z)}`;

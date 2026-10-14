@@ -19,6 +19,9 @@ const PICK_EVERY = 0.2;
 const FADE = 4;
 /** Falloff: a smooth window to the radius, times an inverse-square-like term this steep. */
 const FALLOFF = 6;
+/** Rim light on models: strength (of their brightest ambient side) and how tight to the edge. */
+const RIM = 0.35;
+const RIM_POWER = 3;
 /** Wrapped diffuse: light reaches a little past the terminator, softer on low-poly models. */
 const WRAP = 0.35;
 
@@ -53,6 +56,9 @@ const FRAGMENT_PARS = `
 uniform vec4 uDynPos[ DYN_MAX ];
 uniform vec3 uDynColor[ DYN_MAX ];
 uniform int uDynCount;
+#ifdef DYN_AMBIENT
+uniform vec3 uDynAmbient[ 6 ];
+#endif
 varying vec3 vDynPos;
 varying vec3 vDynNormal;
 `;
@@ -74,6 +80,16 @@ const FRAGMENT = `
     float k = d2 / r2;
     dynSum += uDynColor[ i ] * ( win * win / ( 1.0 + ${FALLOFF.toFixed(1)} * k ) * max( ndl, 0.0 ) );
   }
+#ifdef DYN_AMBIENT
+  // Models: the ambient cube of the place they stand in, instead of the one floor light.
+  vec3 n2 = dynN * dynN;
+  vec3 amb = n2.x * ( dynN.x > 0.0 ? uDynAmbient[ 0 ] : uDynAmbient[ 1 ] )
+    + n2.y * ( dynN.y > 0.0 ? uDynAmbient[ 2 ] : uDynAmbient[ 3 ] )
+    + n2.z * ( dynN.z > 0.0 ? uDynAmbient[ 4 ] : uDynAmbient[ 5 ] );
+  vec3 rimLight = max( max( uDynAmbient[ 0 ], uDynAmbient[ 1 ] ), max( max( uDynAmbient[ 2 ], uDynAmbient[ 4 ] ), uDynAmbient[ 5 ] ) );
+  float rim = pow( 1.0 - max( dot( dynN, normalize( cameraPosition - vDynPos ) ), 0.0 ), ${RIM_POWER.toFixed(1)} );
+  reflectedLight.indirectDiffuse = dynAlbedo * ( amb + rimLight * ( ${RIM.toFixed(2)} * rim ) );
+#endif
   reflectedLight.indirectDiffuse += dynAlbedo * dynSum;
 }
 vec3 outgoingLight = reflectedLight.indirectDiffuse;
@@ -105,19 +121,21 @@ export class DynamicLights {
 
   /**
    * Lets an unlit (MeshBasic) material take the dynamic lights while enhanced lighting is on.
-   * Off, it compiles to the unchanged original shader.
+   * Off, it compiles to the unchanged original shader. `ambient`: a model's ambient cube (six
+   * colours, LevelLight.ambientCube), lighting it in place of its material colour.
    */
-  enhance(material: THREE.Material): void {
+  enhance(material: THREE.Material, ambient?: { value: THREE.Color[] }): void {
     if (!(material as THREE.MeshBasicMaterial).isMeshBasicMaterial || this.materials.has(material)) return;
     this.materials.add(material);
     material.addEventListener('dispose', () => this.materials.delete(material));
     material.onBeforeCompile = (shader) => {
       if (!this.on) return;
       Object.assign(shader.uniforms, this.uniforms);
+      if (ambient) shader.uniforms['uDynAmbient'] = ambient;
       shader.vertexShader = VERTEX_PARS + shader.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n' + VERTEX);
-      shader.fragmentShader = FRAGMENT_PARS + shader.fragmentShader.replace('vec3 outgoingLight = reflectedLight.indirectDiffuse;', FRAGMENT);
+      shader.fragmentShader = (ambient ? '#define DYN_AMBIENT\n' : '') + FRAGMENT_PARS + shader.fragmentShader.replace('vec3 outgoingLight = reflectedLight.indirectDiffuse;', FRAGMENT);
     };
-    material.customProgramCacheKey = () => (this.on ? 'dynamic-lights' : 'classic');
+    material.customProgramCacheKey = () => (this.on ? (ambient ? 'dynamic-lights-ambient' : 'dynamic-lights') : 'classic');
     if (this.on) material.needsUpdate = true;
   }
 

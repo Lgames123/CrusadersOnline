@@ -143,7 +143,7 @@
 - [x] Session 17 (2026-10-14): **story: cutscenes and the main quests, decompiled.**
   - The cap's per-type object table decoded; flag / quest / relay triggers, cameras (Bezier paths) and the 29 scripted sequences of 26 acts converted with resolved arguments (asset-format-discovery.md §6.5); the quest book text read from crusaders.exe's string table.
   - Server: triggers fire once per character; a sequence plays on the triggering player's client (SC_CUTSCENE) while the server freezes him, then applies its TriggerFlag steps (assign / complete with XP and gold / journal), places Drake where the stand-in ended (on the floor) and loads the next act. Story progress persisted (003_story.sql) and carried across zones.
-  - Client: cutscene player (camera paths, stand-in and NPC puppets with their ASM clips, voice lines with subtitles, fades, letterbox; Esc skips), quest book on F2 with the original frame, tabs and texts.
+  - Client: cutscene player (camera paths, stand-in and NPC puppets with their ASM clips, voice lines with subtitles, fades, letterbox; not skippable), quest book on F2 with the original frame, tabs and texts.
   - Verified live: Cs1a (Aerin's ride, 8.5 s, then Ci1a), Ci1a (Aerin's farewell), Ci1b (Celestia's briefing: Meet Celestia completed, Horn of Shattering assigned, then Ci2b). 153 tests.
   - Dev only: DEV_GUEST_SPAWN puts guests at a point of the default arena; launch configs story-client (3100) / story-server (8190, own PGlite).
   - New game, as decompiled: new characters begin in Ws9a (the prison; New Game loads caps\WS9A.cap) at the act's first start point (cap type 0x06, converter 1.15), facing its heading; any character without a saved position in an act starts there too. 155 tests.

@@ -84,11 +84,18 @@ function buildSilhouette(object: THREE.Object3D): { meshes: THREE.Mesh[]; materi
   return { meshes, material };
 }
 
+interface Unlit {
+  materials: THREE.MeshBasicMaterial[];
+  /** The ambient cube the enhanced lighting lights them by (shared by the object's materials). */
+  ambient: { value: THREE.Color[] };
+}
+
 /** Swaps an object's materials for unlit copies (once); returns them. */
-function unlitMaterials(object: THREE.Object3D): THREE.MeshBasicMaterial[] {
-  const cached = object.userData['unlit'] as THREE.MeshBasicMaterial[] | undefined;
+function unlitMaterials(object: THREE.Object3D): Unlit {
+  const cached = object.userData['unlit'] as Unlit | undefined;
   if (cached) return cached;
   const list: THREE.MeshBasicMaterial[] = [];
+  const ambient = { value: Array.from({ length: 6 }, () => DEFAULT_LIGHT.clone()) };
   const copies = new Map<THREE.Material, THREE.MeshBasicMaterial>();
   object.traverse((o) => {
     const mesh = o as THREE.Mesh;
@@ -108,7 +115,7 @@ function unlitMaterials(object: THREE.Object3D): THREE.MeshBasicMaterial[] {
           name: src.name,
         });
         c.color.copy(DEFAULT_LIGHT);
-        dynamicLights.enhance(c);
+        dynamicLights.enhance(c, ambient);
         copies.set(m, c);
         list.push(c);
       }
@@ -116,8 +123,9 @@ function unlitMaterials(object: THREE.Object3D): THREE.MeshBasicMaterial[] {
     };
     mesh.material = Array.isArray(mesh.material) ? mesh.material.map(swap) : swap(mesh.material);
   });
-  object.userData['unlit'] = list;
-  return list;
+  const unlit = { materials: list, ambient };
+  object.userData['unlit'] = unlit;
+  return unlit;
 }
 
 /** A soft round shadow texture (shared). */
@@ -142,6 +150,9 @@ interface Tracked {
   materials: THREE.MeshBasicMaterial[];
   light: THREE.Color;
   target: THREE.Color;
+  /** Enhanced lighting: the ambient cube (eased like `light`) and the one sampled last. */
+  ambient: THREE.Color[];
+  ambientTarget: THREE.Color[];
   shadow: THREE.Mesh | null;
   floor: number | null;
   next: number;
@@ -172,7 +183,15 @@ export class ModelLighting {
   /** The level whose light things take (null: plain grey light, no shadows). */
   setLevel(level: LevelLight | null): void {
     this.level = level;
-    for (const t of this.tracked.values()) t.next = 0;
+    this.resample();
+  }
+
+  /** Samples everything again (a new level, the enhanced lighting turned on or off). */
+  resample(): void {
+    for (const t of this.tracked.values()) {
+      t.next = 0;
+      if (t.still) t.floor = null;
+    }
   }
 
   /**
@@ -190,7 +209,9 @@ export class ModelLighting {
       this.scene.add(shadow);
     }
     const light = DEFAULT_LIGHT.clone();
-    this.tracked.set(key, { object, materials: unlitMaterials(object), light, target: light.clone(), shadow, floor: null, next: 0, still, character, silhouette: null });
+    const unlit = unlitMaterials(object);
+    const ambientTarget = unlit.ambient.value.map((c) => c.clone());
+    this.tracked.set(key, { object, materials: unlit.materials, light, target: light.clone(), ambient: unlit.ambient.value, ambientTarget, shadow, floor: null, next: 0, still, character, silhouette: null });
   }
 
   /** The keys casting silhouettes this frame: the player and up to SILHOUETTE_MAX characters near them. */
@@ -239,9 +260,17 @@ export class ModelLighting {
         t.next = now + SAMPLE_EVERY;
         t.floor = this.level ? this.level.sample(this.at, t.target) : null;
         if (t.floor === null) t.target.copy(DEFAULT_LIGHT);
-        if (t.still) t.light.copy(t.target);
+        if (!dynamicLights.enabled || t.floor === null || !this.level!.ambientCube(this.at, t.ambientTarget)) for (const c of t.ambientTarget) c.copy(t.target);
+        if (t.still) {
+          t.light.copy(t.target);
+          t.ambient.forEach((c, i) => c.copy(t.ambientTarget[i]!));
+        }
       }
-      if (!t.still) t.light.lerp(t.target, Math.min(1, dt * FOLLOW));
+      if (!t.still) {
+        const k = Math.min(1, dt * FOLLOW);
+        t.light.lerp(t.target, k);
+        if (dynamicLights.enabled) t.ambient.forEach((c, i) => c.lerp(t.ambientTarget[i]!, k));
+      }
       for (const m of t.materials) m.color.copy(t.light);
       const grounded = t.floor !== null && this.at.y - t.floor < 3;
       const silhouette = grounded && cast.has(key);

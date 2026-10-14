@@ -579,7 +579,10 @@ async function main(): Promise<void> {
   dynamicLights.enabled = settings.current.enhancedLighting;
   settings.onChange((s) => {
     lighting.silhouettes = s.silhouetteShadows;
-    dynamicLights.enabled = s.enhancedLighting;
+    if (dynamicLights.enabled !== s.enhancedLighting) {
+      dynamicLights.enabled = s.enhancedLighting;
+      lighting.resample();
+    }
     if (effects) effects.scale = s.smallEffects ? SMALL_EFFECTS_SCALE : EFFECTS_SCALE;
   });
   // Footsteps on the original clips' own LEFT/RIGHT FOOTSTEP events, in step with the animation,
@@ -799,11 +802,8 @@ async function main(): Promise<void> {
   input.onLockChange = (locked) => {
     const ours = releasing;
     releasing = false;
-    // Esc released the pointer: the options (in a sequence, Esc skips it instead).
-    if (!locked && !ours && !inventoryPanel.open && !questBook.open) {
-      if (cutscene) endCutscene();
-      else setOptionsOpen(true);
-    }
+    // Esc released the pointer: the options (sequences play to their end, as in the original).
+    if (!locked && !ours && !inventoryPanel.open && !questBook.open && !cutscene) setOptionsOpen(true);
     updateHint();
   };
 
@@ -839,11 +839,8 @@ async function main(): Promise<void> {
   questBook.onClose = () => setQuestBookOpen(false);
   questBook.onTurn = () => sounds?.play(SFX.turnPage);
   window.addEventListener('keydown', (e) => {
-    if (cutscene) {
-      // Esc skips the sequence (the server applies its outcome all the same).
-      if (e.code === 'Escape' && !e.repeat) endCutscene();
-      return;
-    }
+    // Sequences cannot be skipped.
+    if (cutscene) return;
     if (e.code === 'Escape') {
       if (e.repeat) return;
       // The Esc that released the pointer may arrive too: it opened the menu already.
