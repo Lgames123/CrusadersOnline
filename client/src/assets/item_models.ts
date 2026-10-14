@@ -51,3 +51,16 @@ export async function outfitFor(look: CharacterLook): Promise<DrakeOutfit> {
   const body = ARMOR_BODIES[id(look.armor) ?? -1];
   return { ...(right ? { right } : {}), ...(left ? { left } : {}), ...(body ? { body } : {}) };
 }
+
+/** Derives a CharacterLook from a list of inventory items. */
+export function lookFromInventory(items: readonly { itemId: string; type: string; equipped: boolean }[]): CharacterLook {
+  const look: CharacterLook = {};
+  for (const item of items) {
+    if (!item.equipped) continue;
+    if (item.type === 'weapon' || item.type === 'shield' || item.type === 'armor') {
+      look[item.type as 'weapon' | 'shield' | 'armor'] = item.itemId;
+    }
+  }
+  return look;
+}
+

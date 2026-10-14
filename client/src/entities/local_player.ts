@@ -25,7 +25,8 @@ function swingSeconds(kind: AttackKind, combo: number, weaponSpeed: number, clip
 export class LocalPlayer {
   /** Predicted character; replaced when the player enters another zone. */
   character: Character;
-  readonly avatar: Avatar;
+  avatar: Avatar;
+  readonly object = new THREE.Group();
   private readonly step: (input: Readonly<InputFrame>) => void;
   private readonly prev: Vec3;
   private readonly offset = new THREE.Vector3();
@@ -59,10 +60,21 @@ export class LocalPlayer {
     this.avatar = avatar;
     this.step = step;
     this.prev = { ...character.position };
+    this.object.add(avatar.object);
   }
 
-  get object(): THREE.Object3D {
-    return this.avatar.object;
+  setAvatar(next: Avatar): void {
+    if (this.avatar === next) return;
+    const old = this.avatar;
+    this.object.remove(old.object);
+    next.object.position.set(0, 0, 0);
+    next.object.rotation.set(0, 0, 0);
+    this.object.add(next.object);
+    next.clipRate = this.clipRate;
+    next.seed = old.seed;
+    next.onEvent = old.onEvent;
+    this.avatar = next;
+    old.dispose();
   }
 
   fixedStep(input: Readonly<InputFrame>): void {

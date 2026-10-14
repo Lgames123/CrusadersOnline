@@ -111,7 +111,7 @@ describe.each(backends)('zone transfers through portals on $name', (backend) => 
     await walk(s, 0, 20);
     expect(s.arenaName).toBe('level:zb');
     // State carried over: the starting kit is still there.
-    expect(s.inventory?.items.map((i) => i.itemId)).toEqual(['axe', 'wooden_shield']);
+    expect(s.inventory?.items.map((i) => i.itemId)).toEqual(['long_sword', 'wooden_shield']);
     s.close();
     await sleep(400);
 

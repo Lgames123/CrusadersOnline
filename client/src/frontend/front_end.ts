@@ -1,4 +1,4 @@
-import { CHARACTER_NAME_RE, LEVEL_PREFIX, type CharacterDetails, type RealmInfo } from '@crusaders/shared';
+import { CHARACTER_NAME_RE, LEVEL_PREFIX, type CharacterDetails, type RealmInfo, type CharacterLook } from '@crusaders/shared';
 import { outfitFor } from '../assets/item_models.ts';
 import type { MusicPlayer } from '../audio/music.ts';
 import type { GameFilesPanel } from '../ui/game_files_panel.ts';
@@ -6,7 +6,7 @@ import * as api from './api.ts';
 import type { TitleScene } from './title_scene.ts';
 
 /** How the player chose to enter the game. */
-export type FrontEndChoice = { kind: 'account'; username: string; characterId: string } | { kind: 'guest' } | { kind: 'offline' };
+export type FrontEndChoice = { kind: 'account'; username: string; characterId: string; look?: CharacterLook } | { kind: 'guest' } | { kind: 'offline' };
 
 export interface FrontEndContext {
   title: TitleScene;
@@ -420,7 +420,7 @@ export async function runFrontEnd(ctx: FrontEndContext): Promise<FrontEndChoice>
 
     const play = () => {
       if (!chosen) return;
-      finish({ kind: 'account', username, characterId: chosen.id });
+      finish({ kind: 'account', username, characterId: chosen.id, look: chosen.look });
     };
 
     const create = async () => {

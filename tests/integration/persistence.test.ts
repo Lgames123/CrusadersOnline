@@ -131,7 +131,7 @@ describe.each(backends)('accounts and sessions on $name (M07)', (backend) => {
     expect(list.data.characters.map((c: { name: string }) => c.name)).toEqual(['Roster', 'Second', 'Third']);
     // Never played: the starting equipment, no time in the world.
     const fresh = list.data.characters[1];
-    expect(fresh).toMatchObject({ level: 1, playSeconds: 0, lastPlayedAt: null, look: { weapon: 'axe', shield: 'wooden_shield' } });
+    expect(fresh).toMatchObject({ level: 1, playSeconds: 0, lastPlayedAt: null, look: { weapon: 'long_sword', shield: 'wooden_shield' } });
 
     // Deleting asks for the name; other accounts cannot delete it.
     expect((await api.call('DELETE', `/api/characters/${fresh.id}`, { name: 'Wrong' })).status).toBe(400);

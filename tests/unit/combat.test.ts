@@ -153,7 +153,7 @@ describe('skeleton warrior AI', () => {
 
 describe('authoritative melee', () => {
   it('kills the skeleton with a combo chain and rewards XP and gold (persisted immediately)', () => {
-    const t = setup();
+    const t = setup({ inventory: [{ slot: 0, itemId: 'axe', equipped: true }, { slot: 1, itemId: 'wooden_shield', equipped: true }] });
     t.run(APPROACH, INPUT.FORWARD, 0);
     t.run(30); // let the mob arrive in front of us
     // Swing whenever possible; requests during startup/active are ignored by the server.
@@ -369,10 +369,10 @@ describe('experience curve (original)', () => {
 describe('inventory and equipment', () => {
   it('equips one item per equipment slot and keeps the bag consistent', () => {
     const inv = startingInventory();
-    expect(addItem(inv, 'long_sword')).toBe(2);
+    expect(addItem(inv, 'axe')).toBe(2);
     expect(setEquipped(inv, 2, true, BUILTIN_ITEMS)).toBe(true);
-    expect(inv.filter((e) => e.equipped).map((e) => e.itemId)).toEqual(['wooden_shield', 'long_sword']);
-    expect(equipmentOf(inv, BUILTIN_ITEMS).weapon.name).toBe('Long Sword');
+    expect(inv.filter((e) => e.equipped).map((e) => e.itemId)).toEqual(['wooden_shield', 'axe']);
+    expect(equipmentOf(inv, BUILTIN_ITEMS).weapon.name).toBe('Axe');
     expect(setEquipped(inv, 2, true, BUILTIN_ITEMS)).toBe(false); // no-op
     expect(setEquipped(inv, 9, true, BUILTIN_ITEMS)).toBe(false); // empty slot
     const full: InventoryEntry[] = Array.from({ length: 32 }, (_, slot) => ({ slot, itemId: 'axe', equipped: false }));
@@ -432,7 +432,7 @@ describe('inventory and equipment', () => {
 
   it('gives new characters the starting kit', () => {
     const t = setup();
-    expect(t.inventories()[0]!.items.map((i) => [i.itemId, i.equipped])).toEqual([['axe', true], ['wooden_shield', true]]);
+    expect(t.inventories()[0]!.items.map((i) => [i.itemId, i.equipped])).toEqual([['long_sword', true], ['wooden_shield', true]]);
   });
 });
 

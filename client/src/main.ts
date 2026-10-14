@@ -40,7 +40,10 @@ import {
   type MovementWorld,
   type DoorMotion,
   type MoverMotion,
+  type InventoryItemView,
+  type CharacterLook,
 } from '@crusaders/shared';
+import { outfitFor, lookFromInventory } from './assets/item_models.ts';
 import { createRenderContext } from './engine/renderer.ts';
 import { CameraRig } from './engine/camera_rig.ts';
 import { classicVerticalFov } from './engine/classic_camera.ts';
@@ -459,6 +462,7 @@ async function main(): Promise<void> {
             player?.setWeaponSpeed(inv.weaponSpeed);
             const w = inv.items.find((i) => i.type === 'weapon' && i.equipped);
             myEdge = w?.damage && w.damage[0]! > w.damage[1]! ? 'sharp' : 'blunt';
+            void updatePlayerOutfit(inv.items);
           },
           zone: (name) => {
             // Portal transitions (and the first entry): swap the level, then tell the server.
@@ -513,7 +517,45 @@ async function main(): Promise<void> {
             document.getElementById('error')!.textContent = `Disconnected from server (${code}${reason ? `: ${reason}` : ''}). Reload to reconnect.`;
           },
         }, (created) => (live = created));
-  const selfAvatar = originals?.('self') ?? new ProceduralAvatar('self');
+  let currentLook: CharacterLook = session?.inventory
+    ? lookFromInventory(session.inventory.items)
+    : auth.kind === 'account' && auth.look
+      ? auth.look
+      : { weapon: 'long_sword', shield: 'wooden_shield' };
+  let dressToken = 0;
+  let pendingOutfitItems: readonly InventoryItemView[] | null = null;
+  const updatePlayerOutfit = async (items: readonly InventoryItemView[]) => {
+    if (!originals?.dressed || !player) return;
+    const look = lookFromInventory(items);
+    if (look.weapon === currentLook.weapon && look.shield === currentLook.shield && look.armor === currentLook.armor) {
+      return;
+    }
+    if (cutscene) {
+      pendingOutfitItems = items;
+      return;
+    }
+    const token = ++dressToken;
+    const outfit = await outfitFor(look);
+    const dressed = await originals.dressed(outfit);
+    if (!dressed || token !== dressToken || !player) {
+      dressed?.dispose();
+      return;
+    }
+    if (cutscene) {
+      pendingOutfitItems = items;
+      dressed.dispose();
+      return;
+    }
+    currentLook = look;
+    player.setAvatar(dressed);
+    delete (player.object.userData as Record<string, unknown>)['unlit'];
+    lighting.forget('me');
+    lighting.track('me', player.object, PLAYER_RADIUS * 1.3, false, true);
+    lighting.playerKey = 'me';
+  };
+
+  const initialOutfit = await outfitFor(currentLook);
+  const selfAvatar = (await originals?.dressed?.(initialOutfit)) ?? originals?.('self') ?? new ProceduralAvatar('self');
   if (session) selfAvatar.seed = session.entityId;
   let mw: MovementWorld;
   if (session) {
@@ -564,7 +606,11 @@ async function main(): Promise<void> {
         local.object.position.set(x, y + 0.1, z);
       }
     }
-    const standIn: Puppet = { object: local.object, avatar: local.avatar, name: 'Drake' };
+    const standIn: Puppet = {
+      object: local.object,
+      get avatar() { return local.avatar; },
+      name: 'Drake',
+    };
     const puppets = new Map<number, Puppet>();
     sequence.actors.forEach((a, i) => {
       const index = i + 2;
@@ -634,8 +680,13 @@ async function main(): Promise<void> {
     updateHint();
     // A sequence that faded out comes back once the next act (or the same place) is shown.
     window.setTimeout(() => fade(false, 800), 600);
+    if (pendingOutfitItems) {
+      const pending = pendingOutfitItems;
+      pendingOutfitItems = null;
+      void updatePlayerOutfit(pending);
+    }
   };
-  lighting.track('me', local.avatar.object, PLAYER_RADIUS * 1.3, false, true);
+  lighting.track('me', local.object, PLAYER_RADIUS * 1.3, false, true);
   lighting.playerKey = 'me';
   scene.add(local.object);
 

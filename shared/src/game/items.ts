@@ -128,7 +128,7 @@ export const INVENTORY_SLOTS = 32;
 /** New characters: the slice's starting weapon and shield, equipped. */
 export function startingInventory(): InventoryEntry[] {
   return [
-    { slot: 0, itemId: 'axe', equipped: true },
+    { slot: 0, itemId: 'long_sword', equipped: true },
     { slot: 1, itemId: 'wooden_shield', equipped: true },
   ];
 }
