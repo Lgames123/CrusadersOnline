@@ -81,13 +81,56 @@
       #game-files .hint { color: #9a8f78; font-size: 12px; margin: 6px 0 8px; }
       #game-files .button { display: inline-block; padding: 6px 10px; border: 1px solid #8a7445; background: #3a2f1c; color: #f0e6cc; cursor: pointer; }
       #game-files .log { margin: 8px 0 0; max-height: 120px; overflow: auto; white-space: pre-wrap; font: 11px/1.35 ui-monospace, Consolas, monospace; color: #bfb8a5; }
-      #settings .settings { display: grid; gap: 8px; margin: 14px auto 6px; max-width: 320px; text-align: left; cursor: default; }
-      #settings label { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #bfb8a5; }
-      #settings label.check { justify-content: flex-start; }
-      #settings .hint { color: #7d766a; font-size: 11px; margin-right: auto; }
-      #settings select { padding: 4px 6px; border: 1px solid #6b5a3a; background: #14120e; color: #e8e2d0; font: inherit; }
-      #settings input[type=range] { width: 140px; accent-color: #d9b45a; }
-      #controls-help { max-width: 560px; margin: 4px auto; font-size: 13px; }
+      #overlay .panel { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow: hidden; display: flex; flex-direction: column; padding: 20px 24px; box-shadow: 0 20px 60px rgba(0,0,0,0.85), inset 0 0 0 1px rgba(217,180,90,0.15); }
+      #overlay .panel h1 { margin: 0 0 8px; font: 600 20px/1 "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif; letter-spacing: .12em; text-transform: uppercase; color: #d9b45a; text-shadow: 0 1px 4px #000; }
+      .opt-container { display: flex; flex-direction: column; text-align: left; margin: 6px 0 0; min-height: 0; flex: 1; }
+      .opt-tabs { display: flex; gap: 4px; border-bottom: 1px solid rgba(107, 90, 58, 0.45); padding-bottom: 2px; }
+      .opt-tab { background: transparent; border: 1px solid transparent; border-bottom: 2px solid transparent; color: #a89f8c; padding: 8px 14px; font-weight: 600; font-size: 13px; letter-spacing: 0.04em; cursor: pointer; transition: all .15s ease; border-radius: 4px 4px 0 0; display: inline-flex; align-items: center; gap: 6px; }
+      .opt-tab:hover { color: #f0e6cc; background: rgba(217,180,90,0.06); }
+      .opt-tab.active { color: #d9b45a; border-bottom-color: #d9b45a; background: rgba(217,180,90,0.12); }
+      .opt-tab-icon { font-size: 14px; }
+      .opt-content { flex: 1; min-height: 260px; max-height: 52vh; overflow-y: auto; padding: 12px 6px 12px 0; scrollbar-width: thin; scrollbar-color: #5a4a2c rgba(0,0,0,0.3); }
+      .opt-content::-webkit-scrollbar { width: 6px; }
+      .opt-content::-webkit-scrollbar-thumb { background: #5a4a2c; border-radius: 3px; }
+      .opt-group { background: rgba(14, 12, 10, 0.65); border: 1px solid rgba(107, 90, 58, 0.35); border-radius: 4px; padding: 12px 14px; margin-bottom: 10px; }
+      .opt-group-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+      .opt-group-header h3 { margin: 0; font-size: 13.5px; color: #f0e6cc; font-weight: 600; }
+      .opt-badge { font: 11px/1.3 ui-monospace, Consolas, monospace; background: #262016; color: #d9b45a; border: 1px solid #6b5a3a; padding: 2px 8px; border-radius: 3px; }
+      .opt-slider-row { display: flex; align-items: center; gap: 10px; }
+      .opt-slider-row input[type=range] { flex: 1; accent-color: #d9b45a; cursor: pointer; height: 6px; }
+      .opt-slider-label { font-size: 11px; color: #7d766a; width: 42px; text-align: center; }
+      .opt-desc { margin: 6px 0 0; font-size: 11.5px; color: #8e8573; line-height: 1.4; }
+      .opt-toggle-group { margin-bottom: 8px; padding: 10px 14px; }
+      .opt-toggle-label { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; user-select: none; }
+      .opt-toggle-label input { margin-top: 3px; accent-color: #d9b45a; cursor: pointer; width: 16px; height: 16px; }
+      .opt-toggle-text { display: flex; flex-direction: column; gap: 2px; }
+      .opt-toggle-text strong { color: #f0e6cc; font-size: 13px; font-weight: 600; }
+      .opt-info-card { border-left: 3px solid #d9b45a; }
+      .opt-info-card h4 { margin: 0 0 4px; font-size: 13px; color: #f0e6cc; }
+      /* Keybindings */
+      .opt-subtabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+      .opt-subtab { padding: 4px 10px; font-size: 11.5px; border: 1px solid #4a3e2a; background: #1a1713; color: #9a8f78; border-radius: 3px; cursor: pointer; transition: all .12s; }
+      .opt-subtab:hover { color: #e8e2d0; border-color: #6b5a3a; }
+      .opt-subtab.active { border-color: #d9b45a; color: #ffd54f; background: #322819; }
+      .opt-listening-banner { background: rgba(217, 180, 90, 0.15); border: 1px solid #d9b45a; color: #fff1c7; padding: 8px 12px; border-radius: 4px; font-size: 12px; margin-bottom: 10px; display: flex; align-items: center; justify-content: center; gap: 6px; animation: opt-pulse 1.5s infinite; }
+      @keyframes opt-pulse { 0%, 100% { box-shadow: 0 0 0 rgba(217, 180, 90, 0); } 50% { box-shadow: 0 0 8px rgba(217, 180, 90, 0.35); } }
+      .hint-key { display: inline-block; padding: 1px 6px; background: #3a2f1c; border: 1px solid #6b5a3a; border-radius: 2px; font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+      .opt-keys-table { display: grid; gap: 3px; }
+      .opt-keys-head { display: grid; grid-template-columns: 1fr 100px 100px; gap: 8px; padding: 4px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #7d766a; border-bottom: 1px solid rgba(107, 90, 58, 0.3); }
+      .opt-keys-body { display: grid; gap: 3px; }
+      .opt-key-row { display: grid; grid-template-columns: 1fr 100px 100px; gap: 8px; align-items: center; padding: 5px 8px; background: rgba(14, 12, 10, 0.45); border: 1px solid rgba(255, 255, 255, 0.03); border-radius: 3px; transition: background .12s; }
+      .opt-key-row:hover { background: rgba(217, 180, 90, 0.06); border-color: rgba(217, 180, 90, 0.2); }
+      .opt-key-name { font-size: 12.5px; color: #e8e2d0; font-weight: 500; }
+      .opt-key-slot { min-width: 0; }
+      .opt-key-chip { width: 100%; box-sizing: border-box; padding: 6px 4px; border: 1px solid #5a4a2c; background: #262016; color: #f0e6cc; font: 12px/1 ui-monospace, Consolas, monospace; border-radius: 3px; text-align: center; cursor: pointer; transition: all .15s; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+      .opt-key-chip:hover { border-color: #d9b45a; background: #3d311e; color: #fff; }
+      .opt-key-chip.empty { color: #635c4e; border-style: dashed; background: transparent; }
+      .opt-key-chip.listening { border-color: #ffd54f; background: #4a3818; color: #ffd54f; box-shadow: 0 0 10px rgba(217, 180, 90, 0.4); font-weight: 700; }
+      .opt-keys-footer { margin-top: 10px; display: flex; justify-content: flex-end; }
+      .opt-footer { display: flex; justify-content: flex-start; align-items: center; border-top: 1px solid rgba(107, 90, 58, 0.3); padding-top: 8px; margin-top: 4px; }
+      .opt-btn-secondary, .opt-btn-reset { background: transparent; border: 1px solid #4a3e2a; color: #8e8573; font-size: 11px; padding: 5px 10px; border-radius: 3px; cursor: pointer; transition: all .15s; }
+      .opt-btn-secondary:hover, .opt-btn-reset:hover { border-color: #8a7445; color: #bfb8a5; }
+      #controls-help { max-width: 580px; margin: 4px auto 0; font-size: 11.5px; color: #7d766a; }
       #death { position: fixed; top: 30%; left: 0; right: 0; text-align: center; font: 700 28px/1.2 system-ui, sans-serif; color: #ff6e6e; text-shadow: 0 2px 6px #000; pointer-events: none; }
       /* Front end: login, server and character screens over the title scene (frontend/front_end.ts). */
       #overlay { z-index: 25; }

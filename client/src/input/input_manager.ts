@@ -1,5 +1,5 @@
 import { INPUT, quantizeAngle, quantizePitch, type InputFrame } from '@crusaders/shared';
-import { DEFAULT_BINDINGS, VIEW_KEYS, actionFor, type Action } from './keybindings.ts';
+import { compileBindings, type Action, type CompiledBindings } from './keybindings.ts';
 
 const MOUSE_SENSITIVITY = 0.0022;
 /**
@@ -27,7 +27,9 @@ export class InputManager {
 
   private held = 0;
   private latched = 0;
-  private readonly bindings = DEFAULT_BINDINGS;
+  private compiled: CompiledBindings = compileBindings();
+  private viewCodes = new Set<string>();
+
   onLockChange: (locked: boolean) => void = () => {};
   /** Primary mouse button while the pointer is locked. The secondary button holds BLOCK. */
   onAttack: () => void = () => {};
@@ -37,12 +39,13 @@ export class InputManager {
 
   private readonly element: HTMLElement;
 
-  constructor(element: HTMLElement) {
+  constructor(element: HTMLElement, initialKeybindings?: Record<string, string[]>) {
     this.element = element;
-    const viewCodes = new Set<string>(Object.values(VIEW_KEYS).flat());
+    this.setBindings(initialKeybindings);
+
     window.addEventListener('keydown', (e) => {
       if (!this.locked) return;
-      const flag = this.bindings[e.code];
+      const flag = this.compiled.bindings[e.code];
       if (flag !== undefined) {
         e.preventDefault();
         // C pressed while a direction is held: roll that way (original controls).
@@ -50,42 +53,61 @@ export class InputManager {
         this.held |= flag;
         this.latched |= flag;
       }
-      if (viewCodes.has(e.code)) {
+      if (this.viewCodes.has(e.code)) {
         e.preventDefault();
         this.view.add(e.code);
       }
-      const action = actionFor(e.code);
+      const action = this.compiled.actionFor(e.code);
       if (action) {
         e.preventDefault();
-        if (!e.repeat) this.onAction(action);
+        if (action === 'attack' && !e.repeat) this.onAttack();
+        else if (action === 'block') this.held |= INPUT.BLOCK;
+        else if (!e.repeat) this.onAction(action);
       }
     });
+
     window.addEventListener('keyup', (e) => {
-      const flag = this.bindings[e.code];
+      const flag = this.compiled.bindings[e.code];
       if (flag !== undefined) this.held &= ~flag;
       this.view.delete(e.code);
+      const action = this.compiled.actionFor(e.code);
+      if (action === 'block') this.held &= ~INPUT.BLOCK;
     });
+
     window.addEventListener('blur', () => {
       this.held = 0;
       this.view.clear();
     });
+
     document.addEventListener('mousemove', (e) => {
       if (!this.locked) return;
       const k = MOUSE_SENSITIVITY * this.sensitivity;
       this.yaw -= e.movementX * k;
       this.setPitch(this.pitch - (this.invertY ? -1 : 1) * e.movementY * k);
     });
+
     document.addEventListener('mousedown', (e) => {
       if (!this.locked) return;
-      if (e.button === 0) this.onAttack();
-      else if (e.button === 2) this.held |= INPUT.BLOCK;
+      const mouseCode = `Mouse${e.button}`;
+      if (this.compiled.isAction('attack', mouseCode) || (e.button === 0 && !this.compiled.actionFor('Mouse0'))) {
+        this.onAttack();
+      }
+      if (this.compiled.isAction('block', mouseCode) || (e.button === 2 && !this.compiled.actionFor('Mouse2'))) {
+        this.held |= INPUT.BLOCK;
+      }
     });
+
     document.addEventListener('mouseup', (e) => {
-      if (e.button === 2) this.held &= ~INPUT.BLOCK;
+      const mouseCode = `Mouse${e.button}`;
+      if (this.compiled.isAction('block', mouseCode) || (e.button === 2 && !this.compiled.actionFor('Mouse2'))) {
+        this.held &= ~INPUT.BLOCK;
+      }
     });
+
     document.addEventListener('contextmenu', (e) => {
       if (this.locked) e.preventDefault();
     });
+
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.element;
       if (!this.locked) {
@@ -94,6 +116,17 @@ export class InputManager {
       }
       this.onLockChange(this.locked);
     });
+  }
+
+  /** Apply custom keybindings dynamically. */
+  setBindings(custom?: Record<string, string[]>): void {
+    this.compiled = compileBindings(custom);
+    this.viewCodes = new Set<string>(Object.values(this.compiled.viewKeys).flat());
+  }
+
+  /** Check if a key code triggers a specific action (used for menus outside pointer lock). */
+  isKeyForAction(action: Action, code: string): boolean {
+    return this.compiled.isAction(action, code);
   }
 
   /** Asks for pointer lock; the browser may refuse (no user gesture, just left with Esc): a click retries. */
@@ -116,11 +149,11 @@ export class InputManager {
   /** Keyboard turning and looking (arrows, numpad), once per rendered frame. */
   updateView(dt: number): void {
     if (!this.view.size) return;
-    if (this.viewHeld(VIEW_KEYS.turnLeft)) this.yaw += TURN_RATE * dt;
-    if (this.viewHeld(VIEW_KEYS.turnRight)) this.yaw -= TURN_RATE * dt;
-    if (this.viewHeld(VIEW_KEYS.lookUp)) this.setPitch(this.pitch + LOOK_RATE * dt);
-    if (this.viewHeld(VIEW_KEYS.lookDown)) this.setPitch(this.pitch - LOOK_RATE * dt);
-    if (this.viewHeld(VIEW_KEYS.lookCentre)) this.pitch = 0;
+    if (this.viewHeld(this.compiled.viewKeys.turnLeft)) this.yaw += TURN_RATE * dt;
+    if (this.viewHeld(this.compiled.viewKeys.turnRight)) this.yaw -= TURN_RATE * dt;
+    if (this.viewHeld(this.compiled.viewKeys.lookUp)) this.setPitch(this.pitch + LOOK_RATE * dt);
+    if (this.viewHeld(this.compiled.viewKeys.lookDown)) this.setPitch(this.pitch - LOOK_RATE * dt);
+    if (this.viewHeld(this.compiled.viewKeys.lookCentre)) this.pitch = 0;
   }
 
   /** Movement flags currently held (attack selection reads them at click time). */

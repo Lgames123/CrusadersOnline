@@ -660,13 +660,14 @@ async function main(): Promise<void> {
     sounds.play(stepSounds()[foot]!, local.object.position, { volume: name.includes('SOFT') ? 0.2 : 0.35 });
   };
   chase = new CameraRig(mw, container.clientWidth / container.clientHeight);
-  const input = new InputManager(renderer.domElement);
+  const input = new InputManager(renderer.domElement, settings.current.keybindings);
   if (enterYaw !== null) input.yaw = enterYaw;
   const applySettings = () => {
     const s = settings.current;
     chase.zoom = s.cameraZoom;
     input.sensitivity = s.mouseSensitivity;
     input.invertY = s.invertMouseY;
+    input.setBindings(s.keybindings);
   };
   applySettings();
   settings.onChange(applySettings);
@@ -929,8 +930,8 @@ async function main(): Promise<void> {
       return;
     }
     if (optionsOpen) return;
-    if (e.code === 'KeyI' && !e.repeat) setInventoryOpen(!inventoryPanel.open);
-    else if (e.code === 'F2' && !e.repeat) {
+    if ((input.isKeyForAction('inventory', e.code) || e.code === 'KeyI') && !e.repeat) setInventoryOpen(!inventoryPanel.open);
+    else if ((input.isKeyForAction('questBook', e.code) || e.code === 'F2') && !e.repeat) {
       e.preventDefault();
       setQuestBookOpen(!questBook.open);
     }

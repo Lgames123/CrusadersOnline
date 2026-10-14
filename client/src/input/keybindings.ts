@@ -35,11 +35,16 @@ export const VIEW_KEYS = {
   lookCentre: ['Numpad5'],
 } as const;
 
+export type ViewKeyAction = keyof typeof VIEW_KEYS;
+
 /** One-shot actions. Reserved ones are listed so nothing else takes their keys. */
 export const ACTION_KEYS = {
+  attack: ['Mouse0'],
+  block: ['Mouse2'],
   interact: ['Tab'],
   healthPotion: ['KeyH'],
   inventory: ['KeyI'],
+  questBook: ['F2'],
   // Original R cast / T cycle spell (unchanged by the WASD shift).
   nextSpell: ['KeyT'],
   castSpell: ['KeyR'],
@@ -54,6 +59,129 @@ export const ACTION_KEYS = {
 
 export type Action = keyof typeof ACTION_KEYS;
 
+export type BindingCategory = 'movement' | 'combat' | 'actions' | 'view';
+
+export interface BindingDefinition {
+  id: string;
+  label: string;
+  category: BindingCategory;
+  defaultKeys: string[];
+  flag?: number;
+  action?: Action;
+  view?: ViewKeyAction;
+}
+
+export const BINDING_DEFINITIONS: readonly BindingDefinition[] = [
+  // Movement
+  { id: 'forward', label: 'Move Forward', category: 'movement', defaultKeys: ['KeyW', 'ArrowUp'], flag: INPUT.FORWARD },
+  { id: 'back', label: 'Move Backward', category: 'movement', defaultKeys: ['KeyS', 'ArrowDown'], flag: INPUT.BACK },
+  { id: 'left', label: 'Strafe Left', category: 'movement', defaultKeys: ['KeyA', 'Numpad1'], flag: INPUT.LEFT },
+  { id: 'right', label: 'Strafe Right', category: 'movement', defaultKeys: ['KeyD', 'Numpad3'], flag: INPUT.RIGHT },
+  { id: 'jump', label: 'Jump', category: 'movement', defaultKeys: ['Space'], flag: INPUT.JUMP },
+  { id: 'duck', label: 'Duck / Roll', category: 'movement', defaultKeys: ['KeyC'], flag: INPUT.DUCK },
+  { id: 'walk', label: 'Walk (Slow)', category: 'movement', defaultKeys: ['ShiftLeft', 'ShiftRight'], flag: INPUT.WALK },
+
+  // Combat
+  { id: 'attack', label: 'Attack (Combo)', category: 'combat', defaultKeys: ['Mouse0'], action: 'attack' },
+  { id: 'block', label: 'Block / Shield', category: 'combat', defaultKeys: ['Mouse2'], flag: INPUT.BLOCK, action: 'block' },
+  { id: 'castSpell', label: 'Cast Spell', category: 'combat', defaultKeys: ['KeyR'], action: 'castSpell' },
+  { id: 'nextSpell', label: 'Cycle Spell', category: 'combat', defaultKeys: ['KeyT'], action: 'nextSpell' },
+  { id: 'healthPotion', label: 'Health Potion', category: 'combat', defaultKeys: ['KeyH'], action: 'healthPotion' },
+  { id: 'useItem', label: 'Use Key / Potion', category: 'combat', defaultKeys: ['KeyZ'], action: 'useItem' },
+
+  // Actions & Interface
+  { id: 'interact', label: 'Interact / Open / Talk', category: 'actions', defaultKeys: ['Tab'], action: 'interact' },
+  { id: 'inventory', label: 'Toggle Inventory', category: 'actions', defaultKeys: ['KeyI'], action: 'inventory' },
+  { id: 'questBook', label: 'Toggle Quest Book', category: 'actions', defaultKeys: ['F2'], action: 'questBook' },
+
+  // Camera / View
+  { id: 'turnLeft', label: 'Turn Left', category: 'view', defaultKeys: ['ArrowLeft', 'Numpad4'], view: 'turnLeft' },
+  { id: 'turnRight', label: 'Turn Right', category: 'view', defaultKeys: ['ArrowRight', 'Numpad6'], view: 'turnRight' },
+  { id: 'lookUp', label: 'Look Up', category: 'view', defaultKeys: ['Numpad9'], view: 'lookUp' },
+  { id: 'lookDown', label: 'Look Down', category: 'view', defaultKeys: ['Numpad7'], view: 'lookDown' },
+  { id: 'lookCentre', label: 'Center View', category: 'view', defaultKeys: ['Numpad5'], view: 'lookCentre' },
+];
+
+export function getDefaultKeybindings(): Record<string, string[]> {
+  const res: Record<string, string[]> = {};
+  for (const def of BINDING_DEFINITIONS) res[def.id] = [...def.defaultKeys];
+  return res;
+}
+
+export function formatKeyCode(code: string): string {
+  if (!code) return '—';
+  if (code.startsWith('Key')) return code.slice(3).toUpperCase();
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (code.startsWith('Numpad')) return 'Num ' + code.slice(6);
+  switch (code) {
+    case 'Space': return 'Space';
+    case 'ArrowUp': return '↑';
+    case 'ArrowDown': return '↓';
+    case 'ArrowLeft': return '←';
+    case 'ArrowRight': return '→';
+    case 'ShiftLeft': return 'L-Shift';
+    case 'ShiftRight': return 'R-Shift';
+    case 'ControlLeft': return 'L-Ctrl';
+    case 'ControlRight': return 'R-Ctrl';
+    case 'AltLeft': return 'L-Alt';
+    case 'AltRight': return 'R-Alt';
+    case 'Tab': return 'Tab';
+    case 'Enter': return 'Enter';
+    case 'Backspace': return 'Bksp';
+    case 'Delete': return 'Del';
+    case 'Mouse0': return 'Left Click';
+    case 'Mouse1': return 'Middle Click';
+    case 'Mouse2': return 'Right Click';
+    case 'Mouse3': return 'Mouse 4';
+    case 'Mouse4': return 'Mouse 5';
+    default: return code;
+  }
+}
+
+export interface CompiledBindings {
+  bindings: Record<string, number>;
+  viewKeys: Record<ViewKeyAction, string[]>;
+  actionFor: (code: string) => Action | null;
+  isAction: (action: Action, code: string) => boolean;
+}
+
+export function compileBindings(custom?: Record<string, string[]>): CompiledBindings {
+  const current: Record<string, string[]> = { ...getDefaultKeybindings(), ...(custom ?? {}) };
+  const bindings: Record<string, number> = {};
+  const viewKeys: Record<ViewKeyAction, string[]> = {
+    turnLeft: [],
+    turnRight: [],
+    lookUp: [],
+    lookDown: [],
+    lookCentre: [],
+  };
+  const actionToCodes = new Map<Action, string[]>();
+  const codeToAction = new Map<string, Action>();
+
+  for (const def of BINDING_DEFINITIONS) {
+    const keys = current[def.id] ?? def.defaultKeys;
+    if (def.flag !== undefined) {
+      for (const k of keys) {
+        if (!k.startsWith('Mouse')) bindings[k] = (bindings[k] ?? 0) | def.flag;
+      }
+    }
+    if (def.view) {
+      viewKeys[def.view] = [...keys];
+    }
+    if (def.action) {
+      actionToCodes.set(def.action, [...keys]);
+      for (const k of keys) codeToAction.set(k, def.action);
+    }
+  }
+
+  return {
+    bindings,
+    viewKeys,
+    actionFor: (code: string) => codeToAction.get(code) ?? null,
+    isAction: (action: Action, code: string) => actionToCodes.get(action)?.includes(code) ?? false,
+  };
+}
+
 export function actionFor(code: string): Action | null {
   for (const [action, keys] of Object.entries(ACTION_KEYS) as [Action, readonly string[]][]) {
     if (keys.includes(code)) return action;
@@ -63,6 +191,5 @@ export function actionFor(code: string): Action | null {
 
 /** Help line shown on the "click to play" screen. */
 export const CONTROLS_HELP =
-  'WASD move · Mouse look · Wheel camera distance · ←/→ turn · Numpad 9/7/5 look up/down/centre · ' +
-  'Click attack (5-hit combo; W or Space + click: leaping attack; A / D + click: side swings) · Right click block (+ Space: shield rush) · ' +
-  'Space jump · C duck (C + direction: roll) · Shift walk · R cast spell · T next spell · Tab pick up / open · Z use key / potion · H health potion · I inventory · Esc release mouse';
+  'WASD move · Mouse look · Wheel camera distance · Space jump · Click attack · Right click block · ' +
+  'R cast spell · T next spell · Tab interact / open · Z use item · H potion · I inventory · F2 quest log · Esc options';

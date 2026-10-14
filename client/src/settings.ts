@@ -23,6 +23,8 @@ export interface Settings {
   enhancedLighting: boolean;
   /** Hit effects at half the original's size (not original; a playtest preference). */
   smallEffects: boolean;
+  /** Custom keybindings mapping action ID to array of key codes. */
+  keybindings?: Record<string, string[]>;
   /** Settings schema version (see OPTIONS_VERSION). */
   optionsVersion?: number;
 }
@@ -36,6 +38,13 @@ const OPTIONS_VERSION = 2;
 function sanitize(raw: unknown): Settings {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<keyof Settings | 'camera', unknown>>;
   const sens = typeof r.mouseSensitivity === 'number' && Number.isFinite(r.mouseSensitivity) ? r.mouseSensitivity : 1;
+  let keybindings: Record<string, string[]> | undefined;
+  if (r.keybindings && typeof r.keybindings === 'object') {
+    keybindings = {};
+    for (const [k, v] of Object.entries(r.keybindings)) {
+      if (Array.isArray(v)) keybindings[k] = v.filter((c): c is string => typeof c === 'string');
+    }
+  }
   return {
     // Older settings stored a camera mode instead of a distance.
     cameraZoom: typeof r.cameraZoom === 'number' && Number.isFinite(r.cameraZoom) ? Math.min(1, Math.max(0, r.cameraZoom)) : r.camera === 'modern' ? 1 : 0,
@@ -46,6 +55,7 @@ function sanitize(raw: unknown): Settings {
     silhouetteShadows: r.silhouetteShadows === true && r.optionsVersion === OPTIONS_VERSION,
     enhancedLighting: r.enhancedLighting === true,
     smallEffects: r.smallEffects === true,
+    keybindings,
     optionsVersion: OPTIONS_VERSION,
   };
 }
