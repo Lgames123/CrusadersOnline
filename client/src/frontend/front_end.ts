@@ -95,6 +95,7 @@ export async function runFrontEnd(ctx: FrontEndContext): Promise<FrontEndChoice>
   /** Per-screen key handler (Enter / Escape / arrows); dialogs take the keys while open. */
   let keys: ((e: KeyboardEvent) => void) | null = null;
   let dialogOpen = false;
+  let activeAccount: string | null = null;
 
   // Browsers only start audio after a gesture: the first click or key brings the music in.
   const unlock = () => {
@@ -167,7 +168,7 @@ export async function runFrontEnd(ctx: FrontEndContext): Promise<FrontEndChoice>
 
   // ---- Login ----------------------------------------------------------------------------------
   const loginScreen = (serverDown: boolean, notice = '') => {
-    const remembered = store.get(ACCOUNT_KEY) ?? '';
+    const remembered = store.get(ACCOUNT_KEY) ?? activeAccount ?? '';
     const el = html(`<div class="fe-screen fe-login-screen">
       <header class="fe-logo"><div class="fe-logo-main">Crusaders</div><div class="fe-logo-sub">Online</div></header>
       <form class="fe-login" autocomplete="on" novalidate>
@@ -199,6 +200,19 @@ export async function runFrontEnd(ctx: FrontEndContext): Promise<FrontEndChoice>
     const switcher = form.querySelector<HTMLButtonElement>('[data-act="switch"]')!;
     const error = form.querySelector<HTMLElement>('.fe-error')!;
     let creating = false;
+
+    const updatePassRequirement = () => {
+      const isCurrent = !creating && !!activeAccount && user.value.trim().toLowerCase() === activeAccount.toLowerCase();
+      pass.required = !isCurrent;
+      if (isCurrent && !pass.value) {
+        pass.placeholder = 'Session active — click Log in to enter';
+      } else if (!creating) {
+        pass.placeholder = '';
+      }
+    };
+    user.addEventListener('input', updatePassRequirement);
+    updatePassRequirement();
+
     switcher.addEventListener('click', () => {
       creating = !creating;
       submit.textContent = creating ? 'Create account' : 'Log in';
@@ -206,6 +220,7 @@ export async function runFrontEnd(ctx: FrontEndContext): Promise<FrontEndChoice>
       pass.autocomplete = creating ? 'new-password' : 'current-password';
       pass.placeholder = creating ? 'At least 8 characters' : '';
       error.textContent = '';
+      updatePassRequirement();
     });
     error.textContent = notice;
     const status = el.querySelector<HTMLElement>('.fe-status')!;
@@ -220,13 +235,20 @@ export async function runFrontEnd(ctx: FrontEndContext): Promise<FrontEndChoice>
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      const typedUser = user.value.trim();
+      if (!creating && activeAccount && typedUser.toLowerCase() === activeAccount.toLowerCase() && !pass.value) {
+        store.set(ACCOUNT_KEY, remember.checked ? activeAccount : null);
+        await realmScreen(activeAccount);
+        return;
+      }
       if (!form.reportValidity()) return;
       error.textContent = '';
       submit.disabled = switcher.disabled = true;
       try {
-        const name = await api.login(user.value.trim(), pass.value, creating);
+        const name = await api.login(typedUser, pass.value, creating);
         pass.value = '';
         store.set(ACCOUNT_KEY, remember.checked ? name : null);
+        activeAccount = name;
         await realmScreen(name);
       } catch (err) {
         error.textContent = (err as Error).message;
@@ -234,7 +256,7 @@ export async function runFrontEnd(ctx: FrontEndContext): Promise<FrontEndChoice>
       }
     });
     show(el, 'title');
-    (remembered ? pass : user).focus();
+    (remembered ? (pass.required ? pass : submit) : user).focus();
   };
 
   // ---- Server selection -----------------------------------------------------------------------
@@ -262,6 +284,7 @@ export async function runFrontEnd(ctx: FrontEndContext): Promise<FrontEndChoice>
     let chosen: RealmInfo | null = null;
     const back = async () => {
       await api.logout();
+      activeAccount = null;
       loginScreen(false);
     };
     const go = () => {
@@ -516,11 +539,10 @@ export async function runFrontEnd(ctx: FrontEndContext): Promise<FrontEndChoice>
     await load();
   };
 
-  // ---- Start: a valid session skips the login ---------------------------------------------------
+  // ---- Start: always default to the login screen on refresh -------------------------------------
   let serverDown = false;
-  let account: string | null = null;
   try {
-    account = await api.currentAccount();
+    activeAccount = await api.currentAccount();
   } catch {
     serverDown = true;
   }
@@ -529,13 +551,14 @@ export async function runFrontEnd(ctx: FrontEndContext): Promise<FrontEndChoice>
     toCharacters = sessionStorage.getItem(CHARACTER_SCREEN_FLAG) === 'characters';
     sessionStorage.removeItem(CHARACTER_SCREEN_FLAG);
   } catch {
-    // No session storage: the server list.
+    // No session storage.
   }
-  if (account && toCharacters) {
+  if (activeAccount && toCharacters) {
     const realm = await api.realms().then((r) => r.realms.find((x) => x.id === store.get(REALM_KEY)) ?? r.realms[0] ?? null).catch(() => null);
-    void characterScreen(account, realm);
-  } else if (account) void realmScreen(account);
-  else loginScreen(serverDown);
+    void characterScreen(activeAccount, realm);
+  } else {
+    loginScreen(serverDown);
+  }
 
   const choice = await done;
   window.removeEventListener('keydown', onKey);
