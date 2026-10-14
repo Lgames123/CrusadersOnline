@@ -131,6 +131,34 @@
       .opt-btn-secondary, .opt-btn-reset { background: transparent; border: 1px solid #4a3e2a; color: #8e8573; font-size: 11px; padding: 5px 10px; border-radius: 3px; cursor: pointer; transition: all .15s; }
       .opt-btn-secondary:hover, .opt-btn-reset:hover { border-color: #8a7445; color: #bfb8a5; }
       #controls-help { max-width: 580px; margin: 4px auto 0; font-size: 11.5px; color: #7d766a; }
+      #overlay .overlay-nav { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 12px 0 2px; width: 100%; }
+      #overlay .main-actions { display: flex; justify-content: center; gap: 10px; width: 100%; max-width: 560px; margin: 0; }
+      #overlay .main-actions button { flex: 1; max-width: 180px; min-width: 105px; font-weight: 600; letter-spacing: 0.03em; white-space: nowrap; padding: 9px 12px; }
+      #overlay .main-actions button:only-child { max-width: 240px; }
+      #overlay button.btn-logout {
+        border-color: #8c3232;
+        background: linear-gradient(to bottom, #4c1a1a, #2c0e0e);
+        color: #fcd5d5;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+        box-shadow: inset 0 1px 0 rgba(255, 160, 160, 0.2), 0 2px 6px rgba(0, 0, 0, 0.35);
+      }
+      #overlay button.btn-logout:hover {
+        border-color: #b84040;
+        background: linear-gradient(to bottom, #632222, #3c1414);
+        color: #ffffff;
+        box-shadow: inset 0 1px 0 rgba(255, 180, 180, 0.3), 0 3px 10px rgba(180, 40, 40, 0.35);
+      }
+      #overlay .confirm-box { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; max-width: 440px; padding: 10px 14px; background: rgba(14, 12, 10, 0.75); border: 1px solid rgba(217, 180, 90, 0.35); border-radius: 4px; box-sizing: border-box; }
+      #overlay .confirm-prompt { font-size: 13.5px; color: #ffd54f; font-weight: 600; text-shadow: 0 1px 3px #000; }
+      #overlay .confirm-buttons { display: flex; justify-content: center; gap: 10px; width: 100%; margin: 0; }
+      #overlay .confirm-buttons button { flex: 1; max-width: 180px; }
+      #overlay [hidden] { display: none !important; }
+      #overlay button.btn-warn { border-color: #d97724; background: linear-gradient(to bottom, #5a2c14, #3a1c0d); color: #ffcc80; font-weight: 600; }
+      #overlay button.btn-warn:hover { border-color: #ff9800; background: linear-gradient(to bottom, #703719, #4a2410); color: #ffe0b2; }
+      #overlay button.btn-danger { border-color: #b84040; background: linear-gradient(to bottom, #632222, #3c1414); color: #ffffff; font-weight: 600; }
+      #overlay button.btn-danger:hover { border-color: #d94545; background: linear-gradient(to bottom, #752828, #4a1818); color: #fff; }
+      #overlay button.btn-cancel { border-color: #4a4232; background: rgba(20, 18, 14, 0.8); color: #bfb8a5; }
+      #overlay button.btn-cancel:hover { border-color: #8a7445; background: #3a2f1c; color: #f0e6cc; }
       #death { position: fixed; top: 30%; left: 0; right: 0; text-align: center; font: 700 28px/1.2 system-ui, sans-serif; color: #ff6e6e; text-shadow: 0 2px 6px #000; pointer-events: none; }
       /* Front end: login, server and character screens over the title scene (frontend/front_end.ts). */
       #overlay { z-index: 25; }
@@ -267,8 +295,20 @@
         <h1>Options</h1>
         <div id="settings"></div>
         <p id="controls-help"></p>
-        <div class="row resume"><button type="button" id="btn-resume">Resume</button></div>
-        <p><a class="link" id="btn-characters" hidden>Change character</a> &nbsp; <a class="link" id="btn-logout" hidden>Log out</a></p>
+        <div class="overlay-nav">
+          <div id="nav-buttons-row" class="row main-actions">
+            <button type="button" id="btn-resume">Resume</button>
+            <button type="button" id="btn-characters" hidden>Change Character</button>
+            <button type="button" id="btn-logout" class="btn-logout" hidden>Log Out</button>
+          </div>
+          <div id="confirm-box" class="confirm-box" hidden>
+            <div id="confirm-prompt" class="confirm-prompt">Are you sure?</div>
+            <div class="row confirm-buttons">
+              <button type="button" id="btn-confirm-yes" class="btn-warn">Are you sure?</button>
+              <button type="button" id="btn-confirm-cancel" class="btn-cancel">Cancel</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     <div id="click-hint" hidden>Click to play · Esc for options</div>

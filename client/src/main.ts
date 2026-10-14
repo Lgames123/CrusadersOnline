@@ -710,9 +710,11 @@ async function main(): Promise<void> {
     music.unlock();
     input.requestLock();
   };
+  let resetOverlayConfirm = () => {};
   const setOptionsOpen = (open: boolean) => {
     if (open === optionsOpen) return;
     optionsOpen = open;
+    resetOverlayConfirm();
     overlay.classList.toggle('hidden', !open);
     gameFiles.visible = open;
     if (open) {
@@ -857,25 +859,69 @@ async function main(): Promise<void> {
   updateHint();
   play();
   // Back to the character screen: the account session stays, the world is left.
-  const characterLink = document.getElementById('btn-characters')!;
-  characterLink.hidden = auth.kind !== 'account';
-  characterLink.addEventListener('click', (e) => {
+  const navButtonsRow = document.getElementById('nav-buttons-row')!;
+  const characterButton = document.getElementById('btn-characters')!;
+  const logoutButton = document.getElementById('btn-logout')!;
+  const confirmBox = document.getElementById('confirm-box')!;
+  const confirmPrompt = document.getElementById('confirm-prompt')!;
+  const confirmYes = document.getElementById('btn-confirm-yes')!;
+  const confirmCancel = document.getElementById('btn-confirm-cancel')!;
+
+  let pendingAction: 'characters' | 'logout' | null = null;
+
+  const resetConfirm = () => {
+    pendingAction = null;
+    confirmBox.hidden = true;
+    navButtonsRow.hidden = false;
+  };
+  resetOverlayConfirm = resetConfirm;
+
+  const showConfirm = (action: 'characters' | 'logout', prompt: string) => {
+    pendingAction = action;
+    confirmPrompt.textContent = prompt;
+    confirmYes.className = action === 'logout' ? 'btn-danger' : 'btn-warn';
+    navButtonsRow.hidden = true;
+    confirmBox.hidden = false;
+  };
+
+  if (auth.kind === 'account') {
+    characterButton.hidden = false;
+    logoutButton.hidden = false;
+  } else {
+    characterButton.hidden = true;
+    logoutButton.hidden = true;
+  }
+
+  characterButton.addEventListener('click', (e) => {
     e.stopPropagation();
-    session?.close();
-    try {
-      sessionStorage.setItem(CHARACTER_SCREEN_FLAG, 'characters');
-    } catch {
-      // Without session storage it opens on the server list.
-    }
-    location.reload();
+    showConfirm('characters', 'Return to character selection?');
   });
-  const logoutLink = document.getElementById('btn-logout')!;
-  logoutLink.hidden = auth.kind !== 'account';
-  logoutLink.addEventListener('click', async (e) => {
+
+  logoutButton.addEventListener('click', (e) => {
     e.stopPropagation();
-    session?.close();
-    await logout();
-    location.reload();
+    showConfirm('logout', 'Log out of Crusaders Online?');
+  });
+
+  confirmCancel.addEventListener('click', (e) => {
+    e.stopPropagation();
+    resetConfirm();
+  });
+
+  confirmYes.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (pendingAction === 'characters') {
+      session?.close();
+      try {
+        sessionStorage.setItem(CHARACTER_SCREEN_FLAG, 'characters');
+      } catch {
+        // Without session storage it opens on the server list.
+      }
+      location.reload();
+    } else if (pendingAction === 'logout') {
+      session?.close();
+      await logout();
+      location.reload();
+    }
   });
   input.onLockChange = (locked) => {
     const ours = releasing;
