@@ -22,6 +22,7 @@ import {
   LEVEL_UNIT_METRES,
   floorAt,
   stagedPlayerSpot,
+  stagedPlayerYaw,
   PORTAL_OBJECT_BASE,
   PORTAL_USE_REACH,
   inPortal,
@@ -557,7 +558,9 @@ async function main(): Promise<void> {
       const x = spot[0] * LEVEL_UNIT_METRES, z = spot[2] * LEVEL_UNIT_METRES;
       const y = floorAt(levelView.arena, x, z, local.object.position.y);
       if (y !== null) {
-        local.placeAt({ x, y: y + 0.1, z }, local.object.rotation.y);
+        const yaw = stagedPlayerYaw(spot) ?? local.object.rotation.y;
+        local.placeAt({ x, y: y + 0.1, z }, yaw);
+        local.object.rotation.y = yaw;
         local.object.position.set(x, y + 0.1, z);
       }
     }

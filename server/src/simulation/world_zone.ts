@@ -8,6 +8,7 @@ import {
   emptyStoryState,
   estimateSequenceMs,
   stagedPlayerSpot,
+  stagedPlayerYaw,
   inStoryVolume,
   storyFlag,
   type StorySequence,
@@ -1309,6 +1310,8 @@ export class WorldZone {
       const x = spot[0] * s, z = spot[2] * s;
       const y = this.arena.meshes.length ? floorAt(this.arena, x, z, p.character.position.y) : spot[1] * s;
       if (y !== null) setCharacterState(p.character, { x, y: y + 0.1, z }, 0, false);
+      const yaw = stagedPlayerYaw(spot);
+      if (yaw !== null) p.yaw = quantizeAngle(yaw);
     }
     p.swing = null;
     p.queuedAttack = false;

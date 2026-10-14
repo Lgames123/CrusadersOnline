@@ -176,3 +176,14 @@ export function stagedPlayerSpot(sequence: StorySequence): [number, number, numb
   }
   return null;
 }
+
+/**
+ * Drake's facing at a staged spot (radians, 0 = -Z, the mirrored frame), where a scene asks for
+ * one; null keeps his own. Ws9a's Ursan scene: he faces the wall beside the cell door.
+ */
+const STAGED_FACING: { spot: [number, number, number]; yaw: number }[] = [{ spot: [2098.21, 1024.093, -1643.612], yaw: 0 }];
+
+export function stagedPlayerYaw(spot: readonly [number, number, number]): number | null {
+  const f = STAGED_FACING.find((e) => Math.hypot(e.spot[0] - spot[0], e.spot[1] - spot[1], e.spot[2] - spot[2]) < 0.5);
+  return f ? f.yaw : null;
+}
