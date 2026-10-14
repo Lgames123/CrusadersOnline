@@ -3,6 +3,13 @@
 This file is the single source of project rules for every agent (Claude Code, Gemini CLI,
 Antigravity, others). `CLAUDE.md` and `GEMINI.md` only point here: change rules here.
 
+## Skills (procedures)
+
+Project procedures live in `.agent/skills/<name>/SKILL.md` (Antigravity loads them by their
+`description`; other agents read the matching one before doing that kind of work): decompiling
+crusaders.exe, converting assets, inspecting level data, testing a cutscene in isolation,
+committing with a context note. Keep them short and current; fix a skill when it misleads.
+
 ## Context notes (simplified SDD)
 
 Every commit carries a context note: a short Markdown file that the next session or agent, of any
