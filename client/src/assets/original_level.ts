@@ -356,13 +356,21 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
     mesh.material = material;
     mesh.removeFromParent();
     if (isSky) {
+      if (material.map) {
+        material.map.wrapS = THREE.ClampToEdgeWrapping;
+        material.map.wrapT = THREE.ClampToEdgeWrapping;
+        material.map.generateMipmaps = false;
+        material.map.minFilter = THREE.LinearFilter;
+        material.map.magFilter = THREE.LinearFilter;
+        material.map.needsUpdate = true;
+      }
       material.depthWrite = false;
-      // Seen from inside; Ws_a's faces point the other way.
-      material.side = THREE.DoubleSide;
+      material.side = THREE.FrontSide;
       fitSkyTile(mesh.geometry);
       // Drawn far around the camera: the level's fog would black it out.
       material.fog = false;
       mesh.renderOrder = -1;
+      mesh.frustumCulled = false;
       sky.add(mesh);
     } else {
       level.add(mesh);
