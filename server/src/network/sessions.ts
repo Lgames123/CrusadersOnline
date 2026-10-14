@@ -52,7 +52,7 @@ export class SessionManager implements TransportHandlers {
     zones: ZoneManager,
     characters: CharacterRepository,
     log: Logger,
-    opts: { defaultArena: string; persist: (records: CharacterPersistRecord[]) => void },
+    opts: { defaultArena: string; devGuestSpawn?: { x: number; y: number; z: number } | null; persist: (records: CharacterPersistRecord[]) => void },
   ) {
     this.tickets = tickets;
     this.zones = zones;
@@ -60,7 +60,10 @@ export class SessionManager implements TransportHandlers {
     this.log = log;
     this.defaultArena = opts.defaultArena;
     this.persist = opts.persist;
+    this.devGuestSpawn = opts.devGuestSpawn ?? null;
   }
+
+  private readonly devGuestSpawn: { x: number; y: number; z: number } | null;
 
   private zoneOf(s: Session): ZoneHost | null {
     return this.zones.host(s.zone);
@@ -241,7 +244,7 @@ export class SessionManager implements TransportHandlers {
   private async enterWorld(s: Session, account: Account, characterId: string, name: string): Promise<void> {
     try {
       if (account.guest) {
-        await this.sendToZone(s, this.defaultArena, { name, characterId: null });
+        await this.sendToZone(s, this.defaultArena, { name, characterId: null, ...(this.devGuestSpawn ? { position: this.devGuestSpawn } : {}) });
       } else {
         const saved = await this.characters.loadOwned(account.id, characterId);
         if (!saved) return this.reject(s, 'character not found');

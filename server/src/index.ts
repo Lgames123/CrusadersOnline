@@ -64,7 +64,7 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
   if (!zones.available(config.arena)) throw new Error(`ARENA ${config.arena} is not available (convert the level into ${config.generatedDir})`);
   zones.keep(config.arena);
   await zones.get(config.arena);
-  sessions = new SessionManager(tickets, zones, characters, log, { defaultArena: config.arena, persist: (r) => save(r, 'transfer') });
+  sessions = new SessionManager(tickets, zones, characters, log, { defaultArena: config.arena, devGuestSpawn: config.devGuestSpawn, persist: (r) => save(r, 'transfer') });
   const api = createApiHandler({ config, accounts, tickets, log });
 
   const http = createServer((req: IncomingMessage, res: ServerResponse) => {

@@ -267,6 +267,28 @@ Moving level pieces are class `0x31` records, not part of the `.msh`: `[31 00 00
 
 Implemented: the converter writes `brushes` (name, vertices, faces and the mover) in each act's placements; brushes named *door* / *gate* become doors (world objects, convex-hull colliders) that open with the interact key (Tab). Doors with turning movers swing like the original (away from the player, eased, back after their delay; a closing door waits for a character in its way instead of pushing him); the others still slide up (simplified); doors, gates, bridges and platforms are solid, the rest are drawn only, with their original textures (no lightmap: dimmed). Locked doors (a guess, keys placed in the acts): train `bfinaldoor` — Fain's Key, Cs1b-Inn `bDoorE_4` / `bDoorE_5` — Room 2 / Room 3 Key; they open with the use key (Z) while the key is carried (keys are not used up: `Permanent`). Levers (`bLever1_1`) are pulled with Tab; in Ws1a/5a/9a the lever opens `bOuterGates`, which no longer opens by hand (the Ca*a lever beside the five nested `bPlat` rings, probably a lift, does nothing yet).
 
+### 6.5 The story layer: triggers, scripted sequences, cameras `[CONFIRMED: 29 sequences in 26 acts]`
+
+The cap DB ends with a **per-type object table**: 225 types (`NUM_CAP_OBJ_TYPES`), each a count and that many pointers; the loader (0x478xxx) patches each object's vtable by type. Header +0 is the image size and +4 the table's size, so the table starts at `size - tableBytes`. Types used by the story:
+
+| Type | Object | Fields |
+|---|---|---|
+| 0x13 | exit trigger | +4 volume, +8 activation (bit 0 walked into, bit 3 use key), +0x0F entry number, +0x34 the portal record (§6.2.2), +0x44 start position |
+| 0x14 | flag trigger | +4 volume, +8 activation; entering sets its flag (0x462A70), a TriggerFlag step sets it too (0x462B00) |
+| 0x1D | quest trigger | +4 volume, +8 activation, +0x0E action mask (0x80 main story), +0x34 quest index, +0x36 player bit; fired by 0x4641F0 |
+| 0x2B | relay trigger | fires its targets: +0x36 count, +0x38 pointer array (0x462B90) |
+| 0x28 | camera | +0x34 eye path (type 0x55), +0x38 look-at path (type 0x53) |
+| 0x40 | action definition | +4 [resource flags, 2, id, argument count], +8 name (MoveToPos, FaceRel, PlaySound, Wait, RunAnimation, DoInteraction, Timeline, ScriptedSequenceDone, FadeOut, TriggerFlag, Appear, CameraTimeline), +0x3C argument names (0x33 bytes each) |
+| 0x4D | sequence binding | +0x10/+0x14 typed reference (type 0x14) to the flag trigger that starts it, +0x18 its camera, +0x20 the sequence definition, +0x28 actor count, +0x2C actor table ([1, 1] = the stand-in for Drake, [1, creature object] = a placed creature; creature objects start 0x18 before their class-0x2D record) |
+
+**Sequence definition:** +2 track count, +3 actor count, +4 actor bit mask, +8 state count (1 in every act), +0x0C the actor of each track (bytes; tracks 0-2 are the timeline, camera/fade and sound tracks), +0x10 the states (0x8C bytes: +4 steps per track, +8 per-track step lists, +0x24 step count, +0x28 steps, +0x2C argument count, +0x30 typed arguments), +0x14 its name.
+
+**Step** (0x30 bytes): +0 start condition [event, track, index, timeline key]: FF FF FF = at once; event 0 = when step `index` of `track` starts (a Timeline: when it reaches the key, keys 500 ms apart), 4 = when it finishes; +8 the action definition; +0x19 argument count; +0x1A argument slots (FF = default); +0x28 / +0x2C a Timeline's key count and keys (12 bytes each, time in ms at +4). **Typed arguments** (8 bytes): 0x0A int, 0x0B float, 0x1E pointer to a point, otherwise a reference (0 = the player, 1 = the stand-in, else a creature, trigger, camera, exit object or binding). PlaySound `sound` is a Sound.ctx id (the voice line; Wait steps carry the line's length), RunAnimation `animation` an ASM state id, MoveToPos `movestate` ASM_RUNNING / ASM_WALKING, ScriptedSequenceDone `loadlevel` an exit object (the next act: Ci1b's briefing loads Ci2b).
+
+**Camera path** (types 0x53 / 0x55): +4 control points, +8 progress per ms, +0x10 point count, +0x11 segment count, +0x13 flags; evaluated by 0x42DA10 as cubic Bezier pieces (piece i: mid(P2i, P2i+1), P2i+1, P2i+2, mid(P2i+2, P2i+3); the first starts at P0, the last ends at the last point), progress stopping at 0.9999. Type 0x55 adds timed events (+0x44 / +0x48 / +0x4C) and a piecewise-linear curve (+0x50 / +0x54 / +0x58, read by 0x42DFA0), not used yet.
+
+Implemented: converter `formats/cap_story.ts` (`story` in each act's placements, Z mirrored); `rules/strings.json` from crusaders.exe's string table (`formats/pe_strings.ts`), where the quest book's text lives (ids 3000-3252).
+
 ### 6.3 `.msh` layout and geometry `[CONFIRMED on 25 of 25 levels]`
 
 **Memory images.** Both `.msh` and `.cap` files are memory images ("game DBs"). The loader decompresses them into game memory at fixed addresses, so internal pointers are absolute: the mesh DBs live at `0x06000000` and the cap DB at `0x08000000`. Each DB ends with a **per-type object table**: for every object type, a count followed by that many pointers. It is the "recyclable overhead" in the loader's messages.

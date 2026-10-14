@@ -98,6 +98,39 @@
         "ARENA": "level:cs1a"
       },
       "port": 8090
+    },
+    {
+      "name": "story-client",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/client",
+        "exec",
+        "vite",
+        "--port",
+        "3100",
+        "--strictPort"
+      ],
+      "env": {
+        "GAME_SERVER_URL": "http://127.0.0.1:8190"
+      },
+      "port": 3100
+    },
+    {
+      "name": "story-server",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/server",
+        "start"
+      ],
+      "env": {
+        "SERVER_PORT": "8190",
+        "ARENA": "level:ci1b",
+        "DATABASE_URL": "pglite:local/pgdata-story",
+        "DEV_GUEST_SPAWN": "624,278.6,-473.7"
+      },
+      "port": 8190
     }
   ]
 }

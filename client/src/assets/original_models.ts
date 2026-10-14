@@ -61,6 +61,8 @@ interface ClipMap {
   gestures?: string[];
   /** Talking (ASM_GESTURE_POLITE_CONVERSATION). */
   talk?: string;
+  /** Every ASM state's clip (models.ctx B lines), for scripted sequences. */
+  asm?: Record<string, string>;
 }
 
 /**
@@ -71,6 +73,7 @@ function withStates(base: ClipMap, states: Record<string, string> | undefined): 
   const st = states ?? {};
   return {
     ...base,
+    asm: st,
     retreat: base.retreat ?? st['ASM_RETREAT'] ?? base.run,
     strafeLeft: base.strafeLeft ?? st['ASM_SIDE_STEP_L'] ?? base.run,
     strafeRight: base.strafeRight ?? st['ASM_SIDE_STEP_R'] ?? base.run,
@@ -103,6 +106,9 @@ function withStates(base: ClipMap, states: Record<string, string> | undefined): 
     attackRight: base.attackRight ?? st['ASM_SWING_LEVEL'] ?? base.attacks[0]!,
   };
 }
+
+/** `anim` while a scripted sequence plays a clip directly (playAsm). */
+const SCRIPTED_ANIM = -2;
 
 const STANDARD_CLIPS: ClipMap = { idle: 'pa21_id_br', run: 'pa01_ru_f', walk: 'pb01_w_fw', air: 'pa21_id_br', attacks: ['pn02_1_sw_lv', 'pn01_1_cp_lo', 'pn03_1_sw_ov'], death: 'pi03_hp', block: 'pt01_rdy_shld' };
 
@@ -316,7 +322,32 @@ class OriginalAvatar implements Avatar {
     this.reactLeft = clip.duration / (this.clipScale);
   }
 
+  /** Scripted clip (playAsm) stops at this clip time, seconds (0: none). */
+  private holdAt = 0;
+
+  playAsm(state: string, opts: { t0: number; t1: number; speed: number; loop: boolean; freeze: boolean }): number | null {
+    const name = this.map.asm?.[state];
+    const clip = name ? this.clips.get(name) : undefined;
+    if (!clip) return null;
+    this.anim = SCRIPTED_ANIM;
+    this.gestureLeft = 0;
+    this.reactLeft = 0;
+    this.restartEvery = 0;
+    const speed = opts.speed > 0 ? opts.speed : 1;
+    const t0 = Math.max(0, Math.min(1, opts.t0));
+    const t1 = Math.max(t0, Math.min(1, opts.t1 || 1));
+    this.play(clip, opts.loop, this.clipScale * speed);
+    if (this.current) {
+      this.current.time = t0 * clip.duration;
+      this.current.paused = false;
+      this.lastTime = this.current.time;
+    }
+    this.holdAt = !opts.loop && t1 < 1 ? t1 * clip.duration : 0;
+    return (clip.duration * (t1 - t0)) / (this.clipScale * speed);
+  }
+
   setState(anim: number, swingSeconds: number, swingId = 0): void {
+    this.holdAt = 0;
     const restart = isAttackAnim(anim) && swingId !== this.swingId;
     this.swingId = swingId;
     this.swingSeconds = swingSeconds;
@@ -503,6 +534,11 @@ class OriginalAvatar implements Avatar {
     const before = this.current;
     const prev = this.lastTime;
     this.mixer.update(dt);
+    // A scripted clip played up to a fraction of it holds there.
+    if (this.holdAt > 0 && this.current && this.current.time >= this.holdAt) {
+      this.current.time = this.holdAt;
+      this.current.paused = true;
+    }
     const cur = this.current;
     if (!cur) return;
     const now = cur.time;

@@ -140,7 +140,15 @@
   - Tools: Frida runner for non-pausing hooks and hardware watchpoints (memory note `frida-runtime-capture`).
   - 92 tests + 2 E2E.
 
+- [x] Session 17 (2026-10-14): **story: cutscenes and the main quests, decompiled.**
+  - The cap's per-type object table decoded; flag / quest / relay triggers, cameras (Bezier paths) and the 29 scripted sequences of 26 acts converted with resolved arguments (asset-format-discovery.md §6.5); the quest book text read from crusaders.exe's string table.
+  - Server: triggers fire once per character; a sequence plays on the triggering player's client (SC_CUTSCENE) while the server freezes him, then applies its TriggerFlag steps (assign / complete with XP and gold / journal), places Drake where the stand-in ended (on the floor) and loads the next act. Story progress persisted (003_story.sql) and carried across zones.
+  - Client: cutscene player (camera paths, stand-in and NPC puppets with their ASM clips, voice lines with subtitles, fades, letterbox; Esc skips), quest book on F2 with the original frame, tabs and texts.
+  - Verified live: Cs1a (Aerin's ride, 8.5 s, then Ci1a), Ci1a (Aerin's farewell), Ci1b (Celestia's briefing: Meet Celestia completed, Horn of Shattering assigned, then Ci2b). 153 tests.
+  - Dev only: DEV_GUEST_SPAWN puts guests at a point of the default arena; launch configs story-client (3100) / story-server (8190, own PGlite).
+
 ### Not Yet Done
+- Side quests (26: NPC records, offer / reminder / completion lines, items), relay triggers' other targets (doors, sounds), the intro movies (.bik), the eye-path events.
 - Spells beyond Torch Light (the framework is in: spell table from default.ctx, spell books, mana and regeneration, conjuring, R / T keys, persistence): fireball, slow, freeze, stoneskin, lightning, heroism, spectral ally, revelation, holy wrath, soul drinker need live captures; creature spells / ranged attacks; mana regeneration rate (one sample).
 - Creature hit reaction IMPACT_FRONT_TWO_STEPS_BACK (PI31); the third combo step's recoil (plays backwards after its impact); combo chain 105–107 (COMBO 6–8, weapon class unknown).
 - NPCs: provisional talk (Tab: a speaker of the creature's voice role, Sound.ctx <speaker>_<role>_nn lines with subtitles), citizens stroll within 4 m, idle gestures; the original's per-NPC lines, routines, trade and scripted sequences live in the acts' sequence scripts (not decoded). Named characters do not talk yet.

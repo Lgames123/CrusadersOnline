@@ -38,7 +38,7 @@ Every unknown item is assigned a priority and a concrete validation experiment t
 ---
 
 ### UNK-004: Dialogue and Quest Script Bytecode (`script/*.bin`)
-- **Status:** Deferred | **Priority:** Low
+- **Status:** RESOLVED (2026-10-14) — no bytecode file: sequences are cap objects (asset-format-discovery.md §6.5); quests are built in code, their text in crusaders.exe's string table (executable-analysis.md §17). | **Priority:** Low
 - **Description:** Are `.bin` files compiled bytecode or simple sequential string ID triggers?
 - **Verification Experiment:** Strings inspection shows text dialogue IDs that correlate directly with `script/messages.ctx`.
 - **Vertical Slice Fallback:** Vertical slice focuses on combat and multiplayer movement; questing is scheduled for Phase 8.

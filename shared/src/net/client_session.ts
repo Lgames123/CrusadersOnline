@@ -5,7 +5,7 @@ import { dequantizeAngle, dequantizePosition } from '../math/quantize.ts';
 import { CS, SC } from '../protocol/opcodes.ts';
 import { INPUT_PACKET_MAX_BYTES, MAX_INPUT_FRAMES, createInputFrame, encodeInput, type InputFrame } from '../protocol/binary/input.ts';
 import { decodeSnapshot, type EntityState } from '../protocol/binary/snapshot.ts';
-import type { AttackKind, CombatEventMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PlayerStatsMsg, ServerControlMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
+import type { AttackKind, CombatEventMsg, CutsceneMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PlayerStatsMsg, QuestLogMsg, ServerControlMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
 import type { ArenaDef } from '../arena/types.ts';
 import { createMovementWorld, disposeMovementWorld, setDoorOpen, setDoorPose, type MovementWorld, type Rapier } from '../movement/physics.ts';
 import { stepDoorMotion, swingPose, type DoorMotion, type DoorSwing } from '../arena/door_swing.ts';
@@ -58,6 +58,10 @@ export interface ClientSessionEvents {
   close?(code: number, reason: string): void;
   /** A refusal from the server worth telling the player (e.g. the bag is full). */
   error?(code: string, message: string): void;
+  /** A scripted sequence starts for this player: play it, then call cutsceneDone(). */
+  cutscene?(d: CutsceneMsg['d']): void;
+  /** The quest book (on entry and after every change). */
+  quests?(d: QuestLogMsg['d']): void;
 }
 
 export interface ClientSessionStats {
@@ -285,7 +289,23 @@ export class ClientSession {
       case SC.ERROR:
         this.events.error?.(msg.d.code, msg.d.message);
         break;
+      case SC.CUTSCENE:
+        this.events.cutscene?.(msg.d);
+        break;
+      case SC.QUEST_LOG:
+        this.questLog = msg.d.log;
+        this.events.quests?.(msg.d);
+        break;
     }
+  }
+
+  /** The player's quest book (null until the server sends it). */
+  questLog: QuestLogMsg['d']['log'] | null = null;
+
+  /** The scripted sequence `sequence` has been played (or skipped). */
+  cutsceneDone(sequence: string): void {
+    if (!this.connected) return;
+    this.sendJson({ op: CS.CUTSCENE_DONE, seq: ++this.seq, d: { sequence } });
   }
 
   /** Latest stats of the local player (null until the first PLAYER_STATS). */

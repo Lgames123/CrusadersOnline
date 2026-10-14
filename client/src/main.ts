@@ -14,6 +14,7 @@ import {
   PLAYER_REACH,
   attackTiming,
   LEVEL_PREFIX,
+  MAIN_QUESTS,
   NPC_VOICES,
   PLAYER_RADIUS,
   LEVEL_UNIT_METRES,
@@ -60,6 +61,8 @@ import { CombatUi } from './ui/combat_ui.ts';
 import { Hud } from './ui/hud.ts';
 import { InventoryPanel } from './ui/inventory.ts';
 import { chooseAuth, logout } from './ui/login.ts';
+import { QuestBook, loadGameStrings } from './ui/quest_book.ts';
+import { Cutscene, type Puppet } from './story/cutscene.ts';
 
 const MAX_FRAME_MS = 250;
 
@@ -82,12 +85,27 @@ async function main(): Promise<void> {
   await registerAssetServiceWorker();
   const gameFiles = new GameFilesPanel(document.getElementById('game-files')!);
   void gameFiles.init().then(() => (gameFiles.visible = true));
-  const [rapier, originals, sounds] = await Promise.all([initPhysics(), loadOriginalAvatars(), SoundBank.load()]);
+  const [rapier, originals, sounds, gameStrings, assetManifest] = await Promise.all([
+    initPhysics(), loadOriginalAvatars(), SoundBank.load(), loadGameStrings(),
+    fetch('/generated/manifest.json').then((r) => (r.ok ? (r.json() as Promise<{ textures?: Record<string, string> }>) : null)).catch(() => null),
+  ]);
   const { renderer, scene } = createRenderContext(container);
   const remotes = new RemoteEntities(scene, originals);
   const combatUi = new CombatUi(document.getElementById('world-ui')!);
   const hud = new Hud(document.getElementById('hud')!, document.getElementById('player-panel')!, document.getElementById('death')!);
   const inventoryPanel = new InventoryPanel(document.getElementById('inventory')!);
+  const questBook = new QuestBook(document.getElementById('quest-book')!, assetManifest?.textures ?? {});
+  questBook.setStrings(gameStrings);
+  // Scripted sequences (cutscenes): played here, the server waits for the end (CS_CUTSCENE_DONE).
+  let cutscene: Cutscene | null = null;
+  const cutsceneUi = document.getElementById('cutscene')!;
+  const fadeEl = document.getElementById('fade')!;
+  const fade = (out: boolean, ms: number) => {
+    fadeEl.style.transition = `opacity ${Math.max(0, ms)}ms linear`;
+    fadeEl.style.opacity = out ? '1' : '0';
+  };
+  /** Starts a sequence of the current level (SC_CUTSCENE); set up once the local player exists. */
+  let playCutscene: (name: string, actors: (number | null)[]) => void = (name) => session?.cutsceneDone(name);
 
   // Online: the session predicts and reconciles. Offline: plain local simulation.
   const auth = await chooseAuth();
@@ -336,6 +354,21 @@ async function main(): Promise<void> {
             chase.snap();
             for (const [id, state] of live.objectStates) levelView?.setObjectState(id, state, live.swings.get(id)?.motion ?? null);
           },
+          cutscene: (d) => playCutscene(d.sequence, d.actors),
+          quests: (d) => {
+            questBook.update(d.log);
+            if (!d.news || !player) return;
+            const s = (id: number) => gameStrings.get(id) ?? '';
+            const lines = [
+              ...d.news.assigned.map((i) => `New quest: ${s(MAIN_QUESTS[i]?.title ?? 0)}`),
+              ...d.news.completed.map((i) => `Quest completed: ${s(MAIN_QUESTS[i]?.title ?? 0)}`),
+              ...(d.news.journal.length ? ['Journal updated (F2)'] : []),
+            ];
+            headPos.copy(player.object.position);
+            headPos.y += player.avatar.headHeight + 0.4;
+            lines.forEach((l, i) => window.setTimeout(() => combatUi.notice(l, headPos), i * 900));
+            sounds?.play(SFX.turnPage);
+          },
           error: (_code, message) => {
             if (!player) return;
             headPos.copy(player.object.position);
@@ -374,6 +407,53 @@ async function main(): Promise<void> {
     player = new LocalPlayer(character, selfAvatar, (f) => stepCharacter(offline, character, f, DEFAULT_MOVEMENT_STATS, TICK_DT));
   }
   const local = player;
+  playCutscene = (name, actors) => {
+    const sequence = levelView?.arena.story?.sequences.find((q) => q.name === name);
+    if (!session || !sequence || !levelView?.arena.story || cutscene) {
+      session?.cutsceneDone(name);
+      return;
+    }
+    const standIn: Puppet = { object: local.object, avatar: local.avatar, name: 'Drake' };
+    const puppets = new Map<number, Puppet>();
+    sequence.actors.forEach((a, i) => {
+      const index = i + 2;
+      if (a && 'player' in a) puppets.set(index, standIn);
+      const id = actors[i];
+      const e = id !== null && id !== undefined ? remotes.byId.get(id) : undefined;
+      if (e) {
+        remotes.scripted.add(e.id);
+        puppets.set(index, { object: e.avatar.object, avatar: e.avatar, name: e.info.name });
+      }
+    });
+    setInventoryOpen(false);
+    setQuestBookOpen(false);
+    cutsceneUi.hidden = false;
+    prompt.hidden = true;
+    cutscene = new Cutscene({
+      story: levelView.arena.story,
+      sequence,
+      actor: (i) => puppets.get(i) ?? null,
+      creature: (placement) => {
+        for (const e of remotes.byId.values()) if (e.info.placement === placement) return { object: e.avatar.object, avatar: e.avatar, name: e.info.name };
+        return null;
+      },
+      playerSpot: local.object.position.clone(),
+      sounds,
+      subtitle: (who, text, ms) => showSubtitle(who, text, ms),
+      fade,
+    }, chase.camera);
+  };
+  const endCutscene = () => {
+    const c = cutscene;
+    if (!c) return;
+    cutscene = null;
+    c.dispose();
+    remotes.scripted.clear();
+    cutsceneUi.hidden = true;
+    session?.cutsceneDone(c.sequence.name);
+    // A sequence that faded out comes back once the next act (or the same place) is shown.
+    window.setTimeout(() => fade(false, 800), 600);
+  };
   lighting.track('me', local.avatar.object, PLAYER_RADIUS * 1.3, false, true);
   lighting.playerKey = 'me';
   scene.add(local.object);
@@ -413,6 +493,7 @@ async function main(): Promise<void> {
     settings.update({ cameraZoom: Math.round((settings.current.cameraZoom + Math.sign(e.deltaY) * 0.1) * 100) / 100 });
   }, { passive: false });
   input.onAttack = () => {
+    if (cutscene) return;
     // The movement key held with the click picks the attack (original controls).
     // Holding C (ducked) ignores clicks, as in the original.
     if (input.heldFlags & INPUT.DUCK) return;
@@ -443,6 +524,12 @@ async function main(): Promise<void> {
   const TALK_RANGE = 2.5;
   const subtitle = document.getElementById('subtitle')!;
   let subtitleTimer = 0;
+  const showSubtitle = (who: string | null, text: string, ms: number) => {
+    subtitle.replaceChildren(...(who ? [Object.assign(document.createElement('span'), { className: 'who', textContent: `${who}:` })] : []), document.createTextNode(text));
+    subtitle.hidden = false;
+    clearTimeout(subtitleTimer);
+    subtitleTimer = window.setTimeout(() => (subtitle.hidden = true), Math.max(2500, ms + 600));
+  };
   const talked = new Map<number, number>();
   const npcVoice = (archetype: string): string | null => NPC_VOICES[Number(archetype.slice(4))] ?? null;
   const talk = (entityId: number) => {
@@ -460,10 +547,7 @@ async function main(): Promise<void> {
     sounds.play(id, e.avatar.object.position, { volume: 1 });
     // The creature faces Drake and gestures through the line (server side, seen by everyone).
     session?.talk(entityId, line.ms);
-    subtitle.replaceChildren(Object.assign(document.createElement('span'), { className: 'who', textContent: `${e.info.name}:` }), document.createTextNode(line.text));
-    subtitle.hidden = false;
-    clearTimeout(subtitleTimer);
-    subtitleTimer = window.setTimeout(() => (subtitle.hidden = true), Math.max(2500, line.ms + 600));
+    showSubtitle(e.info.name, line.text, line.ms);
   };
 
   // Nearest item, chest or door within reach (the server re-checks); Tab picks up / opens.
@@ -515,6 +599,7 @@ async function main(): Promise<void> {
     for (const s of door.def.sounds) sounds.play(s, at);
   };
   input.onAction = (action) => {
+    if (cutscene) return;
     if (action === 'interact') {
       const target = nearestInteractable();
       if (target && target.id < 0) talk(-target.id);
@@ -560,27 +645,48 @@ async function main(): Promise<void> {
     location.reload();
   });
   input.onLockChange = (locked) => {
-    overlay.classList.toggle('hidden', locked || inventoryPanel.open);
+    overlay.classList.toggle('hidden', locked || inventoryPanel.open || questBook.open);
     gameFiles.visible = !locked;
   };
 
   // Inventory (online only): I toggles it, releasing the pointer so items can be clicked.
-  const setInventoryOpen = (open: boolean) => {
+  function setInventoryOpen(open: boolean): void {
     if (!session || open === inventoryPanel.open) return;
     inventoryPanel.open = open;
     if (open) document.exitPointerLock();
     else input.requestLock();
     overlay.classList.toggle('hidden', open || input.locked);
-  };
+  }
   inventoryPanel.onToggleEquip = (slot, equip) => {
     const item = session?.inventory?.items.find((i) => i.slot === slot);
     if (item?.type === 'potion') session?.useItem(slot);
     else session?.equip(slot, equip);
   };
   inventoryPanel.onClose = () => setInventoryOpen(false);
+  // Quest book (F2, the original's key), online only.
+  function setQuestBookOpen(open: boolean): void {
+    if (!session || open === questBook.open) return;
+    questBook.open = open;
+    if (open) {
+      document.exitPointerLock();
+      sounds?.play(SFX.turnPage);
+    } else input.requestLock();
+    overlay.classList.toggle('hidden', open || input.locked || inventoryPanel.open);
+  }
+  questBook.onClose = () => setQuestBookOpen(false);
+  questBook.onTurn = () => sounds?.play(SFX.turnPage);
   window.addEventListener('keydown', (e) => {
+    if (cutscene) {
+      // Esc skips the sequence (the server applies its outcome all the same).
+      if (e.code === 'Escape' && !e.repeat) endCutscene();
+      return;
+    }
     if (e.code === 'KeyI' && !e.repeat) setInventoryOpen(!inventoryPanel.open);
-    else if (e.code === 'Escape' && inventoryPanel.open) setInventoryOpen(false);
+    else if (e.code === 'F2' && !e.repeat) {
+      e.preventDefault();
+      setQuestBookOpen(!questBook.open);
+    } else if (e.code === 'Escape' && inventoryPanel.open) setInventoryOpen(false);
+    else if (e.code === 'Escape' && questBook.open) setQuestBookOpen(false);
   });
 
   window.addEventListener('resize', () => {
@@ -602,12 +708,14 @@ async function main(): Promise<void> {
   const lastStep = new THREE.Vector3();
   let stepFoot = 0;
 
-  renderer.setAnimationLoop((now) => {
+  const frameLoop = (now: number): void => {
     const frameMs = Math.min(now - last, MAX_FRAME_MS);
     last = now;
     acc += frameMs;
     while (acc >= TICK_MS) {
       input.sample(frame, ++tick);
+      // During a scripted sequence the character stands still (the server ignores the keys too).
+      if (cutscene) frame.flags = 0;
       if (local.rooted) frame.flags |= INPUT.ROOTED;
       // An attack whose clip carries Drake starts its root motion on this step (shared movement).
       frame.flags |= local.takeAttackMotion() << INPUT_ATTACK_SHIFT;
@@ -620,7 +728,11 @@ async function main(): Promise<void> {
     }
     const dt = frameMs / 1000;
     local.viewHeading = input.yaw;
-    local.render(acc / TICK_MS, dt);
+    if (cutscene) {
+      cutscene.update(dt);
+      local.avatar.update(dt);
+      if (cutscene?.finished) endCutscene();
+    } else local.render(acc / TICK_MS, dt);
     if (myTorch.visible) myTorch.position.set(local.object.position.x, local.object.position.y + TORCH_LIGHT_HEIGHT, local.object.position.z);
     if (session) remotes.update(session, dt);
     effects?.update(dt);
@@ -648,9 +760,10 @@ async function main(): Promise<void> {
     const movingNow = Math.hypot(local.object.position.x - target.x, local.object.position.z - target.z) > 1e-4;
     target.copy(local.object.position);
     chase.update(target, input.yaw, local.bodyHeading, input.pitch, dt, movingNow);
-    levelView?.update(chase.camera, dt);
+    const viewCamera = cutscene ? cutscene.camera : chase.camera;
+    levelView?.update(viewCamera, dt);
     if (sounds) {
-      sounds.setListener(chase.camera);
+      sounds.setListener(viewCamera);
       // Footsteps on stone while running on the ground (catacomb floors are ST materials).
       // Placeholder avatars have no clip events: approximate steps by distance.
       const moving = !local.avatar.hasEvents && local.character.grounded && Math.hypot(local.object.position.x - lastStep.x, local.object.position.z - lastStep.z) > 1.1;
@@ -659,15 +772,18 @@ async function main(): Promise<void> {
         sounds.play(stepSounds()[stepFoot = 1 - stepFoot]!, local.object.position, { volume: 0.35 });
       }
     }
-    if (levelView && session) {
+    if (levelView && session && !cutscene) {
       const t = nearestInteractable();
       prompt.hidden = !t;
       if (t) prompt.textContent = t.label;
     }
-    renderer.render(scene, chase.camera);
-    combatUi.update(dt, chase.camera, remotes, container.clientWidth, container.clientHeight);
+    renderer.render(scene, viewCamera);
+    combatUi.update(dt, viewCamera, remotes, container.clientWidth, container.clientHeight);
     hud.update(dt, tick, local.character, session, remotes.count);
-  });
+  };
+  renderer.setAnimationLoop(frameLoop);
+  // Debug/E2E: frames can be driven by hand where requestAnimationFrame does not run (hidden pane).
+  if (import.meta.env.DEV) (window as unknown as { __co: Record<string, unknown> }).__co['frame'] = frameLoop;
 }
 
 main().catch((err: unknown) => {

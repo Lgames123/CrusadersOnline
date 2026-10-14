@@ -522,3 +522,19 @@ Implemented: `attackSweep` / `hitShove` (`shared/src/game/combat.ts`) and `World
 **Citizens under attack** (states from the id / name table `0x4EA6F0`). The citizen struck plays `ASM_IMPACT_LEFT` / `_BACK` (~0.5 s), then `ASM_COMBAT_STANDING` (~0.4 s) and `ASM_RUNNING`. Citizens that see it — one 55 ft away did, one 65 ft away did not — go `COMBAT_STANDING` for ~0.25 s, then run ~7 s; afterwards, a player coming within ~30 ft sets them off again at once (alert 10–100 ms, run). A citizen with Drake standing ~4 ft away plays `ASM_GESTURE_ANGRY` (84).
 
 **Talking to citizens** (Frida, same day). The use key on a citizen plays its line (Sound.ctx MP3, e.g. RO_CM_03) and switches it to `ASM_GESTURE_POLITE_CONVERSATION` (81) for exactly the line's length (7.39 s, 4.81 s and so on), standing still and turning to face Drake at ~90° a second, following him while the line lasts. One citizen's rousing line ("Our Crusaders shall smite the Legion!") used `ASM_GESTURE_ANGRY` (84) instead; how the gesture is chosen per line is not known (implemented: always the polite one).
+
+
+## 17. Scripted Sequences and the Quest Manager (decompiled, 2026-10-14)
+
+### 17.1 Sequences
+A sequence starts when the player enters its flag trigger (each fires once: the flag stays set). At the start (0x41F830) the player is frozen and hidden and a stand-in (`PlayerActor`, global 0x52FFC4, actor 1) takes his transform; at the end (0x419600 -> 0x41FB80) the player is put where the stand-in stands. Each track runs in order; the start conditions are in asset-format-discovery.md §6.5. PlaySound does not wait for the line (a Wait of its Sound.ctx length follows); Wait / Timeline / FadeOut last their argument; CameraTimeline's camera flies its path at its rate. Cs1a's Aerin scene: Drake's line, 3317 ms, Aerin's line, the fade from key 11 (5.5 s) for 3 s, then ScriptedSequenceDone loads Ci1a: 8.5 s, as played.
+
+A loadlevel exit to another act of the same mesh (Ci1b -> Ci2b) matches no entry object, so Drake keeps his position (the fixup's type-0x13 case moves the start only for the matching entry: entry = the exit number + 1 of the act's portal back). MoveToPos targets' heights are not kept by the scripts (Ci1a's are Cs1a's): the actors walk on the floor.
+
+### 17.2 Quest manager
+`0x497670` builds 10 main-quest records (0x3C bytes: +4 objective, +6 title, +8 giver (string ids), +0x0A XP, +0x0C gold, +0x12 item name, +0x32 state, +0x34 / +0x36 journal entries at start / end, +0x38..+0x3B player bits set / cleared on assign / complete) and 26 side-quest records (0x44 bytes from +0x258, with voice lines for offer / reminder / completion and required items). Quest triggers (type 0x1D) fire 0x4641F0: bit 0x01 journal start (0x496C00), 0x20 journal end, 0x08 assign (main 0x496990: active list), 0x10 complete (main 0x496B40: an active quest finishes with Stats_AddExperience(XP) and its gold (0x496A40); one never assigned is only marked done), 0x04 talk (side 0x497170), 0x02 a side quest's item check (0x4974A0), 0x40 a player bit. The main story's triggers are fired by the sequences' TriggerFlag steps (Celestia's briefing completes "Meet Celestia" and assigns "Horn of Shattering").
+
+### 17.3 Quest book
+F2 (Readme). Drawn by 0x455EE0: the frame of textures questbook1-3 and 5-14 at fixed points of a 640 x 480 screen over the glass256 pane (32,70)-(532,460); tabs Next / Previous / Assigned / Completed / Notes clicked at x 520-632, y 100 / 155 / 211 / 269 / 325 (0x455BF0); the selected tab (questbookb3-5) at x 531 and the hover outline (questbookbh) at x 545. Text (0x456240, LoadStringA): Assigned "<giver> said\n<objective>", Completed "Completed: <title> Quest", Notes the journal; with more than one entry, one per page.
+
+Not implemented yet: side quests (NPC records and conversations), relay targets other than triggers, the eye path's events and curve, the two .bik movies, DoInteraction.

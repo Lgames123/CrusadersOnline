@@ -41,6 +41,12 @@ export interface Avatar {
   blade?(a: THREE.Vector3, b: THREE.Vector3): { key: string; seconds: number } | null;
   /** Whether this avatar reports clip events through onEvent. */
   readonly hasEvents?: boolean;
+  /**
+   * Scripted sequences (RunAnimation): plays the clip of an ASM state (ASM_STATE_NAMES) from
+   * fraction t0 to t1 of it at `speed`, holding the last pose when `freeze`. Returns the seconds
+   * it plays for, or null without such a clip. Any later setState() takes over again.
+   */
+  playAsm?(state: string, opts: { t0: number; t1: number; speed: number; loop: boolean; freeze: boolean }): number | null;
   update(dt: number): void;
   dispose(): void;
 }

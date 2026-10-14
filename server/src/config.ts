@@ -36,6 +36,11 @@ export interface ServerConfig {
   arena: string;
   /** Converter output directory (GENERATED_DIR, default local/generated). */
   generatedDir: string;
+  /**
+   * Development only (DEV_GUEST_SPAWN="x,y,z", metres): where guests appear in the default
+   * arena, to test a spot of a level (e.g. a scripted sequence's trigger) without walking there.
+   */
+  devGuestSpawn: { x: number; y: number; z: number } | null;
 }
 
 /** Repository root; relative paths (e.g. pglite:local/pgdata) resolve against it. */
@@ -75,6 +80,12 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     itemRulesPath: resolveItemRules(env),
     arena: process.env['ARENA'] ?? 'synthetic-arena',
     generatedDir: path.resolve(REPO_ROOT, process.env['GENERATED_DIR'] ?? 'local/generated'),
+    devGuestSpawn: env === 'production' ? null : parsePoint(process.env['DEV_GUEST_SPAWN']),
     ...overrides,
   };
+}
+
+function parsePoint(v: string | undefined): { x: number; y: number; z: number } | null {
+  const n = (v ?? '').split(',').map(Number);
+  return n.length === 3 && n.every(Number.isFinite) ? { x: n[0]!, y: n[1]!, z: n[2]! } : null;
 }

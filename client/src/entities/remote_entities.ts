@@ -31,6 +31,9 @@ export class RemoteEntities {
   private readonly originals: AvatarFactory | null;
   private readonly sample: RemoteSample = { x: 0, y: 0, z: 0, yaw: 0, anim: 0, animPhase: 0, hp: 0, flags: 0 };
 
+  /** Entities a scripted sequence is playing on this client: not moved by snapshots meanwhile. */
+  readonly scripted = new Set<number>();
+
   /** Torch lights carried by other players (Torch Light spell). */
   private readonly lights = new Map<number, THREE.PointLight>();
 
@@ -88,6 +91,10 @@ export class RemoteEntities {
   update(session: ClientSession, dt: number): void {
     const renderTick = session.estimateServerTick() - INTERP_DELAY_TICKS;
     for (const e of this.byId.values()) {
+      if (this.scripted.has(e.id)) {
+        e.avatar.update(dt);
+        continue;
+      }
       if (!session.sampleRemote(e.id, renderTick, this.sample)) continue;
       e.visible = e.avatar.object.visible = true;
       e.avatar.object.position.set(this.sample.x, this.sample.y, this.sample.z);

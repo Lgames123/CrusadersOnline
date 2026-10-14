@@ -143,6 +143,8 @@ export const SFX = {
   levelUp: 417,
   died: 418,
   click: 401,
+  /** Turning a quest book page (UITurnPage). */
+  turnPage: 412,
   shieldBlockWood: 345,
   chestOpen: 520,
   /** A debris piece landing (HitMetal02; logged ~0.3 s after a barrel broke). */

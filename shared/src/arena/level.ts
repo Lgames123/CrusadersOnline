@@ -439,3 +439,31 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
     mesh: placements.mesh,
   };
 }
+
+/**
+ * The walkable floor at (x, z) nearest to height `nearY` (metres), within `window` metres up or
+ * down, or null: where a character set down at a point of a level stands (e.g. Drake at the end
+ * of a scripted walk, whose target height the scripts do not keep).
+ */
+export function floorAt(arena: ArenaDef, x: number, z: number, nearY: number, window = 8): number | null {
+  const mesh = arena.meshes[0];
+  if (!mesh) return null;
+  const v = mesh.vertices, idx = mesh.indices;
+  let best: number | null = null;
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t]! * 3, b = idx[t + 1]! * 3, c = idx[t + 2]! * 3;
+    const ax = v[a]!, az = v[a + 2]!, bx = v[b]!, bz = v[b + 2]!, cx = v[c]!, cz = v[c + 2]!;
+    if (x < Math.min(ax, bx, cx) || x > Math.max(ax, bx, cx) || z < Math.min(az, bz, cz) || z > Math.max(az, bz, cz)) continue;
+    const d = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
+    if (Math.abs(d) < 1e-9) continue;
+    const w0 = ((bz - cz) * (x - cx) + (cx - bx) * (z - cz)) / d;
+    const w1 = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / d;
+    if (w0 < 0 || w1 < 0 || w0 + w1 > 1) continue;
+    const y = w0 * v[a + 1]! + w1 * v[b + 1]! + (1 - w0 - w1) * v[c + 1]!;
+    const uy = v[b + 1]! - v[a + 1]!, vy = v[c + 1]! - v[a + 1]!;
+    const nx = uy * (cz - az) - (bz - az) * vy, ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az), nz = (bx - ax) * vy - uy * (cx - ax);
+    if (Math.abs(ny) / (Math.hypot(nx, ny, nz) || 1) <= 0.7) continue;
+    if (Math.abs(y - nearY) <= window && (best === null || Math.abs(y - nearY) < Math.abs(best - nearY))) best = y;
+  }
+  return best;
+}

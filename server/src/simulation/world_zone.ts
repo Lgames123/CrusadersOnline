@@ -3,6 +3,7 @@ import {
   BUILTIN_ITEMS,
   LEVEL_PREFIX,
   LEVEL_UNIT_METRES,
+  floorAt,
   applyQuestAction,
   emptyStoryState,
   estimateSequenceMs,
@@ -1258,8 +1259,13 @@ export class WorldZone {
       }
     }
     if (end) {
+      // The stand-in walks on the floor: its end is the target's x / z on the floor nearest to
+      // where Drake stood (the scripts' target heights are not kept; Ci1a's are Cs1a's).
       const s = LEVEL_UNIT_METRES;
-      setCharacterState(p.character, { x: end[0] * s, y: end[1] * s + 0.1, z: end[2] * s }, 0, false);
+      const x = end[0] * s, z = end[2] * s;
+      // (Synthetic arenas have no level mesh: the target as given.)
+      const y = this.arena.meshes.length ? floorAt(this.arena, x, z, p.character.position.y) : end[1] * s;
+      if (y !== null) setCharacterState(p.character, { x, y: y + 0.1, z }, 0, false);
     }
     const record = this.persistRecord(p);
     if (record) this.outbox.persist?.([record], 'progress');
