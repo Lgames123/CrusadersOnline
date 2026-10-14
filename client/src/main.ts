@@ -59,6 +59,7 @@ import { Debris } from './engine/debris.ts';
 import { SwingTrails } from './engine/swing_trail.ts';
 import { ModelLighting } from './engine/model_light.ts';
 import { dynamicLights } from './engine/dynamic_lights.ts';
+import { PostFx } from './engine/post_fx.ts';
 import { TORCH_LIGHT_COLOR, TORCH_LIGHT_HEIGHT, TORCH_LIGHT_INTENSITY, TORCH_DYNAMIC_INTENSITY } from './entities/torch_light.ts';
 import { connectToWorld } from './network/connect.ts';
 import { CombatUi } from './ui/combat_ui.ts';
@@ -109,6 +110,8 @@ async function main(): Promise<void> {
     fetch('/generated/manifest.json').then((r) => (r.ok ? (r.json() as Promise<{ textures?: Record<string, string> }>) : null)).catch(() => null),
   ]);
   const { renderer, scene } = createRenderContext(container);
+  // Enhanced lighting's HDR, bloom and tone mapping (off: drawn straight to the screen).
+  const postFx = new PostFx(renderer, scene);
   const remotes = new RemoteEntities(scene, originals);
   /**
    * Creatures only a sequence plays (arena.puppets, e.g. Ws9a's cell guards): not the server's,
@@ -577,10 +580,12 @@ async function main(): Promise<void> {
   settings.onChange((s) => (music.volume = s.musicVolume));
   lighting.silhouettes = settings.current.silhouetteShadows;
   dynamicLights.enabled = settings.current.enhancedLighting;
+  postFx.enabled = settings.current.enhancedLighting;
   settings.onChange((s) => {
     lighting.silhouettes = s.silhouetteShadows;
     if (dynamicLights.enabled !== s.enhancedLighting) {
       dynamicLights.enabled = s.enhancedLighting;
+      postFx.enabled = s.enhancedLighting;
       lighting.resample();
     }
     if (effects) effects.scale = s.smallEffects ? SMALL_EFFECTS_SCALE : EFFECTS_SCALE;
@@ -861,13 +866,14 @@ async function main(): Promise<void> {
 
   window.addEventListener('resize', () => {
     renderer.setSize(container.clientWidth, container.clientHeight);
+    postFx.setSize(container.clientWidth, container.clientHeight);
     chase.resize(container.clientWidth / container.clientHeight);
     if (cutscene) cinemaFov(cutscene.camera);
   });
 
   if (import.meta.env.DEV) {
     // Debug/E2E hook: lets tests drive input without pointer lock.
-    (window as unknown as { __co: unknown }).__co = { input, player: local, mw, session, remotes, inventory: inventoryPanel, scene, get camera() { return chase.camera; }, cameras: { classic: chase.classic, modern: chase.modern }, rig: chase, settings, renderer, level: levelView, get effects() { return effects; }, render: () => renderer.render(scene, chase.camera) };
+    (window as unknown as { __co: unknown }).__co = { input, player: local, mw, session, remotes, inventory: inventoryPanel, scene, get camera() { return chase.camera; }, cameras: { classic: chase.classic, modern: chase.modern }, rig: chase, settings, renderer, level: levelView, get effects() { return effects; }, render: () => postFx.render(chase.camera, 0) };
   }
 
   // Fixed-step simulation (same 20 Hz step as the server), interpolated rendering.
@@ -969,7 +975,7 @@ async function main(): Promise<void> {
       if (t) prompt.textContent = t.label;
     }
     dynamicLights.update(viewCamera, dt);
-    renderer.render(scene, viewCamera);
+    postFx.render(viewCamera, dt);
     combatUi.update(dt, viewCamera, remotes, container.clientWidth, container.clientHeight);
     hud.update(dt, tick, local.character, session, remotes.count);
   };

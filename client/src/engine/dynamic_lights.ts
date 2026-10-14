@@ -20,7 +20,7 @@ const FADE = 4;
 /** Falloff: a smooth window to the radius, times an inverse-square-like term this steep. */
 const FALLOFF = 6;
 /** Rim light on models: strength (of their brightest ambient side) and how tight to the edge. */
-const RIM = 0.35;
+const RIM = 0.12;
 const RIM_POWER = 3;
 /** Wrapped diffuse: light reaches a little past the terminator, softer on low-poly models. */
 const WRAP = 0.35;

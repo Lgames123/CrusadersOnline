@@ -153,7 +153,9 @@ export class LevelLight {
       }
       if (hits) cube[face]!.copy(sum.multiplyScalar(1 / hits));
       // Nothing that way (open sky above, open ground around): the floor's light, less from below.
-      else cube[face]!.copy(floor).multiplyScalar(face === 3 ? 0.5 : 1);
+      else cube[face]!.copy(floor).multiplyScalar(face === 3 ? 0.6 : 1);
+      // Only part of the way from the classic single light: a hint of direction, not a re-light.
+      cube[face]!.lerp(floor, 1 - DIRECTIONALITY);
     });
     return cube;
   }
@@ -210,6 +212,8 @@ const key = (cx: number, cz: number) => (cx + 32768) * 65536 + (cz + 32768);
 const CHEST = 1;
 const RAY_LENGTH = 8;
 const CUBE_CACHE_MAX = 8192;
+/** How far each side moves from the floor's light towards its own (0: classic, 1: fully its own). */
+const DIRECTIONALITY = 0.5;
 const AXES = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1)];
 /** Two axes across each face's direction, and the spread of its rays over them. */
 const PERP = AXES.map((a) => (Math.abs(a.y) > 0.5 ? [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 1)] : [new THREE.Vector3(0, 1, 0), new THREE.Vector3(-a.z, 0, a.x)]));
