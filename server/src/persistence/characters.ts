@@ -1,6 +1,23 @@
-import type { Kysely } from 'kysely';
-import { decodeSpells, encodeSpells, sanitizeStoryState, type InventoryEntry, type KnownSpell, type SpellId, type StoryState } from '@crusaders/shared';
+import { sql, type Kysely } from 'kysely';
+import {
+  LEVEL_PREFIX,
+  MAX_CHARACTERS,
+  NEW_GAME_ACT,
+  decodeSpells,
+  encodeSpells,
+  sanitizeStoryState,
+  startingInventory,
+  type CharacterDetails,
+  type CharacterLook,
+  type InventoryEntry,
+  type ItemCatalog,
+  type KnownSpell,
+  type SpellId,
+  type StoryState,
+} from '@crusaders/shared';
 import type { DB } from './schema.ts';
+
+export class NameTakenError extends Error {}
 
 /** Character state the zone needs to spawn a player. */
 export interface CharacterSpawnState {
@@ -86,6 +103,83 @@ export class CharacterRepository {
       story: parseStory(r.story),
       inventory: items.map((i) => ({ slot: i.slot_index, itemId: i.item_id, equipped: i.is_equipped, ...(i.quantity > 1 ? { quantity: i.quantity } : {}) })),
     };
+  }
+
+  /** The account's characters for the character screen, oldest first; `catalog` sorts what they wear. */
+  async listDetails(accountId: string, catalog: ItemCatalog): Promise<CharacterDetails[]> {
+    const rows = await this.db
+      .selectFrom('characters')
+      .select(['id', 'name', 'level', 'zone_id', 'gold', 'play_seconds', 'last_played_at', 'created_at'])
+      .where('account_id', '=', accountId)
+      .orderBy('created_at')
+      .execute();
+    if (rows.length === 0) return [];
+    const items = await this.db
+      .selectFrom('inventory_items')
+      .select(['character_id', 'item_id', 'slot_index', 'is_equipped'])
+      .where('character_id', 'in', rows.map((r) => r.id))
+      .execute();
+    return rows.map((r) => {
+      const own = items.filter((i) => i.character_id === r.id).map((i) => ({ slot: i.slot_index, itemId: i.item_id, equipped: i.is_equipped }));
+      // A character never saved yet starts with the zone's starting inventory.
+      const inv = own.length > 0 ? own : startingInventory();
+      const look: CharacterLook = {};
+      for (const e of inv) {
+        const type = e.equipped ? catalog.get(e.itemId)?.type : undefined;
+        if (type === 'weapon' || type === 'shield' || type === 'armor') look[type] = e.itemId;
+      }
+      return {
+        id: r.id,
+        name: r.name,
+        level: r.level,
+        zone: r.zone_id,
+        gold: r.gold,
+        playSeconds: Number(r.play_seconds),
+        lastPlayedAt: r.last_played_at ? new Date(r.last_played_at).toISOString() : null,
+        createdAt: new Date(r.created_at).toISOString(),
+        look,
+      };
+    });
+  }
+
+  /**
+   * A new character starting the new game, unless the account already has MAX_CHARACTERS.
+   * Throws NameTakenError when the name is in use (names are unique across accounts).
+   */
+  async create(accountId: string, name: string): Promise<{ id: string } | 'limit'> {
+    try {
+      return await this.db.transaction().execute(async (trx) => {
+        const { count } = await trx
+          .selectFrom('characters')
+          .select((eb) => eb.fn.countAll<string>().as('count'))
+          .where('account_id', '=', accountId)
+          .executeTakeFirstOrThrow();
+        if (Number(count) >= MAX_CHARACTERS) return 'limit' as const;
+        return trx
+          .insertInto('characters')
+          .values({ account_id: accountId, name, zone_id: `${LEVEL_PREFIX}${NEW_GAME_ACT}` })
+          .returning(['id'])
+          .executeTakeFirstOrThrow();
+      });
+    } catch (err) {
+      if (/unique|duplicate/i.test((err as Error).message)) throw new NameTakenError('character name already taken');
+      throw err;
+    }
+  }
+
+  /** Deletes a character of `accountId` (its inventory goes with it). False if not theirs. */
+  async delete(accountId: string, characterId: string): Promise<boolean> {
+    const r = await this.db.deleteFrom('characters').where('id', '=', characterId).where('account_id', '=', accountId).executeTakeFirst();
+    return Number(r.numDeletedRows) > 0;
+  }
+
+  /** Adds a finished session's time in the world. */
+  async addPlayTime(characterId: string, seconds: number): Promise<void> {
+    await this.db
+      .updateTable('characters')
+      .set({ play_seconds: sql<number>`play_seconds + ${Math.max(0, Math.round(seconds))}`, last_played_at: new Date() })
+      .where('id', '=', characterId)
+      .execute();
   }
 
   async saveStates(records: readonly CharacterPersistRecord[]): Promise<void> {

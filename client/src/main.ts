@@ -20,6 +20,8 @@ import {
   NPC_VOICES,
   PLAYER_RADIUS,
   LEVEL_UNIT_METRES,
+  floorAt,
+  stagedPlayerSpot,
   PORTAL_OBJECT_BASE,
   PORTAL_USE_REACH,
   inPortal,
@@ -36,11 +38,12 @@ import {
   type ClientSession,
   type MovementWorld,
   type DoorMotion,
+  type MoverMotion,
 } from '@crusaders/shared';
 import { createRenderContext } from './engine/renderer.ts';
 import { CameraRig } from './engine/camera_rig.ts';
 import { classicVerticalFov } from './engine/classic_camera.ts';
-import { CLASSIC_SETTINGS, SettingsStore } from './settings.ts';
+import { SettingsStore } from './settings.ts';
 import { SettingsPanel } from './ui/settings_panel.ts';
 import { CONTROLS_HELP } from './input/keybindings.ts';
 import { buildArenaMeshes } from './entities/arena.ts';
@@ -65,7 +68,9 @@ import { connectToWorld } from './network/connect.ts';
 import { CombatUi } from './ui/combat_ui.ts';
 import { Hud } from './ui/hud.ts';
 import { InventoryPanel } from './ui/inventory.ts';
-import { chooseAuth, logout } from './ui/login.ts';
+import { logout } from './frontend/api.ts';
+import { CHARACTER_SCREEN_FLAG, runFrontEnd } from './frontend/front_end.ts';
+import { TitleScene } from './frontend/title_scene.ts';
 import { QuestBook, loadGameStrings } from './ui/quest_book.ts';
 import { Cutscene, type Puppet } from './story/cutscene.ts';
 
@@ -104,7 +109,10 @@ async function main(): Promise<void> {
   /** In the world, the game files panel (re-import) shows only with the options menu. */
   let inWorld = false;
   let optionsOpen = false;
-  void gameFiles.init().then(() => (gameFiles.visible = !inWorld || optionsOpen));
+  // Before the world the front end shows it (Game files); in the world, with the options.
+  void gameFiles.init().then(() => {
+    if (inWorld) gameFiles.visible = optionsOpen;
+  });
   const [rapier, originals, sounds, gameStrings, assetManifest] = await Promise.all([
     initPhysics(), loadOriginalAvatars(), SoundBank.load(), loadGameStrings(),
     fetch('/generated/manifest.json').then((r) => (r.ok ? (r.json() as Promise<{ textures?: Record<string, string> }>) : null)).catch(() => null),
@@ -176,8 +184,48 @@ async function main(): Promise<void> {
   /** Starts a sequence of the current level (SC_CUTSCENE); set up once the local player exists. */
   let playCutscene: (name: string, actors: (number | null)[]) => void = (name) => session?.cutsceneDone(name);
 
+  // Before anything that loads asynchronously reads it (the effects below).
+  const settings = new SettingsStore();
+  /** The level act's music (the original's CD tracks, looped). */
+  const music = new MusicPlayer(settings.current.musicVolume);
+  settings.onChange((s) => (music.volume = s.musicVolume));
+  new SettingsPanel(document.getElementById('settings')!, settings);
+  document.getElementById('controls-help')!.textContent = CONTROLS_HELP;
+
+  // Login, server and character screens over the Citadel hall, then the world.
   // Online: the session predicts and reconciles. Offline: plain local simulation.
-  const auth = await chooseAuth();
+  const title = await TitleScene.create(renderer, settings, originals);
+  if (import.meta.env.DEV) (window as unknown as { __title: TitleScene }).__title = title;
+  const resumeButton = document.getElementById('btn-resume')!;
+  const auth = await runFrontEnd({
+    title,
+    music,
+    gameFiles,
+    openOptions: (onClose) => {
+      resumeButton.textContent = 'Close';
+      overlay.classList.remove('hidden');
+      const close = () => {
+        overlay.classList.add('hidden');
+        resumeButton.textContent = 'Resume';
+        resumeButton.removeEventListener('click', close);
+        overlay.removeEventListener('click', outside);
+        window.removeEventListener('keydown', escKey, true);
+        onClose();
+      };
+      const outside = (e: MouseEvent) => {
+        if (e.target === overlay) close();
+      };
+      const escKey = (e: KeyboardEvent) => {
+        if (e.key !== 'Escape') return;
+        e.stopPropagation();
+        close();
+      };
+      resumeButton.addEventListener('click', close);
+      overlay.addEventListener('click', outside);
+      window.addEventListener('keydown', escKey, true);
+    },
+  });
+  title.dispose();
 
   // Zones: online, the server announces the arena on login and on every portal transition
   // (SC_ZONE_CHANGE); offline it is ?level=<act> or the synthetic arena. Original levels come
@@ -187,8 +235,6 @@ async function main(): Promise<void> {
   let levelView = null as OriginalLevel | null;
   let arenaObject: THREE.Object3D | null = null;
   /** Loads an arena into the scene, replacing the previous one. Null if it cannot be shown. */
-  /** The level act's music (the original's CD tracks, looped). */
-  const music = new MusicPlayer(CLASSIC_SETTINGS.musicVolume);
   // Characters, props and items lit by the floor under them, with blob shadows.
   const lighting = new ModelLighting(scene);
   const lightingKeys = new Set<unknown>();
@@ -237,8 +283,6 @@ async function main(): Promise<void> {
   const headPos = new THREE.Vector3();
   const prompt = document.getElementById('prompt')!;
   let lastStats: { level: number; dead: boolean } | null = null;
-  // Before anything that loads asynchronously reads it (the effects below).
-  const settings = new SettingsStore();
   /** The original's special effects (sparks, blood, bone chips), when the game files are imported. */
   let effects: Effects | null = null;
   void Effects.load(scene).then((e) => {
@@ -271,7 +315,7 @@ async function main(): Promise<void> {
   const session: ClientSession | null =
     auth.kind === 'offline'
       ? null
-      : await connectToWorld(rapier, arena, auth.kind, {
+      : await connectToWorld(rapier, arena, auth.kind, auth.kind === 'account' ? auth.characterId : null, {
           spawn: (id, _name, info) => {
             remotes.spawn(id, info);
             const e = remotes.byId.get(id);
@@ -370,9 +414,9 @@ async function main(): Promise<void> {
             }
           },
           objects: (d) => {
-            for (const o of d.objects as { id: number; state: 'present' | 'gone' | 'open'; by?: number; loot?: string[]; damage?: number; swing?: DoorMotion }[]) {
+            for (const o of d.objects as { id: number; state: 'present' | 'gone' | 'open'; by?: number; loot?: string[]; damage?: number; swing?: DoorMotion; mover?: MoverMotion }[]) {
               const view = levelView?.objects.get(o.id);
-              levelView?.setObjectState(o.id, o.state, o.swing ?? null);
+              levelView?.setObjectState(o.id, o.state, o.swing ?? null, o.mover ?? null);
               // Someone else opening a door: its sound (our own plays on the key press).
               if (!d.full && o.swing?.phase === 'opening' && o.by !== undefined && o.by !== session?.entityId) doorSounds(o.id);
               if (!view || d.full) continue;
@@ -441,7 +485,7 @@ async function main(): Promise<void> {
             player.features = live.features;
             chase.mw = live.mw;
             chase.snap();
-            for (const [id, state] of live.objectStates) levelView?.setObjectState(id, state, live.swings.get(id)?.motion ?? null);
+            for (const [id, state] of live.objectStates) levelView?.setObjectState(id, state, live.swings.get(id)?.motion ?? null, live.movers.get(id)?.motion ?? null);
           },
           cutscene: (d) => playCutscene(d.sequence, d.actors),
           quests: (d) => {
@@ -483,7 +527,7 @@ async function main(): Promise<void> {
       hud.stats(session.playerStats);
       lastStats = { level: session.playerStats.level, dead: session.playerStats.dead };
     }
-    for (const [id, state] of session.objectStates) levelView?.setObjectState(id, state, session.swings.get(id)?.motion ?? null);
+    for (const [id, state] of session.objectStates) levelView?.setObjectState(id, state, session.swings.get(id)?.motion ?? null, session.movers.get(id)?.motion ?? null);
     if (session.inventory) {
       inventoryPanel.update(session.inventory);
       player.setWeaponSpeed(session.inventory.weaponSpeed);
@@ -501,6 +545,21 @@ async function main(): Promise<void> {
     if (!session || !sequence || !levelView?.arena.story || cutscene) {
       session?.cutsceneDone(name);
       return;
+    }
+    // The stand-in starts from a stand: what the keys were doing (running, a raised shield, a
+    // swing) ends here, or its clip loops on (footsteps and all) under the sequence's own.
+    local.avatar.setShield?.(false);
+    local.avatar.setUpperSwing?.(null, 0);
+    local.avatar.setState(ANIM.IDLE, 0);
+    // Staged (not original): Drake stands where the sequence is framed for him, as the server puts him.
+    const spot = stagedPlayerSpot(sequence);
+    if (spot) {
+      const x = spot[0] * LEVEL_UNIT_METRES, z = spot[2] * LEVEL_UNIT_METRES;
+      const y = floorAt(levelView.arena, x, z, local.object.position.y);
+      if (y !== null) {
+        local.placeAt({ x, y: y + 0.1, z }, local.object.rotation.y);
+        local.object.position.set(x, y + 0.1, z);
+      }
     }
     const standIn: Puppet = { object: local.object, avatar: local.avatar, name: 'Drake' };
     const puppets = new Map<number, Puppet>();
@@ -544,6 +603,7 @@ async function main(): Promise<void> {
           sounds.play(sfx.damage, headPos);
         }
       },
+      useBrush: (name) => levelView?.useBrush(name),
       playerSpot: local.object.position.clone(),
       sounds,
       subtitle: (who, text, ms) => showSubtitle(who, text, ms),
@@ -576,8 +636,6 @@ async function main(): Promise<void> {
   lighting.playerKey = 'me';
   scene.add(local.object);
 
-  music.volume = settings.current.musicVolume;
-  settings.onChange((s) => (music.volume = s.musicVolume));
   lighting.silhouettes = settings.current.silhouetteShadows;
   dynamicLights.enabled = settings.current.enhancedLighting;
   postFx.enabled = settings.current.enhancedLighting;
@@ -609,8 +667,6 @@ async function main(): Promise<void> {
   };
   applySettings();
   settings.onChange(applySettings);
-  new SettingsPanel(document.getElementById('settings')!, settings);
-  document.getElementById('controls-help')!.textContent = CONTROLS_HELP;
   // Mouse wheel: zoom between the classic camera (closest) and the modern one (farthest).
   renderer.domElement.addEventListener('wheel', (e) => {
     if (!input.locked) return;
@@ -796,6 +852,19 @@ async function main(): Promise<void> {
   gameFiles.visible = false;
   updateHint();
   play();
+  // Back to the character screen: the account session stays, the world is left.
+  const characterLink = document.getElementById('btn-characters')!;
+  characterLink.hidden = auth.kind !== 'account';
+  characterLink.addEventListener('click', (e) => {
+    e.stopPropagation();
+    session?.close();
+    try {
+      sessionStorage.setItem(CHARACTER_SCREEN_FLAG, 'characters');
+    } catch {
+      // Without session storage it opens on the server list.
+    }
+    location.reload();
+  });
   const logoutLink = document.getElementById('btn-logout')!;
   logoutLink.hidden = auth.kind !== 'account';
   logoutLink.addEventListener('click', async (e) => {

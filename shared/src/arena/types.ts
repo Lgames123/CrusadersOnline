@@ -1,4 +1,5 @@
 import type { DoorSwing } from './door_swing.ts';
+import type { MoverDef } from './mover.ts';
 import type { LevelStory } from '../game/story.ts';
 
 /**
@@ -67,8 +68,10 @@ export interface BrushDef {
   solid: boolean;
   /** World object id when the brush is a door or a lever. */
   door?: number;
-  /** A door that swings about its hinge (the original's turning mover); others slide up. */
+  /** A door that swings about its hinge (the original's turning mover, door_swing.ts). */
   swing?: DoorSwing;
+  /** Any other keyframe mover (gates, cell doors, levers, platforms, wheels...; mover.ts). */
+  mover?: MoverDef;
 }
 
 /** Level exit: walking into its trigger moves the player to another zone (arena). */

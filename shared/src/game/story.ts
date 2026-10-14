@@ -73,6 +73,8 @@ export interface StoryTrigger {
   volume?: StoryVolume;
   quest?: StoryQuestAction;
   targets?: StoryRef[];
+  /** Relays: the brushes (by name) they set moving, as a lever does. */
+  brushes?: string[];
 }
 
 export interface StoryCameraPath {

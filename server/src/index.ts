@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { pino, type Logger } from 'pino';
+import { BUILTIN_ITEMS, catalogFromItemRules } from '@crusaders/shared';
 import { TicketStore } from './auth/tickets.ts';
 import { REPO_ROOT, loadConfig, type ServerConfig } from './config.ts';
 import { createApiHandler } from './http/api.ts';
@@ -65,7 +67,19 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
   zones.keep(config.arena);
   await zones.get(config.arena);
   sessions = new SessionManager(tickets, zones, characters, log, { defaultArena: config.arena, devGuestSpawn: config.devGuestSpawn, persist: (r) => save(r, 'transfer') });
-  const api = createApiHandler({ config, accounts, tickets, log });
+  // The zones' item catalog, here for what characters wear on the character screen.
+  const items = config.itemRulesPath ? catalogFromItemRules(JSON.parse(readFileSync(config.itemRulesPath, 'utf8')) as Parameters<typeof catalogFromItemRules>[0]) : BUILTIN_ITEMS;
+  const live = sessions;
+  const api = createApiHandler({
+    config,
+    accounts,
+    characters,
+    items,
+    tickets,
+    log,
+    onlinePlayers: () => live.playerCount,
+    isCharacterOnline: (id) => live.isCharacterActive(id),
+  });
 
   const http = createServer((req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://localhost');

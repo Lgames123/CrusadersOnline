@@ -10,6 +10,7 @@ import {
   estimateSequenceMs,
   inStoryVolume,
   sanitizeQuestLog,
+  stagedPlayerSpot,
   type StorySequence,
   type StoryStep,
 } from '@crusaders/shared';
@@ -82,6 +83,22 @@ describe('scripted sequences', () => {
     const run = new SequenceRun(seq, { start: (s) => (s.action === 'FaceRel' ? { update: () => false } : null) });
     for (let i = 0; i < 5 && !run.finished; i++) run.update(50);
     expect(run.finished).toBe(true);
+  });
+});
+
+describe('staged sequences (not original)', () => {
+  const step = (action: string, args: StoryStep['args']): StoryStep => ({ action, when: null, args });
+  it("puts Drake where another actor first turns to face, unless the sequence walks him itself", () => {
+    // Ws9a's Ursan scene: Ursan (actor 3) faces Drake's spot by the cell door; Drake has no MoveToPos.
+    const ursan: StorySequence = {
+      name: 'ScriptedSequence', trigger: 1, actors: [{ player: true }, { creature: 3 }],
+      tracks: [{ actor: 2, steps: [0] }, { actor: 3, steps: [1] }],
+      steps: [step('RunAnimation', { animation: 82 }), step('FaceRel', { thingtoface: [2098.21, 1024.093, -1643.612], neverdone: 1 })],
+    };
+    expect(stagedPlayerSpot(ursan)).toEqual([2098.21, 1024.093, -1643.612]);
+    // A sequence that walks Drake (Cs1a's Aerin) is left as it is.
+    const walks: StorySequence = { ...ursan, steps: [step('MoveToPos', { pos: [1, 2, 3] }), ursan.steps[1]!] };
+    expect(stagedPlayerSpot(walks)).toBeNull();
   });
 });
 

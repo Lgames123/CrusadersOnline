@@ -113,6 +113,15 @@ export function setDoorOpen(mw: MovementWorld, id: number, open: boolean): boole
   return true;
 }
 
+/** Puts a mover's collider at its pose (world point = R p + t), from its rest pose. */
+export function setBrushPose(mw: MovementWorld, id: number, t: [number, number, number], q: [number, number, number, number]): void {
+  const c = mw.doors.get(id);
+  if (!c) return;
+  c.setRotation({ x: q[0], y: q[1], z: q[2], w: q[3] });
+  c.setTranslation({ x: t[0], y: t[1], z: t[2] });
+  mw.world.step(); // refresh the broad phase for scene queries
+}
+
 /** Turns a swinging door's collider by `angle` (about +Y) round (cx, cz), from its shut pose. */
 export function setDoorPose(mw: MovementWorld, id: number, cx: number, cz: number, angle: number): void {
   const c = mw.doors.get(id);

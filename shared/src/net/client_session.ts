@@ -7,8 +7,9 @@ import { INPUT_PACKET_MAX_BYTES, MAX_INPUT_FRAMES, createInputFrame, encodeInput
 import { decodeSnapshot, type EntityState } from '../protocol/binary/snapshot.ts';
 import type { AttackKind, CombatEventMsg, CutsceneMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PlayerStatsMsg, QuestLogMsg, ServerControlMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
 import type { ArenaDef } from '../arena/types.ts';
-import { createMovementWorld, disposeMovementWorld, setDoorOpen, setDoorPose, type MovementWorld, type Rapier } from '../movement/physics.ts';
+import { createMovementWorld, disposeMovementWorld, setBrushPose, setDoorOpen, setDoorPose, type MovementWorld, type Rapier } from '../movement/physics.ts';
 import { stepDoorMotion, swingPose, type DoorMotion, type DoorSwing } from '../arena/door_swing.ts';
+import { MOVER_BACK, MOVER_FORWARD, moverPose, shutMover, stepMover, type MoverDef, type MoverMotion } from '../arena/mover.ts';
 import { createCharacter, setCharacterState, stepCharacter, type Character } from '../movement/character.ts';
 
 const INPUT_HISTORY = 64;
@@ -100,6 +101,8 @@ export class ClientSession {
   readonly objectStates = new Map<number, WorldObjectState>();
   /** Swinging doors of the arena by object id, with their motion (null = shut). */
   readonly swings = new Map<number, { def: DoorSwing; motion: DoorMotion | null }>();
+  /** Other movers (gates, levers...) by world-object id. */
+  readonly movers = new Map<number, { def: MoverDef; motion: MoverMotion }>();
 
   private ws: WebSocket | null = null;
   private readonly events: ClientSessionEvents;
@@ -129,7 +132,19 @@ export class ClientSession {
 
   private collectSwings(arena: ArenaDef): void {
     this.swings.clear();
-    for (const b of arena.brushes ?? []) if (b.door !== undefined && b.swing) this.swings.set(b.door, { def: b.swing, motion: null });
+    this.movers.clear();
+    for (const b of arena.brushes ?? []) {
+      if (b.door !== undefined && b.swing) this.swings.set(b.door, { def: b.swing, motion: null });
+      else if (b.door !== undefined && b.mover) this.movers.set(b.door, { def: b.mover, motion: shutMover() });
+    }
+  }
+
+  /** Puts a mover's collider at its pose. */
+  private poseMover(id: number): void {
+    const d = this.movers.get(id);
+    if (!d) return;
+    const pose = moverPose(d.def, d.motion);
+    setBrushPose(this.mw, id, pose.t, pose.q);
   }
 
   /** Puts a swinging door's collider at its current turn. */
@@ -271,10 +286,16 @@ export class ClientSession {
         if (msg.d.full) this.objectStates.clear();
         if (msg.d.full) for (const id of this.mw.doors.keys()) setDoorOpen(this.mw, id, false);
         if (msg.d.full) for (const [id, d] of this.swings) d.motion = null, this.poseDoor(id);
+        if (msg.d.full) for (const [id, d] of this.movers) d.motion = shutMover(), this.poseMover(id);
         for (const o of msg.d.objects) {
           this.objectStates.set(o.id, o.state);
           const swing = this.swings.get(o.id);
-          if (swing) {
+          const mover = this.movers.get(o.id);
+          if (mover) {
+            // Movers keep their collider and move it (stepped in tick()).
+            mover.motion = o.mover ? { ...o.mover } : shutMover();
+            this.poseMover(o.id);
+          } else if (swing) {
             // Swinging doors keep their collider and turn it (stepped in tick()).
             swing.motion = o.state === 'open' && o.swing ? { ...o.swing } : null;
             this.poseDoor(o.id);
@@ -381,6 +402,12 @@ export class ClientSession {
       const before = d.motion.progress;
       if (!stepDoorMotion(d.def, d.motion, TICK_MS)) d.motion = null;
       if (!d.motion || d.motion.progress !== before) this.poseDoor(id);
+    }
+    for (const [id, d] of this.movers) {
+      if (d.motion.state !== MOVER_FORWARD && d.motion.state !== MOVER_BACK) continue;
+      const { key, progress } = d.motion;
+      stepMover(d.def, d.motion, TICK_MS);
+      if (d.motion.progress !== progress || d.motion.key !== key) this.poseMover(id);
     }
     stepCharacter(this.mw, c, slot, this.moveStats, TICK_DT);
 

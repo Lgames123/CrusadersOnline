@@ -41,6 +41,8 @@ export interface ServerConfig {
    * arena, to test a spot of a level (e.g. a scripted sequence's trigger) without walking there.
    */
   devGuestSpawn: { x: number; y: number; z: number } | null;
+  /** Name of this world on the server selection screen (REALM_NAME). */
+  realmName: string;
 }
 
 /** Repository root; relative paths (e.g. pglite:local/pgdata) resolve against it. */
@@ -81,6 +83,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     arena: process.env['ARENA'] ?? 'synthetic-arena',
     generatedDir: path.resolve(REPO_ROOT, process.env['GENERATED_DIR'] ?? 'local/generated'),
     devGuestSpawn: env === 'production' ? null : parsePoint(process.env['DEV_GUEST_SPAWN']),
+    realmName: (process.env['REALM_NAME'] ?? '').trim().slice(0, 32) || 'Ardon',
     ...overrides,
   };
 }

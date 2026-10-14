@@ -28,6 +28,8 @@ interface Session {
   inputBucket: TokenBucket;
   controlBucket: TokenBucket;
   authTimer: NodeJS.Timeout;
+  /** When the character entered the world (played time), 0 until then. */
+  enteredAt: number;
 }
 
 /**
@@ -120,6 +122,11 @@ export class SessionManager implements TransportHandlers {
     this.sessions.get(connId)?.conn.send(data);
   }
 
+  /** Whether a character is in (or entering) the world. */
+  isCharacterActive(characterId: string): boolean {
+    return this.activeCharacters.has(characterId);
+  }
+
   get playerCount(): number {
     let n = 0;
     for (const s of this.sessions.values()) if (s.state === 'in_world') n++;
@@ -137,6 +144,7 @@ export class SessionManager implements TransportHandlers {
       inputBucket: new TokenBucket(25, 30), // 20 Hz nominal (security.md §2.3)
       controlBucket: new TokenBucket(5, 10),
       authTimer: setTimeout(() => conn.close(CLOSE.AUTH_TIMEOUT, 'authentication timeout'), AUTH_TIMEOUT_MS),
+      enteredAt: 0,
     };
     this.sessions.set(conn.id, session);
   }
@@ -147,6 +155,10 @@ export class SessionManager implements TransportHandlers {
     clearTimeout(s.authTimer);
     if (s.state === 'in_world' || s.state === 'transferring') this.zoneOf(s)?.leave(conn.id);
     if (s.characterId) this.activeCharacters.delete(s.characterId);
+    if (s.characterId && s.enteredAt && !s.account?.guest) {
+      const seconds = (Date.now() - s.enteredAt) / 1000;
+      void this.characters.addPlayTime(s.characterId, seconds).catch((err: unknown) => this.log.error({ err }, 'play time save failed'));
+    }
     this.sessions.delete(conn.id);
     this.log.info({ conn: conn.id, account: s.account?.name }, 'disconnected');
   }
@@ -206,6 +218,7 @@ export class SessionManager implements TransportHandlers {
         host.join(conn.id, s.pendingJoin);
         s.pendingJoin = null;
         s.state = 'in_world';
+        s.enteredAt ||= Date.now();
         this.log.info({ conn: conn.id, account: s.account?.name, zone: s.zone }, 'entered zone');
         return;
       }

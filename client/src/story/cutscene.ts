@@ -48,6 +48,8 @@ export interface CutsceneContext {
   fade(out: boolean, ms: number): void;
   /** A puppet starts an ASM clip (its sounds: impacts, death). */
   animation?(p: Puppet, state: string): void;
+  /** A brush set moving by a TriggerFlag step (a relay's target: the cell door Ursan opens). */
+  useBrush?(name: string): void;
 }
 
 /** Body turn rate of creatures in sequences, rad/s (the brain's 270 degrees a second). */
@@ -202,8 +204,16 @@ export class Cutscene {
         return puppet ? this.face(puppet, a) : null;
       case 'RunAnimation':
         return puppet ? this.animate(puppet, a) : null;
+      case 'TriggerFlag': {
+        // Its brushes move here, for this player (the server applies the rest of the trigger when the
+        // sequence ends and leaves the shared world's brushes as they are).
+        const flag = a['flag'];
+        const t = flag && typeof flag === 'object' && 'trigger' in flag ? this.ctx.story.triggers.find((u) => u.id === flag.trigger) : undefined;
+        for (const name of t?.brushes ?? []) this.ctx.useBrush?.(name);
+        return null;
+      }
       default:
-        // Timeline, Wait (timed by the scheduler); TriggerFlag, DoInteraction, ScriptedSequenceDone
+        // Timeline, Wait (timed by the scheduler); DoInteraction, ScriptedSequenceDone
         // (the server applies them).
         return null;
     }

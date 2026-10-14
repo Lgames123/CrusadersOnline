@@ -78,7 +78,9 @@ export class SettingsStore {
     for (const l of this.listeners) l(this.value);
   }
 
-  onChange(listener: (s: Settings) => void): void {
+  /** Returns a function that removes the listener. */
+  onChange(listener: (s: Settings) => void): () => void {
     this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 }

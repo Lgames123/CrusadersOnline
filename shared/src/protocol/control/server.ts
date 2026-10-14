@@ -1,4 +1,5 @@
 import type { DoorMotion } from '../../arena/door_swing.ts';
+import type { MoverMotion } from '../../arena/mover.ts';
 import { INPUT, SC } from '../opcodes.ts';
 import type { SpellId } from '../../game/spells.ts';
 import type { ItemType } from '../../game/items.ts';
@@ -107,8 +108,11 @@ export interface InventoryUpdateMsg {
 export type WorldObjectState = 'present' | 'gone' | 'open';
 export interface ObjectStateMsg {
   op: typeof SC.OBJECT_STATE;
-  /** `swing`: a swinging door's motion (opening / held open / closing) as of this message. */
-  d: { objects: { id: number; state: WorldObjectState; swing?: DoorMotion }[]; full?: boolean };
+  /**
+   * `swing`: a swinging door's motion (opening / held open / closing) as of this message;
+   * `mover`: any other mover's (gates, levers...), stepped on from it by the client.
+   */
+  d: { objects: { id: number; state: WorldObjectState; swing?: DoorMotion; mover?: MoverMotion }[]; full?: boolean };
 }
 
 /**

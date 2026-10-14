@@ -109,6 +109,55 @@ describe.each(backends)('accounts and sessions on $name (M07)', (backend) => {
     expect((await stale.call('POST', '/api/ws-ticket')).status).toBe(401);
   });
 
+  it('lists realms, creates up to three characters, deletes one and plays the chosen one', async () => {
+    const api = new Api(server.port);
+    await api.call('POST', '/api/auth/register', { username: 'Roster', password: 'password123' });
+    const realms = await api.call('GET', '/api/realms');
+    expect(realms.status).toBe(200);
+    expect(realms.data.realms).toHaveLength(1);
+    expect(realms.data.realms[0].characters).toBe(1);
+
+    expect((await api.call('POST', '/api/characters', { name: 'x' })).status).toBe(400);
+    expect((await api.call('POST', '/api/characters', { name: 'roster' })).status).toBe(409); // names are unique
+    const second = await api.call('POST', '/api/characters', { name: 'Second' });
+    expect(second.status).toBe(201);
+    expect((await api.call('POST', '/api/characters', { name: 'Third' })).status).toBe(201);
+    const full = await api.call('POST', '/api/characters', { name: 'Fourth' });
+    expect(full.status).toBe(409);
+    expect(full.data.error).toBe('character_limit');
+
+    const list = await api.call('GET', '/api/characters');
+    expect(list.data.max).toBe(3);
+    expect(list.data.characters.map((c: { name: string }) => c.name)).toEqual(['Roster', 'Second', 'Third']);
+    // Never played: the starting equipment, no time in the world.
+    const fresh = list.data.characters[1];
+    expect(fresh).toMatchObject({ level: 1, playSeconds: 0, lastPlayedAt: null, look: { weapon: 'axe', shield: 'wooden_shield' } });
+
+    // Deleting asks for the name; other accounts cannot delete it.
+    expect((await api.call('DELETE', `/api/characters/${fresh.id}`, { name: 'Wrong' })).status).toBe(400);
+    const stranger = new Api(server.port);
+    await stranger.call('POST', '/api/auth/register', { username: 'Stranger', password: 'password123' });
+    expect((await stranger.call('DELETE', `/api/characters/${fresh.id}`, { name: 'Second' })).status).toBe(404);
+    expect((await stranger.call('POST', '/api/ws-ticket', { characterId: fresh.id })).status).toBe(404);
+    expect((await api.call('DELETE', `/api/characters/${fresh.id}`, { name: 'second' })).status).toBe(200);
+    expect((await api.call('GET', '/api/characters')).data.characters).toHaveLength(2);
+
+    // The ticket names the chosen character; leaving the world records the session.
+    const third = (await api.call('GET', '/api/characters')).data.characters[1];
+    const { data } = await api.call('POST', '/api/ws-ticket', { characterId: third.id });
+    const s = new ClientSession(rapier, arena);
+    await s.connect(`ws://127.0.0.1:${server.port}/ws`, data.ticket);
+    await run(s, 0, 10);
+    expect(s.character).not.toBeNull();
+    s.close();
+    let after: { name: string; lastPlayedAt: string | null } | undefined;
+    for (let i = 0; i < 40 && !after?.lastPlayedAt; i++) {
+      await sleep(50);
+      after = (await api.call('GET', '/api/characters')).data.characters.find((c: { id: string }) => c.id === third.id);
+    }
+    expect(after?.lastPlayedAt).not.toBeNull();
+  });
+
   it('saves the position on disconnect and restores it on the next login', async () => {
     const api = new Api(server.port);
     await api.call('POST', '/api/auth/register', { username: 'Walker', password: 'password123' });

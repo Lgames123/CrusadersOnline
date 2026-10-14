@@ -41,6 +41,11 @@ export interface CapStoryTrigger {
   quest?: { index: number; main: boolean; actions: number; bit: number };
   /** Relays: what firing it fires. */
   targets?: CapRef[];
+  /**
+   * Relays: the brush it sets moving (the mover's use, as a lever's): the runtime object pointed
+   * to just before the relay's record (Ws9a 159982 -> bCellDoor, 159370 -> bOuterGates).
+   */
+  brushes?: string[];
 }
 
 /** A camera path (types 0x53 / 0x55): piecewise cubic Bezier, progress advanced per millisecond. */
@@ -234,7 +239,12 @@ export function parseStory(data: Uint8Array, dv: DataView, types: ReadonlyMap<nu
     const vol = ptr(o + 4);
     const volume = vol > 0 && inRange(vol, 0x40) ? ctx.parseVolume(vol) : null;
     const targets = n > 0 && n < 64 && inRange(list, 4 * n) ? Array.from({ length: n }, (_, i) => resolveRef(dv.getUint32(list + 4 * i, true))) : [];
-    triggers.push({ id: o, kind: 'relay', activation: dv.getUint32(o + 8, true), ...(volume ? { volume } : {}), targets });
+    // A brush (class 0x31) runtime object starts 0x18 before its record; its name pointer is at record +0x14.
+    const owner = o >= 4 ? ptr(o - 4) : -1;
+    const namePtr = owner >= 0 && inRange(owner + 0x18 + 0x14, 4) ? ptr(owner + 0x18 + 0x14) : -1;
+    const brush = namePtr >= 0 && inRange(namePtr, 1) ? ascii(data, namePtr) : '';
+    const brushes = /^b[A-Za-z]\w*$/.test(brush) && dv.getUint32(owner + 0x18, true) === 0x31 ? [brush] : [];
+    triggers.push({ id: o, kind: 'relay', activation: dv.getUint32(o + 8, true), ...(volume ? { volume } : {}), targets, ...(brushes.length ? { brushes } : {}) });
   }
 
   const sequences: CapSequence[] = [];

@@ -49,6 +49,9 @@ export interface CharactersTable {
   yaw: Generated<number>;
   created_at: Timestamp;
   last_saved_at: Timestamp;
+  /** Seconds spent in the world (004_play_time.sql). */
+  play_seconds: ColumnType<string, number | bigint | undefined, number | bigint>;
+  last_played_at: Timestamp | null;
 }
 
 export interface InventoryItemsTable {

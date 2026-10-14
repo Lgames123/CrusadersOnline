@@ -1,4 +1,5 @@
 import { doorSwingFromMotion, type LevelBrushMotion } from './door_swing.ts';
+import { moverFromMotion } from './mover.ts';
 import { CREATURE_TEMPLATES, npcArchetypeId } from '../game/creatures.ts';
 import type { ArenaDef, BrushDef, PortalDef, TriMeshDef, WorldObjectDef } from './types.ts';
 import { SEQUENCE_ACTOR_BASE, type LevelStory } from '../game/story.ts';
@@ -453,6 +454,10 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
     const brush: BrushDef = { name: b.name, points, solid: SOLID_BRUSH.test(b.name) };
     const swing = b.motion ? doorSwingFromMotion(b.motion, s) : null;
     if (swing && DOOR_BRUSH.test(b.name)) brush.swing = swing;
+    else if (b.motion) {
+      const mover = moverFromMotion(b.motion, s);
+      if (mover) brush.mover = mover;
+    }
     const lever = LEVER_BRUSH.test(b.name);
     if (DOOR_BRUSH.test(b.name) || lever) {
       const min = [Infinity, Infinity, Infinity];

@@ -7,6 +7,7 @@ import {
   applyQuestAction,
   emptyStoryState,
   estimateSequenceMs,
+  stagedPlayerSpot,
   inStoryVolume,
   storyFlag,
   type StorySequence,
@@ -14,7 +15,17 @@ import {
   type StoryTrigger,
   TICK_MS,
   setDoorPose,
+  setBrushPose,
   stepDoorMotion,
+  useMover,
+  stepMover,
+  moverPose,
+  shutMover,
+  MOVER_SHUT,
+  MOVER_PARKED,
+  MOVER_DONE,
+  type MoverDef,
+  type MoverMotion,
   swingKeyAwayFrom,
   swingPoint,
   swingPose,
@@ -273,6 +284,8 @@ interface WorldObject {
   respawnAt: number;
   /** Swinging doors: the swing, the slab's shut footprint (x/z hull, metres) and the motion. */
   swing?: { def: DoorSwing; points: Float32Array; hull: [number, number][]; motion: DoorMotion | null; blocked: boolean };
+  /** Other movers (gates, cell doors, levers): the original's keyframe mover and its motion. */
+  mover?: { def: MoverDef; motion: MoverMotion };
 }
 
 /** One change in an OBJECT_STATE message. */
@@ -288,6 +301,8 @@ interface ObjectChange {
   hp?: number;
   /** Swinging doors: the motion as of now. */
   swing?: DoorMotion;
+  /** Other movers: the motion as of now. */
+  mover?: MoverMotion;
 }
 
 /** Convex hull (x/z) of a brush's points, counter-clockwise (monotone chain). */
@@ -564,6 +579,7 @@ export class WorldZone {
     for (const b of arena.brushes ?? []) {
       const o = b.door !== undefined ? this.objects.get(b.door) : undefined;
       if (o && b.swing) o.swing = { def: b.swing, points: b.points, hull: hullXZ(b.points), motion: null, blocked: false };
+      else if (o && b.mover) o.mover = { def: b.mover, motion: shutMover() };
     }
   }
 
@@ -733,7 +749,7 @@ export class WorldZone {
     this.sendInventory(p);
     this.sendJson(connId, { op: SC.QUEST_LOG, d: { log: p.story.quests } });
     if (this.objects.size) {
-      const changed = [...this.objects.values()].filter((o) => o.state !== 'present').map((o) => ({ id: o.def.id, state: o.state, ...(o.swing?.motion ? { swing: { ...o.swing.motion } } : {}) }));
+      const changed = [...this.objects.values()].filter((o) => o.state !== 'present').map((o) => ({ id: o.def.id, state: o.state, ...(o.swing?.motion ? { swing: { ...o.swing.motion } } : {}), ...(o.mover ? { mover: { ...o.mover.motion } } : {}) }));
       this.sendJson(connId, { op: SC.OBJECT_STATE, d: { objects: changed, full: true } });
     }
     return p.entityId;
@@ -753,7 +769,8 @@ export class WorldZone {
     }
     const o = this.objects.get(id);
     // A swinging door may be opened again while it swings shut.
-    const reopens = o?.swing?.motion?.phase === 'closing';
+    // A parked mover is used again to send it back (0x48EC10).
+    const reopens = o?.swing?.motion?.phase === 'closing' || o?.mover?.motion.state === MOVER_PARKED;
     if (!p || !o || !alive(p) || (o.state !== 'present' && !reopens) || o.def.kind === 'breakable') return;
     if (o.def.kind === 'door' || o.def.kind === 'lever') {
       this.openDoor(p, o, key);
@@ -793,6 +810,17 @@ export class WorldZone {
     }
     const changes: ObjectChange[] = [];
     for (const target of [o, ...(o.def.opens ?? []).map((id) => this.objects.get(id))]) {
+      const mv = target?.mover;
+      if (target && mv) {
+        // The original's use (0x48EC10); a lever that does not move pulls nothing.
+        if (!useMover(mv.def, mv.motion)) {
+          if (target === o) break;
+          continue;
+        }
+        target.state = 'open';
+        changes.push({ id: target.def.id, state: 'open', by: p.entityId, mover: { ...mv.motion } });
+        continue;
+      }
       const sw = target?.swing;
       if (target && sw) {
         // A swinging door opens away from the player; one swinging shut opens again.
@@ -955,6 +983,28 @@ export class WorldZone {
   private stepDoors(): void {
     const changes: ObjectChange[] = [];
     for (const o of this.objects.values()) {
+      const mv = o.mover;
+      if (mv && mv.motion.state !== MOVER_SHUT && mv.motion.state !== MOVER_PARKED && mv.motion.state !== MOVER_DONE) {
+        const m = mv.motion;
+        const { state, key, progress } = m;
+        const wasBlocked = !!m.blocked;
+        // A mover does not run into a character: it holds until the way is clear (the original
+        // pushes Drake or stops, flags 0x200 / 0x80).
+        m.blocked = false;
+        const probe = { ...m };
+        stepMover(mv.def, probe, TICK_MS);
+        m.blocked = this.moverHits(o, probe) && !this.moverHits(o, m);
+        if (!m.blocked) stepMover(mv.def, m, TICK_MS);
+        if (m.progress !== progress || m.key !== key) {
+          const pose = moverPose(mv.def, m);
+          setBrushPose(this.mw, o.def.id, pose.t, pose.q);
+        }
+        if (m.state !== state || m.key !== key || m.blocked !== wasBlocked) {
+          o.state = m.state === MOVER_SHUT ? 'present' : 'open';
+          changes.push({ id: o.def.id, state: o.state, mover: { ...m } });
+        }
+        continue;
+      }
       const sw = o.swing;
       const m = sw?.motion;
       if (!sw || !m) continue;
@@ -972,6 +1022,23 @@ export class WorldZone {
       } else if (m.phase !== phase || sw.blocked !== wasBlocked) changes.push({ id: o.def.id, state: 'open', swing: { ...m, blocked: sw.blocked } });
     }
     if (changes.length) this.broadcastObjects(changes);
+  }
+
+  /** Whether a mover's brush at `motion` touches a live character (its bounds, moved; turns are not checked). */
+  private moverHits(o: WorldObject, motion: MoverMotion): boolean {
+    const mv = o.mover!;
+    const b = o.def.bounds;
+    if (!b || mv.def.segments[motion.key]?.kind !== 'move') return false;
+    const { t } = moverPose(mv.def, motion);
+    for (const a of this.actors.values()) {
+      if (!alive(a)) continue;
+      const p = a.character.position;
+      if (p.y > b[4] + t[1] || p.y + 1.8 < b[1] + t[1]) continue;
+      const dx = Math.max(b[0] + t[0] - p.x, 0, p.x - b[3] - t[0]);
+      const dz = Math.max(b[2] + t[2] - p.z, 0, p.z - b[5] - t[2]);
+      if (Math.hypot(dx, dz) < PLAYER_RADIUS) return true;
+    }
+    return false;
   }
 
   /** Whether a swinging door at `progress` touches a live character within its height. */
@@ -1175,8 +1242,13 @@ export class WorldZone {
     }
   }
 
-  /** Fires a trigger for a player: its flag, then what it does (sequence, quest, relay targets). */
-  private fireTrigger(p: Player, t: StoryTrigger, depth = 0): void {
+  /**
+   * Fires a trigger for a player: its flag, then what it does (sequence, quest, relay targets and
+   * brushes). `played`: fired from a finished sequence. Its brushes moved in that player's
+   * sequence only (their client showed it): the world's stay as they are, so the next player's
+   * sequence finds Ursan's cell door shut as the story has it (the sequence leaves Drake outside).
+   */
+  private fireTrigger(p: Player, t: StoryTrigger, depth = 0, played = false): void {
     const act = this.act;
     if (!act || depth > 8) return;
     const flag = storyFlag(act, t.id);
@@ -1187,8 +1259,9 @@ export class WorldZone {
     if (t.kind === 'relay') {
       for (const ref of t.targets ?? []) {
         const next = 'trigger' in ref ? this.arena.story?.triggers.find((u) => u.id === ref.trigger) : undefined;
-        if (next) this.fireTrigger(p, next, depth + 1);
+        if (next) this.fireTrigger(p, next, depth + 1, played);
       }
+      if (!played) for (const name of t.brushes ?? []) this.useBrush(name, p.entityId);
     }
     if (t.kind === 'flag' && !p.cutscene) {
       const seq = this.arena.story?.sequences.find((q) => q.trigger === t.id);
@@ -1196,6 +1269,16 @@ export class WorldZone {
     }
     const record = this.persistRecord(p);
     if (record) this.outbox.persist?.([record], 'progress');
+  }
+
+  /** Sets a brush's mover going (a relay's target, 0x48EC10). */
+  private useBrush(name: string, by: number): void {
+    const b = this.arena.brushes?.find((x) => x.name === name && x.door !== undefined);
+    const o = b ? this.objects.get(b.door!) : undefined;
+    const mv = o?.mover;
+    if (!o || !mv || !useMover(mv.def, mv.motion)) return;
+    o.state = mv.motion.state === MOVER_SHUT ? 'present' : 'open';
+    this.broadcastObjects([{ id: o.def.id, state: o.state, by, mover: { ...mv.motion } }]);
   }
 
   private applyQuest(p: Player, t: StoryTrigger): void {
@@ -1219,6 +1302,14 @@ export class WorldZone {
     // At most the estimated length (actors' steps at walking pace) and a margin.
     const ms = estimateSequenceMs(sequence) * 1.5 + 15_000;
     p.cutscene = { sequence, until: this.tick + Math.ceil(ms / TICK_MS) };
+    // Staged (not original): Drake stands where the sequence is framed for him (stagedPlayerSpot).
+    const spot = stagedPlayerSpot(sequence);
+    if (spot) {
+      const s = LEVEL_UNIT_METRES;
+      const x = spot[0] * s, z = spot[2] * s;
+      const y = this.arena.meshes.length ? floorAt(this.arena, x, z, p.character.position.y) : spot[1] * s;
+      if (y !== null) setCharacterState(p.character, { x, y: y + 0.1, z }, 0, false);
+    }
     p.swing = null;
     p.queuedAttack = false;
     p.cast = null;
@@ -1254,7 +1345,7 @@ export class WorldZone {
         const flag = step.args['flag'];
         if (step.action === 'TriggerFlag' && flag && typeof flag === 'object' && 'trigger' in flag) {
           const t = story?.triggers.find((u) => u.id === flag.trigger);
-          if (t) this.fireTrigger(p, t);
+          if (t) this.fireTrigger(p, t, 0, true);
         }
         const level = step.args['loadlevel'];
         if (step.action === 'ScriptedSequenceDone' && level && typeof level === 'object' && 'exit' in level) load = level.exit.toLowerCase();

@@ -3,6 +3,7 @@ import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { ANIM, CREATURE_TEMPLATES, ORIGINAL_CLIP_FPS, isAttackAnim, isLocomotionAnim, npcArchetypeId, type AttackKind } from '@crusaders/shared';
 import type { Avatar, AvatarKind } from '../entities/avatar.ts';
+import type { DrakeOutfit } from './item_models.ts';
 
 /**
  * Characters rendered with the original models and animations converted from the player's own
@@ -233,16 +234,20 @@ class OriginalAvatar implements Avatar {
   constructor(source: GLTF, map: ClipMap, texture?: THREE.Texture, equipment?: { right?: THREE.Object3D; left?: THREE.Object3D }) {
     const model = cloneSkinned(source.scene);
     model.scale.setScalar(UNIT_SCALE);
+    // The texture variant skins the body only: held items keep their own textures.
+    if (texture) {
+      model.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const m = (mesh.material as THREE.MeshStandardMaterial).clone();
+        m.map = texture;
+        mesh.material = m;
+      });
+    }
     if (equipment) attachEquipment(model, equipment);
     model.traverse((o) => {
       o.castShadow = true;
       o.frustumCulled = false; // skinned bounds do not follow animation
-      const mesh = o as THREE.Mesh;
-      if (texture && mesh.isMesh) {
-        const m = (mesh.material as THREE.MeshStandardMaterial).clone();
-        m.map = texture;
-        mesh.material = m;
-      }
     });
     this.object.add(model);
     this.mixer = new THREE.AnimationMixer(model);
@@ -650,7 +655,10 @@ function findBlade(model: THREE.Object3D): { mount: THREE.Object3D; held: THREE.
   return { mount, held: mount.children[0], base: near, tip: far };
 }
 
-export type AvatarFactory = (kind: AvatarKind) => Avatar | null;
+export type AvatarFactory = ((kind: AvatarKind) => Avatar | null) & {
+  /** Drake wearing an outfit (the character screen): its weapon, shield and armour body. */
+  dressed?(outfit: DrakeOutfit): Promise<Avatar | null>;
+};
 
 /** Resolves to a factory for original-model avatars, or null when not available. */
 export async function loadOriginalAvatars(): Promise<AvatarFactory | null> {
@@ -702,13 +710,42 @@ export async function loadOriginalAvatars(): Promise<AvatarFactory | null> {
     }
     if (loaded.size === 0) return null;
     console.info(`[assets] using original models from your installation: ${[...loaded.keys()].join(', ')}`);
-    return (kind) => {
+    const factory: AvatarFactory = (kind) => {
       const entry = loaded.get(kind === 'player' ? 'self' : kind);
       if (!entry) return null;
       const avatar = new OriginalAvatar(entry.gltf, entry.clips, entry.texture, entry.equipment);
       avatar.events = entry.events;
       return avatar;
     };
+    factory.dressed = async (outfit) => {
+      const self = loaded.get('self');
+      if (!self) return null;
+      let source = self.gltf;
+      let texture = self.texture;
+      // Armour bodies share Drake's skeleton (Bip01 bones): his clips play on them as they are.
+      const bodyUrl = outfit.body ? manifest.models[outfit.body.model] : undefined;
+      const body = bodyUrl ? await loader.loadAsync(`/generated/${bodyUrl}`).catch(() => null) : null;
+      if (body && outfit.body) {
+        let dummies: unknown;
+        body.scene.traverse((o) => (dummies ??= (o.userData as { transforms?: unknown }).transforms));
+        if (!dummies) self.gltf.scene.traverse((o) => (dummies ??= (o.userData as { transforms?: unknown }).transforms));
+        if (dummies) body.scene.userData['transforms'] = dummies;
+        source = { ...body, animations: self.gltf.animations };
+        const texUrl = manifest.textures[outfit.body.texture];
+        texture = texUrl ? await textures.loadAsync(`/generated/${texUrl}`).catch(() => undefined) : undefined;
+        if (texture) {
+          texture.flipY = false;
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+        }
+      }
+      const right = await prop(outfit.right);
+      const left = await prop(outfit.left);
+      const avatar = new OriginalAvatar(source, self.clips, texture, { ...(right ? { right } : {}), ...(left ? { left } : {}) });
+      avatar.events = self.events;
+      return avatar;
+    };
+    return factory;
   } catch (err) {
     console.warn('[assets] original models unavailable:', err);
     return null;

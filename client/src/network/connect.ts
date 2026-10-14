@@ -11,6 +11,8 @@ export async function connectToWorld(
   rapier: Rapier,
   arena: ArenaDef,
   mode: 'account' | 'guest',
+  /** Account play: the character chosen on the character screen. */
+  characterId: string | null,
   events: ClientSessionEvents,
   /** Receives the session as soon as it exists (zone events arrive before connect resolves). */
   onCreate?: (session: ClientSession) => void,
@@ -19,6 +21,7 @@ export async function connectToWorld(
     const res = await fetch(mode === 'account' ? '/api/ws-ticket' : '/api/dev/guest-ticket', {
       method: 'POST',
       credentials: 'same-origin',
+      ...(mode === 'account' && characterId ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify({ characterId }) } : {}),
     });
     if (!res.ok) throw new Error(`ticket request failed: HTTP ${res.status}`);
     const { ticket } = (await res.json()) as { ticket: string };

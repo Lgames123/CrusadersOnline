@@ -10,6 +10,11 @@ import {
   initPhysics,
   setDoorOpen,
   advanceSwing,
+  moverFromMotion,
+  MOVER_BACK,
+  MOVER_DONE,
+  MOVER_FORWARD,
+  MOVER_SHUT,
   doorSwingFromMotion,
   swingKeyAwayFrom,
   wallDistance,
@@ -100,6 +105,36 @@ describe('doors', () => {
     expect(open(500_001)).toBe(true);
     expect(open(500_000)).toBe(true);
     expect(wallDistance((z as unknown as { mw: Parameters<typeof wallDistance>[0] }).mw, { x: 0, y: 0, z: 0 }, 0, 3, 1)).toBeNull();
+  });
+
+  it('a lever pulls once and its gate rises on its mover, waits its delay and comes back down (Ws9a)', () => {
+    // Ws9a: bLever1_1 turns 40° about Z, once (mode 6); bOuterGates rises, back after 5 s (mode 0 + flag 8).
+    const arena = doorArena();
+    arena.objects![0]!.byLever = true;
+    arena.objects!.push({ id: 500_001, kind: 'lever', x: 1, y: 0, z: 0, bounds: [1, 0, -0.1, 1.2, 1.2, 0.1], opens: [500_000] });
+    arena.brushes![0]!.mover = moverFromMotion({ flags: 0x4002048, start: 0, delayMs: 5000, types: [0x46], keys: [[0, 3.2, 0]], speeds: [1 / 1000, 0] }, 1)!;
+    arena.brushes!.push({ name: 'bLever1_1', points: new Float32Array([1, 0, 0, 1.2, 1.2, 0]), solid: false, door: 500_001, mover: moverFromMotion({ flags: 0x4002806, start: 0, delayMs: 0, types: [0xa0], keys: [[40, 1.1, 0]], speeds: [1 / 500, 0] }, 1)! });
+    const messages: ServerControlMsg[] = [];
+    const z = new WorldZone(rapier, 'lever', arena, {
+      send: (_c, data) => { if (typeof data === 'string') messages.push(JSON.parse(data) as ServerControlMsg); },
+    });
+    z.join(1, { name: 'Puller', characterId: null, position: { x: 0, y: 0.5, z: 0 } });
+    const last = (id: number) => messages.flatMap((m) => (m.op === SC.OBJECT_STATE ? m.d.objects.filter((o) => o.id === id) : [])).at(-1);
+    const blocked = () => wallDistance((z as unknown as { mw: Parameters<typeof wallDistance>[0] }).mw, { x: 0, y: 0, z: 0 }, 0, 3, 1) !== null;
+    z.interact(1, 500_001);
+    expect(last(500_001)).toMatchObject({ state: 'open', mover: { state: MOVER_FORWARD } });
+    expect(last(500_000)).toMatchObject({ state: 'open', mover: { state: MOVER_FORWARD } });
+    expect(blocked()).toBe(true); // it has only begun to rise
+    for (let i = 0; i < 20 * 1.1; i++) z.step();
+    expect(last(500_001)).toMatchObject({ mover: { state: MOVER_DONE } });
+    expect(last(500_000)).toMatchObject({ mover: { state: MOVER_BACK, progress: 1 } });
+    expect(blocked()).toBe(false); // up out of the way
+    // The lever is done: pulling it again moves nothing.
+    const sent = messages.length;
+    z.interact(1, 500_001);
+    expect(messages.length).toBe(sent);
+    for (let i = 0; i < 20 * 6.5; i++) z.step();
+    expect(last(500_000)).toMatchObject({ state: 'present', mover: { state: MOVER_SHUT } });
   });
 
   it('a door exit is taken with the interact key, not by walking in', () => {

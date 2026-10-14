@@ -1,4 +1,4 @@
-import type { StorySequence, StoryStep } from './story.ts';
+import { SEQUENCE_ACTOR_BASE, type StorySequence, type StoryStep } from './story.ts';
 
 /**
  * Runs a scripted sequence's steps on time (executable-analysis.md §17.2). Each track plays its
@@ -153,4 +153,26 @@ export function estimateSequenceMs(sequence: StorySequence, limitMs = 300_000): 
   });
   while (!run.finished && run.elapsedMs < limitMs) run.update(100);
   return run.elapsedMs;
+}
+
+/**
+ * Where a sequence is staged for Drake (not original): the point another actor turns to face as
+ * its first step, when the sequence does not walk Drake anywhere itself (Ws9a's Ursan looks at the
+ * spot by his cell door, where the opening camera frames Drake). The original leaves the stand-in
+ * where the player stood (0x41F830), off camera when the trigger was entered at its far edge.
+ * Original units, Z mirrored; null when the sequence has no such spot.
+ */
+export function stagedPlayerSpot(sequence: StorySequence): [number, number, number] | null {
+  const player = new Set(sequence.actors.flatMap((a, i) => (a && 'player' in a ? [i + SEQUENCE_ACTOR_BASE] : [])));
+  if (!player.size) return null;
+  for (const t of sequence.tracks) {
+    if (player.has(t.actor) && t.steps.some((i) => sequence.steps[i]?.action === 'MoveToPos')) return null;
+  }
+  for (const t of sequence.tracks) {
+    if (player.has(t.actor) || t.actor < SEQUENCE_ACTOR_BASE) continue;
+    const first = sequence.steps[t.steps[0] ?? -1];
+    const at = first?.args['thingtoface'];
+    if (first?.action === 'FaceRel' && Array.isArray(at)) return [at[0], at[1], at[2]];
+  }
+  return null;
 }

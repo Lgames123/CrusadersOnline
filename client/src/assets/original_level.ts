@@ -4,7 +4,7 @@ import { LevelLight } from '../engine/level_light.ts';
 import { dynamicLights } from '../engine/dynamic_lights.ts';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, type ArenaDef, type LevelObject, type LevelBrush, type LevelPlacements, type WorldObjectDef, type WorldObjectState, type DoorMotion, type DoorSwing, stepDoorMotion, swingPose } from '@crusaders/shared';
+import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, type ArenaDef, type LevelObject, type LevelBrush, type LevelPlacements, type WorldObjectDef, type WorldObjectState, type DoorMotion, type DoorSwing, stepDoorMotion, swingPose, type MoverDef, type MoverMotion, moverPose, shutMover, stepMover, useMover } from '@crusaders/shared';
 
 /**
  * An original level converted from the player's own installation (imported in the browser, or
@@ -38,7 +38,7 @@ export interface LevelObjectView {
 
 /**
  * A door or lever brush: its world object and the drawn piece (swinging doors turn about their
- * hinge, other doors slide up, levers turn about their mover's axis).
+ * hinge; gates, cell doors and levers follow their keyframe mover).
  */
 export interface DoorView {
   def: WorldObjectDef;
@@ -46,8 +46,8 @@ export interface DoorView {
   state: WorldObjectState;
   /** 0 closed .. 1 open. */
   open: number;
-  /** Levers: the full turn about +Z (radians) of their mover (segment 0x20, 0x48FC90). */
-  tip?: number;
+  /** Gates, cell doors, levers...: the original's keyframe mover and its motion (mover.ts). */
+  mover?: { def: MoverDef; motion: MoverMotion };
   /** Swinging doors: the swing and its motion (null = shut), stepped every frame. */
   swing?: { def: DoorSwing; motion: DoorMotion | null };
 }
@@ -101,7 +101,9 @@ export interface OriginalLevel {
   /** The baked light of the level's floors (characters and props take it), if it has a lightmap. */
   light: LevelLight | null;
   /** `swing`: a swinging door's motion as of now (from the server). */
-  setObjectState(id: number, state: WorldObjectState, swing?: DoorMotion | null): void;
+  setObjectState(id: number, state: WorldObjectState, swing?: DoorMotion | null, mover?: MoverMotion | null): void;
+  /** Sets a brush's mover going here (a cutscene's relay; the server's state follows). */
+  useBrush(name: string): void;
   /** Surface under a point (metres), for footsteps; null off the level. */
   surfaceAt(pos: THREE.Vector3): Surface | null;
   /** Music track of the level act (Music/<n>.mp3), if any. */
@@ -136,12 +138,31 @@ function texturedBrushMesh(brush: LevelBrush, texture: (name: string) => { map: 
   if (!faces.length) return null;
   const s = LEVEL_UNIT_METRES;
   const byTex = new Map<string, { pos: number[]; uv: number[] }>();
+  // Faces are drawn from their outer side only, as the original culls back faces: a see-through
+  // grate's far side does not show through its near side. Brushes are convex: a face looks away
+  // from the brush's centre (its winding is not kept by the Z mirror, so it is set here).
+  const centre = [0, 0, 0];
+  for (const p of brush.points) for (let k = 0; k < 3; k++) centre[k]! += p[k]! / brush.points.length;
   for (const f of faces) {
     const tex = texture(f.texture);
     if (!tex) return null;
     let g = byTex.get(f.texture);
     if (!g) byTex.set(f.texture, (g = { pos: [], uv: [] }));
-    const vert = (i: number) => {
+    const n = [0, 0, 0];
+    const mid = [0, 0, 0];
+    f.indices.forEach((vi, i) => {
+      const a = brush.points[vi]!, b = brush.points[f.indices[(i + 1) % f.indices.length]!]!;
+      n[0]! += (a[1] - b[1]) * (a[2] + b[2]);
+      n[1]! += (a[2] - b[2]) * (a[0] + b[0]);
+      n[2]! += (a[0] - b[0]) * (a[1] + b[1]);
+      for (let k = 0; k < 3; k++) mid[k]! += a[k]! / f.indices.length;
+    });
+    // Newell's normal points the way the polygon winds counter-clockwise (glTF / three.js front).
+    const outward = n[0]! * (mid[0]! - centre[0]!) + n[1]! * (mid[1]! - centre[1]!) + n[2]! * (mid[2]! - centre[2]!) >= 0;
+    const order = f.indices.map((_, i) => i);
+    if (!outward) order.reverse();
+    const vert = (j: number) => {
+      const i = order[j]!;
       const p = brush.points[f.indices[i]!]!;
       g.pos.push(p[0] * s, p[1] * s, p[2] * s);
       // v = 0 is the picture's bottom row (the TGA rows as stored), as on the level faces.
@@ -161,8 +182,7 @@ function texturedBrushMesh(brush: LevelBrush, texture: (name: string) => { map: 
     geo.addGroup(pos.length / 3, g.pos.length / 3, materials.length);
     pos.push(...g.pos);
     uv.push(...g.uv);
-    // Both sides: the mirrored Z flips the winding of some faces.
-    materials.push(new THREE.MeshBasicMaterial({ map: texture(name)!.map, color: new THREE.Color(BRUSH_SHADE, BRUSH_SHADE, BRUSH_SHADE), side: THREE.DoubleSide }));
+    materials.push(new THREE.MeshBasicMaterial({ map: texture(name)!.map, color: new THREE.Color(BRUSH_SHADE, BRUSH_SHADE, BRUSH_SHADE) }));
   }
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
@@ -413,7 +433,14 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
       const size = manifest.textureSizes?.[name];
       let entry: { map: THREE.Texture; size: [number, number] } | null = null;
       if (file && size) {
-        const map = new THREE.TextureLoader().load(`/generated/${file}`);
+        const map = new THREE.TextureLoader().load(`/generated/${file}`, () => {
+          // Its alpha is known once loaded (the cell doors' grates are see-through).
+          for (const m of (map.userData['materials'] as THREE.MeshBasicMaterial[] | undefined) ?? []) {
+            applyTextureAlpha(m);
+            m.needsUpdate = true;
+          }
+          map.userData['loaded'] = true;
+        });
         map.flipY = false; // as the level's glTF textures
         map.colorSpace = THREE.SRGBColorSpace;
         map.wrapS = map.wrapT = THREE.RepeatWrapping;
@@ -427,20 +454,19 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
     const source = placements.brushes?.[i];
     const mesh = (source && texturedBrushMesh(source, brushTexture)) || brushMesh(b.points, b.name);
     if (!mesh) return;
-    for (const m of [mesh.material].flat()) dynamicLights.enhance(m);
+    for (const m of [mesh.material].flat()) {
+      dynamicLights.enhance(m);
+      const map = (m as THREE.MeshBasicMaterial).map;
+      if (!map) continue;
+      if (map.userData['loaded']) applyTextureAlpha(m as THREE.MeshBasicMaterial);
+      else ((map.userData['materials'] ??= []) as THREE.Material[]).push(m);
+    }
     mesh.name = b.name;
     root.add(mesh);
     const def = b.door !== undefined ? doorDefs.get(b.door) : undefined;
-    let tip: number | undefined;
-    if (def?.kind === 'lever') {
-      // Its mover turns it about Z through (x, y) (segment 0x20; the angle keeps its sign under
-      // the Z mirror). Without one: about its centre, as before.
-      const m = source?.motion;
-      const k = m?.keys.find((_, j) => ((m.types[j] ?? 0) & 0x3f) === 0x20);
-      const c = k
-        ? new THREE.Vector3(k[1] * LEVEL_UNIT_METRES, k[2] * LEVEL_UNIT_METRES, 0)
-        : new THREE.Box3().setFromObject(mesh).getCenter(new THREE.Vector3());
-      tip = k ? (k[0] * Math.PI) / 180 : -Math.PI / 3;
+    if (def?.kind === 'lever' && !b.mover) {
+      // No mover: pivot at its centre so it can tip over when pulled.
+      const c = new THREE.Box3().setFromObject(mesh).getCenter(new THREE.Vector3());
       mesh.geometry.translate(-c.x, -c.y, -c.z);
       mesh.position.copy(c);
     }
@@ -450,7 +476,7 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
       mesh.geometry.translate(-k.cx, 0, -k.cz);
       mesh.position.set(k.cx, 0, k.cz);
       doors.set(def.id, { def, mesh, state: 'present', open: 0, swing: { def: b.swing, motion: null } });
-    } else if (def) doors.set(def.id, { def, mesh, state: 'present', open: 0, ...(tip !== undefined ? { tip } : {}) });
+    } else if (def) doors.set(def.id, { def, mesh, state: 'present', open: 0, ...(b.mover ? { mover: { def: b.mover, motion: shutMover() } } : {}) });
   });
 
   const lights: THREE.PointLight[] = [];
@@ -495,9 +521,13 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
     objects,
     doors,
     torches,
-    setObjectState(id, state, swing) {
+    useBrush(name) {
+      for (const d of doors.values()) if (d.mesh.name === name && d.mover && useMover(d.mover.def, d.mover.motion)) d.state = 'open';
+    },
+    setObjectState(id, state, swing, mover) {
       const door = doors.get(id);
       if (door) door.state = state;
+      if (door?.mover && mover !== undefined) door.mover.motion = mover ? { ...mover } : shutMover();
       if (door?.swing && swing !== undefined) door.swing.motion = state === 'open' && swing ? { ...swing } : null;
       const v = objects.get(id);
       if (!v) return;
@@ -523,11 +553,19 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
           d.mesh.rotation.y = d.swing.motion ? swingPose(d.swing.def, d.swing.motion).angle : 0;
           continue;
         }
+        if (d.mover) {
+          // The brush's points are its rest pose: world point = R p + t.
+          stepMover(d.mover.def, d.mover.motion, dt * 1000);
+          const pose = moverPose(d.mover.def, d.mover.motion);
+          d.mesh.position.set(...pose.t);
+          d.mesh.quaternion.set(...pose.q);
+          continue;
+        }
         const target = d.state === 'open' ? 1 : 0;
         if (d.open === target) continue;
         d.open = target > d.open ? Math.min(1, d.open + dt / DOOR_OPEN_SECONDS) : 0;
         const b = d.def.bounds!;
-        if (d.def.kind === 'lever') d.mesh.rotation.z = (d.tip ?? 0) * d.open;
+        if (d.def.kind === 'lever') d.mesh.rotation.z = (-Math.PI / 3) * d.open;
         else d.mesh.position.y = (b[4] - b[1]) * 0.95 * d.open;
       }
       flames.forEach((f, i) => f.scale.setScalar(1.4 + 0.25 * Math.sin(t * 13 + i * 1.7) + 0.15 * Math.sin(t * 29 + i)));
