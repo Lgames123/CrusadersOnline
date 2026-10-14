@@ -91,6 +91,8 @@ export interface ArenaDef {
   boxes: BoxDef[];
   meshes: TriMeshDef[];
   spawnPoints: { x: number; y: number; z: number }[];
+  /** Original levels: the act's start points (metres; yaw radians, 0 = -Z). A fresh character starts at the first. */
+  starts?: { x: number; y: number; z: number; yaw: number }[];
   /**
    * Hostile spawns: archetype id (game/combat.ts) and position; original levels also carry the
    * placement's own HP, XP value and resists, which override the archetype's.
@@ -111,6 +113,11 @@ export interface ArenaDef {
    * world-object id, its collider gone while it is broken.
    */
   solids?: { points: Float32Array; object?: number }[];
+  /**
+   * Original levels: creatures only a scripted sequence plays (it kills them). Not simulated;
+   * the client of the player who triggers the sequence shows them, as the server's mobs are shared.
+   */
+  puppets?: { archetype: string; placement: number; x: number; y: number; z: number; /** Radians, 0 = -Z. */ yaw?: number }[];
   /** Triggers, scripted sequences and cameras (original levels; original units, Z mirrored). */
   story?: LevelStory;
   /** Original levels: the mesh the act is built on (acts of one mesh share its coordinates). */

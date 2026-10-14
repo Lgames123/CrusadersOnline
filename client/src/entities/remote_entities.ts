@@ -11,7 +11,8 @@ import {
 } from '@crusaders/shared';
 import { ProceduralAvatar, type Avatar, type AvatarKind } from './avatar.ts';
 import type { AvatarFactory } from '../assets/original_models.ts';
-import { TORCH_LIGHT_COLOR, TORCH_LIGHT_HEIGHT, TORCH_LIGHT_INTENSITY, torchRadius } from './torch_light.ts';
+import { TORCH_LIGHT_COLOR, TORCH_LIGHT_HEIGHT, TORCH_LIGHT_INTENSITY, TORCH_DYNAMIC_INTENSITY, torchRadius } from './torch_light.ts';
+import { dynamicLights } from '../engine/dynamic_lights.ts';
 
 export interface RemoteEntity {
   id: number;
@@ -45,6 +46,7 @@ export class RemoteEntities {
   private updateLight(id: number, level: number, pos: THREE.Vector3): void {
     let light = this.lights.get(id);
     if (!level) {
+      dynamicLights.remove(`torch:${id}`);
       if (light) {
         this.scene.remove(light);
         this.lights.delete(id);
@@ -58,6 +60,7 @@ export class RemoteEntities {
     }
     light.distance = torchRadius(level);
     light.position.set(pos.x, pos.y + TORCH_LIGHT_HEIGHT, pos.z);
+    dynamicLights.set(`torch:${id}`, light.position, TORCH_LIGHT_COLOR, TORCH_DYNAMIC_INTENSITY, light.distance, 0.08);
   }
 
   get count(): number {

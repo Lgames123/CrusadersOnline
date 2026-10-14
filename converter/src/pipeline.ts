@@ -66,7 +66,7 @@ export interface ConvertReport {
   warnings: string[];
 }
 
-const MANIFEST_VERSION = '1.14.0'; // 1.14: story (triggers, sequences, cameras), rules/strings.json; 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers; 1.9: door sounds; 1.10: lightmap UVs at 16 bytes a vertex; 1.11: lightmap seams stitched; 1.12: prop model boxes, model names in lower case; 1.13: creature facing
+const MANIFEST_VERSION = '1.15.0'; // 1.15: level start points; 1.14: story (triggers, sequences, cameras), rules/strings.json; 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers; 1.9: door sounds; 1.10: lightmap UVs at 16 bytes a vertex; 1.11: lightmap seams stitched; 1.12: prop model boxes, model names in lower case; 1.13: creature facing
 /** Bump when level output changes so cached levels are rebuilt. */
 const LEVEL_EMIT_VERSION = '2';
 
@@ -418,6 +418,8 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
             ...(p.trigger ? { trigger: { polygon: p.trigger.polygon.map(([x, z]) => [x, -z]), yMin: p.trigger.yMin, yMax: p.trigger.yMax } } : {}),
           })),
         story: mirrorStory(cap.story),
+        // Headings stay in the original's degrees (D3D, unmirrored); the arena converts them.
+        starts: cap.starts.map((s) => ({ position: [s.position[0], s.position[1], -s.position[2]], heading: s.angles[1] })),
         objects: cap.objects.map((o) => {
           const model = o.kind === 'sprite' ? undefined : modelById.get(o.modelId);
           const glb = model ? manifest.models[model] : undefined;

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { LevelLight } from './level_light.ts';
+import { dynamicLights } from './dynamic_lights.ts';
 
 /**
  * Characters, props and items lit like the level: unlit texture times the light of the floor
@@ -107,6 +108,7 @@ function unlitMaterials(object: THREE.Object3D): THREE.MeshBasicMaterial[] {
           name: src.name,
         });
         c.color.copy(DEFAULT_LIGHT);
+        dynamicLights.enhance(c);
         copies.set(m, c);
         list.push(c);
       }

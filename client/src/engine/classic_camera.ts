@@ -14,7 +14,9 @@ import { CHARACTER_GROUPS, LEVEL_UNIT_METRES, type MovementWorld } from '@crusad
  *   feet, it moves in 1 ft at a time until the line is clear.
  * - Eye and aim point chase their targets each frame at a rate that grows with distance
  *   (lazy when close, quick when far), with an extra pull while the character stands still.
- * - Fixed horizontal field of view of 2·atan(100/120) ≈ 79.6°; near 0.5 ft, far 1600 ft.
+ * - View window ±100 × ±75 at distance 120 (79.6° × 64°): the original's 3D view always filled its
+ *   4:3 screen (the HUD only overlays it). Other window shapes keep that whole window in view:
+ *   wider ones show more at the sides, narrower ones more above and below. Near 0.5 ft, far 1600 ft.
  */
 const FT = LEVEL_UNIT_METRES;
 const ANCHOR_UP = 4;
@@ -24,13 +26,19 @@ const AIM_AHEAD = 8;
 const SIGHT_ORIGIN_UP = 2;
 const EYE_RATE = 0.002;
 const AIM_RATE = 0.0008;
-export const CLASSIC_HFOV = 2 * Math.atan(100 / 120);
+/** The original's view window at distance 120 (0x430470; 0x42E5D0 fits its height to the 4:3 screen). */
+const WINDOW_X = 100 / 120;
+const WINDOW_Y = 75 / 120;
 const NEAR = 0.5 * FT;
 const FAR = 1600 * FT;
 
-/** Vertical FOV (degrees, for three.js) that keeps the horizontal FOV fixed. */
-export function classicVerticalFov(aspect: number): number {
-  return THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(CLASSIC_HFOV / 2) / aspect));
+/**
+ * Vertical FOV (degrees, for three.js) showing the original's whole view window. `band`: the
+ * fraction of the screen's height the picture is seen in (cutscene bars cover the rest).
+ */
+export function classicVerticalFov(aspect: number, band = 1): number {
+  const half = Math.max(WINDOW_Y, WINDOW_X / (aspect / band));
+  return THREE.MathUtils.radToDeg(2 * Math.atan(half / band));
 }
 
 export class ClassicCamera {

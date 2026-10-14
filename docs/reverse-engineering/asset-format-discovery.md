@@ -273,6 +273,7 @@ The cap DB ends with a **per-type object table**: 225 types (`NUM_CAP_OBJ_TYPES`
 
 | Type | Object | Fields |
 |---|---|---|
+| 0x06 | start points | header +0x20 records of 7 dwords: x, y, z, pitch, heading, roll (degrees), 1. A new game puts Drake at the first (0x476F20: angles to +0x1CC / +0x1C8 / +0x1D0; heading D3D, facing (sin, cos) in x, z); a loadlevel with a start index uses that one |
 | 0x13 | exit trigger | +4 volume, +8 activation (bit 0 walked into, bit 3 use key), +0x0F entry number, +0x34 the portal record (§6.2.2), +0x44 start position |
 | 0x14 | flag trigger | +4 volume, +8 activation; entering sets its flag (0x462A70), a TriggerFlag step sets it too (0x462B00) |
 | 0x1D | quest trigger | +4 volume, +8 activation, +0x0E action mask (0x80 main story), +0x34 quest index, +0x36 player bit; fired by 0x4641F0 |

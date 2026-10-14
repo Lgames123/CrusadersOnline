@@ -264,10 +264,12 @@ Frame time `ms` comes from `0x004FDFA4` (integer milliseconds). With `gap` = dis
 The camera orientation is then derived from eye → aim point (atan2 for yaw and pitch).
 
 ### 10.3 Projection
-View window ±100 × ±75 at distance 120 (`+0x244..+0x250`, `+0x220`): a fixed **horizontal** field of view of 2·atan(100/120) ≈ 79.6°, the vertical extent following the viewport aspect (`0x0042E5D0`). Near 0.5 ft, far 1600 ft (`+0x16C/+0x170`, far clamped to 15–2000).
+View window ±100 × ±75 at distance 120 (`+0x244..+0x250`, `+0x220`, set by `0x430470`; the projection `0x431710` scales x and y by 2·120 / window size). `0x0042E5D0` refits the vertical extent to the 3D viewport's aspect (±100 × h / w), and that viewport is always the whole screen (§10.4), which the original only ran at 4:3: the view is **79.6° × 64°**. Near 0.5 ft, far 1600 ft (`+0x16C/+0x170`, far clamped to 15–2000).
+
+CrusadersOnline keeps that whole 4:3 window in view on any screen (wider windows add to the sides, narrower ones above and below), and during sequences fits it between its cinema bars (not the original's).
 
 ### 10.4 HUD screen size
-Numpad +/− change a screen-size step: with the HUD shown the 3D view uses the top three quarters of the screen, and each step insets it by 16 × 9 pixels (`0x00468960`).
+`0x00468960` lays out the 3D viewport from a screen-size step (HUD byte `+0x90`): at a step ≤ 0 it is the whole screen; a step n ≥ 1 would use the top three quarters inset by 16n × 9n pixels. The keys only move the step between −1 (HUD hidden, `0x468B20`) and 0 (HUD shown, `0x468AB0`), so the 3D view always fills the screen and the HUD overlays it. (Corrected 2026-10-14: an earlier reading took the three-quarter layout for the default.)
 
 ### 10.5 Controls (game Readme)
 ESDF movement (E forward, D back, S/F strafe), arrows / numpad 4-6 rotate, numpad 9/7/5 look up / down / centre, mouse free look, Space jump (with a direction: directional jumps and flips), C crouch (with a direction: rolls), Shift + direction walk carefully. LMB attack (combos by repeated taps; C/Space/E/S/F + LMB select crouch, jump, overhand, left and right attacks), RMB block, Space + RMB shield rush, Tab interact, R cast, Z use item, W/T/Q cycle weapon/spell/item, A quick select, I inventory, M map, H health potion.
@@ -525,6 +527,9 @@ Implemented: `attackSweep` / `hitShove` (`shared/src/game/combat.ts`) and `World
 
 
 ## 17. Scripted Sequences and the Quest Manager (decompiled, 2026-10-14)
+
+### 17.0 Where a new game begins
+The main menu's New Game (0x4A3280) copies `caps\WS9A.cap` into the current-act name (0x58CA0C; Training copies `caps\train.cap`) with load mode 0. Ws9a is the prison: Drake has just beaten the two skeletons (Skeleton01/02 beside him), Captain Ursan's sequence ends in Ws1a. The level load (0x476F20) places Drake, when not arriving through an exit, at the act's first start point (type 0x06, asset-format-discovery.md §6.5): Ws9a (2186.6, 1024.0, 1560.0), heading 0. Arriving through an exit it uses `0x58C9A8` (the matching exit trigger's +0x44 position, §17.1) or the start point the loadlevel names (`0x58D0CE`). The heading's sense (D3D, facing (sin h, cos h)) was checked against the level geometry, not live: from most start points of Ca, Du and Gl that way is the open side.
 
 ### 17.1 Sequences
 A sequence starts when the player enters its flag trigger (each fires once: the flag stays set). At the start (0x41F830) the player is frozen and hidden and a stand-in (`PlayerActor`, global 0x52FFC4, actor 1) takes his transform; at the end (0x419600 -> 0x41FB80) the player is put where the stand-in stands. Each track runs in order; the start conditions are in asset-format-discovery.md §6.5. PlaySound does not wait for the line (a Wait of its Sound.ctx length follows); Wait / Timeline / FadeOut last their argument; CameraTimeline's camera flies its path at its rate. Cs1a's Aerin scene: Drake's line, 3317 ms, Aerin's line, the fade from key 11 (5.5 s) for 3 s, then ScriptedSequenceDone loads Ci1a: 8.5 s, as played.

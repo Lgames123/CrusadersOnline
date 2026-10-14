@@ -16,13 +16,18 @@ export interface Settings {
    * under each character, like the original's projected shadow texture.
    */
   silhouetteShadows: boolean;
+  /**
+   * Enhanced lighting (not original): torches, the Torch Light spell and sparks light the level
+   * and characters around them. Off: the original's baked light only.
+   */
+  enhancedLighting: boolean;
   /** Hit effects at half the original's size (not original; a playtest preference). */
   smallEffects: boolean;
   /** Settings schema version (see OPTIONS_VERSION). */
   optionsVersion?: number;
 }
 
-export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false, musicVolume: 0.5, silhouetteShadows: false, smallEffects: false };
+export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false, musicVolume: 0.5, silhouetteShadows: false, enhancedLighting: false, smallEffects: false };
 
 const KEY = 'crusaders.settings';
 /** Bumped when a default moves back to the original, so earlier stored values reset once. */
@@ -39,6 +44,7 @@ function sanitize(raw: unknown): Settings {
     musicVolume: typeof r.musicVolume === 'number' && Number.isFinite(r.musicVolume) ? Math.min(1, Math.max(0, r.musicVolume)) : CLASSIC_SETTINGS.musicVolume,
     // Stored before it became optional (default on then): back to the original unless chosen again.
     silhouetteShadows: r.silhouetteShadows === true && r.optionsVersion === OPTIONS_VERSION,
+    enhancedLighting: r.enhancedLighting === true,
     smallEffects: r.smallEffects === true,
     optionsVersion: OPTIONS_VERSION,
   };

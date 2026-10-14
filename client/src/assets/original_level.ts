@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LevelLight } from '../engine/level_light.ts';
+import { dynamicLights } from '../engine/dynamic_lights.ts';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, type ArenaDef, type LevelObject, type LevelBrush, type LevelPlacements, type WorldObjectDef, type WorldObjectState, type DoorMotion, type DoorSwing, stepDoorMotion, swingPose } from '@crusaders/shared';
@@ -163,6 +164,8 @@ function texturedBrushMesh(brush: LevelBrush, texture: (name: string) => { map: 
   }
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  // For the enhanced lighting (unlit otherwise).
+  geo.computeVertexNormals();
   return new THREE.Mesh(geo, materials);
 }
 
@@ -279,6 +282,7 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
       material.lightMap = lightMap;
       material.lightMapIntensity = LIGHTMAP_GAIN;
     }
+    if (!isSky) dynamicLights.enhance(material);
     old.dispose();
     mesh.material = material;
     mesh.removeFromParent();
@@ -374,6 +378,7 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
     const source = placements.brushes?.[i];
     const mesh = (source && texturedBrushMesh(source, brushTexture)) || brushMesh(b.points, b.name);
     if (!mesh) return;
+    for (const m of [mesh.material].flat()) dynamicLights.enhance(m);
     mesh.name = b.name;
     root.add(mesh);
     const def = b.door !== undefined ? doorDefs.get(b.door) : undefined;

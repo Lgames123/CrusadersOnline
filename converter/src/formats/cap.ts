@@ -79,6 +79,20 @@ export interface CapLevel {
   brushes: CapBrush[];
   /** Triggers, scripted sequences (cutscenes) and their cameras (cap_story.ts). */
   story: CapStory;
+  /** Drake's start points (type 0x06); a new game puts him at the first. */
+  starts: CapStart[];
+}
+
+/**
+ * A start point: the type-0x06 object points to header +0x20 records of 7 dwords (x, y, z,
+ * three angles in degrees, 1). The level load (0x476F20) copies the first to the player on a new
+ * game: angles [0] -> +0x1CC, [1] -> +0x1C8, [2] -> +0x1D0, set as (pitch, heading, roll).
+ */
+export interface CapStart {
+  /** Original units and axes (feet). */
+  position: [number, number, number];
+  /** Pitch, heading (D3D: facing (sin, cos) in x, z), roll; degrees. */
+  angles: [number, number, number];
 }
 
 /**
@@ -186,7 +200,20 @@ export function parseCap(bytes: Uint8Array, itemNames: ReadonlySet<string> = new
   const portals = parsePortals(data, dv, exitAt);
   const types = capTypeTable(data, dv, view.getUint32(0, true), view.getUint32(4, true));
   const story = parseStory(data, dv, types, { creatureAt, exitAt, parseVolume: (at) => parseTrigger(data, dv, at) ?? null });
-  return { mesh, creatures, objects, portals, music: bytes[0x1c] ?? 0, brushes: parseBrushes(data, dv), story };
+  return { mesh, creatures, objects, portals, music: bytes[0x1c] ?? 0, brushes: parseBrushes(data, dv), story, starts: parseStarts(dv, types, view.getUint32(0x20, true)) };
+}
+
+function parseStarts(dv: DataView, types: ReadonlyMap<number, number[]>, count: number): CapStart[] {
+  const at = types.get(0x06)?.[0];
+  if (at === undefined || count > 64) return [];
+  const out: CapStart[] = [];
+  for (let i = 0; i < count && at + 28 * i + 24 <= dv.byteLength; i++) {
+    const f = (k: number) => Math.round(dv.getFloat32(at + 28 * i + 4 * k, true) * 1000) / 1000;
+    const s: CapStart = { position: [f(0), f(1), f(2)], angles: [f(3), f(4), f(5)] };
+    if (![...s.position, ...s.angles].every(Number.isFinite)) break;
+    out.push(s);
+  }
+  return out;
 }
 
 /**

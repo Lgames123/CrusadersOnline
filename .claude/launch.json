@@ -126,9 +126,8 @@
       ],
       "env": {
         "SERVER_PORT": "8190",
-        "ARENA": "level:ci1b",
-        "DATABASE_URL": "pglite:local/pgdata-story",
-        "DEV_GUEST_SPAWN": "624,278.6,-473.7"
+        "ARENA": "level:ws9a",
+        "DATABASE_URL": "pglite:local/pgdata-story"
       },
       "port": 8190
     }

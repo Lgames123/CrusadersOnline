@@ -346,6 +346,20 @@ class OriginalAvatar implements Avatar {
     return (clip.duration * (t1 - t0)) / (this.clipScale * speed);
   }
 
+  showHeld(side: 'right' | 'left', visible: boolean): void {
+    const end = side === 'right' ? 'RIGHT' : 'LEFT';
+    this.object.traverse((o) => {
+      if (o.name.includes('WPN') && o.name.trim().endsWith(end)) o.visible = visible;
+    });
+  }
+
+  asmEventSeconds(state: string, event: string, speed = 1): number | null {
+    const name = this.map.asm?.[state];
+    const e = name ? this.events.get(name)?.find((x) => x.name === event) : undefined;
+    // Event frames count the clip's 30 fps frames.
+    return e ? e.frame / 30 / (this.clipScale * (speed > 0 ? speed : 1)) : null;
+  }
+
   setState(anim: number, swingSeconds: number, swingId = 0): void {
     this.holdAt = 0;
     const restart = isAttackAnim(anim) && swingId !== this.swingId;

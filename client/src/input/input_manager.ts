@@ -96,8 +96,13 @@ export class InputManager {
     });
   }
 
+  /** Asks for pointer lock; the browser may refuse (no user gesture, just left with Esc): a click retries. */
   requestLock(): void {
-    void this.element.requestPointerLock();
+    try {
+      Promise.resolve(this.element.requestPointerLock()).catch(() => {});
+    } catch {
+      // Older engines throw instead of rejecting.
+    }
   }
 
   private setPitch(p: number): void {

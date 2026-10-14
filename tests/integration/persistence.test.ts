@@ -7,7 +7,8 @@ const arena = createSyntheticArena();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let rapier: Rapier;
 
-const baseConfig = { port: 0, host: '127.0.0.1', env: 'test' as const, logLevel: 'silent', httpBurst: 1000 };
+// No converted levels (generatedDir '.'): accounts start in the synthetic arena, not the new game's act.
+const baseConfig = { port: 0, host: '127.0.0.1', env: 'test' as const, logLevel: 'silent', httpBurst: 1000, generatedDir: '.' };
 
 beforeAll(async () => {
   rapier = await initPhysics();

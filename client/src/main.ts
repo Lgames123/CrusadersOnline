@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import {
+  ANIM,
   DEFAULT_MOVEMENT_STATS,
+  MOB_ARCHETYPES,
   INPUT,
   INPUT_ATTACK_SHIFT,
   BUILTIN_SPELLS,
@@ -37,11 +39,12 @@ import {
 } from '@crusaders/shared';
 import { createRenderContext } from './engine/renderer.ts';
 import { CameraRig } from './engine/camera_rig.ts';
+import { classicVerticalFov } from './engine/classic_camera.ts';
 import { CLASSIC_SETTINGS, SettingsStore } from './settings.ts';
 import { SettingsPanel } from './ui/settings_panel.ts';
 import { CONTROLS_HELP } from './input/keybindings.ts';
 import { buildArenaMeshes } from './entities/arena.ts';
-import { ProceduralAvatar, type Avatar } from './entities/avatar.ts';
+import { ProceduralAvatar, type Avatar, type AvatarKind } from './entities/avatar.ts';
 import { LocalPlayer } from './entities/local_player.ts';
 import { RemoteEntities } from './entities/remote_entities.ts';
 import { loadOriginalAvatars } from './assets/original_models.ts';
@@ -55,7 +58,8 @@ import { EFFECTS_SCALE, Effects, SMALL_EFFECTS_SCALE } from './engine/effects.ts
 import { Debris } from './engine/debris.ts';
 import { SwingTrails } from './engine/swing_trail.ts';
 import { ModelLighting } from './engine/model_light.ts';
-import { TORCH_LIGHT_COLOR, TORCH_LIGHT_HEIGHT, TORCH_LIGHT_INTENSITY } from './entities/torch_light.ts';
+import { dynamicLights } from './engine/dynamic_lights.ts';
+import { TORCH_LIGHT_COLOR, TORCH_LIGHT_HEIGHT, TORCH_LIGHT_INTENSITY, TORCH_DYNAMIC_INTENSITY } from './entities/torch_light.ts';
 import { connectToWorld } from './network/connect.ts';
 import { CombatUi } from './ui/combat_ui.ts';
 import { Hud } from './ui/hud.ts';
@@ -65,6 +69,18 @@ import { QuestBook, loadGameStrings } from './ui/quest_book.ts';
 import { Cutscene, type Puppet } from './story/cutscene.ts';
 
 const MAX_FRAME_MS = 250;
+
+/** Enhanced lighting (not original): wall torches, the player's Torch Light, sparks. */
+const LEVEL_TORCH_KEY = 'level-torch:';
+const LEVEL_TORCH_COLOR = 0xff9a40;
+const LEVEL_TORCH_INTENSITY = 1.2;
+const LEVEL_TORCH_RADIUS = 8;
+const MY_TORCH_KEY = 'torch:me';
+const SPARK_LIGHT_COLOR = 0xffc070;
+const EVIL_LIGHT_COLOR = 0x60ff50;
+const SPARK_LIGHT_INTENSITY = 2.5;
+const SPARK_LIGHT_RADIUS = 3;
+const SPARK_LIGHT_SECONDS = 0.18;
 
 /** Side of `target` (facing its rotation.y, 0 = -Z) that `from` stands on: 0 front, 1 left, 2 right, 3 back. */
 function impactSide(target: THREE.Object3D, from: THREE.Object3D): number {
@@ -84,13 +100,46 @@ async function main(): Promise<void> {
   // Original assets: imported in this browser (service worker over Cache Storage) or dev server.
   await registerAssetServiceWorker();
   const gameFiles = new GameFilesPanel(document.getElementById('game-files')!);
-  void gameFiles.init().then(() => (gameFiles.visible = true));
+  /** In the world, the game files panel (re-import) shows only with the options menu. */
+  let inWorld = false;
+  let optionsOpen = false;
+  void gameFiles.init().then(() => (gameFiles.visible = !inWorld || optionsOpen));
   const [rapier, originals, sounds, gameStrings, assetManifest] = await Promise.all([
     initPhysics(), loadOriginalAvatars(), SoundBank.load(), loadGameStrings(),
     fetch('/generated/manifest.json').then((r) => (r.ok ? (r.json() as Promise<{ textures?: Record<string, string> }>) : null)).catch(() => null),
   ]);
   const { renderer, scene } = createRenderContext(container);
   const remotes = new RemoteEntities(scene, originals);
+  /**
+   * Creatures only a sequence plays (arena.puppets, e.g. Ws9a's cell guards): not the server's,
+   * shown here when this player's sequence casts them and left where it ends (dead) until the
+   * act is left; the trigger never fires again for this character.
+   */
+  const scenePuppets = new Map<number, Puppet>();
+  const clearScenePuppets = () => {
+    for (const [placement, p] of scenePuppets) {
+      scene.remove(p.object);
+      lighting.forget(`puppet:${placement}`);
+      p.avatar.dispose();
+    }
+    scenePuppets.clear();
+  };
+  const scenePuppet = (placement: number): Puppet | null => {
+    const known = scenePuppets.get(placement);
+    if (known) return known;
+    const def = levelView?.arena.puppets?.find((q) => q.placement === placement);
+    if (!def) return null;
+    const kind = def.archetype as AvatarKind;
+    const avatar = originals?.(kind) ?? new ProceduralAvatar(kind);
+    avatar.object.position.set(def.x, def.y, def.z);
+    avatar.object.rotation.y = def.yaw ?? 0;
+    avatar.setState(ANIM.IDLE, 0);
+    scene.add(avatar.object);
+    lighting.track(`puppet:${placement}`, avatar.object, PLAYER_RADIUS * 1.3, false, true);
+    const p: Puppet = { object: avatar.object, avatar, name: MOB_ARCHETYPES[def.archetype]?.name ?? '', archetype: def.archetype };
+    scenePuppets.set(placement, p);
+    return p;
+  };
   const combatUi = new CombatUi(document.getElementById('world-ui')!);
   const hud = new Hud(document.getElementById('hud')!, document.getElementById('player-panel')!, document.getElementById('death')!);
   const inventoryPanel = new InventoryPanel(document.getElementById('inventory')!);
@@ -98,11 +147,28 @@ async function main(): Promise<void> {
   questBook.setStrings(gameStrings);
   // Scripted sequences (cutscenes): played here, the server waits for the end (CS_CUTSCENE_DONE).
   let cutscene: Cutscene | null = null;
+  /** The view flying back behind Drake after a sequence (OUTRO_SECONDS). */
+  let outro: { camera: THREE.PerspectiveCamera; from: THREE.Vector3; fromQ: THREE.Quaternion; fromFov: number; t: number } | null = null;
+  const OUTRO_SECONDS = 1.5;
+  /** Snapshot count at the latest world entry, while the screen waits black for an opening sequence. */
+  let entryFade: number | null = null;
   const cutsceneUi = document.getElementById('cutscene')!;
+  // Cinema bars over a sequence (not the original's): each CINEMA_BAR of the screen's height, the
+  // camera widened so the original's whole view fits between them.
+  const CINEMA_BAR = 0.06;
+  for (const bar of cutsceneUi.querySelectorAll<HTMLElement>('.bar')) bar.style.height = `${CINEMA_BAR * 100}vh`;
+  const cinemaFov = (cam: THREE.PerspectiveCamera) => {
+    cam.aspect = container.clientWidth / container.clientHeight;
+    cam.fov = classicVerticalFov(cam.aspect, 1 - 2 * CINEMA_BAR);
+    cam.updateProjectionMatrix();
+  };
   const fadeEl = document.getElementById('fade')!;
   const fade = (out: boolean, ms: number) => {
-    fadeEl.style.transition = `opacity ${Math.max(0, ms)}ms linear`;
+    fadeEl.style.transition = ms > 0 ? `opacity ${ms}ms linear` : 'none';
     fadeEl.style.opacity = out ? '1' : '0';
+    // Commit it now: an instant fade and a timed one started in the same frame (Ws9a's opening:
+    // black, then 1.5 s back in) would otherwise merge, and the timed one start from clear.
+    void fadeEl.offsetWidth;
   };
   /** Starts a sequence of the current level (SC_CUTSCENE); set up once the local player exists. */
   let playCutscene: (name: string, actors: (number | null)[]) => void = (name) => session?.cutsceneDone(name);
@@ -146,6 +212,9 @@ async function main(): Promise<void> {
     view?.applyAtmosphere(scene);
     levelView = view;
     lighting.setLevel(view?.light ?? null);
+    // Enhanced lighting: the level's wall torches light the stone around them.
+    dynamicLights.removePrefix(LEVEL_TORCH_KEY);
+    view?.torches.forEach((p, i) => dynamicLights.set(`${LEVEL_TORCH_KEY}${i}`, p, LEVEL_TORCH_COLOR, LEVEL_TORCH_INTENSITY, LEVEL_TORCH_RADIUS, 0.15));
     for (const k of [...lightingKeys]) if (typeof k === 'string' && k.startsWith(PROP_KEY)) (lighting.forget(k), lightingKeys.delete(k));
     for (const [id, v] of view?.objects ?? []) {
       const size = new THREE.Box3().setFromObject(v.object).getSize(new THREE.Vector3());
@@ -165,6 +234,8 @@ async function main(): Promise<void> {
   const headPos = new THREE.Vector3();
   const prompt = document.getElementById('prompt')!;
   let lastStats: { level: number; dead: boolean } | null = null;
+  // Before anything that loads asynchronously reads it (the effects below).
+  const settings = new SettingsStore();
   /** The original's special effects (sparks, blood, bone chips), when the game files are imported. */
   let effects: Effects | null = null;
   void Effects.load(scene).then((e) => {
@@ -192,6 +263,8 @@ async function main(): Promise<void> {
   let myEdge: 'sharp' | 'blunt' = 'blunt';
   /** Set as soon as the session exists: zone / enter events fire before connectToWorld resolves. */
   let live: ClientSession | null = null;
+  /** Heading of the latest world entry, applied to the view once the input exists. */
+  let enterYaw: number | null = null;
   const session: ClientSession | null =
     auth.kind === 'offline'
       ? null
@@ -211,6 +284,7 @@ async function main(): Promise<void> {
             hud.stats(s);
             myTorch.distance = s.light;
             myTorch.visible = s.light > 0;
+            if (!myTorch.visible) dynamicLights.remove(MY_TORCH_KEY);
             if (player) player.dead = s.dead;
             if (player && s.speed) {
               player.clipRate = s.speed;
@@ -248,13 +322,17 @@ async function main(): Promise<void> {
               at.y += 1.2;
               const step = new THREE.Vector3(0, 0.2, 0).addScaledVector(toward, -0.1);
               if (e.blocked) {
+                dynamicLights.flash(at, SPARK_LIGHT_COLOR, SPARK_LIGHT_INTENSITY, SPARK_LIGHT_RADIUS, SPARK_LIGHT_SECONDS);
                 fxBurst('SWORD_DAMAGE', 3, at, step);
                 fxBurst('SWORD_METAL', 3, at, step);
               } else if (e.damage > 0) {
                 const bone = !isMe && CREATURE_SFX[target?.info.archetype ?? '']?.material === 'bone';
                 // Undead blows carry dark damage: the original adds its green flame on the victim.
                 const undeadAttacker = !mine && CREATURE_SFX[remotes.byId.get(e.attacker)?.info.archetype ?? '']?.material === 'bone';
-                if (undeadAttacker) effects.spawn('FIREBALL_PROJ_EVIL_SPAWN', at);
+                if (undeadAttacker) {
+                  effects.spawn('FIREBALL_PROJ_EVIL_SPAWN', at);
+                  dynamicLights.flash(at, EVIL_LIGHT_COLOR, SPARK_LIGHT_INTENSITY, SPARK_LIGHT_RADIUS, 0.4);
+                }
                 if (bone) {
                   // The victim also sheds 5 chips in its own texture (debris spawner 0x43E310:
                   // ±1.2 ft about the hit, speed 40), small, so gone after 1.5 s.
@@ -339,15 +417,23 @@ async function main(): Promise<void> {
             errorBox.textContent = `Entering ${name.replace(LEVEL_PREFIX, '').toUpperCase()}…`;
             for (const id of remotes.byId.keys()) (lighting.forget(id), trails.forget(id));
             remotes.clear();
+            clearScenePuppets();
             void showArena(name).then((next) => {
               if (!next || !live) return;
               live.setArena(next);
               live.zoneReady(name);
             });
           },
-          enter: () => {
+          enter: (d) => {
             errorBox.textContent = '';
+            enterYaw = d.yaw ?? null;
+            // From black: an act's opening sequence (the server sends it on its first tick, before
+            // that tick's snapshot) takes the fade over; otherwise the world fades in.
+            fade(true, 0);
+            entryFade = live?.stats.snapshots ?? 0;
+            outro = null;
             if (!live || !player) return; // first entry: the player is created below
+            if (enterYaw !== null) input.yaw = enterYaw;
             player.character = live.character!;
             player.features = live.features;
             chase.mw = live.mw;
@@ -422,26 +508,45 @@ async function main(): Promise<void> {
       const e = id !== null && id !== undefined ? remotes.byId.get(id) : undefined;
       if (e) {
         remotes.scripted.add(e.id);
-        puppets.set(index, { object: e.avatar.object, avatar: e.avatar, name: e.info.name });
+        puppets.set(index, { object: e.avatar.object, avatar: e.avatar, name: e.info.name, ...(e.info.archetype ? { archetype: e.info.archetype } : {}) });
+      } else if (a && 'creature' in a) {
+        const own = scenePuppet(a.creature);
+        if (own) puppets.set(index, own);
       }
     });
     setInventoryOpen(false);
     setQuestBookOpen(false);
     cutsceneUi.hidden = false;
     prompt.hidden = true;
+    clickHint.hidden = true;
     cutscene = new Cutscene({
       story: levelView.arena.story,
       sequence,
       actor: (i) => puppets.get(i) ?? null,
       creature: (placement) => {
         for (const e of remotes.byId.values()) if (e.info.placement === placement) return { object: e.avatar.object, avatar: e.avatar, name: e.info.name };
-        return null;
+        return scenePuppet(placement);
+      },
+      // The creatures' own cries, as a fight's: struck (impact clips) and killed (death clip).
+      animation: (p, state) => {
+        const sfx = CREATURE_SFX[p.archetype ?? ''];
+        if (!sounds || !sfx) return;
+        headPos.copy(p.object.position);
+        headPos.y += p.avatar.headHeight;
+        if (state === 'ASM_HIT_POINTS_DEPLETED') {
+          sounds.play(SFX.impact[sfx.material].sharp, headPos);
+          sounds.play(sfx.death, headPos);
+        } else if (state.startsWith('ASM_IMPACT')) {
+          sounds.play(SFX.impact[sfx.material].sharp, headPos);
+          sounds.play(sfx.damage, headPos);
+        }
       },
       playerSpot: local.object.position.clone(),
       sounds,
       subtitle: (who, text, ms) => showSubtitle(who, text, ms),
       fade,
     }, chase.camera);
+    cinemaFov(cutscene.camera);
   };
   const endCutscene = () => {
     const c = cutscene;
@@ -451,6 +556,16 @@ async function main(): Promise<void> {
     remotes.scripted.clear();
     cutsceneUi.hidden = true;
     session?.cutsceneDone(c.sequence.name);
+    // Drake stays in this act (no level load): the view flies from the sequence's last camera
+    // to its place behind him, facing where the stand-in faces.
+    const loads = c.sequence.steps.some((st) => st.action === 'ScriptedSequenceDone' && st.args['loadlevel']);
+    if (!loads) {
+      input.yaw = local.object.rotation.y;
+      local.placeAt(local.object.position, local.object.rotation.y);
+      chase.snap();
+      outro = { camera: c.camera, from: c.camera.position.clone(), fromQ: c.camera.quaternion.clone(), fromFov: c.camera.fov, t: 0 };
+    }
+    updateHint();
     // A sequence that faded out comes back once the next act (or the same place) is shown.
     window.setTimeout(() => fade(false, 800), 600);
   };
@@ -458,12 +573,13 @@ async function main(): Promise<void> {
   lighting.playerKey = 'me';
   scene.add(local.object);
 
-  const settings = new SettingsStore();
   music.volume = settings.current.musicVolume;
   settings.onChange((s) => (music.volume = s.musicVolume));
   lighting.silhouettes = settings.current.silhouetteShadows;
+  dynamicLights.enabled = settings.current.enhancedLighting;
   settings.onChange((s) => {
     lighting.silhouettes = s.silhouetteShadows;
+    dynamicLights.enabled = s.enhancedLighting;
     if (effects) effects.scale = s.smallEffects ? SMALL_EFFECTS_SCALE : EFFECTS_SCALE;
   });
   // Footsteps on the original clips' own LEFT/RIGHT FOOTSTEP events, in step with the animation,
@@ -476,6 +592,7 @@ async function main(): Promise<void> {
   };
   chase = new CameraRig(mw, container.clientWidth / container.clientHeight);
   const input = new InputManager(renderer.domElement);
+  if (enterYaw !== null) input.yaw = enterYaw;
   const applySettings = () => {
     const s = settings.current;
     chase.zoom = s.cameraZoom;
@@ -511,10 +628,42 @@ async function main(): Promise<void> {
     }
   };
 
-  overlay.addEventListener('click', () => {
+  // Options menu (Esc): settings, controls, re-import, log out. Playing needs pointer lock: a
+  // click on the world takes it; leaving it (Esc) opens the menu, except when the inventory or
+  // the quest book released it.
+  const clickHint = document.getElementById('click-hint')!;
+  let releasing = false;
+  let optionsAt = 0;
+  const updateHint = () => {
+    clickHint.hidden = input.locked || optionsOpen || inventoryPanel.open || questBook.open || !!cutscene;
+  };
+  const play = () => {
     sounds?.unlock();
     music.unlock();
     input.requestLock();
+  };
+  const setOptionsOpen = (open: boolean) => {
+    if (open === optionsOpen) return;
+    optionsOpen = open;
+    overlay.classList.toggle('hidden', !open);
+    gameFiles.visible = open;
+    if (open) {
+      optionsAt = performance.now();
+      setInventoryOpen(false);
+      setQuestBookOpen(false);
+      if (input.locked) {
+        releasing = true;
+        document.exitPointerLock();
+      }
+    } else play();
+    updateHint();
+  };
+  renderer.domElement.addEventListener('click', () => {
+    if (!input.locked && !optionsOpen && !cutscene) play();
+  });
+  document.getElementById('btn-resume')!.addEventListener('click', () => setOptionsOpen(false));
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) setOptionsOpen(false);
   });
 
   // Talking (provisional): the original links each NPC to its lines in the acts' sequence scripts
@@ -635,7 +784,10 @@ async function main(): Promise<void> {
       if (potion) session?.useItem(potion.slot);
     }
   };
-  overlay.classList.remove('hidden');
+  inWorld = true;
+  gameFiles.visible = false;
+  updateHint();
+  play();
   const logoutLink = document.getElementById('btn-logout')!;
   logoutLink.hidden = auth.kind !== 'account';
   logoutLink.addEventListener('click', async (e) => {
@@ -645,17 +797,25 @@ async function main(): Promise<void> {
     location.reload();
   });
   input.onLockChange = (locked) => {
-    overlay.classList.toggle('hidden', locked || inventoryPanel.open || questBook.open);
-    gameFiles.visible = !locked;
+    const ours = releasing;
+    releasing = false;
+    // Esc released the pointer: the options (in a sequence, Esc skips it instead).
+    if (!locked && !ours && !inventoryPanel.open && !questBook.open) {
+      if (cutscene) endCutscene();
+      else setOptionsOpen(true);
+    }
+    updateHint();
   };
 
   // Inventory (online only): I toggles it, releasing the pointer so items can be clicked.
   function setInventoryOpen(open: boolean): void {
     if (!session || open === inventoryPanel.open) return;
     inventoryPanel.open = open;
-    if (open) document.exitPointerLock();
-    else input.requestLock();
-    overlay.classList.toggle('hidden', open || input.locked);
+    if (open && input.locked) {
+      releasing = true;
+      document.exitPointerLock();
+    } else if (!open && !optionsOpen) input.requestLock();
+    updateHint();
   }
   inventoryPanel.onToggleEquip = (slot, equip) => {
     const item = session?.inventory?.items.find((i) => i.slot === slot);
@@ -668,10 +828,13 @@ async function main(): Promise<void> {
     if (!session || open === questBook.open) return;
     questBook.open = open;
     if (open) {
-      document.exitPointerLock();
+      if (input.locked) {
+        releasing = true;
+        document.exitPointerLock();
+      }
       sounds?.play(SFX.turnPage);
-    } else input.requestLock();
-    overlay.classList.toggle('hidden', open || input.locked || inventoryPanel.open);
+    } else if (!optionsOpen) input.requestLock();
+    updateHint();
   }
   questBook.onClose = () => setQuestBookOpen(false);
   questBook.onTurn = () => sounds?.play(SFX.turnPage);
@@ -681,17 +844,28 @@ async function main(): Promise<void> {
       if (e.code === 'Escape' && !e.repeat) endCutscene();
       return;
     }
+    if (e.code === 'Escape') {
+      if (e.repeat) return;
+      // The Esc that released the pointer may arrive too: it opened the menu already.
+      if (optionsOpen) {
+        if (performance.now() - optionsAt > 250) setOptionsOpen(false);
+      } else if (inventoryPanel.open) setInventoryOpen(false);
+      else if (questBook.open) setQuestBookOpen(false);
+      else setOptionsOpen(true);
+      return;
+    }
+    if (optionsOpen) return;
     if (e.code === 'KeyI' && !e.repeat) setInventoryOpen(!inventoryPanel.open);
     else if (e.code === 'F2' && !e.repeat) {
       e.preventDefault();
       setQuestBookOpen(!questBook.open);
-    } else if (e.code === 'Escape' && inventoryPanel.open) setInventoryOpen(false);
-    else if (e.code === 'Escape' && questBook.open) setQuestBookOpen(false);
+    }
   });
 
   window.addEventListener('resize', () => {
     renderer.setSize(container.clientWidth, container.clientHeight);
     chase.resize(container.clientWidth / container.clientHeight);
+    if (cutscene) cinemaFov(cutscene.camera);
   });
 
   if (import.meta.env.DEV) {
@@ -733,8 +907,12 @@ async function main(): Promise<void> {
       local.avatar.update(dt);
       if (cutscene?.finished) endCutscene();
     } else local.render(acc / TICK_MS, dt);
-    if (myTorch.visible) myTorch.position.set(local.object.position.x, local.object.position.y + TORCH_LIGHT_HEIGHT, local.object.position.z);
+    if (myTorch.visible) {
+      myTorch.position.set(local.object.position.x, local.object.position.y + TORCH_LIGHT_HEIGHT, local.object.position.z);
+      dynamicLights.set(MY_TORCH_KEY, myTorch.position, TORCH_LIGHT_COLOR, TORCH_DYNAMIC_INTENSITY, myTorch.distance, 0.08);
+    }
     if (session) remotes.update(session, dt);
+    for (const p of scenePuppets.values()) p.avatar.update(dt);
     effects?.update(dt);
     debris?.update(dt);
     lighting.update(dt, now / 1000);
@@ -753,6 +931,7 @@ async function main(): Promise<void> {
       const fwd = new THREE.Vector3(-Math.sin(w.yaw), 0, -Math.cos(w.yaw));
       const at = new THREE.Vector3(feet.x, feet.y + 1.2, feet.z).addScaledVector(fwd, d - 0.05);
       const normal = fwd.clone().negate().setY(0.6).normalize();
+      dynamicLights.flash(at, SPARK_LIGHT_COLOR, SPARK_LIGHT_INTENSITY, SPARK_LIGHT_RADIUS, SPARK_LIGHT_SECONDS);
       fxBurst('SWORD_DAMAGE', 3, at, normal.clone().multiplyScalar(0.2), normal);
       fxBurst('SWORD_METAL', 3, at, normal.clone().multiplyScalar(0.2), normal);
     }
@@ -760,7 +939,22 @@ async function main(): Promise<void> {
     const movingNow = Math.hypot(local.object.position.x - target.x, local.object.position.z - target.z) > 1e-4;
     target.copy(local.object.position);
     chase.update(target, input.yaw, local.bodyHeading, input.pitch, dt, movingNow);
-    const viewCamera = cutscene ? cutscene.camera : chase.camera;
+    if (entryFade !== null && (cutscene || (session && session.stats.snapshots >= entryFade + 3))) {
+      if (!cutscene) fade(false, 600);
+      entryFade = null;
+    }
+    let viewCamera = cutscene ? cutscene.camera : chase.camera;
+    if (!cutscene && outro) {
+      outro.t += dt;
+      const k = Math.min(1, outro.t / OUTRO_SECONDS);
+      const e = k * k * k * (k * (k * 6 - 15) + 10); // smootherstep
+      outro.camera.position.lerpVectors(outro.from, chase.camera.position, e);
+      outro.camera.quaternion.slerpQuaternions(outro.fromQ, chase.camera.quaternion, e);
+      outro.camera.fov = outro.fromFov + (chase.camera.fov - outro.fromFov) * e;
+      outro.camera.updateProjectionMatrix();
+      viewCamera = outro.camera;
+      if (k >= 1) outro = null;
+    }
     levelView?.update(viewCamera, dt);
     if (sounds) {
       sounds.setListener(viewCamera);
@@ -777,6 +971,7 @@ async function main(): Promise<void> {
       prompt.hidden = !t;
       if (t) prompt.textContent = t.label;
     }
+    dynamicLights.update(viewCamera, dt);
     renderer.render(scene, viewCamera);
     combatUi.update(dt, viewCamera, remotes, container.clientWidth, container.clientHeight);
     hud.update(dt, tick, local.character, session, remotes.count);

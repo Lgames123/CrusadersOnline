@@ -3,6 +3,8 @@ import { BUILTIN_SPELLS } from '@crusaders/shared';
 /** Torch Light spell: a warm light around the caster (radius from default.ctx S0, in feet). */
 export const TORCH_LIGHT_COLOR = 0xffc070;
 export const TORCH_LIGHT_INTENSITY = 6;
+/** Enhanced lighting: the share of a surface's texture colour the torch adds at its centre. */
+export const TORCH_DYNAMIC_INTENSITY = 1.4;
 /** Above the feet, around head height. */
 export const TORCH_LIGHT_HEIGHT = 2;
 

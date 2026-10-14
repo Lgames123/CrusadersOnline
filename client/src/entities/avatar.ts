@@ -47,6 +47,10 @@ export interface Avatar {
    * it plays for, or null without such a clip. Any later setState() takes over again.
    */
   playAsm?(state: string, opts: { t0: number; t1: number; speed: number; loop: boolean; freeze: boolean }): number | null;
+  /** Shows or hides what the right hand (weapon) or left forearm (shield) holds. */
+  showHeld?(side: 'right' | 'left', visible: boolean): void;
+  /** Seconds into an ASM state's clip, played by playAsm at `speed`, at which its authored `event` falls. */
+  asmEventSeconds?(state: string, event: string, speed?: number): number | null;
   update(dt: number): void;
   dispose(): void;
 }
@@ -117,6 +121,11 @@ export class ProceduralAvatar implements Avatar {
       if (isAttackAnim(anim)) this.swingSeconds = Math.max(0.1, swingSeconds);
     }
     this.anim = anim;
+  }
+
+  showHeld(side: 'right' | 'left', visible: boolean): void {
+    if (side === 'right') this.arm.visible = visible;
+    else this.shield.visible = visible;
   }
 
   update(dt: number): void {

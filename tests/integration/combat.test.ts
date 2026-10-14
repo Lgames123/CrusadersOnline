@@ -26,7 +26,7 @@ describe.each(backends)('vertical-slice combat over the network on $name (M08)',
   let db: TestDatabase;
   beforeAll(async () => {
     db = await backend.create();
-    server = await startServer({ port: 0, host: '127.0.0.1', env: 'test', logLevel: 'silent', databaseUrl: db.url, httpBurst: 1000 });
+    server = await startServer({ port: 0, host: '127.0.0.1', env: 'test', logLevel: 'silent', databaseUrl: db.url, httpBurst: 1000, generatedDir: '.' });
   });
   afterAll(async () => {
     await server.close();

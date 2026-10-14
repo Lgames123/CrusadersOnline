@@ -1,7 +1,7 @@
 import { doorSwingFromMotion, type LevelBrushMotion } from './door_swing.ts';
 import { CREATURE_TEMPLATES, npcArchetypeId } from '../game/creatures.ts';
 import type { ArenaDef, BrushDef, PortalDef, TriMeshDef, WorldObjectDef } from './types.ts';
-import type { LevelStory } from '../game/story.ts';
+import { SEQUENCE_ACTOR_BASE, type LevelStory } from '../game/story.ts';
 
 /**
  * Arenas built from an original level converted from the user's own installation
@@ -110,7 +110,22 @@ export interface LevelPlacements {
   brushes?: LevelBrush[];
   /** Triggers, scripted sequences and their cameras (converter 1.14+). */
   story?: LevelStory;
+  /** Drake's start points (converter 1.15+): a new game begins at the first. */
+  starts?: LevelStart[];
 }
+
+export interface LevelStart {
+  /** Original units, Z mirrored. */
+  position: [number, number, number];
+  /** The original's heading, degrees, unmirrored (D3D: facing (sin, cos) in x, z). */
+  heading: number;
+}
+
+/**
+ * The act a new game begins in: the menu's New Game sets caps\WS9A.cap (0x4A3280; Training sets
+ * caps\train.cap), the prison where Drake has just beaten the two skeletons.
+ */
+export const NEW_GAME_ACT = 'ws9a';
 
 /** Horizontal radius / height of a portal trigger without a volume, metres (slice values). */
 export const PORTAL_RADIUS = 1.6;
@@ -324,6 +339,25 @@ function spawnPoints(mesh: TriMeshDef, hostiles: { x: number; y: number; z: numb
   return (good.length ? good : pick(cand)).map((c) => ({ x: c.x, y: c.y + 0.1, z: c.z }));
 }
 
+/** ASM_HIT_POINTS_DEPLETED: a creature's death clip. */
+const ASM_DEATH = 78;
+
+/**
+ * Placements of the creatures a sequence kills (a RunAnimation of the death clip on their
+ * track): actors of the script only (Ws9a's cell guards, Du1c / Du3c's), never fought or respawned.
+ */
+function scriptedDeaths(story: LevelStory | undefined): Set<number> {
+  const out = new Set<number>();
+  for (const q of story?.sequences ?? []) {
+    for (const t of q.tracks) {
+      const a = q.actors[t.actor - SEQUENCE_ACTOR_BASE];
+      if (!a || !('creature' in a)) continue;
+      if (t.steps.some((i) => q.steps[i]?.action === 'RunAnimation' && q.steps[i]!.args['animation'] === ASM_DEATH)) out.add(a.creature);
+    }
+  }
+  return out;
+}
+
 export function buildLevelArena(name: string, collision: Uint8Array, placements: LevelPlacements): ArenaDef {
   const mesh = parseLevelCollision(collision);
   const s = LEVEL_UNIT_METRES;
@@ -331,7 +365,24 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
     .filter((c) => c.disposition === HOSTILE)
     .map((c) => ({ x: c.position[0] * s, y: c.position[1] * s, z: c.position[2] * s }));
   const mobSpawns: ArenaDef['mobSpawns'] = [];
+  const scripted = scriptedDeaths(placements.story);
+  const puppets: NonNullable<ArenaDef['puppets']> = [];
   placements.creatures.forEach((c, placement) => {
+    // Killed by a sequence (Ws9a's two cell guards): the triggering player's client plays them.
+    if (scripted.has(placement)) {
+      const archetype = LEVEL_ARCHETYPES[c.type] ?? (CREATURE_TEMPLATES[c.type] ? npcArchetypeId(c.type) : null);
+      if (archetype) {
+        puppets.push({
+          archetype,
+          placement,
+          x: c.position[0] * s,
+          y: c.position[1] * s + 0.1,
+          z: c.position[2] * s,
+          ...(c.facing ? { yaw: Math.atan2(-c.facing[0], -c.facing[1]) } : {}),
+        });
+      }
+      return;
+    }
     // Citizens, guards, merchants (dispositions 0-2): peaceful, standing at their place.
     if (c.disposition >= 0 && c.disposition < HOSTILE && CREATURE_TEMPLATES[c.type]) {
       mobSpawns.push({
@@ -436,6 +487,11 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
   return {
     name, boxes: [], meshes: [mesh], spawnPoints: spawnPoints(mesh, hostiles, 8), mobSpawns, objects, portals, brushes, solids,
     ...(placements.story ? { story: placements.story } : {}),
+    ...(puppets.length ? { puppets } : {}),
+    // Mirrored, the original's facing (sin h, cos h) becomes (sin h, -cos h): yaw -h (0 = -Z).
+    ...(placements.starts?.length
+      ? { starts: placements.starts.map((p) => ({ x: p.position[0] * s, y: p.position[1] * s + 0.1, z: p.position[2] * s, yaw: (-p.heading * Math.PI) / 180 })) }
+      : {}),
     mesh: placements.mesh,
   };
 }
@@ -462,7 +518,8 @@ export function floorAt(arena: ArenaDef, x: number, z: number, nearY: number, wi
     const y = w0 * v[a + 1]! + w1 * v[b + 1]! + (1 - w0 - w1) * v[c + 1]!;
     const uy = v[b + 1]! - v[a + 1]!, vy = v[c + 1]! - v[a + 1]!;
     const nx = uy * (cz - az) - (bz - az) * vy, ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az), nz = (bx - ax) * vy - uy * (cx - ax);
-    if (Math.abs(ny) / (Math.hypot(nx, ny, nz) || 1) <= 0.7) continue;
+    // Floors only, facing up (every converted mesh winds its floors that way): never a ceiling.
+    if (ny / (Math.hypot(nx, ny, nz) || 1) <= 0.7) continue;
     if (Math.abs(y - nearY) <= window && (best === null || Math.abs(y - nearY) < Math.abs(best - nearY))) best = y;
   }
   return best;

@@ -76,6 +76,26 @@ function storyZone(load = true) {
   return { zone, run, messages, portals, saves };
 }
 
+describe('start points', () => {
+  it("a character with nowhere to resume begins at the act's first start point, facing its way", () => {
+    const arena = createSyntheticArena();
+    arena.starts = [{ x: 2, y: 0.5, z: -3, yaw: -Math.PI / 2 }, { x: 9, y: 0.5, z: 9, yaw: 0 }];
+    const messages: ServerControlMsg[] = [];
+    const zone = new WorldZone(rapier, arena.name, arena, {
+      send: (_c, data) => { if (typeof data === 'string') messages.push(JSON.parse(data) as ServerControlMsg); },
+      portal: () => {},
+      persist: () => {},
+    });
+    zone.join(1, { name: 'New', characterId: 'c1', position: null, yaw: 1234 });
+    zone.join(2, { name: 'Saved', characterId: 'c2', position: { x: 0, y: 0.5, z: 0 }, yaw: quantizeAngle(1) });
+    const enters = messages.flatMap((m) => (m.op === SC.WORLD_ENTER ? [m.d] : []));
+    expect(enters[0]!.spawn).toMatchObject({ x: 2, z: -3 });
+    expect(enters[0]!.yaw).toBeCloseTo((3 * Math.PI) / 2, 3); // -90°, as [0, 2π)
+    expect(enters[1]!.spawn).toMatchObject({ x: 0, z: 0 });
+    expect(enters[1]!.yaw).toBeCloseTo(1, 3);
+  });
+});
+
 describe('story triggers and sequences (server)', () => {
   it('walking into a trigger starts its sequence once; the outcome applies when it is done', () => {
     const t = storyZone();

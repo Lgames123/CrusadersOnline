@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ANIM, INPUT, TICK_DT, SIDE_SWING_CHAIN_SECONDS, SIDE_SWING_RECHAIN_TICKS, gameplayFeatures, type GameplayFeatures, attackAnim, attackMotion, isHitAction, isLayeredSwing, dequantizeAngle, movementAnim, looksGrounded, movementFacingOffset, type AttackKind, attackTiming, type Character, type InputFrame, type Vec3 } from '@crusaders/shared';
+import { ANIM, INPUT, TICK_DT, SIDE_SWING_CHAIN_SECONDS, SIDE_SWING_RECHAIN_TICKS, gameplayFeatures, type GameplayFeatures, attackAnim, attackMotion, isHitAction, isLayeredSwing, dequantizeAngle, movementAnim, looksGrounded, movementFacingOffset, type AttackKind, attackTiming, type Character, type InputFrame, type Vec3, setCharacterState } from '@crusaders/shared';
 import type { Avatar } from './avatar.ts';
 
 /**
@@ -138,6 +138,14 @@ export class LocalPlayer {
   /** Own swing playing: the feet stay planted (sent as INPUT.ROOTED). */
   get rooted(): boolean {
     return (this.swingLeft > 0 && !isLayeredSwing(this.kind)) || this.castLeft > 0;
+  }
+
+  /** A sequence left the stand-in here: the prediction goes on from it (the server moves Drake there too). */
+  placeAt(feet: Readonly<Vec3>, yaw: number): void {
+    setCharacterState(this.character, feet, 0, false);
+    this.prev.x = feet.x; this.prev.y = feet.y; this.prev.z = feet.z;
+    this.offset.set(0, 0, 0);
+    this.facing = this.targetFacing = this.heading = this.targetHeading = yaw;
   }
 
   /** The authoritative state moved the prediction by (dx, dy, dz). */

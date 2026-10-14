@@ -28,6 +28,8 @@ export interface Puppet {
   object: THREE.Object3D;
   avatar: Avatar;
   name: string;
+  /** Creatures: their archetype (cries, impact material). */
+  archetype?: string;
 }
 
 export interface CutsceneContext {
@@ -44,6 +46,8 @@ export interface CutsceneContext {
   subtitle(speaker: string | null, text: string, ms: number): void;
   /** Fade to black (`out`) or back over `ms`. */
   fade(out: boolean, ms: number): void;
+  /** A puppet starts an ASM clip (its sounds: impacts, death). */
+  animation?(p: Puppet, state: string): void;
 }
 
 /** Body turn rate of creatures in sequences, rad/s (the brain's 270 degrees a second). */
@@ -56,6 +60,9 @@ const WALK_SPEED = DEFAULT_MOVEMENT_STATS.walkSpeed;
 const ASM_RUNNING = 1;
 
 const num = (a: StoryArg | undefined, d = 0): number => (typeof a === 'number' ? a : d);
+/** RunAnimation ids of ASM_READY_WEAPON / ASM_READY_SHIELD (ASM_STATE_NAMES). */
+const ASM_READY_WEAPON = 28;
+const ASM_READY_SHIELD = 58;
 
 export class Cutscene {
   readonly sequence: StorySequence;
@@ -71,6 +78,8 @@ export class Cutscene {
   /** The latest step driving each puppet's body (a later step overrides an earlier one's leftovers). */
   private readonly owner = new Map<Puppet, number>();
   private serial = 0;
+  /** Held items the stand-in takes up during the sequence (hidden until its ready clips' SWAP). */
+  private readonly unarmed: Puppet | null = null;
 
   constructor(ctx: CutsceneContext, base: THREE.PerspectiveCamera) {
     this.ctx = ctx;
@@ -79,6 +88,21 @@ export class Cutscene {
     if (ctx.sequence.camera !== undefined) this.setCamera(ctx.sequence.camera);
     else this.camera.copy(base);
     this.run = new SequenceRun(ctx.sequence, { start: (step, _i, actor) => this.start(step, actor) });
+    // Drake readies his sword and shield in the sequence (Ws9a's cell): empty-handed until then.
+    const standIn = this.ctx.actor(this.standIn());
+    const ready = new Set<number>();
+    for (const t of this.sequence.tracks) {
+      if (t.actor !== this.standIn()) continue;
+      for (const i of t.steps) {
+        const st = this.sequence.steps[i];
+        if (st?.action === 'RunAnimation') ready.add(num(st.args['animation'], -1));
+      }
+    }
+    if (standIn && (ready.has(ASM_READY_WEAPON) || ready.has(ASM_READY_SHIELD))) {
+      this.unarmed = standIn;
+      if (ready.has(ASM_READY_WEAPON)) standIn.avatar.showHeld?.('right', false);
+      if (ready.has(ASM_READY_SHIELD)) standIn.avatar.showHeld?.('left', false);
+    }
   }
 
   get finished(): boolean {
@@ -107,6 +131,8 @@ export class Cutscene {
   dispose(): void {
     for (const s of this.stops) s();
     this.stops.length = 0;
+    this.unarmed?.avatar.showHeld?.('right', true);
+    this.unarmed?.avatar.showHeld?.('left', true);
   }
 
   private setCamera(id: number): void {
@@ -236,7 +262,15 @@ export class Cutscene {
     const state = ASM_STATE_NAMES[num(a['animation'], 7)] ?? 'ASM_STANDING';
     const t0 = num(a['t0'], 0);
     const t1 = num(a['t1'], 1) || 1;
-    const freeze = num(a['freeze_at_end'], 1) !== 0;
+    // A creature the sequence kills stays down (the cell guards' death clips are not frozen).
+    const freeze = num(a['freeze_at_end'], 1) !== 0 || state === 'ASM_HIT_POINTS_DEPLETED';
+    this.ctx.animation?.(p, state);
+    // Readying a weapon / shield: it comes into the hand at the clip's SWAP frame.
+    const side = state === 'ASM_READY_WEAPON' ? 'right' : state === 'ASM_READY_SHIELD' ? 'left' : null;
+    if (side) {
+      const at = p.avatar.asmEventSeconds?.(state, 'SWAP', num(a['speed'], 1) || 1) ?? 0;
+      this.later.push({ ms: at * 1000, fn: () => p.avatar.showHeld?.(side, true) });
+    }
     const seconds = p.avatar.playAsm?.(state, { t0, t1, speed: num(a['speed'], 1) || 1, loop: num(a['continuous'], 0) !== 0, freeze }) ?? null;
     // The step counts as done at `tdone` of the clip's played range (it may go on playing); a
     // clip not frozen at its end goes back to standing.

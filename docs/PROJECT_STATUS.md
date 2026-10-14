@@ -146,6 +146,8 @@
   - Client: cutscene player (camera paths, stand-in and NPC puppets with their ASM clips, voice lines with subtitles, fades, letterbox; Esc skips), quest book on F2 with the original frame, tabs and texts.
   - Verified live: Cs1a (Aerin's ride, 8.5 s, then Ci1a), Ci1a (Aerin's farewell), Ci1b (Celestia's briefing: Meet Celestia completed, Horn of Shattering assigned, then Ci2b). 153 tests.
   - Dev only: DEV_GUEST_SPAWN puts guests at a point of the default arena; launch configs story-client (3100) / story-server (8190, own PGlite).
+  - New game, as decompiled: new characters begin in Ws9a (the prison; New Game loads caps\WS9A.cap) at the act's first start point (cap type 0x06, converter 1.15), facing its heading; any character without a saved position in an act starts there too. 155 tests.
+  - Creatures a sequence kills (Ws9a's cell guards in ssEscapeFromCell, Du1c / Du3c's) are not server mobs: the triggering player's client plays them (their cries on impact and death) and leaves them dead; floorAt takes floors only (a sequence's end once put Drake on Ws9a's cell ceiling). 157 tests.
 
 ### Not Yet Done
 - Side quests (26: NPC records, offer / reminder / completion lines, items), relay triggers' other targets (doors, sounds), the intro movies (.bik), the eye-path events.

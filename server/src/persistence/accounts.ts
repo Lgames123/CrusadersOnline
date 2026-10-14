@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import argon2 from 'argon2';
 import type { Kysely } from 'kysely';
-import type { CharacterSummary } from '@crusaders/shared';
+import { LEVEL_PREFIX, NEW_GAME_ACT, type CharacterSummary } from '@crusaders/shared';
 import type { DB } from './schema.ts';
 
 /** OWASP minimum for argon2id (ADR-008). */
@@ -37,7 +37,9 @@ export class AccountRepository {
           .values({ username, password_hash: passwordHash })
           .returning(['id', 'username', 'is_admin'])
           .executeTakeFirstOrThrow();
-        await trx.insertInto('characters').values({ account_id: acc.id, name: username }).execute();
+        // A new game: the first act's start point (no saved position); the server's default
+        // arena instead when that act is not converted.
+        await trx.insertInto('characters').values({ account_id: acc.id, name: username, zone_id: `${LEVEL_PREFIX}${NEW_GAME_ACT}` }).execute();
         return { id: acc.id, username: acc.username, isAdmin: acc.is_admin };
       });
     } catch (err) {

@@ -25,6 +25,8 @@ export interface WorldEnterMsg {
     arena: string;
     serverTick: number;
     spawn: { x: number; y: number; z: number };
+    /** Heading to face (radians, 0 = -Z): the act's start point or the saved one. */
+    yaw?: number;
     /** Non-original gameplay features this server has on (features.ts); absent: none. */
     features?: Partial<GameplayFeatures>;
   };

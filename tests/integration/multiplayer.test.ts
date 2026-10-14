@@ -21,7 +21,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 beforeAll(async () => {
   rapier = await initPhysics();
-  server = await startServer({ port: 0, host: '127.0.0.1', env: 'test', logLevel: 'silent', databaseUrl: 'pglite:memory', httpBurst: 1000 });
+  server = await startServer({ port: 0, host: '127.0.0.1', env: 'test', logLevel: 'silent', databaseUrl: 'pglite:memory', httpBurst: 1000, generatedDir: '.' });
 });
 
 afterAll(async () => {
