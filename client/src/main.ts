@@ -1035,6 +1035,12 @@ async function main(): Promise<void> {
   inventoryPanel.onDrop = (slot) => session?.dropInventoryItem(slot);
   inventoryPanel.onPickup = (object) => session?.interact(object);
   inventoryPanel.onClose = (kind) => setInventoryPanelOpen(kind, false);
+  inventoryPanel.onNotice = (message) => {
+    if (!player) return;
+    headPos.copy(player.object.position);
+    headPos.y += player.avatar.headHeight;
+    combatUi.notice(message, headPos);
+  };
   // Quest book (F2, the original's key), online only.
   function setQuestBookOpen(open: boolean): void {
     if (!session || open === questBook.open) return;

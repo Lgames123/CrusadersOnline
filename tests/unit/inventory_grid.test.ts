@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addItem, BUILTIN_ITEMS, canPlaceGrid, catalogFromItemRules, firstFreeGridPosition, fitsGrid, INVENTORY_GRID, layoutInventoryGrid, layoutLegacyGrid, mergeInventoryStacks, moveInventoryGridItem, overlapsGrid, setEquipped, splitInventoryStack } from '@crusaders/shared';
+import { addItem, BUILTIN_ITEMS, canPlaceGrid, catalogFromItemRules, firstFreeGridPosition, fitsGrid, INVENTORY_GRID, layoutInventoryGrid, layoutItemViews, layoutLegacyGrid, mergeInventoryStacks, moveInventoryGridItem, overlapsGrid, setEquipped, splitInventoryStack } from '@crusaders/shared';
 
 describe('inventory grid geometry', () => {
   it('uses the original dimensions, including inherited fields from item rules', () => {
@@ -105,4 +105,60 @@ describe('inventory grid geometry', () => {
     expect(addItem(inv, 'long_sword', 1, BUILTIN_ITEMS)).toBe(1);
     expect(inv[1]).toMatchObject({ slot: 1, itemId: 'long_sword', x: 1, y: 0 });
   });
+
+  it('preserves saved coordinates in pass 1 regardless of slot order', () => {
+    // Slot 0 has no saved coordinates; Slot 1 has saved x: 0, y: 0.
+    // In pass 1, Slot 1 gets (0, 0); in pass 2, Slot 0 gets placed in the first free spot (1, 0).
+    const inv = [
+      { slot: 0, itemId: 'healing_potion', equipped: false },
+      { slot: 1, itemId: 'healing_potion', equipped: false, x: 0, y: 0 },
+    ];
+    const layout = layoutInventoryGrid(inv, BUILTIN_ITEMS);
+    expect(layout.get(1)).toMatchObject({ x: 0, y: 0 });
+    expect(layout.get(0)).toMatchObject({ x: 1, y: 0 });
+  });
+
+  it('swaps equipped items only when the unequipped item fits the remaining space', () => {
+    // Long sword is 1x3, Battle axe is 1x3. They swap cleanly.
+    const inv = [
+      { slot: 0, itemId: 'long_sword', equipped: true },
+      { slot: 1, itemId: 'battle_axe', equipped: false, x: 0, y: 0 },
+    ];
+    expect(setEquipped(inv, 1, true, BUILTIN_ITEMS)).toBe(true);
+    expect(inv.find((e) => e.slot === 1)?.equipped).toBe(true);
+    expect(inv.find((e) => e.slot === 0)?.equipped).toBe(false);
+    expect(inv.find((e) => e.slot === 0)?.x).toBe(0);
+    expect(inv.find((e) => e.slot === 0)?.y).toBe(0);
+  });
+
+  it('lays out item views without double-counting and allows unequipping 2x3 armor when space exists', () => {
+    // 14 items matching the user screenshot exactly:
+    const items = [
+      { slot: 0, x: 0, y: 0, width: 1, height: 3, equipped: false },
+      { slot: 1, x: 1, y: 0, width: 1, height: 3, equipped: false },
+      { slot: 2, x: 2, y: 0, width: 1, height: 3, equipped: false },
+      { slot: 3, x: 3, y: 0, width: 1, height: 3, equipped: false },
+      { slot: 4, x: 4, y: 0, width: 1, height: 1, equipped: false },
+      { slot: 5, x: 5, y: 0, width: 1, height: 1, equipped: false },
+      { slot: 6, x: 6, y: 0, width: 1, height: 1, equipped: false },
+      { slot: 7, x: 7, y: 0, width: 1, height: 1, equipped: false },
+      { slot: 8, x: 4, y: 1, width: 1, height: 1, equipped: false },
+      { slot: 9, x: 6, y: 1, width: 1, height: 1, equipped: false },
+      { slot: 10, x: 7, y: 1, width: 1, height: 1, equipped: false },
+      { slot: 11, x: 5, y: 2, width: 1, height: 3, equipped: false },
+      { slot: 12, x: 0, y: 3, width: 1, height: 3, equipped: false },
+      { slot: 13, x: 1, y: 3, width: 1, height: 3, equipped: false },
+      // Equipped armor (2x3)
+      { slot: 14, width: 2, height: 3, equipped: true },
+    ];
+
+    const layout = layoutItemViews(items);
+    expect(layout.size).toBe(14);
+    const occupied = [...layout.values()];
+    expect(occupied.length).toBe(14);
+
+    const armorPlacement = firstFreeGridPosition(INVENTORY_GRID, { width: 2, height: 3 }, occupied);
+    expect(armorPlacement).toEqual({ x: 6, y: 2 });
+  });
 });
+

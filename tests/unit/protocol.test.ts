@@ -163,6 +163,9 @@ describe('control message schemas', () => {
       expect(parseClientControl(JSON.stringify({ op: CS.PLAYER_ATTACK, seq: 1, d: { comboIndex: 1, clientTick: 1, kind } }))).not.toBeNull();
     }
     expect(parseClientControl(JSON.stringify({ op: CS.PLAYER_ATTACK, seq: 1, d: { comboIndex: 1, clientTick: 1, kind: 'bash' } }))).toBeNull();
+    // Dropped dynamic items start at 2_000_000 and must not be rejected as malformed
+    expect(parseClientControl(JSON.stringify({ op: CS.INTERACT, seq: 1, d: { object: 2_000_000 } }))).not.toBeNull();
+    expect(parseClientControl(JSON.stringify({ op: CS.INTERACT, seq: 1, d: { object: 2_000_500 } }))).not.toBeNull();
     expect(parseClientControl('{not json')).toBeNull();
     expect(parseClientControl('x'.repeat(5000))).toBeNull();
   });

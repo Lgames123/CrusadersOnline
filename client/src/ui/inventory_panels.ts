@@ -1,4 +1,4 @@
-import { canPlaceGrid, DAMAGE_TYPES, firstFreeGridPosition, INVENTORY_GRID, type GridPlacement, type Inventory, type InventoryItemView } from '@crusaders/shared';
+import { canPlaceGrid, DAMAGE_TYPES, firstFreeGridPosition, INVENTORY_GRID, layoutItemViews, type GridPlacement, type Inventory, type InventoryItemView } from '@crusaders/shared';
 import { HeldItemPreview } from './held_item_preview.ts';
 import { ItemThumbnails } from './item_thumbnails.ts';
 import { itemPreviewModelFile } from '../assets/item_models.ts';
@@ -51,6 +51,7 @@ export class InventoryPanels {
   onPickup: (object: number) => void = () => {};
   onDrop: (slot: number) => void = () => {};
   onClose: (kind: InventoryPanelKind) => void = () => {};
+  onNotice?: (message: string) => void;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -64,7 +65,15 @@ export class InventoryPanels {
       const slot = target.closest<HTMLElement>('[data-slot]');
       const object = target.closest<HTMLElement>('[data-object]');
       const close = target.closest<HTMLElement>('[data-close]');
-      if (slot) this.onToggleEquip(Number(slot.dataset['slot']), slot.dataset['equipped'] !== 'true');
+      if (slot) {
+        const slotNum = Number(slot.dataset['slot']);
+        const equip = slot.dataset['equipped'] !== 'true';
+        if (!equip && !this.canUnequipItem(slotNum)) {
+          this.onNotice?.('Inventory full.');
+          return;
+        }
+        this.onToggleEquip(slotNum, equip);
+      }
       else if (object) this.onPickup(Number(object.dataset['object']));
       else if (close) this.onClose(close.dataset['close'] as InventoryPanelKind);
     });
@@ -140,22 +149,11 @@ export class InventoryPanels {
 
   private bag(): string {
     const bag = (this.inventory?.items ?? []).filter((item) => !item.equipped);
-    const occupied: GridPlacement[] = [];
-    const placed = new Map<number, { item: InventoryItemView; x: number; y: number }>();
-    // Keep authoritative coordinates first, then pack pre-migration records around them.
-    for (const item of [...bag].sort((a, b) => a.slot - b.slot)) {
-      const width = Math.max(1, item.width ?? 1), height = Math.max(1, item.height ?? 1);
-      const saved = item.x === undefined || item.y === undefined ? null : { x: item.x, y: item.y, width, height };
-      const at = saved && canPlaceGrid(INVENTORY_GRID, saved, occupied) ? saved : null;
-      if (at) (occupied.push(at), placed.set(item.slot, { item, x: at.x, y: at.y }));
-    }
-    for (const item of [...bag].sort((a, b) => a.slot - b.slot)) {
-      if (placed.has(item.slot)) continue;
-      const width = Math.max(1, item.width ?? 1), height = Math.max(1, item.height ?? 1);
-      const at = firstFreeGridPosition(INVENTORY_GRID, { width, height }, occupied);
-      if (at) (occupied.push({ ...at, width, height }), placed.set(item.slot, { item, ...at }));
-    }
-    const cards = [...placed.values()].map((entry) => this.itemCard(entry.item, entry)).join('');
+    const placed = layoutItemViews(this.inventory?.items ?? []);
+    const cards = bag.flatMap((item) => {
+      const p = placed.get(item.slot);
+      return p ? [this.itemCard(item, p)] : [];
+    }).join('');
     const overflow = placed.size !== bag.length;
     return `<section class="inv-surface inv-bag" ${this.shown.bag ? '' : 'hidden'} aria-label="Inventory">
       <div class="inv-head"><div><h2>Inventory</h2><span>Shift+I · ${bag.length} items</span></div><button type="button" class="secondary" data-close="bag" aria-label="Close inventory">×</button></div>
@@ -227,16 +225,48 @@ export class InventoryPanels {
     return x >= 0 && y >= 0 && x < INVENTORY_GRID.columns && y < INVENTORY_GRID.rows ? { x, y } : null;
   }
 
+  private canUnequipItem(slot: number): boolean {
+    const item = this.inventory?.items.find((i) => i.slot === slot);
+    if (!item) return false;
+    const placed = layoutItemViews(this.inventory?.items ?? []);
+    const occupied = [...placed.values()];
+    const width = Math.max(1, item.width ?? 1), height = Math.max(1, item.height ?? 1);
+    return firstFreeGridPosition(INVENTORY_GRID, { width, height }, occupied) !== null;
+  }
+
+  private dropOnCharacter(slot: number): void {
+    const item = this.inventory?.items.find((i) => i.slot === slot);
+    if (!item || (item.type !== 'weapon' && item.type !== 'shield' && item.type !== 'armor')) {
+      return;
+    }
+    const prev = this.inventory?.items.find((i) => i.equipped && i.type === item.type);
+    if (prev) {
+      // Swapping: verify that the previously equipped item will fit in the bag once this item is equipped.
+      const bag = (this.inventory?.items ?? []).filter((i) => !i.equipped && i.slot !== slot);
+      const placed = layoutItemViews(bag);
+      const occupied = [...placed.values()];
+      const prevWidth = Math.max(1, prev.width ?? 1), prevHeight = Math.max(1, prev.height ?? 1);
+      const at = firstFreeGridPosition(INVENTORY_GRID, { width: prevWidth, height: prevHeight }, occupied);
+      if (!at) {
+        this.onNotice?.('Inventory full.');
+        return;
+      }
+    }
+    this.onToggleEquip(slot, true);
+  }
+
   private updateDrag(e: PointerEvent): void {
     const drag = this.drag;
     if (!drag) return;
     this.preview.move(e.clientX, e.clientY);
     const under = document.elementFromPoint(e.clientX, e.clientY);
     const overGround = !!under?.closest('.inv-ground');
+    const overCharacter = !!under?.closest('.inv-character');
     const insideBag = !!under?.closest('.inv-bag');
     this.root.querySelector('.inv-ground')?.classList.toggle('drop-hover', overGround);
+    this.root.querySelector('.inv-character')?.classList.toggle('drop-hover', overCharacter);
 
-    if (overGround || !insideBag) {
+    if (overGround || overCharacter || !insideBag) {
       drag.target.hidden = true;
       drag.grid.classList.remove('drag-valid', 'drag-invalid');
       return;
@@ -263,9 +293,12 @@ export class InventoryPanels {
     const drag = this.drag;
     if (!drag) return;
     const under = document.elementFromPoint(e.clientX, e.clientY);
+    const overCharacter = !!under?.closest('.inv-character');
     const overGround = !!under?.closest('.inv-ground');
     const insideBag = !!under?.closest('.inv-bag');
-    if (overGround || !insideBag) {
+    if (overCharacter) {
+      this.dropOnCharacter(drag.slot);
+    } else if (overGround || !insideBag) {
       this.onDrop(drag.slot);
     } else {
       const at = this.dragPosition(e);
@@ -287,6 +320,7 @@ export class InventoryPanels {
     const drag = this.drag;
     if (!drag) return;
     this.root.querySelector('.inv-ground')?.classList.remove('drop-hover');
+    this.root.querySelector('.inv-character')?.classList.remove('drop-hover');
     this.root.querySelectorAll('.inv-dragging').forEach((el) => el.classList.remove('inv-dragging'));
     drag.grid.classList.remove('drag-valid', 'drag-invalid');
     drag.target.remove();

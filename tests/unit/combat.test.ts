@@ -752,4 +752,203 @@ describe('world objects (original level placements)', () => {
     // Only the initial drop 'present' state should exist, no respawn
     expect(respawnMsgs).toHaveLength(1);
   });
+
+  it('expires dropped items after 5 minutes (6000 ticks) and broadcasts gone state', () => {
+    const t = objectZone();
+    t.zone.interact(1, 1);
+    t.zone.step();
+    const potion = t.last(SC.INVENTORY_UPDATE)!.d.items.find((i) => i.itemId === 'healing_potion')!;
+    t.zone.dropInventoryItem(1, potion.slot);
+    t.zone.step();
+
+    const droppedObjMsg = t.messages.filter((m) => m.op === SC.OBJECT_STATE && !m.d.full).flatMap((m) => (m as Extract<ServerControlMsg, { op: typeof SC.OBJECT_STATE }>).d.objects).find((o) => o.id >= 2_000_000)!;
+    expect(droppedObjMsg).toBeDefined();
+    const droppedId = droppedObjMsg.id;
+
+    // Step 5 minutes (20 ticks/sec * 300 sec = 6000 ticks)
+    for (let i = 0; i < 6020; i++) t.zone.step();
+
+    // Verify it expired and became 'gone'
+    const goneMsgs = t.messages.filter((m) => m.op === SC.OBJECT_STATE && !m.d.full).flatMap((m) => (m as Extract<ServerControlMsg, { op: typeof SC.OBJECT_STATE }>).d.objects).filter((o) => o.id === droppedId && o.state === 'gone');
+    expect(goneMsgs.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('enforces a 20-item ground limit per player, instantly removing the oldest on the 21st drop', () => {
+    const t = objectZone();
+    const p = (t.zone as unknown as { players: Map<number, { inventory: InventoryEntry[] }> }).players.get(1)!;
+    // Add 21 separate unequipped potions to inventory
+    for (let s = 2; s <= 22; s++) {
+      p.inventory.push({ slot: s, itemId: 'healing_potion', equipped: false });
+    }
+
+    const droppedIds: number[] = [];
+
+    // Drop first 20 items (slots 2..21)
+    for (let s = 2; s <= 21; s++) {
+      t.zone.dropInventoryItem(1, s);
+      t.zone.step();
+
+      const lastDropped = t.messages.filter((m) => m.op === SC.OBJECT_STATE && !m.d.full).flatMap((m) => (m as Extract<ServerControlMsg, { op: typeof SC.OBJECT_STATE }>).d.objects).filter((o) => o.id >= 2_000_000 && o.state === 'present').at(-1)!;
+      droppedIds.push(lastDropped.id);
+    }
+    expect(droppedIds).toHaveLength(20);
+    const firstDroppedId = droppedIds[0]!;
+
+    // Verify the first item is still present before dropping the 21st
+    const firstBefore21 = t.messages.filter((m) => m.op === SC.OBJECT_STATE && !m.d.full).flatMap((m) => (m as Extract<ServerControlMsg, { op: typeof SC.OBJECT_STATE }>).d.objects).filter((o) => o.id === firstDroppedId && o.state === 'gone');
+    expect(firstBefore21).toHaveLength(0);
+
+    // Drop the 21st item (slot 22)
+    t.zone.dropInventoryItem(1, 22);
+    t.zone.step();
+
+    // The oldest item (firstDroppedId) must have disappeared instantly
+    const firstAfter21 = t.messages.filter((m) => m.op === SC.OBJECT_STATE && !m.d.full).flatMap((m) => (m as Extract<ServerControlMsg, { op: typeof SC.OBJECT_STATE }>).d.objects).filter((o) => o.id === firstDroppedId && o.state === 'gone');
+    expect(firstAfter21).toHaveLength(1);
+  });
+
+  it('allows picking up dropped dynamic items atomically without duplication between two players', () => {
+    const arena = createSyntheticArena();
+    const messages: { connId: number; msg: ServerControlMsg }[] = [];
+    const zone = new WorldZone(rapier, 'atomic', arena, {
+      send: (c, data) => { if (typeof data === 'string') messages.push({ connId: c, msg: JSON.parse(data) }); },
+    }, { random: () => 0 });
+
+    zone.join(1, { name: 'P1', characterId: null, position: { x: 0, y: 0.5, z: 0 }, inventory: [{ slot: 2, itemId: 'healing_potion', equipped: false, quantity: 1, x: 0, y: 0 }] });
+    zone.join(2, { name: 'P2', characterId: null, position: { x: 0, y: 0.5, z: 0 }, inventory: [] });
+
+    // Player 1 drops the potion
+    zone.dropInventoryItem(1, 2);
+    zone.step();
+
+    const dropped = messages
+      .filter((m) => m.msg.op === SC.OBJECT_STATE && !m.msg.d.full)
+      .flatMap((m) => (m.msg as Extract<ServerControlMsg, { op: typeof SC.OBJECT_STATE }>).d.objects)
+      .find((o) => o.id >= 2_000_000 && o.state === 'present');
+    expect(dropped).toBeDefined();
+    const droppedId = dropped!.id;
+
+    // Both players attempt to interact / pick up the same item at the same time
+    zone.interact(1, droppedId);
+    zone.interact(2, droppedId);
+    zone.step();
+
+    // Exactly one player should receive the potion in an INVENTORY_UPDATE
+    const p1Inv = messages.filter((m) => m.connId === 1 && m.msg.op === SC.INVENTORY_UPDATE).at(-1)?.msg as Extract<ServerControlMsg, { op: typeof SC.INVENTORY_UPDATE }>;
+    const p2Inv = messages.filter((m) => m.connId === 2 && m.msg.op === SC.INVENTORY_UPDATE).at(-1)?.msg as Extract<ServerControlMsg, { op: typeof SC.INVENTORY_UPDATE }>;
+
+    const p1Has = p1Inv?.d.items.some((i) => i.itemId === 'healing_potion') ?? false;
+    const p2Has = p2Inv?.d.items.some((i) => i.itemId === 'healing_potion') ?? false;
+    expect(p1Has !== p2Has).toBe(true);
+
+    // Dynamic item was removed from world objects
+    const gone = messages
+      .filter((m) => m.msg.op === SC.OBJECT_STATE && !m.msg.d.full)
+      .flatMap((m) => (m.msg as Extract<ServerControlMsg, { op: typeof SC.OBJECT_STATE }>).d.objects)
+      .find((o) => o.id === droppedId && o.state === 'gone');
+    expect(gone).toBeDefined();
+  });
+
+  it('rejects pickup when bag is full and preserves the ground item', () => {
+    const arena = createSyntheticArena();
+    const messages: { connId: number; msg: ServerControlMsg }[] = [];
+    const zone = new WorldZone(rapier, 'full_bag', arena, {
+      send: (c, data) => { if (typeof data === 'string') messages.push({ connId: c, msg: JSON.parse(data) }); },
+    }, { random: () => 0 });
+
+    zone.join(1, { name: 'P1', characterId: null, position: { x: 0, y: 0.5, z: 0 }, inventory: [{ slot: 0, itemId: 'long_sword', equipped: false, x: 0, y: 0 }] });
+    // Fill P2's bag completely (all 48 cells)
+    const fullBag = Array.from({ length: 48 }, (_, i) => ({
+      slot: i,
+      itemId: 'mace',
+      equipped: false,
+      x: i % 8,
+      y: Math.floor(i / 8),
+    }));
+    zone.join(2, { name: 'P2', characterId: null, position: { x: 0, y: 0.5, z: 0 }, inventory: fullBag });
+
+    zone.dropInventoryItem(1, 0);
+    zone.step();
+
+    const dropped = messages
+      .filter((m) => m.msg.op === SC.OBJECT_STATE && !m.msg.d.full)
+      .flatMap((m) => (m.msg as Extract<ServerControlMsg, { op: typeof SC.OBJECT_STATE }>).d.objects)
+      .find((o) => o.id >= 2_000_000 && o.state === 'present')!;
+
+    // Player 2 with full bag tries to pick it up
+    messages.length = 0;
+    zone.interact(2, dropped.id);
+    zone.step();
+
+    // Must receive bag_full error
+    const err = messages.find((m) => m.connId === 2 && m.msg.op === SC.ERROR)?.msg as Extract<ServerControlMsg, { op: typeof SC.ERROR }> | undefined;
+    expect(err).toBeDefined();
+    expect(err?.d.code).toBe('bag_full');
+    expect(err?.d.message).toBe('Inventory full.');
+  });
+
+  it('rejects equip and sends bag_full when swapped item cannot fit in inventory', () => {
+    const arena = createSyntheticArena();
+    const messages: { connId: number; msg: ServerControlMsg }[] = [];
+    const zone = new WorldZone(rapier, 'equip_full', arena, {
+      send: (c, data) => { if (typeof data === 'string') messages.push({ connId: c, msg: JSON.parse(data) }); },
+    }, { random: () => 0 });
+
+    // Equipped scale_armor (2x3) and banded_armor (2x3) in bag.
+    // The bag is packed with potions so there is no 2x3 space to return scale_armor to the bag.
+    const packedInv = [
+      { slot: 0, itemId: 'scale_armor', equipped: true },
+      { slot: 1, itemId: 'banded_armor', equipped: false, x: 0, y: 0 },
+      ...Array.from({ length: 42 }, (_, i) => ({
+        slot: i + 2,
+        itemId: 'healing_potion',
+        equipped: false,
+        x: (i + 2) % 8,
+        y: Math.floor((i + 2) / 8),
+      })),
+    ];
+    zone.join(1, { name: 'P1', characterId: null, position: { x: 0, y: 0.5, z: 0 }, inventory: packedInv });
+
+    messages.length = 0;
+    zone.equip(1, 1, true);
+    zone.step();
+
+    const err = messages.find((m) => m.connId === 1 && m.msg.op === SC.ERROR)?.msg as Extract<ServerControlMsg, { op: typeof SC.ERROR }> | undefined;
+    expect(err).toBeDefined();
+    expect(err?.d.code).toBe('bag_full');
+    expect(err?.d.message).toBe('Inventory full.');
+  });
+
+  it('picks up Mana Crystals and restores mana when used', () => {
+    const arena = createSyntheticArena();
+    arena.objects = [{ id: 10, kind: 'item', x: 0, y: 0.5, z: 0.5, item: { name: 'Mana Crystals 2', quantity: 2 } }];
+    const messages: { connId: number; msg: ServerControlMsg }[] = [];
+    const zone = new WorldZone(rapier, 'mana_crystals', arena, {
+      send: (c, data) => { if (typeof data === 'string') messages.push({ connId: c, msg: JSON.parse(data) }); },
+    }, { random: () => 0 });
+
+    zone.join(1, { name: 'Mage', characterId: null, mana: 5, position: { x: 0, y: 0.5, z: 0 }, inventory: [] });
+    zone.step();
+
+    // Pick up Mana Crystals 2
+    messages.length = 0;
+    zone.interact(1, 10);
+    zone.step();
+
+    const inv = messages.filter((m) => m.connId === 1 && m.msg.op === SC.INVENTORY_UPDATE).at(-1)?.msg as Extract<ServerControlMsg, { op: typeof SC.INVENTORY_UPDATE }>;
+    expect(inv).toBeDefined();
+    const crystal = inv.d.items.find((i) => i.itemId === 'mana_crystals_2');
+    expect(crystal).toBeDefined();
+    expect(crystal?.quantity).toBe(2);
+
+    // Use one crystal to restore mana
+    zone.useItem(1, crystal!.slot);
+    zone.step();
+
+    const stats = messages.filter((m) => m.connId === 1 && m.msg.op === SC.PLAYER_STATS).at(-1)?.msg as Extract<ServerControlMsg, { op: typeof SC.PLAYER_STATS }>;
+    expect(stats).toBeDefined();
+    expect(stats.d.mana).toBe(10); // 5 + 5 = 10
+  });
 });
+
+

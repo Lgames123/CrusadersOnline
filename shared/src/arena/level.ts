@@ -64,6 +64,8 @@ export interface LevelPortal {
 export const PORTAL_OBJECT_BASE = 900_000;
 /** How close to a door exit's trigger the interact key reaches, metres. */
 export const PORTAL_USE_REACH = 1.5;
+/** Base ID for dynamically spawned objects in the world (e.g. dropped items). */
+export const DYNAMIC_OBJECT_BASE = 2_000_000;
 
 /** A brush (cap class 0x31): name and vertices (original units, Z mirrored; the first is the pivot). */
 export interface LevelBrush {

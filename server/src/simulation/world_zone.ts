@@ -36,6 +36,7 @@ import {
   UNARMED,
   PORTAL_OBJECT_BASE,
   PORTAL_USE_REACH,
+  DYNAMIC_OBJECT_BASE,
   arrivalPoint,
   GOLD_ITEM,
   itemSlug,
@@ -280,8 +281,9 @@ const OBJECT_RESPAWN_TICKS = 20 * 300; // 5 min, so a persistent world refills
 const BREAKABLE_RADIUS = 0.5;
 /** Hit-set key offset so swings can record breakables next to entity ids. */
 const OBJECT_HIT_KEY = 1_000_000;
-/** Base ID for dynamically spawned objects in the world (e.g. dropped items). */
-export const DYNAMIC_OBJECT_BASE = 2_000_000;
+/** Dropped items: expire after 5 minutes (5 * 60 * 20 ticks), max 20 per player on ground. */
+export const DROPPED_ITEM_LIFETIME_TICKS = 20 * 60 * 5;
+export const MAX_DROPPED_ITEMS_PER_PLAYER = 20;
 
 interface WorldObject {
   def: WorldObjectDef;
@@ -292,8 +294,12 @@ interface WorldObject {
   swing?: { def: DoorSwing; points: Float32Array; hull: [number, number][]; motion: DoorMotion | null; blocked: boolean };
   /** Other movers (gates, cell doors, levers): the original's keyframe mover and its motion. */
   mover?: { def: MoverDef; motion: MoverMotion };
-  /** Dynamically dropped item in the world: never respawns, removed upon pickup. */
+  /** Dynamically dropped item in the world: never respawns, removed upon pickup or expiry. */
   dynamic?: boolean;
+  /** Key of player who dropped this item (characterId or connection id). */
+  ownerKey?: string;
+  /** Tick at which the dropped item expires (5 minutes from drop). */
+  expiresAt?: number;
 }
 
 /** One change in an OBJECT_STATE message. */
@@ -563,7 +569,9 @@ export class WorldZone {
   private readonly scratchFrames: InputFrame[] = Array.from({ length: MAX_INPUT_FRAMES }, createInputFrame);
   private readonly frame = createInputFrame();
   private readonly objects = new Map<number, WorldObject>();
-  private nextDynamicObjectId = 2_000_000;
+  private nextDynamicObjectId = DYNAMIC_OBJECT_BASE;
+  /** Dropped item IDs per player (oldest to newest, capped at MAX_DROPPED_ITEMS_PER_PLAYER). */
+  private readonly playerDroppedItems = new Map<string, number[]>();
   /** Height below which a player has fallen out of the level (catchFall). */
   private readonly fallLimit: number;
 
@@ -799,12 +807,24 @@ export class WorldZone {
     const grants = o.def.kind === 'item' ? (o.def.item ? [o.def.item] : []) : (o.def.contents ?? []);
     const loot: string[] = [];
     for (const g of grants) if (this.grantItem(p, g.name, g.quantity)) loot.push(g.quantity > 1 ? `${g.quantity} ${g.name}` : g.name);
+    const anyDef = grants.some((g) => this.items.get(g.name) || this.items.get(itemSlug(g.name)));
     if (o.def.kind === 'item' && grants.length && !loot.length) {
-      this.sendJson(connId, { op: SC.ERROR, d: { code: 'bag_full', message: 'Your bag is full.' } }); // leave it there
+      if (anyDef) {
+        this.sendJson(connId, { op: SC.ERROR, d: { code: 'bag_full', message: 'Inventory full.' } }); // leave it there
+      }
       return;
     }
     if (o.dynamic) {
+      o.state = 'gone';
       this.objects.delete(id);
+      if (o.ownerKey) {
+        const list = this.playerDroppedItems.get(o.ownerKey);
+        if (list) {
+          const idx = list.indexOf(id);
+          if (idx !== -1) list.splice(idx, 1);
+          if (!list.length) this.playerDroppedItems.delete(o.ownerKey);
+        }
+      }
       this.broadcastObjects([{ id, state: 'gone', by: p.entityId, loot }]);
     } else {
       o.state = o.def.kind === 'chest' ? 'open' : 'gone';
@@ -870,7 +890,7 @@ export class WorldZone {
       p.statsDirty = true;
       return true;
     }
-    const def = this.items.get(itemSlug(name));
+    const def = this.items.get(name) ?? this.items.get(itemSlug(name));
     if (!def) return false;
     // A spell book is used as soon as it is touched (items.ctx): the spell is learned.
     if (def.type === 'spellbook' && def.spell) return this.learnSpell(p, def.spell);
@@ -967,9 +987,10 @@ export class WorldZone {
     if (!p || !alive(p)) return;
     const entry = p.inventory.find((e) => e.slot === slot);
     const def = entry && this.items.get(entry.itemId);
-    if (!def || def.type !== 'potion' || !def.heal) return;
+    if (!def || def.type !== 'potion' || (!def.heal && !def.mana)) return;
     takeOne(p.inventory, slot, this.items);
-    p.hp = Math.min(p.maxHp, p.hp + def.heal);
+    if (def.heal) p.hp = Math.min(p.maxHp, p.hp + def.heal);
+    if (def.mana) p.mana = Math.min(p.maxMana, p.mana + def.mana);
     p.statsDirty = true;
     p.inventoryDirty = true;
     this.sendInventory(p);
@@ -1092,6 +1113,24 @@ export class WorldZone {
     if (back.length) this.broadcastObjects(back);
   }
 
+  private expireDroppedObjects(): void {
+    const expired: ObjectChange[] = [];
+    for (const [id, o] of this.objects) {
+      if (!o.dynamic || !o.expiresAt || this.tick < o.expiresAt) continue;
+      this.objects.delete(id);
+      if (o.ownerKey) {
+        const list = this.playerDroppedItems.get(o.ownerKey);
+        if (list) {
+          const idx = list.indexOf(id);
+          if (idx !== -1) list.splice(idx, 1);
+          if (!list.length) this.playerDroppedItems.delete(o.ownerKey);
+        }
+      }
+      expired.push({ id, state: 'gone' });
+    }
+    if (expired.length) this.broadcastObjects(expired);
+  }
+
   /**
    * Equip or unequip the item in an inventory slot (CS_EQUIP_ITEM). Ignored while dead; during a
    * swing the request is deferred to the swing's end so a weapon change never alters a swing
@@ -1151,6 +1190,17 @@ export class WorldZone {
     const record = this.persistRecord(p);
     if (record) this.outbox.persist?.([record], 'progress');
 
+    // Enforce 20-item ground limit per player: oldest item disappears immediately when dropping the 21st.
+    const ownerKey = p.characterId ?? String(connId);
+    const list = this.playerDroppedItems.get(ownerKey) ?? [];
+    while (list.length >= MAX_DROPPED_ITEMS_PER_PLAYER) {
+      const oldestId = list.shift()!;
+      if (this.objects.has(oldestId)) {
+        this.objects.delete(oldestId);
+        this.broadcastObjects([{ id: oldestId, state: 'gone' }]);
+      }
+    }
+
     const id = this.nextDynamicObjectId++;
     const pos = p.character.position;
     const objDef: WorldObjectDef = {
@@ -1167,12 +1217,19 @@ export class WorldZone {
       hp: 0,
       respawnAt: 0,
       dynamic: true,
+      ownerKey,
+      expiresAt: this.tick + DROPPED_ITEM_LIFETIME_TICKS,
     });
+    list.push(id);
+    this.playerDroppedItems.set(ownerKey, list);
     this.broadcastObjects([{ id, state: 'present', def: objDef }]);
   }
 
   private applyEquipRequest(p: Player, slot: number, equip: boolean): void {
-    if (!setEquipped(p.inventory, slot, equip, this.items)) return;
+    if (!setEquipped(p.inventory, slot, equip, this.items)) {
+      this.sendJson(p.connId, { op: SC.ERROR, d: { code: 'bag_full', message: 'Inventory full.' } });
+      return;
+    }
     this.applyEquipment(p);
     p.inventoryDirty = true;
     this.sendInventory(p);
@@ -1581,7 +1638,10 @@ export class WorldZone {
     for (const a of this.actors.values()) if (a.swing && alive(a)) this.updateSwing(a);
 
     // 4. Deaths and respawns (actors and world objects).
-    if (this.objects.size && tick % 20 === 0) this.respawnObjects();
+    if (this.objects.size && tick % 20 === 0) {
+      this.respawnObjects();
+      this.expireDroppedObjects();
+    }
     if (this.objects.size) this.stepDoors();
     for (const a of this.actors.values()) {
       if (a.deadUntil !== 0 && tick >= a.deadUntil) this.respawn(a);

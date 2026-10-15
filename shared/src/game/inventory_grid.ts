@@ -49,22 +49,72 @@ export function layoutLegacyGrid<T extends GridShape>(items: readonly T[], size:
   });
 }
 
-/** Resolves saved coordinates and deterministically places legacy entries that have none. */
 export function layoutInventoryGrid(inv: readonly InventoryEntry[], catalog: ItemCatalog, size: GridSize = INVENTORY_GRID): ReadonlyMap<number, GridPlacement> {
   const out = new Map<number, GridPlacement>();
   const occupied: GridPlacement[] = [];
-  for (const entry of [...inv].filter((e) => !e.equipped).sort((a, b) => a.slot - b.slot)) {
+  const unplaced: { entry: InventoryEntry; width: number; height: number }[] = [];
+  const bag = [...inv].filter((e) => !e.equipped).sort((a, b) => a.slot - b.slot);
+
+  // Pass 1: Keep authoritative saved coordinates first
+  for (const entry of bag) {
     const def = catalog.get(entry.itemId);
     if (!def) continue;
     const saved = entry.x === undefined || entry.y === undefined ? null : { x: entry.x, y: entry.y, width: def.width, height: def.height };
-    const at = saved && canPlaceGrid(size, saved, occupied) ? saved : (() => {
-      const first = firstFreeGridPosition(size, def, occupied);
-      return first ? { ...first, width: def.width, height: def.height } : null;
-    })();
-    if (!at) continue;
-    occupied.push(at);
-    out.set(entry.slot, at);
+    if (saved && canPlaceGrid(size, saved, occupied)) {
+      occupied.push(saved);
+      out.set(entry.slot, saved);
+    } else {
+      unplaced.push({ entry, width: def.width, height: def.height });
+    }
   }
+
+  // Pass 2: Pack pre-migration or displaced records into the first free positions
+  for (const { entry, width, height } of unplaced) {
+    const at = firstFreeGridPosition(size, { width, height }, occupied);
+    if (!at) continue;
+    const placement = { ...at, width, height };
+    occupied.push(placement);
+    out.set(entry.slot, placement);
+  }
+
+  return out;
+}
+
+export interface ItemViewLike {
+  slot: number;
+  width?: number;
+  height?: number;
+  equipped?: boolean;
+  x?: number;
+  y?: number;
+}
+
+/** Lays out pre-dimensioned item views deterministically, matching layoutInventoryGrid without needing catalog lookup. */
+export function layoutItemViews<T extends ItemViewLike>(items: readonly T[], size: GridSize = INVENTORY_GRID): Map<number, GridPlacement> {
+  const out = new Map<number, GridPlacement>();
+  const occupied: GridPlacement[] = [];
+  const unplaced: { item: T; width: number; height: number }[] = [];
+  const bag = [...items].filter((item) => !item.equipped).sort((a, b) => a.slot - b.slot);
+
+  for (const item of bag) {
+    const width = Math.max(1, item.width ?? 1), height = Math.max(1, item.height ?? 1);
+    const saved = item.x === undefined || item.y === undefined ? null : { x: item.x, y: item.y, width, height };
+    if (saved && canPlaceGrid(size, saved, occupied)) {
+      occupied.push(saved);
+      out.set(item.slot, saved);
+    } else {
+      unplaced.push({ item, width, height });
+    }
+  }
+
+  for (const { item, width, height } of unplaced) {
+    const at = firstFreeGridPosition(size, { width, height }, occupied);
+    if (!at) continue;
+    const placement = { ...at, width, height };
+    occupied.push(placement);
+    out.set(item.slot, placement);
+  }
+
   return out;
 }
 

@@ -29,6 +29,8 @@ export interface ItemDef {
   protection?: DamageVector;
   /** Potions with `Use HEAL`: hit points restored (items.ctx `UseParameters`). */
   heal?: number;
+  /** Potions with `Use RESTORE_MANA`: mana restored (items.ctx `UseParameters`). */
+  mana?: number;
   /** Spell books (items.ctx `Use GRANT_SPELL`): the spell learned when picked up. */
   spell?: SpellId;
   /** Several of the same item share one inventory slot. */
@@ -48,8 +50,8 @@ const shield = (name: string, price: number, model?: number): ItemDef =>
   ({ id: itemSlug(name), name, type: 'shield', width: 2, height: 2, price, ...(model !== undefined ? { model } : {}) });
 const armor = (name: string, prot: Partial<Record<DamageType, number>>, price: number, model?: number): ItemDef =>
   ({ id: itemSlug(name), name, type: 'armor', width: 2, height: 3, protection: damageVector(prot, 1), price, ...(model !== undefined ? { model } : {}) });
-const potion = (name: string, heal: number, price: number, model?: number): ItemDef =>
-  ({ id: itemSlug(name), name, type: 'potion', width: 1, height: 1, heal, stackable: true, price, ...(model !== undefined ? { model } : {}) });
+const potion = (name: string, heal: number, price: number, model?: number, mana?: number): ItemDef =>
+  ({ id: itemSlug(name), name, type: 'potion', width: 1, height: 1, ...(heal ? { heal } : {}), ...(mana ? { mana } : {}), stackable: true, price, ...(model !== undefined ? { model } : {}) });
 const spellBook = (name: string, spell: SpellId, price: number, model?: number): ItemDef =>
   ({ id: itemSlug(name), name, type: 'spellbook', width: 1, height: 1, spell, price, ...(model !== undefined ? { model } : {}) });
 const key = (name: string, price: number, model?: number): ItemDef =>
@@ -74,6 +76,10 @@ export const BUILTIN_ITEMS: ItemCatalog = new Map(
     armor('Banded Armor', { SLASH: 0.8, BASH: 0.8 }, 250, 81),
     potion('Healing Potion', 10, 100, 62),
     potion('Greater Healing Potion', 50, 300, 62),
+    potion('Mana Crystals', 0, 20, 69, 5),
+    potion('Mana Crystals 2', 0, 20, 198, 5),
+    potion('Mana Crystals 3', 0, 20, 69, 5),
+    potion('Mana Potion', 0, 100, 62, 25),
     spellBook('Torch Light Spell Book', 'torch_light', 100, 63),
   ].map((d) => [d.id, d]),
 );
@@ -123,14 +129,22 @@ export function catalogFromItemRules(rules: { items: readonly ItemRule[] }): Ite
       // Inherited books keep the parent's Use; the spell is the book's own UseParameters.
       const spell = SPELL_BOOK_PARAMS[String(r.calls?.find((c) => c.name === 'UseParameters')?.args[0] ?? '')];
       if (spell) def = spellBook(r.name, spell, price);
-    } else if (type === 'POTION' && r.fields['Use'] === 'HEAL') {
+    } else if (type === 'POTION') {
+      const use = r.fields['Use'];
       const amount = Number(r.calls?.find((c) => c.name === 'UseParameters')?.args[0] ?? 0);
-      if (amount > 0) def = potion(r.name, amount, price);
-    } else if (type === 'USEABLE' && / Key$/.test(r.name)) {
-      // Door keys (Stone Key, Fain's Key, Room 2 Key...): carried, used on a locked door.
+      def = potion(r.name, use === 'HEAL' ? amount : 0, price, undefined, use === 'RESTORE_MANA' ? amount : undefined);
+    } else if ((type === 'USEABLE' && / Key$/.test(r.name)) || type === 'QUEST' || type === 'RING') {
       def = key(r.name, price);
     }
-    if (def && def.id) out.set(def.id, withSourceShape(def, r.fields));
+    if (def && def.id) {
+      const shaped = withSourceShape(def, r.fields);
+      out.set(shaped.id, shaped);
+      out.set(r.name, shaped);
+      if (typeof r.fields['Name'] === 'string' && r.fields['Name'].trim()) {
+        out.set(itemSlug(r.fields['Name']), shaped);
+        out.set(r.fields['Name'].trim(), shaped);
+      }
+    }
   }
   return out;
 }

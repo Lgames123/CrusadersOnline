@@ -4,7 +4,7 @@ import { LevelLight } from '../engine/level_light.ts';
 import { dynamicLights } from '../engine/dynamic_lights.ts';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, type ArenaDef, type LevelObject, type LevelBrush, type LevelPlacements, type WorldObjectDef, type WorldObjectState, type DoorMotion, type DoorSwing, stepDoorMotion, swingPose, type MoverDef, type MoverMotion, moverPose, shutMover, stepMover, useMover } from '@crusaders/shared';
+import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, DYNAMIC_OBJECT_BASE, type ArenaDef, type LevelObject, type LevelBrush, type LevelPlacements, type WorldObjectDef, type WorldObjectState, type DoorMotion, type DoorSwing, stepDoorMotion, swingPose, type MoverDef, type MoverMotion, moverPose, shutMover, stepMover, useMover } from '@crusaders/shared';
 
 /**
  * An original level converted from the player's own installation (imported in the browser, or
@@ -405,6 +405,14 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
     return p;
   };
   const objects = new Map<number, LevelObjectView>();
+  const CHEST_CLUSTER_RADIUS = 2.5; // metres
+  interface DroppedChestCluster {
+    position: THREE.Vector3;
+    chest: THREE.Object3D;
+    itemIds: Set<number>;
+  }
+  const droppedClusters: DroppedChestCluster[] = [];
+  const chestModelPromise = loadModel('models/chest01.glb');
   const torches: THREE.Vector3[] = [];
   const flames: THREE.Sprite[] = [];
   const flameMat = new THREE.SpriteMaterial({ map: flameTexture(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
@@ -542,27 +550,71 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
       const v = objects.get(id);
       if (!v) return;
       v.state = state;
-      v.object.visible = state !== 'gone';
+      if (id >= DYNAMIC_OBJECT_BASE) {
+        if (state === 'gone') {
+          const cluster = droppedClusters.find((c) => c.itemIds.has(id));
+          if (cluster) {
+            cluster.itemIds.delete(id);
+            if (cluster.itemIds.size === 0) {
+              props.remove(cluster.chest);
+              const idx = droppedClusters.indexOf(cluster);
+              if (idx !== -1) droppedClusters.splice(idx, 1);
+            }
+          }
+        }
+      } else {
+        v.object.visible = state !== 'gone';
+      }
     },
     spawnDynamicObject(def: WorldObjectDef) {
       if (objects.has(def.id)) return;
       const viewPos = new THREE.Vector3(def.x, def.y, def.z);
-      const geom = new THREE.DodecahedronGeometry(0.2);
-      const mat = new THREE.MeshStandardMaterial({ color: 0xd9b45a, emissive: 0x3d3010, roughness: 0.3 });
-      const obj = new THREE.Mesh(geom, mat);
-      obj.position.copy(viewPos);
-      props.add(obj);
+
+      let cluster = droppedClusters.find((c) => c.itemIds.size > 0 && c.position.distanceTo(viewPos) <= CHEST_CLUSTER_RADIUS);
+      if (!cluster) {
+        const clusterPos = viewPos.clone();
+        const chestContainer = new THREE.Group();
+        chestContainer.position.set(def.x / LEVEL_UNIT_METRES, def.y / LEVEL_UNIT_METRES, def.z / LEVEL_UNIT_METRES);
+        props.add(chestContainer);
+
+        chestModelPromise.then((src) => {
+          if (src) {
+            const mesh = cloneSkinned(src);
+            mesh.traverse((m) => {
+              m.castShadow = false;
+              m.receiveShadow = false;
+            });
+            chestContainer.add(mesh);
+          } else {
+            const geom = new THREE.BoxGeometry(2.5, 2.0, 1.8);
+            const mat = new THREE.MeshStandardMaterial({ color: 0x5a3c22, roughness: 0.7 });
+            const fallback = new THREE.Mesh(geom, mat);
+            fallback.position.y = 1.0;
+            chestContainer.add(fallback);
+          }
+        });
+
+        cluster = {
+          position: clusterPos,
+          chest: chestContainer,
+          itemIds: new Set<number>([def.id]),
+        };
+        droppedClusters.push(cluster);
+      } else {
+        cluster.itemIds.add(def.id);
+      }
+
       objects.set(def.id, {
         def: {
           kind: 'item',
           name: def.item?.name ?? 'Item',
-          modelId: 0,
+          modelId: 96,
           rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1],
           hp: 0,
           position: [def.x / LEVEL_UNIT_METRES, def.y / LEVEL_UNIT_METRES, def.z / LEVEL_UNIT_METRES],
           item: def.item ? { name: def.item.name, quantity: def.item.quantity } : undefined,
         },
-        object: obj,
+        object: cluster.chest,
         position: viewPos,
         state: 'present',
       });
