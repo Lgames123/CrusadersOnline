@@ -8,7 +8,7 @@ import { ZoneHost } from './zone_host.ts';
 export interface ZoneManagerEvents {
   deliver(connId: number, data: Uint8Array | string): void;
   persist(records: PersistRecord[], reason: PersistReason): void;
-  portal(arena: string, connId: number, target: string, keep?: { x: number; y: number; z: number; mesh: string }): void;
+  portal(arena: string, connId: number, target: string, crossing?: { x: number; y: number; z: number; yaw: number; mesh?: string }, keep?: { x: number; y: number; z: number; mesh: string }): void;
   transferred(arena: string, connId: number, record: PersistRecord | null, state: TransferState | null): void;
   metrics?(m: ZoneMetrics): void;
   error?(arena: string, err: Error): void;
@@ -91,7 +91,7 @@ export class ZoneManager {
         {
           deliver: (connId, data) => this.events.deliver(connId, data),
           persist: (records, reason) => this.events.persist(records, reason),
-          portal: (connId, target, keep) => this.events.portal(arena, connId, target, keep),
+          portal: (connId, target, crossing, keep) => this.events.portal(arena, connId, target, crossing, keep),
           transferred: (connId, record, state) => this.events.transferred(arena, connId, record, state),
           ...(this.events.metrics ? { metrics: this.events.metrics } : {}),
           error: (err) => this.events.error?.(arena, err),

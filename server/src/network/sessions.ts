@@ -72,7 +72,13 @@ export class SessionManager implements TransportHandlers {
   }
 
   /** A player of `arena` entered a portal to `target` (from the zone worker). */
-  onPortal(arena: string, connId: number, target: string, keep?: { x: number; y: number; z: number; mesh: string }): void {
+  onPortal(
+    arena: string,
+    connId: number,
+    target: string,
+    crossing?: { x: number; y: number; z: number; yaw: number; mesh?: string },
+    keep?: { x: number; y: number; z: number; mesh: string },
+  ): void {
     const s = this.sessions.get(connId);
     if (!s || s.state !== 'in_world' || s.zone !== arena) return;
     if (!this.zones.available(target)) {
@@ -87,18 +93,32 @@ export class SessionManager implements TransportHandlers {
     // Remember the destination; the 'transferred' answer carries the player's state.
     (s as Session & { transferTo?: string }).transferTo = target;
     (s as Session & { transferKeep?: typeof keep }).transferKeep = keep;
+    (s as Session & { transferCrossing?: typeof crossing }).transferCrossing = crossing;
   }
 
   /** The old zone removed the player: save, then send them into the destination zone. */
   onTransferred(arena: string, connId: number, record: PersistRecord | null, state: TransferState | null): void {
-    const s = this.sessions.get(connId) as (Session & { transferTo?: string; transferKeep?: { x: number; y: number; z: number; mesh: string } }) | undefined;
+    const s = this.sessions.get(connId) as
+      | (Session & {
+          transferTo?: string;
+          transferKeep?: { x: number; y: number; z: number; mesh: string };
+          transferCrossing?: { x: number; y: number; z: number; yaw: number; mesh?: string };
+        })
+      | undefined;
     const target = s?.transferTo;
     const keep = s?.transferKeep;
+    const crossing = s?.transferCrossing;
     if (record) this.persist([{ ...record, ...(target ? { zone: target, resetPosition: true } : {}) }]);
     if (!s || !target || !state) return;
     delete s.transferTo;
     delete s.transferKeep;
-    void this.sendToZone(s, target, { ...state, arrivingFrom: arena, ...(keep ? { arrivingAt: { x: keep.x, y: keep.y, z: keep.z }, arrivingMesh: keep.mesh } : {}) });
+    delete s.transferCrossing;
+    void this.sendToZone(s, target, {
+      ...state,
+      arrivingFrom: arena,
+      ...(crossing ? { arrivingCrossing: crossing } : {}),
+      ...(keep ? { arrivingAt: { x: keep.x, y: keep.y, z: keep.z }, arrivingMesh: keep.mesh } : {}),
+    });
   }
 
   /** Announces the arena to the client and waits for CS_ZONE_READY before joining. */

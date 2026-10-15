@@ -9,7 +9,7 @@ export interface ZoneHostEvents {
   metrics?(m: ZoneMetrics): void;
   persist?(records: PersistRecord[], reason: PersistReason): void;
   error?(err: Error): void;
-  portal?(connId: number, target: string, keep?: { x: number; y: number; z: number; mesh: string }): void;
+  portal?(connId: number, target: string, crossing?: { x: number; y: number; z: number; yaw: number; mesh?: string }, keep?: { x: number; y: number; z: number; mesh: string }): void;
   transferred?(connId: number, record: PersistRecord | null, state: TransferState | null): void;
 }
 
@@ -46,7 +46,7 @@ export class ZoneHost {
             events.persist?.(msg.records, msg.reason);
             break;
           case 'portal':
-            events.portal?.(msg.connId, msg.target, msg.keep);
+            events.portal?.(msg.connId, msg.target, msg.crossing, msg.keep);
             break;
           case 'transferred':
             events.transferred?.(msg.connId, msg.record, msg.state);

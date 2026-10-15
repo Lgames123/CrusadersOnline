@@ -42,7 +42,7 @@ export type FromZone =
   /** Character states to save: periodic flush, a player leaving, or final flush before stop. */
   | { t: 'persist'; reason: PersistReason; records: PersistRecord[] }
   /** A player entered a portal trigger (the main thread decides whether to transfer). */
-  | { t: 'portal'; connId: number; target: string; keep?: { x: number; y: number; z: number; mesh: string } }
+  | { t: 'portal'; connId: number; target: string; crossing?: { x: number; y: number; z: number; yaw: number; mesh?: string }; keep?: { x: number; y: number; z: number; mesh: string } }
   | { t: 'transferred'; connId: number; record: PersistRecord | null; state: TransferState | null }
   | { t: 'stopped' };
 

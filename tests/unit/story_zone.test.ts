@@ -56,7 +56,7 @@ function storyZone(load = true) {
   };
   arena.story = story;
   const messages: ServerControlMsg[] = [];
-  const portals: { target: string; keep?: { mesh: string } }[] = [];
+  const portals: { target: string; keep?: { x: number; y: number; z: number; yaw: number; mesh?: string } }[] = [];
   const saves: PersistRecord[] = [];
   const zone = new WorldZone(rapier, arena.name, arena, {
     send: (_c, data) => { if (typeof data === 'string') messages.push(JSON.parse(data) as ServerControlMsg); },

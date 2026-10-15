@@ -194,7 +194,12 @@ export interface ZoneOutbox {
    * A player walked into a portal trigger leading to `target` (once per entry), or a scripted
    * sequence loads another act; `keep`: arrive at this position if `target` is on the same mesh.
    */
-  portal?(connId: number, target: string, keep?: { x: number; y: number; z: number; mesh: string }): void;
+  portal?(
+    connId: number,
+    target: string,
+    crossing?: { x: number; y: number; z: number; yaw: number; mesh?: string },
+    keep?: { x: number; y: number; z: number; mesh: string },
+  ): void;
 }
 
 export interface JoinOptions {
@@ -215,6 +220,8 @@ export interface JoinOptions {
   selectedSpell?: SpellId | null;
   /** Arriving through a portal from this arena: placed at the portal leading back there. */
   arrivingFrom?: string;
+  /** Crossing position and heading when entering the portal in the previous arena. */
+  arrivingCrossing?: { x: number; y: number; z: number; yaw: number; mesh?: string };
   /** A story level change: arrive here if this arena is on `arrivingMesh` (another act of the same level). */
   arrivingAt?: { x: number; y: number; z: number };
   arrivingMesh?: string;
@@ -223,7 +230,7 @@ export interface JoinOptions {
 }
 
 /** Player state carried across a zone transfer (everything but the position). */
-export type TransferState = Omit<JoinOptions, 'position' | 'arrivingFrom' | 'arrivingAt' | 'arrivingMesh'>;
+export type TransferState = Omit<JoinOptions, 'position' | 'arrivingFrom' | 'arrivingAt' | 'arrivingMesh' | 'arrivingCrossing'>;
 
 /** State a zone hands back for saving (see persistence/characters.ts). */
 export interface PersistRecord {
@@ -681,7 +688,7 @@ export class WorldZone {
     if (this.players.has(connId)) throw new Error(`connection ${connId} already in zone`);
     // Nowhere to resume in an original act: its first start point, as a new game (0x476F20).
     const start = !opts.arrivingAt && !opts.arrivingFrom && !validPosition(opts.position) ? this.arena.starts?.[0] : undefined;
-    const arr = opts.arrivingFrom ? arrivalPoint(this.arena, opts.arrivingFrom) : null;
+    const arr = opts.arrivingFrom ? arrivalPoint(this.arena, opts.arrivingFrom, opts.arrivingCrossing) : null;
     const spawn = opts.arrivingAt && opts.arrivingMesh && opts.arrivingMesh === this.arena.mesh && validPosition(opts.arrivingAt)
       ? opts.arrivingAt
       : arr
@@ -791,7 +798,16 @@ export class WorldZone {
     if (p && id >= PORTAL_OBJECT_BASE && id < DYNAMIC_OBJECT_BASE) {
       // A door exit in reach (its trigger, widened by PORTAL_USE_REACH).
       const portal = this.arena.portals?.find((q) => q.id === id - PORTAL_OBJECT_BASE);
-      if (portal?.use && alive(p) && inPortal(portal, p.character.position, PORTAL_USE_REACH)) this.outbox.portal?.(p.connId, portal.target);
+      if (portal?.use && alive(p) && inPortal(portal, p.character.position, PORTAL_USE_REACH)) {
+        const crossing = {
+          x: p.character.position.x,
+          y: p.character.position.y,
+          z: p.character.position.z,
+          yaw: dequantizeAngle(p.yaw),
+          mesh: this.arena.mesh,
+        };
+        this.outbox.portal?.(p.connId, portal.target, crossing);
+      }
       return;
     }
     const o = this.objects.get(id);
@@ -1361,7 +1377,14 @@ export class WorldZone {
         p.inPortal.delete(portal.id);
       } else if (!p.inPortal.has(portal.id)) {
         p.inPortal.add(portal.id);
-        this.outbox.portal?.(p.connId, portal.target);
+        const crossing = {
+          x: pos.x,
+          y: pos.y,
+          z: pos.z,
+          yaw: dequantizeAngle(p.yaw),
+          mesh: this.arena.mesh,
+        };
+        this.outbox.portal?.(p.connId, portal.target, crossing);
       }
     }
   }
@@ -1515,7 +1538,7 @@ export class WorldZone {
     if (record) this.outbox.persist?.([record], 'progress');
     // Another act of the same level keeps Drake where he stands (the acts share the mesh's coordinates).
     const pos = p.character.position;
-    if (load) this.outbox.portal?.(p.connId, `${LEVEL_PREFIX}${load}`, this.arena.mesh ? { x: pos.x, y: pos.y, z: pos.z, mesh: this.arena.mesh } : undefined);
+    if (load) this.outbox.portal?.(p.connId, `${LEVEL_PREFIX}${load}`, this.arena.mesh ? { x: pos.x, y: pos.y, z: pos.z, yaw: dequantizeAngle(p.yaw), mesh: this.arena.mesh } : undefined);
   }
 
   /** Removes the player; returns its final state for saving (null for guests / unknown). */

@@ -1,5 +1,6 @@
 # Context notes
 
+- 2026-10-15 [Zone transfer continuity and collision mesh connectivity](2026-10-15-zone-transfer-continuity-and-connectivity.md) — starts-by-exit removed, shared-frame yaw preservation, and BFS connectivity interior arrival (Antigravity)
 - 2026-10-15 [Zone transfer arrival positioning and facing synchronization](2026-10-15-zone-transfer-arrival-and-facing.md) — Cap start dispatch, geometric interior derivation, and yaw sync preventing portal bounce loops (Antigravity)
 - 2026-10-14 [Citadel portal network transition fixes](2026-10-14-citadel-portal-network-fixes.md) — restored gate volumes, staircase ascending trigger bounds, closest-floor arrival selection without bounces (Antigravity)
 - 2026-10-14 [Inventory grid modernization](2026-10-14-inventory-grid-modernization.md) — resolved item shapes, 8×6 grid, migration 005, authoritative moves/drops, dynamic world loot and three panels (Codex & Antigravity)
