@@ -258,13 +258,16 @@ function floorNear(arena: ArenaDef, portal: PortalDef): { x: number; y: number; 
     let best: { x: number; y: number; z: number; drop: number } | null = null;
     for (const { x, z } of ringAround(portal, r)) {
       const col = column(x, z);
-      // Highest walkable floor within the window, then head room above it.
-      let floor = -Infinity;
-      for (const h of col) if (h.floor && h.y <= at.y + ARRIVAL_MAX_RISE && h.y >= at.y - ARRIVAL_MAX_DROP && h.y > floor) floor = h.y;
-      if (floor === -Infinity) continue;
-      if (col.some((h) => h.y > floor + 0.2 && h.y < floor + ARRIVAL_HEADROOM)) continue;
-      const drop = Math.abs(at.y - floor);
-      if (!best || drop < best.drop) best = { x, y: floor + 0.1, z, drop };
+      // Pick the walkable floor in this column with headroom that minimizes drop from the reference height.
+      let colBest: { y: number; drop: number } | null = null;
+      for (const h of col) {
+        if (!h.floor || h.y > at.y + ARRIVAL_MAX_RISE || h.y < at.y - ARRIVAL_MAX_DROP) continue;
+        if (col.some((c) => c.y > h.y + 0.2 && c.y < h.y + ARRIVAL_HEADROOM)) continue;
+        const drop = Math.abs(at.y - h.y);
+        if (!colBest || drop < colBest.drop) colBest = { y: h.y, drop };
+      }
+      if (!colBest) continue;
+      if (!best || colBest.drop < best.drop) best = { x, y: colBest.y + 0.1, z, drop: colBest.drop };
     }
     if (best) return { x: best.x, y: best.y, z: best.z };
   }

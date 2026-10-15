@@ -80,7 +80,7 @@ function mirrorMoverKey(type: number, [a, b, c]: [number, number, number]): [num
   return [a, b, c];
 }
 
-const MANIFEST_VERSION = '1.18.0'; // 1.18: relays' brush targets; 1.17: level texture v from the picture's bottom; mover keys mirrored by segment type; 1.16: level textures one picture every 15 units; 1.15: level start points; 1.14: story (triggers, sequences, cameras), rules/strings.json; 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers; 1.9: door sounds; 1.10: lightmap UVs at 16 bytes a vertex; 1.11: lightmap seams stitched; 1.12: prop model boxes, model names in lower case; 1.13: creature facing
+const MANIFEST_VERSION = '1.19.0'; // 1.19: citadel portal geometry and triggers; 1.18: relays' brush targets; 1.17: level texture v from the picture's bottom; mover keys mirrored by segment type; 1.16: level textures one picture every 15 units; 1.15: level start points; 1.14: story (triggers, sequences, cameras), rules/strings.json; 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers; 1.9: door sounds; 1.10: lightmap UVs at 16 bytes a vertex; 1.11: lightmap seams stitched; 1.12: prop model boxes, model names in lower case; 1.13: creature facing
 /** Bump when level output changes so cached levels are rebuilt. */
 const LEVEL_EMIT_VERSION = '2';
 
@@ -424,13 +424,17 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
         creatures: cap.creatures.map((c) => ({ ...c, position: [c.position[0], c.position[1], -c.position[2]], facing: [c.facing[0], -c.facing[1]] })),
         portals: cap.portals
           .filter((p) => capFiles.some((f) => f.toLowerCase() === `${p.target.toLowerCase()}.cap`))
-          .map((p) => ({
-            exit: p.exit,
-            target: p.target.toLowerCase(),
-            position: [p.position[0], p.position[1], -p.position[2]],
-            ...(p.use ? { use: true } : {}),
-            ...(p.trigger ? { trigger: { polygon: p.trigger.polygon.map(([x, z]) => [x, -z]), yMin: p.trigger.yMin, yMax: p.trigger.yMax } } : {}),
-          })),
+          .map((p) => {
+            const rawTrigger = p.trigger ? { polygon: p.trigger.polygon.map(([x, z]) => [x, -z] as [number, number]), yMin: p.trigger.yMin, yMax: p.trigger.yMax } : undefined;
+            const trigger = resolveLevelPortalTrigger(name, p.target.toLowerCase(), rawTrigger);
+            return {
+              exit: p.exit,
+              target: p.target.toLowerCase(),
+              position: [p.position[0], p.position[1], -p.position[2]],
+              ...(p.use ? { use: true } : {}),
+              ...(trigger ? { trigger } : {}),
+            };
+          }),
         story: mirrorStory(cap.story),
         // Headings stay in the original's degrees (D3D, unmirrored); the arena converts them.
         starts: cap.starts.map((s) => ({ position: [s.position[0], s.position[1], -s.position[2]], heading: s.angles[1] })),
@@ -475,3 +479,100 @@ function mirrorStory(story: CapStory): CapStory {
     })),
   };
 }
+
+interface LevelPortalTrigger {
+  polygon: [number, number][];
+  yMin: number;
+  yMax: number;
+}
+
+/**
+ * Resolves or completes trigger volumes for level transition portals.
+ * Several original Cap files bound portals to story triggers or omit volPtr on the exit record,
+ * leaving portals to fall back to an unreachable cylinder or a staircase height window that only
+ * triggered when walking down rather than up.
+ */
+function resolveLevelPortalTrigger(act: string, target: string, raw?: LevelPortalTrigger): LevelPortalTrigger | undefined {
+  // Citadel acts stairs going UP to interior palace: span the full tower spiral staircase (872 to 1040 ft)
+  if (/^ci[1-9]a$/.test(act) && target === `${act.slice(0, 3)}b`) {
+    return {
+      polygon: [
+        [2036, -1338],
+        [2036, -1362],
+        [2060, -1362],
+        [2060, -1338],
+      ],
+      yMin: 872,
+      yMax: 1040,
+    };
+  }
+
+  // Citadel next-act exits on the upper stair landing in ci*b
+  if (/^ci[1-9]b$/.test(act) && /^ci[1-9]b$/.test(target) && target !== act) {
+    return {
+      polygon: [
+        [2036, -1328],
+        [2036, -1356],
+        [2060, -1356],
+        [2060, -1328],
+      ],
+      yMin: 855,
+      yMax: 880,
+    };
+  }
+
+  // Corantha <-> Citadel gate portals that lacked direct volPtr in original Caps (from Cap 0x33 volume records)
+  if (act === 'cs1a' && target === 'ci1a') {
+    return {
+      polygon: [
+        [2024, -1618],
+        [2024, -1646],
+        [2090, -1646],
+        [2090, -1618],
+      ],
+      yMin: 1012,
+      yMax: 1045,
+    };
+  }
+  if (act === 'cs2a' && target === 'ci2a') {
+    return {
+      polygon: [
+        [1989, -1650],
+        [1989, -1711],
+        [2100, -1711],
+        [2100, -1650],
+      ],
+      yMin: 1008,
+      yMax: 1040,
+    };
+  }
+  if (act === 'cs3a' && target === 'ci3a') {
+    return {
+      polygon: [
+        [2020, -1618],
+        [2020, -1646],
+        [2086, -1646],
+        [2086, -1618],
+      ],
+      yMin: 994,
+      yMax: 1066,
+    };
+  }
+
+  // Citadel front gates back to Corantha (from Cap 0x33 volume records)
+  if ((act === 'ci1a' || act === 'ci2a' || act === 'ci3a') && target.startsWith('cs')) {
+    return {
+      polygon: [
+        [1990, -1210],
+        [1990, -1248],
+        [2080, -1248],
+        [2080, -1210],
+      ],
+      yMin: 896,
+      yMax: 916,
+    };
+  }
+
+  return raw;
+}
+

@@ -1,5 +1,6 @@
 # Context notes
 
+- 2026-10-14 [Citadel portal network transition fixes](2026-10-14-citadel-portal-network-fixes.md) — restored gate volumes, staircase ascending trigger bounds, closest-floor arrival selection without bounces (Antigravity)
 - 2026-10-14 [Inventory grid modernization](2026-10-14-inventory-grid-modernization.md) — resolved item shapes, 8×6 grid, migration 005, authoritative moves/drops, dynamic world loot and three panels (Codex & Antigravity)
 
 One line per note, newest first: `- YYYY-MM-DD [title](file.md) — one-line hook (agent)`. Each commit adds its note here (rule in `AGENTS.md`). Notes are shared by every agent: read them whoever wrote them.
