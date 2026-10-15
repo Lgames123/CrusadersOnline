@@ -83,6 +83,8 @@ export interface PortalDef {
   x: number;
   y: number;
   z: number;
+  /** Exit number within the level (Cap 0x06 start point index or exit record id). */
+  exit?: number;
   /** The original trigger volume (metres): an x/z polygon between two heights. */
   trigger?: { polygon: [number, number][]; yMin: number; yMax: number };
   /** Door exit: taken with the interact key instead of walking in. */

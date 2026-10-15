@@ -157,72 +157,68 @@ export function inPortal(portal: PortalDef, pos: { x: number; y: number; z: numb
 
 /**
  * Where a player arriving from `fromArena` appears: on the floor next to this arena's portal
- * that leads back there, outside its trigger, else the first spawn point. The original's exit
- * triggers often sit at the dark end of a corridor, past the last floor polygon, so the nearest
- * floor around the trigger (with head room) is searched on the level mesh.
+ * that leads back there, outside its trigger, facing away from the trigger into the level interior,
+ * else the first spawn point. The original level code (loadlevel.c at 0x476F20) checks the Cap's
+ * starts table when exit matches; otherwise interior direction and facing are derived from trigger
+ * geometry so that walking forward along the spawn yaw never re-enters the return trigger.
  */
-export function arrivalPoint(arena: ArenaDef, fromArena: string | undefined): { x: number; y: number; z: number } {
+export function arrivalPoint(arena: ArenaDef, fromArena: string | undefined): { x: number; y: number; z: number; yaw: number } {
   const back = fromArena ? arena.portals?.find((p) => p.target === fromArena) : undefined;
-  const fallback = arena.spawnPoints[0] ?? { x: 0, y: 1, z: 0 };
+  const start0 = arena.starts?.[0];
+  const spawn0 = arena.spawnPoints[0] ?? { x: 0, y: 1, z: 0 };
+  const fallback = {
+    x: spawn0.x,
+    y: spawn0.y,
+    z: spawn0.z,
+    yaw: start0?.yaw ?? 0,
+  };
   if (!back) return fallback;
-  return floorNear(arena, back) ?? fallback;
+  return arrivalNear(arena, back) ?? fallback;
 }
 
-/** Arrival search: ring radii (metres from the trigger centre), directions, height window. */
-const ARRIVAL_RINGS = [0, 0.5, 1, 1.5, 2.5, 3.5, 5, 7, 9.5, 12, 15, 18];
-const ARRIVAL_DIRECTIONS = 24;
+/** Arrival search: ring radii (metres from the trigger boundary), height window, and headroom. */
+const ARRIVAL_RINGS = [1.2, 1.8, 2.5, 3.5, 5, 7, 9.5, 12, 15, 18];
 const ARRIVAL_MAX_DROP = 8;
 // Some exit triggers hang below the floor, at the bottom of a drop (Ca1a -> Ca1b): floors up to 12 m above count.
 const ARRIVAL_MAX_RISE = 12;
 /** Head room needed above the floor (a standing character). */
 const ARRIVAL_HEADROOM = 1.9;
 
-/** Candidate arrival points `r` metres outside a portal's trigger (around its polygon, else its circle). */
-function ringAround(portal: PortalDef, r: number): { x: number; z: number }[] {
-  const out: { x: number; z: number }[] = [];
-  const poly = portal.trigger?.polygon;
-  if (!poly) {
-    for (let k = 0; k < ARRIVAL_DIRECTIONS; k++) {
-      const ang = (k / ARRIVAL_DIRECTIONS) * Math.PI * 2;
-      out.push({ x: portal.x + Math.cos(ang) * (PORTAL_RADIUS + 0.8 + r), z: portal.z + Math.sin(ang) * (PORTAL_RADIUS + 0.8 + r) });
-    }
-    return out;
-  }
-  // Along each edge (every metre), pushed out along its outward normal.
-  const cx = poly.reduce((a, p) => a + p[0], 0) / poly.length;
-  const cz = poly.reduce((a, p) => a + p[1], 0) / poly.length;
-  const d = 0.8 + r;
-  for (let i = 0; i < poly.length; i++) {
-    const [x1, z1] = poly[i]!;
-    const [x2, z2] = poly[(i + 1) % poly.length]!;
-    const len = Math.hypot(x2 - x1, z2 - z1) || 1;
-    let nx = (z2 - z1) / len, nz = -(x2 - x1) / len;
-    // Outward: away from the centroid (the polygon is convex).
-    if (((x1 + x2) / 2 - cx) * nx + ((z1 + z2) / 2 - cz) * nz < 0) {
-      nx = -nx;
-      nz = -nz;
-    }
-    const steps = Math.max(1, Math.ceil(len));
-    for (let k = 0; k <= steps; k++) out.push({ x: x1 + ((x2 - x1) * k) / steps + nx * d, z: z1 + ((z2 - z1) * k) / steps + nz * d });
-  }
-  return out.filter((p) => !inPortal(portal, { x: p.x, y: portal.trigger!.yMin, z: p.z }));
-}
-
 /**
- * The closest point (by ring, then smallest drop) outside the portal's trigger that has a
- * walkable floor below within the height window and nothing overhead for ARRIVAL_HEADROOM.
- * Pure geometry on the collision mesh, so server and tests agree.
+ * Finds the arrival position and facing yaw outside a return portal's trigger:
+ * 1. Checks Cap starts table (0x476F20) if portal carries an exit index with valid floor and clearance.
+ * 2. Evaluates outward normals along polygon edges and radial directions, choosing a walkable floor
+ *    that faces away from the trigger and whose forward walk path (3-4m) does not re-enter any portal.
  */
-function floorNear(arena: ArenaDef, portal: PortalDef): { x: number; y: number; z: number } | null {
-  // Height reference: the trigger's floor when it has a volume.
+function arrivalNear(arena: ArenaDef, portal: PortalDef): { x: number; y: number; z: number; yaw: number } | null {
+  // 1. Original starts table from Cap 0x06
+  if (arena.starts && portal.exit !== undefined && portal.exit >= 0 && portal.exit < arena.starts.length) {
+    const s = arena.starts[portal.exit];
+    if (s) {
+      const fl = floorAt(arena, s.x, s.z, s.y, 4);
+      if (fl !== null && !inPortal(portal, { x: s.x, y: fl, z: s.z }, 0.5)) {
+        const fwdX = -Math.sin(s.yaw), fwdZ = -Math.cos(s.yaw);
+        let clear = true;
+        for (let d = 0.5; d <= 3.0; d += 0.5) {
+          if (inPortal(portal, { x: s.x + fwdX * d, y: fl, z: s.z + fwdZ * d }, 0.1)) {
+            clear = false;
+            break;
+          }
+        }
+        if (clear) return { x: s.x, y: fl + 0.1, z: s.z, yaw: s.yaw };
+      }
+    }
+  }
+
+  // 2. Geometry on collision mesh
   const at = { x: portal.x, y: portal.trigger ? portal.trigger.yMin : portal.y, z: portal.z };
-  const extent = portal.trigger ? Math.max(...portal.trigger.polygon.map(([x, z]) => Math.hypot(x - portal.x, z - portal.z))) : PORTAL_RADIUS;
+  const poly = portal.trigger?.polygon;
+  const extent = poly ? Math.max(...poly.map(([x, z]) => Math.hypot(x - portal.x, z - portal.z))) : PORTAL_RADIUS;
   const mesh = arena.meshes[0];
   if (!mesh) return null;
   const v = mesh.vertices;
   const idx = mesh.indices;
-  // Triangles near the search area, with their walkability.
-  const reach = extent + ARRIVAL_RINGS[ARRIVAL_RINGS.length - 1]! + 2;
+  const reach = extent + ARRIVAL_RINGS[ARRIVAL_RINGS.length - 1]! + 4;
   const tris: number[] = [];
   for (let t = 0; t < idx.length; t += 3) {
     const a = idx[t]! * 3, b = idx[t + 1]! * 3, c = idx[t + 2]! * 3;
@@ -233,7 +229,8 @@ function floorNear(arena: ArenaDef, portal: PortalDef): { x: number; y: number; 
     if (minY > at.y + ARRIVAL_MAX_RISE + ARRIVAL_HEADROOM + 1) continue;
     tris.push(t);
   }
-  /** Heights of the triangles over (x, z), and whether each is walkable (normal mostly up). */
+
+  /** Heights of triangles over (x, z) with walkability flag. */
   const column = (x: number, z: number) => {
     const out: { y: number; floor: boolean }[] = [];
     for (const t of tris) {
@@ -246,7 +243,6 @@ function floorNear(arena: ArenaDef, portal: PortalDef): { x: number; y: number; 
       const w2 = 1 - w0 - w1;
       if (w0 < 0 || w1 < 0 || w2 < 0) continue;
       const y = w0 * v[a + 1]! + w1 * v[b + 1]! + w2 * v[c + 1]!;
-      // Normal's vertical share.
       const ux = bx - ax, uy = v[b + 1]! - v[a + 1]!, uz = bz - az;
       const vx = cx - ax, vy = v[c + 1]! - v[a + 1]!, vz = cz - az;
       const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
@@ -254,24 +250,99 @@ function floorNear(arena: ArenaDef, portal: PortalDef): { x: number; y: number; 
     }
     return out;
   };
+
+  let globalBest: { x: number; y: number; z: number; yaw: number; score: number; forwardFloors: number } | null = null;
+
   for (const r of ARRIVAL_RINGS) {
-    let best: { x: number; y: number; z: number; drop: number } | null = null;
-    for (const { x, z } of ringAround(portal, r)) {
-      const col = column(x, z);
-      // Pick the walkable floor in this column with headroom that minimizes drop from the reference height.
+    const candidates: { x: number; z: number; nx: number; nz: number; yaw: number }[] = [];
+    if (poly && poly.length >= 3) {
+      const cx = poly.reduce((a, p) => a + p[0], 0) / poly.length;
+      const cz = poly.reduce((a, p) => a + p[1], 0) / poly.length;
+      for (let i = 0; i < poly.length; i++) {
+        const [x1, z1] = poly[i]!;
+        const [x2, z2] = poly[(i + 1) % poly.length]!;
+        const len = Math.hypot(x2 - x1, z2 - z1) || 1;
+        let nx = (z2 - z1) / len, nz = -(x2 - x1) / len;
+        if (((x1 + x2) / 2 - cx) * nx + ((z1 + z2) / 2 - cz) * nz < 0) {
+          nx = -nx;
+          nz = -nz;
+        }
+        // Yaw pointing along outward normal: forward in physics is (-sin yaw, -cos yaw)
+        const yaw = Math.atan2(-nx, -nz);
+        const steps = Math.max(1, Math.ceil(len));
+        for (let k = 0; k <= steps; k++) {
+          const px = x1 + ((x2 - x1) * k) / steps + nx * r;
+          const pz = z1 + ((z2 - z1) * k) / steps + nz * r;
+          candidates.push({ x: px, z: pz, nx, nz, yaw });
+        }
+      }
+    }
+    for (let k = 0; k < 24; k++) {
+      const ang = (k / 24) * Math.PI * 2;
+      const nx = Math.cos(ang), nz = Math.sin(ang);
+      const yaw = Math.atan2(-nx, -nz);
+      candidates.push({
+        x: portal.x + nx * (extent + r),
+        z: portal.z + nz * (extent + r),
+        nx,
+        nz,
+        yaw,
+      });
+    }
+
+    let ringBest: { x: number; y: number; z: number; yaw: number; score: number; forwardFloors: number } | null = null;
+    for (const c of candidates) {
+      const col = column(c.x, c.z);
       let colBest: { y: number; drop: number } | null = null;
       for (const h of col) {
         if (!h.floor || h.y > at.y + ARRIVAL_MAX_RISE || h.y < at.y - ARRIVAL_MAX_DROP) continue;
-        if (col.some((c) => c.y > h.y + 0.2 && c.y < h.y + ARRIVAL_HEADROOM)) continue;
+        if (col.some((other) => other.y > h.y + 0.2 && other.y < h.y + ARRIVAL_HEADROOM)) continue;
         const drop = Math.abs(at.y - h.y);
         if (!colBest || drop < colBest.drop) colBest = { y: h.y, drop };
       }
       if (!colBest) continue;
-      if (!best || colBest.drop < best.drop) best = { x, y: colBest.y + 0.1, z, drop: colBest.drop };
+      if (inPortal(portal, { x: c.x, y: colBest.y, z: c.z }, 0.2)) continue;
+
+      let inAny = false;
+      for (const p of arena.portals ?? []) {
+        if (inPortal(p, { x: c.x, y: colBest.y, z: c.z }, 0.1)) {
+          inAny = true;
+          break;
+        }
+      }
+      if (inAny) continue;
+
+      // Forward walk check along yaw
+      const fwdX = -Math.sin(c.yaw), fwdZ = -Math.cos(c.yaw);
+      let reenters = false;
+      let forwardFloors = 0;
+      for (let d = 0.5; d <= 4.0; d += 0.5) {
+        const tx = c.x + fwdX * d, tz = c.z + fwdZ * d;
+        const tcol = column(tx, tz);
+        const tf = tcol.find((h) => h.floor && Math.abs(h.y - colBest!.y) <= 2.0);
+        if (tf) forwardFloors++;
+        for (const p of arena.portals ?? []) {
+          if (inPortal(p, { x: tx, y: tf ? tf.y : colBest.y, z: tz }, 0.05)) {
+            reenters = true;
+            break;
+          }
+        }
+        if (reenters) break;
+      }
+      if (reenters) continue;
+
+      const score = forwardFloors * 10 - colBest.drop * 2;
+      const candResult = { x: c.x, y: colBest.y + 0.1, z: c.z, yaw: c.yaw, score, forwardFloors };
+      if (!ringBest || score > ringBest.score) ringBest = candResult;
+      if (!globalBest || score > globalBest.score) globalBest = candResult;
     }
-    if (best) return { x: best.x, y: best.y, z: best.z };
+    // High-confidence interior arrival found: at least 2m forward clear floor
+    if (ringBest && ringBest.forwardFloors >= 4) {
+      return { x: ringBest.x, y: ringBest.y, z: ringBest.z, yaw: ringBest.yaw };
+    }
   }
-  return null;
+
+  return globalBest ? { x: globalBest.x, y: globalBest.y, z: globalBest.z, yaw: globalBest.yaw } : null;
 }
 
 /** Creature type ids (creature template table) that the slice can spawn, by archetype. */
@@ -447,6 +518,7 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
     x: p.position[0] * s,
     y: p.position[1] * s,
     z: p.position[2] * s,
+    ...(p.exit !== undefined ? { exit: p.exit } : {}),
     ...(p.use ? { use: true } : {}),
     ...(p.trigger ? { trigger: { polygon: p.trigger.polygon.map(([x, z]) => [x * s, z * s] as [number, number]), yMin: p.trigger.yMin * s, yMax: p.trigger.yMax * s } } : {}),
   }));

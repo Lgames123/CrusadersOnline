@@ -681,10 +681,11 @@ export class WorldZone {
     if (this.players.has(connId)) throw new Error(`connection ${connId} already in zone`);
     // Nowhere to resume in an original act: its first start point, as a new game (0x476F20).
     const start = !opts.arrivingAt && !opts.arrivingFrom && !validPosition(opts.position) ? this.arena.starts?.[0] : undefined;
+    const arr = opts.arrivingFrom ? arrivalPoint(this.arena, opts.arrivingFrom) : null;
     const spawn = opts.arrivingAt && opts.arrivingMesh && opts.arrivingMesh === this.arena.mesh && validPosition(opts.arrivingAt)
       ? opts.arrivingAt
-      : opts.arrivingFrom
-      ? arrivalPoint(this.arena, opts.arrivingFrom)
+      : arr
+      ? arr
       : validPosition(opts.position) ? opts.position : start ?? this.nextSpawnPoint();
     const xp = Math.max(0, Math.floor(opts.experience ?? 0));
     const level = levelForXp(xp);
@@ -706,7 +707,7 @@ export class WorldZone {
       character: createCharacter(this.mw, spawn),
       moveStats: { ...this.playerStats, clipRate: originalSpeedMultiplier(rules.attributes, level) },
       queue: new InputQueue(),
-      yaw: start ? quantizeAngle(start.yaw) : (opts.yaw ?? 0) & 0xffff,
+      yaw: start ? quantizeAngle(start.yaw) : arr ? quantizeAngle(arr.yaw) : (opts.yaw ?? 0) & 0xffff,
       anim: ANIM.IDLE,
       hp,
       maxHp,

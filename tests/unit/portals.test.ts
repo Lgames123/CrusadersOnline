@@ -194,4 +194,78 @@ describe('Citadel and Corantha portal network', () => {
       expect(portal!.trigger!.polygon.length).toBeGreaterThanOrEqual(3);
     }
   });
+
+  it('places player past return trigger facing into level for ci9a <-> ci9b without bounce loop', () => {
+    const levelsDir = path.resolve(import.meta.dirname ?? path.dirname(new URL(import.meta.url).pathname), '../../local/generated/levels');
+    if (!fs.existsSync(levelsDir)) return;
+
+    const ci9aCol = fs.readFileSync(path.join(levelsDir, 'ci_a.collision.bin'));
+    const ci9bCol = fs.readFileSync(path.join(levelsDir, 'ci_b.collision.bin'));
+    const ci9aPlacements = JSON.parse(fs.readFileSync(path.join(levelsDir, 'ci9a.placements.json'), 'utf8')) as LevelPlacements;
+    const ci9bPlacements = JSON.parse(fs.readFileSync(path.join(levelsDir, 'ci9b.placements.json'), 'utf8')) as LevelPlacements;
+
+    const ci9a = buildLevelArena('level:ci9a', ci9aCol, ci9aPlacements);
+    const ci9b = buildLevelArena('level:ci9b', ci9bCol, ci9bPlacements);
+
+    // 1. Arrival in ci9b from ci9a
+    const arrB = arrivalPoint(ci9b, 'level:ci9a');
+    const returnPortalB = ci9b.portals!.find((p) => p.target === 'level:ci9a')!;
+    expect(inPortal(returnPortalB, arrB, 0.1), 'must land outside ci9b return trigger').toBe(false);
+
+    // Walking forward 0.5m to 4m along spawn yaw in ci9b
+    const fwdBx = -Math.sin(arrB.yaw), fwdBz = -Math.cos(arrB.yaw);
+    for (let d = 0.5; d <= 4.0; d += 0.5) {
+      const step = { x: arrB.x + fwdBx * d, y: arrB.y, z: arrB.z + fwdBz * d };
+      expect(inPortal(returnPortalB, step, 0.05), `ci9b step forward ${d}m must not re-enter return trigger`).toBe(false);
+    }
+
+    // 2. Arrival in ci9a from ci9b
+    const arrA = arrivalPoint(ci9a, 'level:ci9b');
+    const returnPortalA = ci9a.portals!.find((p) => p.target === 'level:ci9b')!;
+    expect(inPortal(returnPortalA, arrA, 0.1), 'must land outside ci9a return trigger').toBe(false);
+
+    // Walking forward 0.5m to 4m along spawn yaw in ci9a
+    const fwdAx = -Math.sin(arrA.yaw), fwdAz = -Math.cos(arrA.yaw);
+    for (let d = 0.5; d <= 4.0; d += 0.5) {
+      const step = { x: arrA.x + fwdAx * d, y: arrA.y, z: arrA.z + fwdAz * d };
+      expect(inPortal(returnPortalA, step, 0.05), `ci9a step forward ${d}m must not re-enter return trigger`).toBe(false);
+    }
+  });
+
+  it('guarantees forward walk along spawn yaw never enters return trigger across full portal network', () => {
+    const levelsDir = path.resolve(import.meta.dirname ?? path.dirname(new URL(import.meta.url).pathname), '../../local/generated/levels');
+    if (!fs.existsSync(levelsDir)) return;
+
+    const files = fs.readdirSync(levelsDir).filter((f) => f.endsWith('.placements.json'));
+    const arenas = new Map<string, ReturnType<typeof buildLevelArena>>();
+
+    for (const file of files) {
+      const name = 'level:' + file.replace('.placements.json', '');
+      const placements = JSON.parse(fs.readFileSync(path.join(levelsDir, file), 'utf8')) as LevelPlacements;
+      const meshFile = placements.mesh ? path.join(levelsDir, `${placements.mesh}.collision.bin`) : null;
+      if (!meshFile || !fs.existsSync(meshFile)) continue;
+      arenas.set(name, buildLevelArena(name, fs.readFileSync(meshFile), placements));
+    }
+
+    let tested = 0;
+    for (const [originName, originArena] of arenas) {
+      for (const portal of originArena.portals ?? []) {
+        const destArena = arenas.get(portal.target);
+        if (!destArena) continue;
+        const returnPortal = destArena.portals?.find((p) => p.target === originName);
+        if (!returnPortal) continue;
+
+        tested++;
+        const arr = arrivalPoint(destArena, originName);
+        expect(inPortal(returnPortal, arr, 0.1), `${originName} -> ${portal.target}: arrived inside return trigger`).toBe(false);
+
+        const fwdX = -Math.sin(arr.yaw), fwdZ = -Math.cos(arr.yaw);
+        for (let d = 0.5; d <= 3.5; d += 0.5) {
+          const step = { x: arr.x + fwdX * d, y: arr.y, z: arr.z + fwdZ * d };
+          expect(inPortal(returnPortal, step, 0.05), `${originName} -> ${portal.target}: step ${d}m re-entered return trigger`).toBe(false);
+        }
+      }
+    }
+    expect(tested).toBeGreaterThanOrEqual(150);
+  });
 });
