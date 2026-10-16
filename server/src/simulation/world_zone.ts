@@ -37,7 +37,8 @@ import {
   PORTAL_OBJECT_BASE,
   PORTAL_USE_REACH,
   DYNAMIC_OBJECT_BASE,
-  arrivalPoint,
+  exitArrival,
+  type ExitCrossing,
   GOLD_ITEM,
   itemSlug,
   takeOne,
@@ -159,6 +160,7 @@ import {
   stepCharacter,
   yawTowards,
   type ArenaDef,
+  type PortalDef,
   type Attributes,
   type Character,
   type CombatEventMsg,
@@ -192,14 +194,10 @@ export interface ZoneOutbox {
   persist?(records: PersistRecord[], reason: PersistReason): void;
   /**
    * A player walked into a portal trigger leading to `target` (once per entry), or a scripted
-   * sequence loads another act; `keep`: arrive at this position if `target` is on the same mesh.
+   * sequence loads another act; `keep`: arrive at this position if `target` is on the same mesh;
+   * `via`: the exit taken and where the player crossed it (where he arrives, see exitArrival).
    */
-  portal?(
-    connId: number,
-    target: string,
-    crossing?: { x: number; y: number; z: number; yaw: number; mesh?: string },
-    keep?: { x: number; y: number; z: number; mesh: string },
-  ): void;
+  portal?(connId: number, target: string, keep?: { x: number; y: number; z: number; mesh: string }, via?: ExitCrossing): void;
 }
 
 export interface JoinOptions {
@@ -220,8 +218,8 @@ export interface JoinOptions {
   selectedSpell?: SpellId | null;
   /** Arriving through a portal from this arena: placed at the portal leading back there. */
   arrivingFrom?: string;
-  /** Crossing position and heading when entering the portal in the previous arena. */
-  arrivingCrossing?: { x: number; y: number; z: number; yaw: number; mesh?: string };
+  /** The exit taken to arrive (the original's entry point and offset, see exitArrival). */
+  arrivingVia?: ExitCrossing;
   /** A story level change: arrive here if this arena is on `arrivingMesh` (another act of the same level). */
   arrivingAt?: { x: number; y: number; z: number };
   arrivingMesh?: string;
@@ -230,7 +228,7 @@ export interface JoinOptions {
 }
 
 /** Player state carried across a zone transfer (everything but the position). */
-export type TransferState = Omit<JoinOptions, 'position' | 'arrivingFrom' | 'arrivingAt' | 'arrivingMesh' | 'arrivingCrossing'>;
+export type TransferState = Omit<JoinOptions, 'position' | 'arrivingFrom' | 'arrivingVia' | 'arrivingAt' | 'arrivingMesh'>;
 
 /** State a zone hands back for saving (see persistence/characters.ts). */
 export interface PersistRecord {
@@ -688,12 +686,13 @@ export class WorldZone {
     if (this.players.has(connId)) throw new Error(`connection ${connId} already in zone`);
     // Nowhere to resume in an original act: its first start point, as a new game (0x476F20).
     const start = !opts.arrivingAt && !opts.arrivingFrom && !validPosition(opts.position) ? this.arena.starts?.[0] : undefined;
-    const arr = opts.arrivingFrom ? arrivalPoint(this.arena, opts.arrivingFrom, opts.arrivingCrossing) : null;
+    // Through an exit: the original's entry point; the heading carries over unless it names one.
+    const arr = opts.arrivingFrom ? exitArrival(this.arena, opts.arrivingFrom, opts.arrivingVia) : null;
     const spawn = opts.arrivingAt && opts.arrivingMesh && opts.arrivingMesh === this.arena.mesh && validPosition(opts.arrivingAt)
       ? opts.arrivingAt
       : arr
-      ? arr
-      : validPosition(opts.position) ? opts.position : start ?? this.nextSpawnPoint();
+        ? arr
+        : validPosition(opts.position) ? opts.position : start ?? this.nextSpawnPoint();
     const xp = Math.max(0, Math.floor(opts.experience ?? 0));
     const level = levelForXp(xp);
     const rules = playerRules(this.difficulty);
@@ -714,7 +713,7 @@ export class WorldZone {
       character: createCharacter(this.mw, spawn),
       moveStats: { ...this.playerStats, clipRate: originalSpeedMultiplier(rules.attributes, level) },
       queue: new InputQueue(),
-      yaw: start ? quantizeAngle(start.yaw) : arr ? quantizeAngle(arr.yaw) : (opts.yaw ?? 0) & 0xffff,
+      yaw: start ? quantizeAngle(start.yaw) : arr?.yaw !== undefined ? quantizeAngle(arr.yaw) : (opts.yaw ?? 0) & 0xffff,
       anim: ANIM.IDLE,
       hp,
       maxHp,
@@ -798,16 +797,7 @@ export class WorldZone {
     if (p && id >= PORTAL_OBJECT_BASE && id < DYNAMIC_OBJECT_BASE) {
       // A door exit in reach (its trigger, widened by PORTAL_USE_REACH).
       const portal = this.arena.portals?.find((q) => q.id === id - PORTAL_OBJECT_BASE);
-      if (portal?.use && alive(p) && inPortal(portal, p.character.position, PORTAL_USE_REACH)) {
-        const crossing = {
-          x: p.character.position.x,
-          y: p.character.position.y,
-          z: p.character.position.z,
-          yaw: dequantizeAngle(p.yaw),
-          mesh: this.arena.mesh,
-        };
-        this.outbox.portal?.(p.connId, portal.target, crossing);
-      }
+      if (portal?.use && alive(p) && inPortal(portal, p.character.position, PORTAL_USE_REACH)) this.outbox.portal?.(p.connId, portal.target, undefined, this.crossing(portal, p));
       return;
     }
     const o = this.objects.get(id);
@@ -1371,22 +1361,22 @@ export class WorldZone {
     if (!portals?.length || !alive(p)) return;
     const pos = p.character.position;
     for (const portal of portals) {
-      if (portal.use) continue; // door exits: the interact key (interact)
+      if (portal.use || portal.scripted) continue; // door exits: the interact key (interact); act changes: scripts
       const inside = inPortal(portal, pos);
       if (!inside) {
         p.inPortal.delete(portal.id);
       } else if (!p.inPortal.has(portal.id)) {
         p.inPortal.add(portal.id);
-        const crossing = {
-          x: pos.x,
-          y: pos.y,
-          z: pos.z,
-          yaw: dequantizeAngle(p.yaw),
-          mesh: this.arena.mesh,
-        };
-        this.outbox.portal?.(p.connId, portal.target, crossing);
+        this.outbox.portal?.(p.connId, portal.target, undefined, this.crossing(portal, p));
       }
     }
+  }
+
+  /** The exit and the player's feet relative to its point, as the original records a crossing. */
+  private crossing(portal: PortalDef, p: Player): ExitCrossing | undefined {
+    if (portal.exit === undefined) return undefined;
+    const pos = p.character.position;
+    return { exit: portal.exit, ...(portal.toStart ? { toStart: true } : {}), offset: { x: pos.x - portal.x, y: pos.y - portal.y, z: pos.z - portal.z } };
   }
 
   // --- Story: triggers, scripted sequences, quests (story.ts; executable-analysis.md §17)
@@ -1538,7 +1528,7 @@ export class WorldZone {
     if (record) this.outbox.persist?.([record], 'progress');
     // Another act of the same level keeps Drake where he stands (the acts share the mesh's coordinates).
     const pos = p.character.position;
-    if (load) this.outbox.portal?.(p.connId, `${LEVEL_PREFIX}${load}`, this.arena.mesh ? { x: pos.x, y: pos.y, z: pos.z, yaw: dequantizeAngle(p.yaw), mesh: this.arena.mesh } : undefined);
+    if (load) this.outbox.portal?.(p.connId, `${LEVEL_PREFIX}${load}`, this.arena.mesh ? { x: pos.x, y: pos.y, z: pos.z, mesh: this.arena.mesh } : undefined);
   }
 
   /** Removes the player; returns its final state for saving (null for guests / unknown). */
@@ -1778,16 +1768,16 @@ export class WorldZone {
     m.anim = m.hitUntil > this.tick
       ? (m.character.rollDir === ACTION_KNOCKDOWN ? ANIM.KNOCKDOWN : ANIM.HIT)
       : m.blockUntil > this.tick
-      ? ANIM.BLOCK
-      : m.state === 'flee' && m.alertUntil > this.tick
-      ? ANIM.ALERT
-      : m.state === 'talk'
-      ? ANIM.GESTURE
-      : m.seq?.hop && this.tick < m.seq.hopUntil
-      ? ANIM.HOP_FORWARD
-      : m.input.flags & INPUT.BACK
-      ? ANIM.RETREAT
-      : m.input.flags & MOVE_MASK ? (m.input.flags & INPUT.WALK ? ANIM.WALK : ANIM.RUN) : ANIM.IDLE;
+        ? ANIM.BLOCK
+        : m.state === 'flee' && m.alertUntil > this.tick
+          ? ANIM.ALERT
+          : m.state === 'talk'
+            ? ANIM.GESTURE
+            : m.seq?.hop && this.tick < m.seq.hopUntil
+              ? ANIM.HOP_FORWARD
+              : m.input.flags & INPUT.BACK
+                ? ANIM.RETREAT
+                : m.input.flags & MOVE_MASK ? (m.input.flags & INPUT.WALK ? ANIM.WALK : ANIM.RUN) : ANIM.IDLE;
   }
 
 
@@ -2009,8 +1999,8 @@ export class WorldZone {
   private decide(m: Mob, target: Player, dist: number): void {
     const pick = mobBand(dist) > 1 ? 'run'
       : dist > m.archetype.engage && !this.attacking(target) ? 'walkIn'
-      : m.lastPick === 'attack' ? 'post'
-      : 'attack';
+        : m.lastPick === 'attack' ? 'post'
+          : 'attack';
     m.lastPick = pick;
     m.brain = pick;
     if (pick === 'attack') this.startSequence(m, target, dist);

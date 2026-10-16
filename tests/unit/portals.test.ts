@@ -6,62 +6,39 @@ import {
   LEVEL_UNIT_METRES,
   buildLevelArena,
   arrivalPoint,
+  exitArrival,
+  floorAt,
   inPortal,
   type LevelPlacements,
   type PortalDef,
 } from '@crusaders/shared';
 
 describe('Citadel and Corantha portal network', () => {
-  it('triggers Citadel stairs going UP as well as down (yMin 872 to yMax 1040)', () => {
+  it('touches a trigger with the body, not the feet (0x4394F0): a volume between two turns of a stair', () => {
+    const ft = LEVEL_UNIT_METRES;
+    // Ci1b's way back to Ci1a: 844-856 ft, over steps at 841 and 857 ft.
     const portal: PortalDef = {
       id: 0,
-      target: 'level:ci1b',
-      x: 2048 * LEVEL_UNIT_METRES,
-      y: 869 * LEVEL_UNIT_METRES,
-      z: -1336 * LEVEL_UNIT_METRES,
+      target: 'level:ci1a',
+      x: 2048 * ft,
+      y: 833 * ft,
+      z: -1352 * ft,
       trigger: {
         polygon: [
-          [2036 * LEVEL_UNIT_METRES, -1338 * LEVEL_UNIT_METRES],
-          [2036 * LEVEL_UNIT_METRES, -1362 * LEVEL_UNIT_METRES],
-          [2060 * LEVEL_UNIT_METRES, -1362 * LEVEL_UNIT_METRES],
-          [2060 * LEVEL_UNIT_METRES, -1338 * LEVEL_UNIT_METRES],
+          [2056 * ft, -1350 * ft],
+          [2056 * ft, -1354 * ft],
+          [2068 * ft, -1354 * ft],
+          [2068 * ft, -1350 * ft],
         ],
-        yMin: 872 * LEVEL_UNIT_METRES,
-        yMax: 1040 * LEVEL_UNIT_METRES,
+        yMin: 844 * ft,
+        yMax: 856 * ft,
       },
     };
-
-    // Going UP the stairs above the balcony (e.g. y = 960 ft) is inside the trigger
-    const upStairs = {
-      x: 2048 * LEVEL_UNIT_METRES,
-      y: 960 * LEVEL_UNIT_METRES,
-      z: -1350 * LEVEL_UNIT_METRES,
-    };
-    expect(inPortal(portal, upStairs)).toBe(true);
-
-    // Near the roof / top landing (y = 1030 ft) is also inside
-    const topStairs = {
-      x: 2048 * LEVEL_UNIT_METRES,
-      y: 1030 * LEVEL_UNIT_METRES,
-      z: -1350 * LEVEL_UNIT_METRES,
-    };
-    expect(inPortal(portal, topStairs)).toBe(true);
-
-    // Below the staircase threshold (e.g. y = 860 ft) is outside
-    const belowStairs = {
-      x: 2048 * LEVEL_UNIT_METRES,
-      y: 860 * LEVEL_UNIT_METRES,
-      z: -1350 * LEVEL_UNIT_METRES,
-    };
-    expect(inPortal(portal, belowStairs)).toBe(false);
-
-    // Out in the courtyard away from the tower is outside
-    const courtyard = {
-      x: 2020 * LEVEL_UNIT_METRES,
-      y: 896 * LEVEL_UNIT_METRES,
-      z: -1300 * LEVEL_UNIT_METRES,
-    };
-    expect(inPortal(portal, courtyard)).toBe(false);
+    expect(inPortal(portal, { x: 2060 * ft, y: 841 * ft, z: -1352 * ft })).toBe(true); // head above the bottom
+    expect(inPortal(portal, { x: 2060 * ft, y: 836 * ft, z: -1352 * ft })).toBe(false); // head still below
+    expect(inPortal(portal, { x: 2060 * ft, y: 857 * ft, z: -1352 * ft })).toBe(false); // feet above the top
+    expect(inPortal(portal, { x: 2060 * ft, y: 850 * ft, z: -1348.9 * ft })).toBe(true); // within a body radius of the edge
+    expect(inPortal(portal, { x: 2060 * ft, y: 850 * ft, z: -1346 * ft })).toBe(false);
   });
 
   it('picks the floor closest to the reference height on multi-level spiral staircases', () => {
@@ -124,253 +101,118 @@ describe('Citadel and Corantha portal network', () => {
       z: -1706 * LEVEL_UNIT_METRES,
       trigger: {
         polygon: [
-          [2024 * LEVEL_UNIT_METRES, -1618 * LEVEL_UNIT_METRES],
-          [2024 * LEVEL_UNIT_METRES, -1646 * LEVEL_UNIT_METRES],
-          [2090 * LEVEL_UNIT_METRES, -1646 * LEVEL_UNIT_METRES],
-          [2090 * LEVEL_UNIT_METRES, -1618 * LEVEL_UNIT_METRES],
+          [1992 * LEVEL_UNIT_METRES, -1680 * LEVEL_UNIT_METRES],
+          [1992 * LEVEL_UNIT_METRES, -1692 * LEVEL_UNIT_METRES],
+          [2104 * LEVEL_UNIT_METRES, -1692 * LEVEL_UNIT_METRES],
+          [2104 * LEVEL_UNIT_METRES, -1680 * LEVEL_UNIT_METRES],
         ],
         yMin: 1012 * LEVEL_UNIT_METRES,
-        yMax: 1045 * LEVEL_UNIT_METRES,
+        yMax: 1040 * LEVEL_UNIT_METRES,
       },
     };
 
     // Inside the gate arch
-    const inGate = {
-      x: 2050 * LEVEL_UNIT_METRES,
-      y: 1025 * LEVEL_UNIT_METRES,
-      z: -1630 * LEVEL_UNIT_METRES,
-    };
-    expect(inPortal(portal, inGate)).toBe(true);
-
+    expect(inPortal(portal, { x: 2050 * LEVEL_UNIT_METRES, y: 1024 * LEVEL_UNIT_METRES, z: -1686 * LEVEL_UNIT_METRES })).toBe(true);
     // Outside the gate before walking in
-    const outsideBefore = {
-      x: 2050 * LEVEL_UNIT_METRES,
-      y: 1025 * LEVEL_UNIT_METRES,
-      z: -1600 * LEVEL_UNIT_METRES,
-    };
-    expect(inPortal(portal, outsideBefore)).toBe(false);
-
+    expect(inPortal(portal, { x: 2050 * LEVEL_UNIT_METRES, y: 1024 * LEVEL_UNIT_METRES, z: -1660 * LEVEL_UNIT_METRES })).toBe(false);
     // Too high above the arch
-    const tooHigh = {
-      x: 2050 * LEVEL_UNIT_METRES,
-      y: 1055 * LEVEL_UNIT_METRES,
-      z: -1630 * LEVEL_UNIT_METRES,
-    };
-    expect(inPortal(portal, tooHigh)).toBe(false);
+    expect(inPortal(portal, { x: 2050 * LEVEL_UNIT_METRES, y: 1045 * LEVEL_UNIT_METRES, z: -1686 * LEVEL_UNIT_METRES })).toBe(false);
   });
 
-  it('ensures converted Citadel and Corantha placement files carry verified trigger volumes', () => {
-    const levelsDir = path.resolve(import.meta.dirname ?? path.dirname(new URL(import.meta.url).pathname), '../../local/generated/levels');
-    if (!fs.existsSync(levelsDir)) return;
-    const checked = [
-      { act: 'cs1a', target: 'ci1a' },
-      { act: 'ci1a', target: 'cs1a' },
-      { act: 'ci1a', target: 'ci1b' },
-      { act: 'ci1b', target: 'ci1a' },
-      { act: 'ci1b', target: 'ci2b' },
-      { act: 'cs2a', target: 'ci2a' },
-      { act: 'ci2a', target: 'cs2a' },
-      { act: 'ci2a', target: 'ci2b' },
-      { act: 'ci2b', target: 'ci9b' },
-      { act: 'cs3a', target: 'ci3a' },
-      { act: 'ci3a', target: 'ci3b' },
-      { act: 'ci3b', target: 'ci4b' },
-      { act: 'cs4a', target: 'ci4a' },
-      { act: 'ci4a', target: 'cs4a' },
-      { act: 'ci4a', target: 'ci4b' },
-      { act: 'ci4b', target: 'ci3b' },
-      { act: 'ci9a', target: 'ci9b' },
-      { act: 'ci9b', target: 'ci1b' },
-    ];
+  const levelsDir = path.resolve(import.meta.dirname ?? path.dirname(new URL(import.meta.url).pathname), '../../local/generated/levels');
+  const placementsOf = (act: string) => JSON.parse(fs.readFileSync(path.join(levelsDir, `${act}.placements.json`), 'utf8')) as LevelPlacements;
+  const arenaOf = (act: string) => {
+    const pl = placementsOf(act);
+    return buildLevelArena(`level:${act}`, fs.readFileSync(path.join(levelsDir, `${pl.mesh}.collision.bin`)), pl);
+  };
 
-    for (const { act, target } of checked) {
-      const pPath = path.join(levelsDir, `${act}.placements.json`);
-      expect(fs.existsSync(pPath), `missing ${act}.placements.json`).toBe(true);
-      const data = JSON.parse(fs.readFileSync(pPath, 'utf8')) as LevelPlacements;
-      const portal = data.portals?.find((p) => p.target.toLowerCase() === target.toLowerCase());
-      expect(portal, `portal ${act} -> ${target} not found`).toBeDefined();
-      expect(portal!.trigger, `portal ${act} -> ${target} must have a trigger volume`).toBeDefined();
-      expect(portal!.trigger!.yMin).toBeLessThan(portal!.trigger!.yMax);
-      expect(portal!.trigger!.polygon.length).toBeGreaterThanOrEqual(3);
+  it('keeps the original Citadel stair volumes; act changes within a mesh are scripted', () => {
+    if (!fs.existsSync(levelsDir)) return;
+    for (const act of ['ci1a', 'ci2a', 'ci3a', 'ci4a', 'ci9a']) {
+      const p = placementsOf(act).portals!.find((q) => q.target === `${act.slice(0, 3)}b`)!;
+      expect(p.trigger, act).toEqual({ polygon: [[2046, -1344], [2046, -1356], [2050, -1356], [2050, -1344]], yMin: 872, yMax: 888 });
+      expect(p.scripted, act).toBeUndefined();
+    }
+    for (const [act, target] of [['ci1b', 'ci2b'], ['ci2b', 'ci9b'], ['ci3b', 'ci4b'], ['ci4b', 'ci3b'], ['ci9b', 'ci1b'], ['co1a', 'co8a']] as const) {
+      const p = placementsOf(act).portals!.find((q) => q.target === target)!;
+      expect(p.trigger, `${act} -> ${target}`).toBeUndefined();
+      expect(p.scripted, `${act} -> ${target}`).toBe(true);
+    }
+    // The gates keep a volume (walking through is kept, see resolveLevelPortalTrigger).
+    for (const [act, target] of [['cs1a', 'ci1a'], ['ci1a', 'cs1a'], ['cs2a', 'ci2a'], ['ci2a', 'cs2a'], ['cs3a', 'ci3a'], ['ci3a', 'cs3a']] as const) {
+      expect(placementsOf(act).portals!.find((q) => q.target === target)!.trigger, `${act} -> ${target}`).toBeDefined();
     }
   });
 
-  it('places player past return trigger facing into level for ci9a <-> ci9b without bounce loop', () => {
-    const levelsDir = path.resolve(import.meta.dirname ?? path.dirname(new URL(import.meta.url).pathname), '../../local/generated/levels');
+  it('arrives as the original: the matching entry plus the crossing offset, heading kept (ci9a <-> ci9b)', () => {
     if (!fs.existsSync(levelsDir)) return;
+    const ft = LEVEL_UNIT_METRES;
+    const ci9a = arenaOf('ci9a');
+    const ci9b = arenaOf('ci9b');
+    // Down the ci9a tower: a step inside the exit's volume.
+    const down = ci9a.portals!.find((p) => p.target === 'level:ci9b')!;
+    const P = { x: 2048 * ft, z: -1346 * ft, y: floorAt(ci9a, 2048 * ft, -1346 * ft, 872 * ft, 1)! + 0.1 };
+    expect(inPortal(down, P)).toBe(true);
+    const arrB = exitArrival(ci9b, 'level:ci9a', { exit: down.exit!, offset: { x: P.x - down.x, y: P.y - down.y, z: P.z - down.z } });
+    // The same step of the same stair in ci9b's frame: (0, -36, -16) ft away.
+    expect(arrB.x).toBeCloseTo(P.x, 5);
+    expect(arrB.z).toBeCloseTo(P.z - 16 * ft, 5);
+    expect(arrB.y).toBeCloseTo(P.y - 36 * ft, 1);
+    expect(arrB.yaw).toBeUndefined();
+    for (const q of ci9b.portals!) if (!q.scripted) expect(inPortal(q, arrB), `ci9b -> ${q.target}`).toBe(false);
+    // Not ci9b's start point 2 (the exit number of the way back is not a start index).
+    expect(Math.hypot(arrB.x - ci9b.starts![2]!.x, arrB.z - ci9b.starts![2]!.z)).toBeGreaterThan(20);
 
-    const ci9aCol = fs.readFileSync(path.join(levelsDir, 'ci_a.collision.bin'));
-    const ci9bCol = fs.readFileSync(path.join(levelsDir, 'ci_b.collision.bin'));
-    const ci9aPlacements = JSON.parse(fs.readFileSync(path.join(levelsDir, 'ci9a.placements.json'), 'utf8')) as LevelPlacements;
-    const ci9bPlacements = JSON.parse(fs.readFileSync(path.join(levelsDir, 'ci9b.placements.json'), 'utf8')) as LevelPlacements;
-
-    const ci9a = buildLevelArena('level:ci9a', ci9aCol, ci9aPlacements);
-    const ci9b = buildLevelArena('level:ci9b', ci9bCol, ci9bPlacements);
-
-    // 1. Arrival in ci9b from ci9a
-    const arrB = arrivalPoint(ci9b, 'level:ci9a');
-    const returnPortalB = ci9b.portals!.find((p) => p.target === 'level:ci9a')!;
-    expect(inPortal(returnPortalB, arrB, 0.1), 'must land outside ci9b return trigger').toBe(false);
-
-    // Walking forward 0.5m to 4m along spawn yaw in ci9b
-    const fwdBx = -Math.sin(arrB.yaw), fwdBz = -Math.cos(arrB.yaw);
-    for (let d = 0.5; d <= 4.0; d += 0.5) {
-      const step = { x: arrB.x + fwdBx * d, y: arrB.y, z: arrB.z + fwdBz * d };
-      expect(inPortal(returnPortalB, step, 0.05), `ci9b step forward ${d}m must not re-enter return trigger`).toBe(false);
-    }
-
-    // 2. Arrival in ci9a from ci9b
-    const arrA = arrivalPoint(ci9a, 'level:ci9b');
-    const returnPortalA = ci9a.portals!.find((p) => p.target === 'level:ci9b')!;
-    expect(inPortal(returnPortalA, arrA, 0.1), 'must land outside ci9a return trigger').toBe(false);
-
-    // Walking forward 0.5m to 4m along spawn yaw in ci9a
-    const fwdAx = -Math.sin(arrA.yaw), fwdAz = -Math.cos(arrA.yaw);
-    for (let d = 0.5; d <= 4.0; d += 0.5) {
-      const step = { x: arrA.x + fwdAx * d, y: arrA.y, z: arrA.z + fwdAz * d };
-      expect(inPortal(returnPortalA, step, 0.05), `ci9a step forward ${d}m must not re-enter return trigger`).toBe(false);
-    }
+    // Back up the ci9b tower.
+    const up = ci9b.portals!.find((p) => p.target === 'level:ci9a')!;
+    const Q = { x: 2060 * ft, z: -1352 * ft, y: floorAt(ci9b, 2060 * ft, -1352 * ft, 841 * ft, 1)! + 0.1 };
+    expect(inPortal(up, Q)).toBe(true);
+    const arrA = exitArrival(ci9a, 'level:ci9b', { exit: up.exit!, offset: { x: Q.x - up.x, y: Q.y - up.y, z: Q.z - up.z } });
+    expect(arrA.z).toBeCloseTo(Q.z + 16 * ft, 5);
+    expect(arrA.y).toBeCloseTo(Q.y + 36 * ft, 1);
+    for (const q of ci9a.portals!) expect(inPortal(q, arrA), `ci9a -> ${q.target}`).toBe(false);
   });
 
-  it('guarantees forward walk along spawn yaw never enters return trigger across full portal network', () => {
-    const levelsDir = path.resolve(import.meta.dirname ?? path.dirname(new URL(import.meta.url).pathname), '../../local/generated/levels');
+  it('arrives at the start point named by an exit with flag 2, with its heading (Ci9a -> Cs1a)', () => {
     if (!fs.existsSync(levelsDir)) return;
+    const ci9a = arenaOf('ci9a');
+    const cs1a = arenaOf('cs1a');
+    const gate = ci9a.portals!.find((p) => p.target === 'level:cs1a')!;
+    expect(gate.toStart).toBe(true);
+    const arr = exitArrival(cs1a, 'level:ci9a', { exit: gate.exit!, toStart: true, offset: { x: 0, y: 0, z: 0 } });
+    const s = cs1a.starts![gate.exit!]!;
+    expect(arr.x).toBeCloseTo(s.x, 5);
+    expect(arr.z).toBeCloseTo(s.z, 5);
+    expect(arr.yaw).toBeCloseTo(s.yaw, 5);
+  });
 
-    const files = fs.readdirSync(levelsDir).filter((f) => f.endsWith('.placements.json'));
+  it('walking into any exit lands on its matching entry, heading kept', () => {
+    if (!fs.existsSync(levelsDir)) return;
     const arenas = new Map<string, ReturnType<typeof buildLevelArena>>();
-
-    for (const file of files) {
-      const name = 'level:' + file.replace('.placements.json', '');
-      const placements = JSON.parse(fs.readFileSync(path.join(levelsDir, file), 'utf8')) as LevelPlacements;
-      const meshFile = placements.mesh ? path.join(levelsDir, `${placements.mesh}.collision.bin`) : null;
-      if (!meshFile || !fs.existsSync(meshFile)) continue;
-      arenas.set(name, buildLevelArena(name, fs.readFileSync(meshFile), placements));
+    for (const f of fs.readdirSync(levelsDir).filter((n) => n.endsWith('.placements.json'))) {
+      const act = f.replace('.placements.json', '');
+      if (fs.existsSync(path.join(levelsDir, `${placementsOf(act).mesh}.collision.bin`))) arenas.set(`level:${act}`, arenaOf(act));
     }
-
     let tested = 0;
-    for (const [originName, originArena] of arenas) {
-      for (const portal of originArena.portals ?? []) {
-        const destArena = arenas.get(portal.target);
-        if (!destArena) continue;
-        const returnPortal = destArena.portals?.find((p) => p.target === originName);
-        if (!returnPortal) continue;
-
+    for (const [src, A] of arenas) {
+      for (const portal of A.portals ?? []) {
+        const B = arenas.get(portal.target);
+        if (!B || portal.use || portal.scripted || !portal.trigger || portal.toStart) continue;
+        const back = B.portals!.find((q) => q.target === src && q.entry === (portal.exit! & 0xff));
+        if (!back) continue;
+        // A step at the volume's centre, on the floor.
+        const poly = portal.trigger.polygon;
+        const cx = poly.reduce((a, p) => a + p[0], 0) / poly.length;
+        const cz = poly.reduce((a, p) => a + p[1], 0) / poly.length;
+        const fy = floorAt(A, cx, cz, portal.trigger.yMin, 2);
+        if (fy === null || !inPortal(portal, { x: cx, y: fy + 0.1, z: cz })) continue;
+        const arr = exitArrival(B, src, { exit: portal.exit!, offset: { x: cx - portal.x, y: fy + 0.1 - portal.y, z: cz - portal.z } });
+        // No floor at the entry (the offset leaves the mesh) falls back to a search beside it.
+        if (Math.hypot(arr.x - (back.x + cx - portal.x), arr.z - (back.z + cz - portal.z)) > 1e-6) continue;
         tested++;
-        const arr = arrivalPoint(destArena, originName);
-        expect(inPortal(returnPortal, arr, 0.1), `${originName} -> ${portal.target}: arrived inside return trigger`).toBe(false);
-
-        const fwdX = -Math.sin(arr.yaw), fwdZ = -Math.cos(arr.yaw);
-        for (let d = 0.5; d <= 3.5; d += 0.5) {
-          const step = { x: arr.x + fwdX * d, y: arr.y, z: arr.z + fwdZ * d };
-          expect(inPortal(returnPortal, step, 0.05), `${originName} -> ${portal.target}: step ${d}m re-entered return trigger`).toBe(false);
-        }
+        expect(arr.yaw, `${src} -> ${portal.target}: heading kept`).toBeUndefined();
       }
     }
-    expect(tested).toBeGreaterThanOrEqual(150);
-  });
-
-  it('ci9a -> ci9b does NOT land at ci9b.starts[2] (starts-by-exit regression), but lands near stairs', () => {
-    const levelsDir = path.resolve(import.meta.dirname ?? path.dirname(new URL(import.meta.url).pathname), '../../local/generated/levels');
-    if (!fs.existsSync(levelsDir)) return;
-
-    const ci9bCol = fs.readFileSync(path.join(levelsDir, 'ci_b.collision.bin'));
-    const ci9bPlacements = JSON.parse(fs.readFileSync(path.join(levelsDir, 'ci9b.placements.json'), 'utf8')) as LevelPlacements;
-    const ci9b = buildLevelArena('level:ci9b', ci9bCol, ci9bPlacements);
-
-    const arrB = arrivalPoint(ci9b, 'level:ci9a');
-    // starts[2] was (2048 * s, 817.5 * s, -1456 * s) where z = -443.78 m
-    expect(arrB.z).toBeGreaterThan(-420);
-    expect(arrB.z).toBeLessThan(-405);
-    // starts[2] had z = -443.78m (100 ft away in the basement)
-    expect(Math.abs(arrB.z - -443.78)).toBeGreaterThan(20);
-    // x is on the stairs landing (around 620..632m)
-    expect(arrB.x).toBeGreaterThan(620);
-    expect(arrB.x).toBeLessThan(632);
-  });
-
-  it('preserves continuity for shared-frame transfers (ci9a <-> ci9b and ci1a <-> ci1b)', () => {
-    const levelsDir = path.resolve(import.meta.dirname ?? path.dirname(new URL(import.meta.url).pathname), '../../local/generated/levels');
-    if (!fs.existsSync(levelsDir)) return;
-
-    const ci9bCol = fs.readFileSync(path.join(levelsDir, 'ci_b.collision.bin'));
-    const ci9bPlacements = JSON.parse(fs.readFileSync(path.join(levelsDir, 'ci9b.placements.json'), 'utf8')) as LevelPlacements;
-    const ci9b = buildLevelArena('level:ci9b', ci9bCol, ci9bPlacements);
-
-    // Player crossing from ci9a walking south/upstairs at yaw = 0
-    const crossing = {
-      x: 2048 * LEVEL_UNIT_METRES,
-      y: 845 * LEVEL_UNIT_METRES,
-      z: -1340 * LEVEL_UNIT_METRES,
-      yaw: 0,
-      mesh: ci9b.mesh,
-    };
-    const arr = arrivalPoint(ci9b, 'level:ci9a', crossing);
-    expect(arr.yaw).toBe(0);
-    expect(arr.x).toBeCloseTo(crossing.x, 1);
-    expect(arr.z).toBeLessThan(crossing.z); // advanced forward along yaw (towards -z)
-  });
-
-  it('different-frame transfer cs1a -> ci1a uses connectivity to arrive facing courtyard', () => {
-    const levelsDir = path.resolve(import.meta.dirname ?? path.dirname(new URL(import.meta.url).pathname), '../../local/generated/levels');
-    if (!fs.existsSync(levelsDir)) return;
-
-    const ci1aCol = fs.readFileSync(path.join(levelsDir, 'ci_a.collision.bin'));
-    const ci1aPlacements = JSON.parse(fs.readFileSync(path.join(levelsDir, 'ci1a.placements.json'), 'utf8')) as LevelPlacements;
-    const ci1a = buildLevelArena('level:ci1a', ci1aCol, ci1aPlacements);
-
-    const arr = arrivalPoint(ci1a, 'level:cs1a');
-    const returnPortal = ci1a.portals!.find((p) => p.target === 'level:cs1a')!;
-    expect(inPortal(returnPortal, arr, 0.1)).toBe(false);
-
-    // Walking forward 3m moves into the courtyard (away from the gate)
-    const fwdX = -Math.sin(arr.yaw), fwdZ = -Math.cos(arr.yaw);
-    for (let d = 0.5; d <= 3.5; d += 0.5) {
-      expect(inPortal(returnPortal, { x: arr.x + fwdX * d, y: arr.y, z: arr.z + fwdZ * d }, 0.05)).toBe(false);
-    }
-  });
-
-  it('rejects dead-end pocket behind trigger in favour of open floor', () => {
-    // Portal at (0, 0, 0), trigger from x: -2..2, z: -1..1
-    // Floor behind trigger (z: 1..2) is bounded by walls (pocket, 2 nodes)
-    // Floor in front of trigger (z: -1..-10, x: -5..5) is open (wide hall, 50+ nodes)
-    const vertices = [
-      // Pocket behind (x: -2..2, z: 1.1..2)
-      -2, 0, 1.1,
-       2, 0, 1.1,
-       2, 0, 2.0,
-      -2, 0, 2.0,
-      // Open hall in front (x: -5..5, z: -1.1..-10)
-      -5, 0, -1.1,
-       5, 0, -1.1,
-       5, 0, -10.0,
-      -5, 0, -10.0,
-    ];
-    const indices = [
-      0, 1, 2, 0, 2, 3, // pocket
-      4, 5, 6, 4, 6, 7, // open hall
-    ];
-    const col = packCollision(vertices, indices);
-    const placements: LevelPlacements = {
-      mesh: 'pocket_test',
-      creatures: [],
-      portals: [{
-        target: 'level:origin',
-        position: [0, 0, 0],
-        trigger: {
-          polygon: [
-            [-2, -1],
-            [-2,  1],
-            [ 2,  1],
-            [ 2, -1],
-          ],
-          yMin: -1,
-          yMax: 2,
-        },
-      }],
-    };
-    const arena = buildLevelArena('level:pocket_test', col, placements);
-    const arr = arrivalPoint(arena, 'level:origin');
-    // Must pick the open hall (z < -1), NOT the pocket (z > 1)
-    expect(arr.z).toBeLessThan(-1);
+    expect(tested).toBeGreaterThanOrEqual(20);
   });
 });

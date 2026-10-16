@@ -83,12 +83,20 @@ export interface PortalDef {
   x: number;
   y: number;
   z: number;
-  /** Exit number within the level (Cap 0x06 start point index or exit record id). */
+  /** Exit number (portal record +4): arrivals through it pick the destination entry with this number. */
   exit?: number;
   /** The original trigger volume (metres): an x/z polygon between two heights. */
   trigger?: { polygon: [number, number][]; yMin: number; yMax: number };
   /** Door exit: taken with the interact key instead of walking in. */
   use?: boolean;
+  /** Entry number of its exit trigger: arrivals through exit `entry` land at this exit (see exitArrival). */
+  entry?: number;
+  /** Exit trigger flag 2: arrivals through this exit go to the destination's start point `exit`. */
+  toStart?: boolean;
+  /** Exit trigger flag 4: arrivals land on this exit's point exactly, not offset. */
+  fixedEntry?: boolean;
+  /** Taken only by a script, never by walking in (no volume, same mesh as the destination). */
+  scripted?: boolean;
 }
 
 export interface ArenaDef {

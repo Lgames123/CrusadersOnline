@@ -56,8 +56,8 @@ const zone = new WorldZone(rapier, zoneName, loadArena(arenaName), {
   persist(records, reason) {
     post({ t: 'persist', reason, records });
   },
-  portal(connId, target, crossing, keep) {
-    post({ t: 'portal', connId, target, ...(crossing ? { crossing } : {}), ...(keep ? { keep } : {}) });
+  portal(connId, target, keep, via) {
+    post({ t: 'portal', connId, target, ...(keep ? { keep } : {}), ...(via ? { via } : {}) });
   },
 }, { difficulty, features: gameplayFeatures(features ?? []), items: loadItems(itemRulesPath), spells: loadSpells(generatedDir) });
 

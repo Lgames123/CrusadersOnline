@@ -61,6 +61,13 @@ export interface CapPortal {
   use: boolean;
   /** Trigger volume: a convex x/z polygon (original units) between two heights, when linked. */
   trigger?: { polygon: [number, number][]; yMin: number; yMax: number };
+  /**
+   * The exit trigger (type 0x13) the record is embedded in, at -0x34: its entry number (+0x0F;
+   * arriving through exit n lands at the entry n) and flags (+0x0E: 2 = arrive at the
+   * destination's start point `exit`, 4 = arrive at this point without the crossing offset).
+   */
+  entry: number;
+  flags: number;
 }
 
 export interface CapLevel {
@@ -232,7 +239,7 @@ function parsePortals(data: Uint8Array, dv: DataView, exitAt?: Map<number, { tar
     const trigger = parseTrigger(data, dv, dv.getUint32(o - 0x30, true) - CAP_BASE);
     const use = (dv.getUint32(o - 0x2c, true) & 8) !== 0;
     exitAt?.set(o, { target, exit: dv.getUint16(o + 4, true) });
-    out.push({ exit: dv.getUint16(o + 4, true), target, position, use, ...(trigger ? { trigger } : {}) });
+    out.push({ exit: dv.getUint16(o + 4, true), target, position, use, entry: data[o - 0x34 + 0xf]!, flags: data[o - 0x34 + 0xe]!, ...(trigger ? { trigger } : {}) });
   }
   return out;
 }

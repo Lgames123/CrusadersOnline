@@ -80,7 +80,7 @@ function mirrorMoverKey(type: number, [a, b, c]: [number, number, number]): [num
   return [a, b, c];
 }
 
-const MANIFEST_VERSION = '1.19.0'; // 1.19: citadel portal geometry and triggers; 1.18: relays' brush targets; 1.17: level texture v from the picture's bottom; mover keys mirrored by segment type; 1.16: level textures one picture every 15 units; 1.15: level start points; 1.14: story (triggers, sequences, cameras), rules/strings.json; 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers; 1.9: door sounds; 1.10: lightmap UVs at 16 bytes a vertex; 1.11: lightmap seams stitched; 1.12: prop model boxes, model names in lower case; 1.13: creature facing
+const MANIFEST_VERSION = '1.19.0'; // placements are rewritten on every run (exit entries / flags need no bump); 1.19: citadel portal geometry and triggers; 1.18: relays' brush targets; 1.17: level texture v from the picture's bottom; mover keys mirrored by segment type; 1.16: level textures one picture every 15 units; 1.15: level start points; 1.14: story (triggers, sequences, cameras), rules/strings.json; 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers; 1.9: door sounds; 1.10: lightmap UVs at 16 bytes a vertex; 1.11: lightmap seams stitched; 1.12: prop model boxes, model names in lower case; 1.13: creature facing
 /** Bump when level output changes so cached levels are rebuilt. */
 const LEVEL_EMIT_VERSION = '2';
 
@@ -399,6 +399,15 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
   // --- Placements: Caps/*.cap -> levels/<cap>.placements.json (positions mirrored like the meshes)
   const capFiles = (await source.list?.('Caps'))?.filter((f) => f.toLowerCase().endsWith('.cap')).sort() ?? [];
   let creatures = 0;
+  // Each act's mesh name (header +0x34), to tell act changes within one level from exits.
+  const capMesh = new Map<string, string>();
+  for (const file of capFiles) {
+    const bytes = await source.readFile(`Caps/${file}`);
+    if (!bytes || bytes.length < 0x74) continue;
+    let e = 0x34;
+    while (e < 0x74 && bytes[e] !== 0) e++;
+    capMesh.set(file.replace(/\.cap$/i, '').toLowerCase(), new TextDecoder('latin1').decode(bytes.subarray(0x34, e)).toLowerCase());
+  }
   for (const file of capFiles) {
     const path = `Caps/${file}`;
     const bytes = await source.readFile(path);
@@ -426,11 +435,16 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
           .filter((p) => capFiles.some((f) => f.toLowerCase() === `${p.target.toLowerCase()}.cap`))
           .map((p) => {
             const rawTrigger = p.trigger ? { polygon: p.trigger.polygon.map(([x, z]) => [x, -z] as [number, number]), yMin: p.trigger.yMin, yMax: p.trigger.yMax } : undefined;
-            const trigger = resolveLevelPortalTrigger(name, p.target.toLowerCase(), rawTrigger);
+            const { trigger, exit = p.exit, flags = p.flags } = resolveLevelPortalTrigger(name, p.target.toLowerCase(), rawTrigger);
+            // No volume and the same mesh as the destination: an act change only a script makes.
+            const scripted = !trigger && !p.use && capMesh.get(p.target.toLowerCase()) === cap.mesh.toLowerCase();
             return {
-              exit: p.exit,
+              exit,
               target: p.target.toLowerCase(),
               position: [p.position[0], p.position[1], -p.position[2]],
+              entry: p.entry,
+              flags,
+              ...(scripted ? { scripted: true } : {}),
               ...(p.use ? { use: true } : {}),
               ...(trigger ? { trigger } : {}),
             };
@@ -487,92 +501,20 @@ interface LevelPortalTrigger {
 }
 
 /**
- * Resolves or completes trigger volumes for level transition portals.
- * Several original Cap files bound portals to story triggers or omit volPtr on the exit record,
- * leaving portals to fall back to an unreachable cylinder or a staircase height window that only
- * triggered when walking down rather than up.
+ * The Corantha <-> Citadel gates of acts 1-3 have no volume on their exit records: the original
+ * enters the Citadel through Aerin's scene and does not walk back out. Walking through them is
+ * kept (not original), with the volumes the same gates have in the other acts of the same meshes:
+ * Cs4a -> Ci4a (Corantha side) and Ci9a -> Cs1a (Citadel side), and Ci1a -> Cs1a arriving as
+ * Ci9a -> Cs1a does (flag 2: Cs1a's start point 0). Every other exit keeps its original volume.
  */
-function resolveLevelPortalTrigger(act: string, target: string, raw?: LevelPortalTrigger): LevelPortalTrigger | undefined {
-  // Citadel acts stairs going UP to interior palace: span the full tower spiral staircase (872 to 1040 ft)
-  if (/^ci[1-9]a$/.test(act) && target === `${act.slice(0, 3)}b`) {
-    return {
-      polygon: [
-        [2036, -1338],
-        [2036, -1362],
-        [2060, -1362],
-        [2060, -1338],
-      ],
-      yMin: 872,
-      yMax: 1040,
-    };
+function resolveLevelPortalTrigger(act: string, target: string, raw?: LevelPortalTrigger): { trigger?: LevelPortalTrigger; exit?: number; flags?: number } {
+  if (/^cs[1-3]a$/.test(act) && target === `ci${act[2]}a`) {
+    return { trigger: { polygon: [[1992, -1680], [1992, -1692], [2104, -1692], [2104, -1680]], yMin: 1012, yMax: 1040 } };
   }
-
-  // Citadel next-act exits on the upper stair landing in ci*b
-  if (/^ci[1-9]b$/.test(act) && /^ci[1-9]b$/.test(target) && target !== act) {
-    return {
-      polygon: [
-        [2036, -1328],
-        [2036, -1356],
-        [2060, -1356],
-        [2060, -1328],
-      ],
-      yMin: 855,
-      yMax: 880,
-    };
+  if (/^ci[1-3]a$/.test(act) && target === `cs${act[2]}a`) {
+    const trigger: LevelPortalTrigger = { polygon: [[1990, -1210], [1990, -1224], [2072, -1224], [2072, -1210]], yMin: 896, yMax: 916 };
+    return act === 'ci1a' ? { trigger, exit: 0, flags: 2 } : { trigger };
   }
-
-  // Corantha <-> Citadel gate portals that lacked direct volPtr in original Caps (from Cap 0x33 volume records)
-  if (act === 'cs1a' && target === 'ci1a') {
-    return {
-      polygon: [
-        [2024, -1618],
-        [2024, -1646],
-        [2090, -1646],
-        [2090, -1618],
-      ],
-      yMin: 1012,
-      yMax: 1045,
-    };
-  }
-  if (act === 'cs2a' && target === 'ci2a') {
-    return {
-      polygon: [
-        [1989, -1650],
-        [1989, -1711],
-        [2100, -1711],
-        [2100, -1650],
-      ],
-      yMin: 1008,
-      yMax: 1040,
-    };
-  }
-  if (act === 'cs3a' && target === 'ci3a') {
-    return {
-      polygon: [
-        [2020, -1618],
-        [2020, -1646],
-        [2086, -1646],
-        [2086, -1618],
-      ],
-      yMin: 994,
-      yMax: 1066,
-    };
-  }
-
-  // Citadel front gates back to Corantha (from Cap 0x33 volume records)
-  if ((act === 'ci1a' || act === 'ci2a' || act === 'ci3a') && target.startsWith('cs')) {
-    return {
-      polygon: [
-        [1990, -1210],
-        [1990, -1248],
-        [2080, -1248],
-        [2080, -1210],
-      ],
-      yMin: 896,
-      yMax: 916,
-    };
-  }
-
-  return raw;
+  return raw ? { trigger: raw } : {};
 }
 

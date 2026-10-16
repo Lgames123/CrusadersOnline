@@ -59,7 +59,7 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
       metrics: (m) => log.debug(m, 'zone tick metrics'),
       error: (arena, err) => log.error({ err, arena }, 'zone worker error'),
       persist: (records, reason) => save(records, reason),
-      portal: (arena, connId, target, crossing, keep) => sessions?.onPortal(arena, connId, target, crossing, keep),
+      portal: (arena, connId, target, keep, via) => sessions?.onPortal(arena, connId, target, keep, via),
       transferred: (arena, connId, record, state) => sessions?.onTransferred(arena, connId, record, state),
     },
   );
