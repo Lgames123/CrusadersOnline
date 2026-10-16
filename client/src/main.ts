@@ -67,6 +67,7 @@ import { Debris } from './engine/debris.ts';
 import { SwingTrails } from './engine/swing_trail.ts';
 import { ModelLighting } from './engine/model_light.ts';
 import { dynamicLights } from './engine/dynamic_lights.ts';
+import { propFixes } from './assets/prop_fixes.ts';
 import { PostFx } from './engine/post_fx.ts';
 import { TORCH_LIGHT_COLOR, TORCH_LIGHT_HEIGHT, TORCH_LIGHT_INTENSITY, TORCH_DYNAMIC_INTENSITY } from './entities/torch_light.ts';
 import { connectToWorld } from './network/connect.ts';
@@ -191,6 +192,8 @@ async function main(): Promise<void> {
 
   // Before anything that loads asynchronously reads it (the effects below).
   const settings = new SettingsStore();
+  propFixes.enabled = settings.current.fixedPropUvs;
+  settings.onChange((s) => (propFixes.enabled = s.fixedPropUvs));
   /** The level act's music (the original's CD tracks, looped). */
   const music = new MusicPlayer(settings.current.musicVolume);
   settings.onChange((s) => (music.volume = s.musicVolume));

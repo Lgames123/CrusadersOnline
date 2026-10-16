@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LevelLight } from '../engine/level_light.ts';
 import { dynamicLights } from '../engine/dynamic_lights.ts';
+import { propFixes } from './prop_fixes.ts';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, DYNAMIC_OBJECT_BASE, type ArenaDef, type LevelObject, type LevelBrush, type LevelPlacements, type WorldObjectDef, type WorldObjectState, type DoorMotion, type DoorSwing, stepDoorMotion, swingPose, type MoverDef, type MoverMotion, moverPose, shutMover, stepMover, useMover } from '@crusaders/shared';
@@ -401,7 +402,13 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
   const models = new Map<string, Promise<THREE.Object3D | null>>();
   const loadModel = (url: string) => {
     let p = models.get(url);
-    if (!p) models.set(url, (p = loader.loadAsync(`/generated/${url}`).then((g) => g.scene as THREE.Object3D, () => null)));
+    if (!p) {
+      p = loader.loadAsync(`/generated/${url}`).then((g) => {
+        propFixes.register(url, g.scene);
+        return g.scene as THREE.Object3D;
+      }, () => null);
+      models.set(url, p);
+    }
     return p;
   };
   const textures = new Map<string, Promise<THREE.Texture | null>>();

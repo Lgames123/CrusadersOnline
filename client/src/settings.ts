@@ -23,13 +23,15 @@ export interface Settings {
   enhancedLighting: boolean;
   /** Hit effects at half the original's size (not original; a playtest preference). */
   smallEffects: boolean;
+  /** Props whose original UVs miss their texture refitted (not original): the Fancy Chair. */
+  fixedPropUvs: boolean;
   /** Custom keybindings mapping action ID to array of key codes. */
   keybindings?: Record<string, string[]>;
   /** Settings schema version (see OPTIONS_VERSION). */
   optionsVersion?: number;
 }
 
-export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false, musicVolume: 0.5, silhouetteShadows: false, enhancedLighting: false, smallEffects: false };
+export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false, musicVolume: 0.5, silhouetteShadows: false, enhancedLighting: false, smallEffects: false, fixedPropUvs: false };
 
 const KEY = 'crusaders.settings';
 /** Bumped when a default moves back to the original, so earlier stored values reset once. */
@@ -55,6 +57,7 @@ function sanitize(raw: unknown): Settings {
     silhouetteShadows: r.silhouetteShadows === true && r.optionsVersion === OPTIONS_VERSION,
     enhancedLighting: r.enhancedLighting === true,
     smallEffects: r.smallEffects === true,
+    fixedPropUvs: r.fixedPropUvs === true,
     keybindings,
     optionsVersion: OPTIONS_VERSION,
   };

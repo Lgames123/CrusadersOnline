@@ -214,6 +214,17 @@ export class SettingsPanel {
                 </span>
               </label>
             </div>
+
+            <div class="opt-group opt-toggle-group">
+              <label class="opt-toggle-label">
+                <input id="set-prop-uvs" type="checkbox" ${s.fixedPropUvs ? 'checked' : ''} />
+                <span class="opt-toggle-box"></span>
+                <span class="opt-toggle-text">
+                  <strong>Fix Mismatched Prop Textures</strong>
+                  <span class="opt-desc">Refits props whose original texture mapping misses their picture, like the Citadel's fancy chairs (red legs, cut-off back frame).</span>
+                </span>
+              </label>
+            </div>
           </div>
         `;
 
@@ -341,6 +352,13 @@ export class SettingsPanel {
       });
     }
 
+    const propUvs = this.root.querySelector<HTMLInputElement>('#set-prop-uvs');
+    if (propUvs) {
+      propUvs.addEventListener('change', () => {
+        this.store.update({ fixedPropUvs: propUvs.checked });
+      });
+    }
+
     // Audio input
     const music = this.root.querySelector<HTMLInputElement>('#set-music');
     if (music) {
@@ -387,6 +405,7 @@ export class SettingsPanel {
           silhouetteShadows: false,
           enhancedLighting: false,
           smallEffects: false,
+          fixedPropUvs: false,
           keybindings: getDefaultKeybindings(),
         });
         this.render();
