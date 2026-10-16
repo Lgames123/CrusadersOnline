@@ -80,7 +80,7 @@ function mirrorMoverKey(type: number, [a, b, c]: [number, number, number]): [num
   return [a, b, c];
 }
 
-const MANIFEST_VERSION = '1.19.0'; // placements are rewritten on every run (exit entries / flags need no bump); 1.19: citadel portal geometry and triggers; 1.18: relays' brush targets; 1.17: level texture v from the picture's bottom; mover keys mirrored by segment type; 1.16: level textures one picture every 15 units; 1.15: level start points; 1.14: story (triggers, sequences, cameras), rules/strings.json; 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers; 1.9: door sounds; 1.10: lightmap UVs at 16 bytes a vertex; 1.11: lightmap seams stitched; 1.12: prop model boxes, model names in lower case; 1.13: creature facing
+const MANIFEST_VERSION = '1.20.0'; // 1.20: placed objects carry their own texture when it differs from the shared model file's; placements are rewritten on every run (exit entries / flags need no bump); 1.19: citadel portal geometry and triggers; 1.18: relays' brush targets; 1.17: level texture v from the picture's bottom; mover keys mirrored by segment type; 1.16: level textures one picture every 15 units; 1.15: level start points; 1.14: story (triggers, sequences, cameras), rules/strings.json; 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers; 1.9: door sounds; 1.10: lightmap UVs at 16 bytes a vertex; 1.11: lightmap seams stitched; 1.12: prop model boxes, model names in lower case; 1.13: creature facing
 /** Bump when level output changes so cached levels are rebuilt. */
 const LEVEL_EMIT_VERSION = '2';
 
@@ -165,6 +165,11 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
   /** For level placements: item names (chest contents) and models.ctx id -> converted model. */
   const itemNames = new Set<string>(['Gold Pieces']);
   const modelById = new Map<number, string>();
+  /** models.ctx id -> its `T` texture list (lower case); converted model -> the texture baked into it. */
+  const texturesById = new Map<number, string[]>();
+  const bakedTexture = new Map<string, string>();
+  /** Item name -> items.ctx `Texture` (index into its model's `T` list). */
+  const itemTexture = new Map<string, number>();
   /** Model bounding boxes (MDL header, original units) by converted model name, for prop colliders. */
   const modelBoxes = new Map<string, { min: [number, number, number]; max: [number, number, number] }>();
 
@@ -206,7 +211,11 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
     manifest.inputs[itemsPath] = await sha256Hex(itemsBytes);
     try {
       const items = parseItemsCtx(new TextDecoder('latin1').decode(itemsBytes));
-      for (const it of items) itemNames.add(it.name);
+      for (const it of items) {
+        itemNames.add(it.name);
+        const t = Number(it.fields['Texture']);
+        if (Number.isInteger(t) && t > 0) itemTexture.set(it.name, t);
+      }
       await sink.writeFile('rules/items.json', JSON.stringify({ items }, null, 2));
       manifest.rules['items'] = 'rules/items.json';
       report.converted.push(itemsPath);
@@ -224,7 +233,11 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
   } else {
     const bindings = parseModelsCtx(new TextDecoder('latin1').decode(bindingsBytes));
     // Converted models are keyed in lower case (models.ctx names mix cases: Drawers01, PineTrTrunkV1).
-    for (const b of bindings) if (!modelById.has(b.id)) modelById.set(b.id, b.file.replace(/\.mdl$/i, '').toLowerCase());
+    for (const b of bindings) {
+      if (modelById.has(b.id)) continue;
+      modelById.set(b.id, b.file.replace(/\.mdl$/i, '').toLowerCase());
+      texturesById.set(b.id, b.textures.map((t) => t.replace(/\.tga$/i, '').toLowerCase()));
+    }
     const files = new Map<string, string | undefined>(); // lower-case file -> first texture
     const anims = new Map<string, Map<string, string>>(); // lower-case model file -> ani file -> label
     const states = new Map<string, Record<string, string>>(); // lower-case model file -> ASM state -> clip
@@ -254,6 +267,7 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
         const tex = texture?.replace(/\.tga$/i, '').toLowerCase();
         const textureFile = tex ? manifest.textures[tex] : undefined;
         if (tex && !textureFile) report.warnings.push(`Models/${file}: texture "${texture}" not found`);
+        if (tex) bakedTexture.set(base.toLowerCase(), tex);
         const animations: { name: string; label: string; clip: AniClip }[] = [];
         for (const [ani, label] of anims.get(file) ?? []) {
           const data = await source.readFile(`Models/${ani}`);
@@ -456,11 +470,17 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
           const model = o.kind === 'sprite' ? undefined : modelById.get(o.modelId);
           const glb = model ? manifest.models[model] : undefined;
           const box = model ? modelBoxes.get(model) : undefined;
+          // A model file bound to several ids is converted once, with the first binding's texture:
+          // the object's own id (and a ground item's Texture index) picks its texture.
+          const list = texturesById.get(o.modelId) ?? [];
+          const tex = list[(o.kind === 'item' && o.item && itemTexture.get(o.item.name)) || 0] ?? list[0];
+          const texture = glb && tex && tex !== bakedTexture.get(model!) ? manifest.textures[tex] : undefined;
           return {
             ...o,
             position: [o.position[0], o.position[1], -o.position[2]],
             rotation: mirrorRot(o.rotation),
             ...(glb ? { model: glb } : {}),
+            ...(texture ? { texture } : {}),
             // The model's box in its converted (Z mirrored) frame: [min x, y, z, max x, y, z].
             ...(box ? { box: [box.min[0], box.min[1], -box.max[2], box.max[0], box.max[1], -box.min[2]] } : {}),
           };

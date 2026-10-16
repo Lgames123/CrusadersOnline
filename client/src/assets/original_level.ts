@@ -404,6 +404,21 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
     if (!p) models.set(url, (p = loader.loadAsync(`/generated/${url}`).then((g) => g.scene as THREE.Object3D, () => null)));
     return p;
   };
+  const textures = new Map<string, Promise<THREE.Texture | null>>();
+  const loadTexture = (url: string) => {
+    let p = textures.get(url);
+    if (!p) {
+      p = new THREE.TextureLoader().loadAsync(`/generated/${url}`).then((t) => {
+        // As the glTF loader sets up a model's own texture.
+        t.flipY = false;
+        t.colorSpace = THREE.SRGBColorSpace;
+        t.wrapS = t.wrapT = THREE.RepeatWrapping;
+        return t;
+      }, () => null);
+      textures.set(url, p);
+    }
+    return p;
+  };
   const objects = new Map<number, LevelObjectView>();
   const CHEST_CLUSTER_RADIUS = 2.5; // metres
   interface DroppedChestCluster {
@@ -431,6 +446,22 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
     const src = await loadModel(o.model);
     if (!src) return;
     const obj = cloneSkinned(src);
+    if (o.texture) {
+      // The object's own texture (the shared model file carries its first binding's).
+      const map = await loadTexture(o.texture);
+      if (map) {
+        obj.traverse((m) => {
+          const mesh = m as THREE.Mesh;
+          if (!mesh.isMesh) return;
+          const swap = (mat: THREE.Material) => {
+            const c = mat.clone() as THREE.MeshStandardMaterial;
+            c.map = map;
+            return c;
+          };
+          mesh.material = Array.isArray(mesh.material) ? mesh.material.map(swap) : swap(mesh.material);
+        });
+      }
+    }
     obj.matrixAutoUpdate = false;
     obj.matrix.copy(placementMatrix(o));
     obj.traverse((m) => {

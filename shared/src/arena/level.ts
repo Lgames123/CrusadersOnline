@@ -45,6 +45,12 @@ export interface LevelObject {
   effect?: string;
   /** Converted model file (relative to the converter output), when available. */
   model?: string;
+  /**
+   * Converted texture file to draw `model` with, when this object's models.ctx id (or, for a
+   * ground item, its items.ctx `Texture` index) names another texture than the one baked into
+   * the shared model file (bookshelves, flags, potions, spell books).
+   */
+  texture?: string;
   /** The model's bounding box in its own frame (original units, Z mirrored): min x y z, max x y z. */
   box?: number[];
 }
