@@ -7,6 +7,9 @@
  *   0x13  exit trigger (its portal record embedded at +0x34)
  *   0x14  flag trigger: +4 volume, +8 activation (1 = walked into); set by entering the volume or
  *         by a TriggerFlag step (vtable slots 0x462A70 / 0x462B00)
+ *   0x1A  message trigger (signs): +4 volume, +8 activation (bit 0 walked into, bit 3 use key,
+ *         0x200 once), +0x34 messages.ctx index; fired by 0x4632B0 (vtable 0x4E19D4 slot 5),
+ *         which shows the message on the HUD for 2000 ms
  *   0x1D  quest trigger: +4 volume, +8 activation, +0x0E action mask, +0x34 quest index,
  *         +0x36 player bit (fired by 0x4641F0)
  *   0x28  camera: +0x34 eye path (type 0x55), +0x38 look-at path (type 0x53)
@@ -104,8 +107,19 @@ export interface CapSequence {
   steps: CapStep[];
 }
 
+/** A message trigger (type 0x1A): signs read with the use key, hints shown on walking in. */
+export interface CapMessage {
+  id: number;
+  /** Activation word (+8): bit 0 walked into, bit 3 use key, 0x200 fires once. */
+  activation: number;
+  volume?: CapTriggerVolume;
+  /** Index in script/messages.ctx. */
+  message: number;
+}
+
 export interface CapStory {
   triggers: CapStoryTrigger[];
+  messages: CapMessage[];
   cameras: CapCamera[];
   sequences: CapSequence[];
 }
@@ -121,6 +135,7 @@ export interface StoryContext {
 
 const T_EXIT = 0x13;
 const T_FLAG = 0x14;
+const T_MESSAGE = 0x1a;
 const T_QUEST = 0x1d;
 const T_CAMERA = 0x28;
 const T_RELAY = 0x2b;
@@ -175,8 +190,16 @@ export function parseStory(data: Uint8Array, dv: DataView, types: ReadonlyMap<nu
     }
   }
 
+  const messages: CapMessage[] = [];
+  for (const o of types.get(T_MESSAGE) ?? []) {
+    if (!inRange(o, 0x38)) continue;
+    const vol = ptr(o + 4);
+    const volume = vol > 0 && inRange(vol, 0x40) ? ctx.parseVolume(vol) : null;
+    messages.push({ id: o, activation: dv.getUint32(o + 8, true), ...(volume ? { volume } : {}), message: dv.getInt32(o + 0x34, true) });
+  }
+
   // --- Cameras
-  const path = (o: number): CapCameraPath | null => {
+  const path =(o: number): CapCameraPath | null => {
     if (!inRange(o, 0x40)) return null;
     const n = data[o + 0x10]!;
     const segments = data[o + 0x11]!;
@@ -327,5 +350,5 @@ export function parseStory(data: Uint8Array, dv: DataView, types: ReadonlyMap<nu
       steps,
     });
   }
-  return { triggers, cameras, sequences };
+  return { triggers, messages, cameras, sequences };
 }

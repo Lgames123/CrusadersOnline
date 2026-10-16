@@ -119,8 +119,26 @@ export interface StorySequence {
   steps: StoryStep[];
 }
 
+/**
+ * A message trigger (cap type 0x1A, fired by 0x4632B0): signs read with the use key and hints
+ * shown on walking in; the text is shown on the HUD for MESSAGE_MS.
+ */
+export interface StoryMessage {
+  id: number;
+  /** Bit 0: walked into; bit 3: use key; 0x200: fires once. */
+  activation: number;
+  volume?: StoryVolume;
+  /** script/messages.ctx index and text. */
+  message: number;
+  text: string;
+}
+
+export const MESSAGE_MS = 2000;
+
 export interface LevelStory {
   triggers: StoryTrigger[];
+  /** Absent in levels converted before message triggers were read. */
+  messages?: StoryMessage[];
   cameras: StoryCamera[];
   sequences: StorySequence[];
 }

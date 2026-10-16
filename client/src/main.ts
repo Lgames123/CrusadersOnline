@@ -26,6 +26,9 @@ import {
   PORTAL_OBJECT_BASE,
   PORTAL_USE_REACH,
   inPortal,
+  MESSAGE_MS,
+  inStoryVolume,
+  type StoryMessage,
   attackKindFor,
   TICK_DT,
   TICK_MS,
@@ -241,6 +244,9 @@ async function main(): Promise<void> {
   const errorBox = document.getElementById('error')!;
   let arena: ArenaDef = createSyntheticArena();
   let levelView = null as OriginalLevel | null;
+  // Message triggers of this level: fired once-only ones (0x200), and the walk-in ones the player is in.
+  const messagesDone = new Set<number>();
+  const messagesInside = new Set<number>();
   let arenaObject: THREE.Object3D | null = null;
   /** Loads an arena into the scene, replacing the previous one. Null if it cannot be shown. */
   // Characters, props and items lit by the floor under them, with blob shadows.
@@ -268,6 +274,8 @@ async function main(): Promise<void> {
     scene.add(arenaObject);
     view?.applyAtmosphere(scene);
     levelView = view;
+    messagesDone.clear();
+    messagesInside.clear();
     lighting.setLevel(view?.light ?? null);
     // Enhanced lighting: the level's wall torches light the stone around them.
     dynamicLights.removePrefix(LEVEL_TORCH_KEY);
@@ -895,9 +903,43 @@ async function main(): Promise<void> {
     const at = k ? new THREE.Vector3(k.cx, door.def.bounds![1], k.cz) : new THREE.Vector3(door.def.x, door.def.y, door.def.z);
     for (const s of door.def.sounds) sounds.play(s, at);
   };
+  // Signs and hints (message triggers, 0x4632B0 through the touch test 0x460320): the use key
+  // reads a sign whose volume the player stands in (activation bit 3); a hint's volume (bit 0)
+  // fires on every check while the player is inside, so its text stays up there; 0x200 fires
+  // once per visit of the level (0x100 only lets a script re-arm it). Text stays MESSAGE_MS.
+  const MESSAGE_USE = 8;
+  const MESSAGE_WALK = 1;
+  const MESSAGE_ONCE = 0x200;
+  const messagesAt = (bit: number): StoryMessage[] => {
+    const p = local.object.position;
+    const x = p.x / LEVEL_UNIT_METRES, y = p.y / LEVEL_UNIT_METRES, z = p.z / LEVEL_UNIT_METRES;
+    return (levelView?.arena.story?.messages ?? []).filter((m) => m.activation & bit && m.volume && !messagesDone.has(m.id) && inStoryVolume(m.volume, x, y, z));
+  };
+  const showMessage = (m: StoryMessage) => {
+    if (m.activation & MESSAGE_ONCE) messagesDone.add(m.id);
+    showSubtitle(null, m.text, MESSAGE_MS);
+  };
+  let messageRefresh = 0;
+  const updateWalkInMessages = () => {
+    const now = performance.now();
+    const inside = new Set<number>();
+    for (const m of messagesAt(MESSAGE_WALK)) {
+      inside.add(m.id);
+      // Entering shows it; staying refreshes it (not every frame: the DOM is rebuilt each time).
+      if (!messagesInside.has(m.id) || now > messageRefresh) {
+        showMessage(m);
+        messageRefresh = now + MESSAGE_MS / 2;
+      }
+    }
+    messagesInside.clear();
+    for (const id of inside) messagesInside.add(id);
+  };
   input.onAction = (action) => {
     if (cutscene) return;
     if (action === 'interact') {
+      // The use key also reads any sign in reach, whatever else it does.
+      const sign = messagesAt(MESSAGE_USE)[0];
+      if (sign) showMessage(sign);
       const target = nearestInteractable();
       if (target && target.id < 0) talk(-target.id);
       else if (target && !target.key) {
@@ -1194,8 +1236,11 @@ async function main(): Promise<void> {
     }
     if (levelView && session && !cutscene) {
       const t = nearestInteractable();
-      prompt.hidden = !t;
+      const sign = !t && messagesAt(MESSAGE_USE).length > 0;
+      prompt.hidden = !t && !sign;
       if (t) prompt.textContent = t.label;
+      else if (sign) prompt.textContent = 'Tab — read sign';
+      updateWalkInMessages();
     }
     updateGroundItems();
     dynamicLights.update(viewCamera, dt);

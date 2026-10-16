@@ -1,5 +1,6 @@
 # Context notes
 
+- 2026-10-16 [Signs and tutorial hints show their text](2026-10-16-sign-messages.md) — cap type 0x1A message triggers + script/messages.ctx; Tab reads signs, walk-in hints in train; script-fired ones not wired (Claude Code)
 - 2026-10-16 [Fancy Chair UV fix on by default](2026-10-16-fancy-chair-fix-default-on.md) — fixedPropUvs defaults on (explicit off keeps the original); localhost.har kept out of git (embeds converted data) (Claude Code)
 - 2026-10-16 [Optional fix for the Fancy Chair's mismatched UVs](2026-10-16-fancy-chair-uv-fix.md) — fixedPropUvs setting refits FCHAIR2's UV islands onto FancyChair.tga's panel and frame columns, client-side and live (Claude Code)
 - 2026-10-16 [Placed objects use their own models.ctx texture](2026-10-16-placed-object-textures.md) — shared model files baked the first binding's texture (bookshelves, flags, ground potions/books); fancy chair UV/texture mismatch is original data; sweep of 140 placed models (Claude Code)

@@ -80,7 +80,7 @@ function mirrorMoverKey(type: number, [a, b, c]: [number, number, number]): [num
   return [a, b, c];
 }
 
-const MANIFEST_VERSION = '1.20.0'; // 1.20: placed objects carry their own texture when it differs from the shared model file's; placements are rewritten on every run (exit entries / flags need no bump); 1.19: citadel portal geometry and triggers; 1.18: relays' brush targets; 1.17: level texture v from the picture's bottom; mover keys mirrored by segment type; 1.16: level textures one picture every 15 units; 1.15: level start points; 1.14: story (triggers, sequences, cameras), rules/strings.json; 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers; 1.9: door sounds; 1.10: lightmap UVs at 16 bytes a vertex; 1.11: lightmap seams stitched; 1.12: prop model boxes, model names in lower case; 1.13: creature facing
+const MANIFEST_VERSION = '1.21.0'; // 1.21: story.messages (sign and hint text from messages.ctx); 1.20: placed objects carry their own texture when it differs from the shared model file's; placements are rewritten on every run (exit entries / flags need no bump); 1.19: citadel portal geometry and triggers; 1.18: relays' brush targets; 1.17: level texture v from the picture's bottom; mover keys mirrored by segment type; 1.16: level textures one picture every 15 units; 1.15: level start points; 1.14: story (triggers, sequences, cameras), rules/strings.json; 1.2: extras.nodeTransform (held items); 1.3: death clips keep root motion; 1.4: level music; 1.5: brushes (doors); 1.6: brush faces; 1.7: portal volumes, door exits; 1.8: brush movers; 1.9: door sounds; 1.10: lightmap UVs at 16 bytes a vertex; 1.11: lightmap seams stitched; 1.12: prop model boxes, model names in lower case; 1.13: creature facing
 /** Bump when level output changes so cached levels are rebuilt. */
 const LEVEL_EMIT_VERSION = '2';
 
@@ -410,6 +410,18 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
     }
   }
 
+  // --- Sign and hint text: script/messages.ctx, "#)Text" per line (loaded by 0x464FC0 into a
+  // 64-entry table; entry 0 is the file's own header line, and the game shows it like any other).
+  const messageText = new Map<number, string>();
+  const messagesCtx = await source.readFile('script/messages.ctx');
+  if (messagesCtx) {
+    manifest.inputs['script/messages.ctx'] = await sha256Hex(messagesCtx);
+    for (const line of new TextDecoder('latin1').decode(messagesCtx).split(/\r?\n/)) {
+      const m = /^(\d+)\)(.*)$/.exec(line);
+      if (m && Number(m[1]) < 64 && m[2]!.trim()) messageText.set(Number(m[1]), m[2]!.trim());
+    }
+  }
+
   // --- Placements: Caps/*.cap -> levels/<cap>.placements.json (positions mirrored like the meshes)
   const capFiles = (await source.list?.('Caps'))?.filter((f) => f.toLowerCase().endsWith('.cap')).sort() ?? [];
   let creatures = 0;
@@ -463,7 +475,7 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
               ...(trigger ? { trigger } : {}),
             };
           }),
-        story: mirrorStory(cap.story),
+        story: mirrorStory(cap.story, messageText),
         // Headings stay in the original's degrees (D3D, unmirrored); the arena converts them.
         starts: cap.starts.map((s) => ({ position: [s.position[0], s.position[1], -s.position[2]], heading: s.angles[1] })),
         objects: cap.objects.map((o) => {
@@ -499,13 +511,19 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
   return report;
 }
 
-/** The story layer in the converted (Z mirrored) frame: volumes, camera paths, step positions. */
-function mirrorStory(story: CapStory): CapStory {
+/**
+ * The story layer in the converted (Z mirrored) frame: volumes, camera paths, step positions.
+ * Message triggers carry their messages.ctx text (those without text are dropped).
+ */
+function mirrorStory(story: CapStory, messageText: ReadonlyMap<number, string>) {
   const vol = (v: CapTriggerVolume): CapTriggerVolume => ({ polygon: v.polygon.map(([x, z]) => [x, -z] as [number, number]), yMin: v.yMin, yMax: v.yMax });
   const path = (p: CapCameraPath): CapCameraPath => ({ ...p, points: p.points.map(([x, y, z]) => [x, y, -z] as [number, number, number]) });
   const arg = (a: CapArg): CapArg => (Array.isArray(a) ? [a[0], a[1], -a[2]] : a);
   return {
     triggers: story.triggers.map((t) => ({ ...t, ...(t.volume ? { volume: vol(t.volume) } : {}) })),
+    messages: story.messages
+      .filter((m) => messageText.has(m.message))
+      .map((m) => ({ ...m, ...(m.volume ? { volume: vol(m.volume) } : {}), text: messageText.get(m.message)! })),
     cameras: story.cameras.map((c) => ({ id: c.id, eye: path(c.eye), target: path(c.target) })),
     sequences: story.sequences.map((s) => ({
       ...s,
