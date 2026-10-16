@@ -405,7 +405,7 @@ export class SettingsPanel {
           silhouetteShadows: false,
           enhancedLighting: false,
           smallEffects: false,
-          fixedPropUvs: false,
+          fixedPropUvs: true,
           keybindings: getDefaultKeybindings(),
         });
         this.render();

@@ -1,5 +1,6 @@
 # Context notes
 
+- 2026-10-16 [Fancy Chair UV fix on by default](2026-10-16-fancy-chair-fix-default-on.md) — fixedPropUvs defaults on (explicit off keeps the original); localhost.har kept out of git (embeds converted data) (Claude Code)
 - 2026-10-16 [Optional fix for the Fancy Chair's mismatched UVs](2026-10-16-fancy-chair-uv-fix.md) — fixedPropUvs setting refits FCHAIR2's UV islands onto FancyChair.tga's panel and frame columns, client-side and live (Claude Code)
 - 2026-10-16 [Placed objects use their own models.ctx texture](2026-10-16-placed-object-textures.md) — shared model files baked the first binding's texture (bookshelves, flags, ground potions/books); fancy chair UV/texture mismatch is original data; sweep of 140 placed models (Claude Code)
 - 2026-10-16 [Inventory item looks and future slots](2026-10-16-inventory-item-looks-and-slots.md) — potion colours from models.ctx Texture lists, models for keys/crystals/quest items, shields posed front, empty-alpha textures opaque, 8×6 paper doll with placeholders (Claude Code)
