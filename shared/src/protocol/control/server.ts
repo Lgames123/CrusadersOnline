@@ -96,6 +96,8 @@ export interface InventoryItemView {
   height?: number;
   /** Original items.ctx Model id, when available. */
   model?: number;
+  /** items.ctx Texture index into the model's models.ctx textures (absent = the first). */
+  texture?: number;
   /** Origin in the inventory grid (undefined for equipped and pre-migration records). */
   x?: number;
   y?: number;

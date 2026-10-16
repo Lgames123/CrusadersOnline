@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { itemPreviewModelFile } from '../assets/item_models.ts';
+import { itemPreviewModelFile, itemPreviewTexture } from '../assets/item_models.ts';
 
 /** Lights shared by the slot thumbnails and the held-item preview, so both read the same. */
 export function addItemLights(scene: THREE.Scene): void {
@@ -14,13 +14,44 @@ export function addItemLights(scene: THREE.Scene): void {
   scene.add(fill);
 }
 
+/** Shield models (items.ctx Model): wooden, metal (and its ice / reflecting / vampiric skins), family. */
+const SHIELD_MODELS: ReadonlySet<number> = new Set([28, 86, 131]);
+
+/**
+ * Some item textures carry an alpha channel that is 0 everywhere (stone1, the Stone Key's: a
+ * 32-bit TGA whose alpha was never painted). The converted material's alpha test then discards
+ * the whole mesh; such a texture is drawn opaque instead.
+ */
+function opaqueIfNoAlpha(material: THREE.Material): void {
+  const map = (material as THREE.MeshStandardMaterial).map;
+  const image = map?.image as CanvasImageSource & { width: number; height: number } | undefined;
+  if (!map || !image?.width || material.alphaTest <= 0) return;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 16;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return;
+  ctx.drawImage(image, 0, 0, 16, 16);
+  const data = ctx.getImageData(0, 0, 16, 16).data;
+  for (let i = 3; i < data.length; i += 4) if (data[i]! > 8) return;
+  material.alphaTest = 0;
+  material.transparent = false;
+  material.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace('#include <alphatest_fragment>', 'diffuseColor.a = 1.0;');
+  };
+  material.customProgramCacheKey = () => 'item-opaque';
+  material.needsUpdate = true;
+}
+
 /**
  * Angles an item's mesh for display by its footprint and centres it in `pivot`; returns its
  * posed size. Tall weapons tilt to show blade and guard, square items show their face.
  */
 export function poseItem(pivot: THREE.Group, mesh: THREE.Object3D, model: number, width: number, height: number): THREE.Vector3 {
   const isArmor = (model >= 80 && model <= 83) || model === 247;
-  if (isArmor) {
+  if (SHIELD_MODELS.has(model)) {
+    // Shield meshes face the forearm they are strapped to: turned round, their face shows.
+    mesh.rotation.set(-0.08, Math.PI + 0.25, 0);
+  } else if (isArmor) {
     mesh.rotation.set(-0.05, 0.22, 0);
   } else if (height > width) {
     mesh.rotation.set(0.08, 0.38, -0.15);
@@ -62,8 +93,9 @@ export class ItemThumbnails {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(34, 1, 0.01, 100);
   private readonly loader = new GLTFLoader();
-  private readonly models = new Map<number, Promise<THREE.Object3D | null>>();
-  private manifest: Promise<Record<string, string>> | null = null;
+  private readonly models = new Map<string, Promise<THREE.Object3D | null>>();
+  private readonly textures = new THREE.TextureLoader();
+  private manifest: Promise<{ models: Record<string, string>; textures: Record<string, string> }> | null = null;
   private readonly cache = new Map<string, string>();
   private readonly pending = new Set<string>();
   private readonly listeners = new Set<(key: string, url: string) => void>();
@@ -79,40 +111,78 @@ export class ItemThumbnails {
     return () => this.listeners.delete(cb);
   }
 
-  getThumbnail(model: number | undefined, width = 1, height = 1): string | null {
+  /** Cache key of an item's thumbnail; `img[data-thumb-key]` uses the same. */
+  static key(model: number, width: number, height: number, texture?: number): string {
+    return `${model}_${texture ?? 0}_${width}x${height}`;
+  }
+
+  getThumbnail(model: number | undefined, width = 1, height = 1, texture?: number): string | null {
     if (model === undefined) return null;
-    const key = `${model}_${width}x${height}`;
+    const key = ItemThumbnails.key(model, width, height, texture);
     const cached = this.cache.get(key);
     if (cached) return cached;
     if (!this.pending.has(key)) {
       this.pending.add(key);
-      void this.renderThumbnail(model, width, height, key);
+      void this.renderThumbnail(model, width, height, key, texture);
     }
     return null;
   }
 
-  async loadModel(model: number): Promise<THREE.Object3D | null> {
-    let entry = this.models.get(model);
+  /**
+   * The item's model (shared: clone before adding it to a scene), drawn with its items.ctx
+   * texture variant when the model has several (potion colours, book covers...).
+   */
+  loadModel(model: number, texture?: number): Promise<THREE.Object3D | null> {
+    const variant = itemPreviewTexture(model, texture);
+    const id = `${model}:${variant ?? ''}`;
+    let entry = this.models.get(id);
     if (!entry) {
       entry = (async () => {
         const fileKey = itemPreviewModelFile(model);
         if (!fileKey) return null;
         this.manifest ??= fetch('/generated/manifest.json')
-          .then(async (r): Promise<{ models?: Record<string, string> }> => (r.ok ? ((await r.json()) as { models?: Record<string, string> }) : {}))
-          .then((m) => m.models ?? {})
-          .catch(() => ({}));
-        const url = (await this.manifest)[fileKey];
+          .then(async (r) => (r.ok ? ((await r.json()) as { models?: Record<string, string>; textures?: Record<string, string> }) : {}))
+          .then((m) => ({ models: m.models ?? {}, textures: m.textures ?? {} }))
+          .catch(() => ({ models: {}, textures: {} }));
+        const manifest = await this.manifest;
+        const url = manifest.models[fileKey];
         if (!url) return null;
         const gltf = await this.loader.loadAsync(`/generated/${url}`).catch(() => null);
-        return gltf?.scene ?? null;
+        if (!gltf) return null;
+        const scene = gltf.scene;
+        const textureUrl = variant && manifest.textures[variant];
+        const map = textureUrl ? await this.textures.loadAsync(`/generated/${textureUrl}`).catch(() => null) : null;
+        scene.traverse((o) => {
+          const mesh = o as THREE.Mesh;
+          if (!mesh.isMesh) return;
+          const swap = (m: THREE.Material) => {
+            if (!map) {
+              opaqueIfNoAlpha(m);
+              return m;
+            }
+            const std = m.clone() as THREE.MeshStandardMaterial;
+            const own = std.map;
+            // Same sampling as the converted model's own texture (glTF: not flipped, sRGB).
+            map.flipY = own?.flipY ?? false;
+            map.wrapS = own?.wrapS ?? THREE.RepeatWrapping;
+            map.wrapT = own?.wrapT ?? THREE.RepeatWrapping;
+            map.colorSpace = own?.colorSpace ?? THREE.SRGBColorSpace;
+            std.map = map;
+            std.needsUpdate = true;
+            opaqueIfNoAlpha(std);
+            return std;
+          };
+          mesh.material = Array.isArray(mesh.material) ? mesh.material.map(swap) : swap(mesh.material);
+        });
+        return scene;
       })();
-      this.models.set(model, entry);
+      this.models.set(id, entry);
     }
     return entry;
   }
 
-  private async renderThumbnail(model: number, width: number, height: number, key: string): Promise<void> {
-    const source = await this.loadModel(model);
+  private async renderThumbnail(model: number, width: number, height: number, key: string, texture?: number): Promise<void> {
+    const source = await this.loadModel(model, texture);
     if (!source) {
       this.pending.delete(key);
       return;

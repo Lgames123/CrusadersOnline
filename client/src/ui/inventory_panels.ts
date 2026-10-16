@@ -24,16 +24,21 @@ const TYPE_LABEL: Record<InventoryItemView['type'], string> = {
 };
 
 /**
- * Paper-doll slots on the 8-cell-wide equipment board (MU Online's layout around the body):
- * column / row / span in board cells. Only weapon, shield and armour exist in the ruleset.
+ * Paper-doll slots on the 8-cell-wide, 6-row equipment board (MU Online's layout around the
+ * body), as grid-area row / column / row span / column span. Only weapon, shield and armour
+ * exist in the ruleset; the others are placeholders for later (the amulet slot is 2×1).
  */
-const EQUIP_SLOTS: { kind: EquipKind | 'head' | 'ring1' | 'ring2'; label: string; area: string }[] = [
-  { kind: 'ring1', label: 'Ring', area: '1 / 2 / span 1 / span 1' },
+const EQUIP_SLOTS: { kind: EquipKind | 'head' | 'ring1' | 'ring2' | 'amulet' | 'gloves' | 'boots' | 'belt'; label: string; area: string }[] = [
+  { kind: 'ring1', label: 'Ring', area: '1 / 1 / span 1 / span 1' },
+  { kind: 'ring2', label: 'Ring', area: '1 / 2 / span 1 / span 1' },
   { kind: 'head', label: 'Helm', area: '1 / 4 / span 2 / span 2' },
-  { kind: 'ring2', label: 'Ring', area: '1 / 7 / span 1 / span 1' },
+  { kind: 'amulet', label: 'Amulet', area: '1 / 7 / span 1 / span 2' },
   { kind: 'weapon', label: 'Weapon', area: '2 / 1 / span 3 / span 2' },
   { kind: 'armor', label: 'Armour', area: '3 / 4 / span 3 / span 2' },
   { kind: 'shield', label: 'Shield', area: '2 / 7 / span 3 / span 2' },
+  { kind: 'gloves', label: 'Gloves', area: '5 / 1 / span 2 / span 2' },
+  { kind: 'belt', label: 'Belt', area: '6 / 4 / span 1 / span 2' },
+  { kind: 'boots', label: 'Boots', area: '5 / 7 / span 2 / span 2' },
 ];
 
 /** How far (CSS px) the pointer travels before a press on an item becomes a drag. */
@@ -229,8 +234,8 @@ export class InventoryPanels {
   private itemCard(item: InventoryItemView, placement?: { x: number; y: number }): string {
     const { width, height } = shapeOf(item);
     const position = placement ? ` style="grid-column:${placement.x + 1} / span ${width};grid-row:${placement.y + 1} / span ${height}"` : '';
-    const thumbKey = item.model !== undefined ? `${item.model}_${width}x${height}` : '';
-    const thumbUrl = item.model !== undefined ? ItemThumbnails.get().getThumbnail(item.model, width, height) : null;
+    const thumbKey = item.model !== undefined ? ItemThumbnails.key(item.model, width, height, item.texture) : '';
+    const thumbUrl = item.model !== undefined ? ItemThumbnails.get().getThumbnail(item.model, width, height, item.texture) : null;
     const hasModel = !!thumbUrl || (item.model !== undefined && itemPreviewModelFile(item.model) !== undefined);
     return `<button type="button" class="inv-item inv-${escape(item.type)}${hasModel ? ' inv-has-model' : ''}" data-slot="${item.slot}"${position} aria-label="${escape(`${item.name}${item.quantity && item.quantity > 1 ? ` ×${item.quantity}` : ''}`)}">
       ${item.model !== undefined ? `<img class="inv-item-thumb" data-thumb-key="${thumbKey}" src="${thumbUrl ?? ''}" alt="" ${thumbUrl ? '' : 'hidden'} />` : ''}
@@ -422,7 +427,7 @@ export class InventoryPanels {
     this.hideTooltip();
     const cell = this.cellSize();
     // The grabbed point of the footprint, proportionally (an equipment slot is not footprint-sized).
-    this.preview.show({ ...(item.model !== undefined ? { model: item.model } : {}), width, height, glyph: ITEM_MARK[item.type] },
+    this.preview.show({ ...(item.model !== undefined ? { model: item.model } : {}), ...(item.texture ? { texture: item.texture } : {}), width, height, glyph: ITEM_MARK[item.type] },
       cell, { x: ((press.x - r.left) / r.width) * width * cell, y: ((press.y - r.top) / r.height) * height * cell });
     this.preview.move(press.x, press.y);
   }

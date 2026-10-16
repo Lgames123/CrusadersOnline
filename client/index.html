@@ -46,7 +46,7 @@
       #player-panel .xp .fill { height: 100%; background: #d9b45a; }
       #player-panel .gold { color: #ffd54f; }
       /* Inventory: MU Online-style framed window (equipment board over the bag), bottom-right; the ground window opens beside it. */
-      #inventory { --cell: clamp(24px, min(4.3vh, 4.4vw), 38px); --gold: #d9b45a; --gold-hi: #ffe08a; --frame: #6e5a35; position: fixed; inset: 0; pointer-events: none; z-index: 10; overflow: hidden; font: 12px/1.3 system-ui, sans-serif; color: #e8dcc0; }
+      #inventory { --cell: clamp(22px, min(4vh, 4.4vw), 38px); --gold: #d9b45a; --gold-hi: #ffe08a; --frame: #6e5a35; position: fixed; inset: 0; pointer-events: none; z-index: 10; overflow: hidden; font: 12px/1.3 system-ui, sans-serif; color: #e8dcc0; }
       #inventory[hidden] { display: none; }
       #inventory .inv-dock { position: absolute; right: 14px; bottom: 14px; display: flex; align-items: stretch; max-height: calc(100% - 28px); }
       #inventory .inv-window { position: relative; pointer-events: auto; box-sizing: border-box; border: 1px solid #1a140b; outline: 1px solid var(--frame); outline-offset: -4px; background: radial-gradient(120% 80% at 50% 0%, rgba(70,56,34,.35), transparent 60%), linear-gradient(180deg, rgba(27,23,17,.97), rgba(10,9,7,.98)); box-shadow: 0 14px 40px rgba(0,0,0,.7), inset 0 0 0 5px rgba(0,0,0,.55), inset 0 0 0 6px rgba(218,183,98,.18); }
@@ -59,8 +59,8 @@
       #inventory .inv-x { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: 22px; height: 22px; padding: 0; border: 1px solid #5a4a2c; background: #1c1710; color: #c9b88f; font: 16px/1 Georgia, serif; }
       #inventory .inv-x:hover { border-color: var(--gold); color: var(--gold-hi); background: #2a2216; }
       /* Equipment board: 8 cells wide like the bag, slots around a faint figure. */
-      #inventory .inv-equipment { position: relative; display: grid; grid-template-columns: repeat(8, var(--cell)); grid-template-rows: repeat(5, var(--cell)); gap: 2px; padding: 3px; margin-bottom: 10px; background: radial-gradient(50% 60% at 50% 55%, rgba(120,96,56,.16), transparent 70%); }
-      #inventory .equip-figure { grid-area: 1 / 3 / span 5 / span 4; z-index: 0; pointer-events: none; background: radial-gradient(closest-side at 50% 18%, rgba(185,160,110,.10) 0 40%, transparent 41%), radial-gradient(closest-side at 50% 62%, rgba(185,160,110,.08) 0 70%, transparent 71%); }
+      #inventory .inv-equipment { position: relative; display: grid; grid-template-columns: repeat(8, var(--cell)); grid-template-rows: repeat(6, var(--cell)); gap: 2px; padding: 3px; margin-bottom: 10px; background: radial-gradient(50% 60% at 50% 55%, rgba(120,96,56,.16), transparent 70%); }
+      #inventory .equip-figure { grid-area: 1 / 3 / span 6 / span 4; z-index: 0; pointer-events: none; background: radial-gradient(closest-side at 50% 18%, rgba(185,160,110,.10) 0 40%, transparent 41%), radial-gradient(closest-side at 50% 62%, rgba(185,160,110,.08) 0 70%, transparent 71%); }
       #inventory .equip-slot { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; box-sizing: border-box; border: 1px solid #4d3f26; background: linear-gradient(180deg, rgba(5,5,4,.75), rgba(22,18,12,.8)); box-shadow: inset 0 0 10px #000; }
       #inventory .equip-slot.future { opacity: .45; border-style: dashed; }
       #inventory .equip-label { color: #6f6450; font: 600 9px/1 "Palatino Linotype", Georgia, serif; letter-spacing: .1em; text-transform: uppercase; text-align: center; pointer-events: none; }

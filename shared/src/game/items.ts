@@ -21,6 +21,8 @@ export interface ItemDef {
   height: number;
   /** Original item model id when known; used by inventory previews. */
   model?: number;
+  /** items.ctx `Texture`: index into the model's texture list in models.ctx (potion colours...). */
+  texture?: number;
   /** Weapons: damage per type (items.ctx `SetDamage`). */
   damage?: DamageVector;
   /** Weapons: swing-rate multiplier (items.ctx `Speed`). */
@@ -101,11 +103,13 @@ function itemDimension(value: string | number | undefined): number {
 
 function withSourceShape(def: ItemDef, fields: ItemRule['fields']): ItemDef {
   const model = Number(fields['Model']);
+  const texture = Number(fields['Texture']);
   return {
     ...def,
     width: itemDimension(fields['Width']),
     height: itemDimension(fields['Height']),
     ...(Number.isInteger(model) && model >= 0 ? { model } : {}),
+    ...(Number.isInteger(texture) && texture > 0 ? { texture } : {}),
   };
 }
 

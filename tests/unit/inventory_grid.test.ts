@@ -13,6 +13,15 @@ describe('inventory grid geometry', () => {
     expect(catalog.get('inherited_sword')).toMatchObject({ width: 1, height: 3, model: 9 });
   });
 
+  it('keeps the items.ctx Texture index that picks a potion colour from its model', () => {
+    const catalog = catalogFromItemRules({ items: [
+      { name: 'Healing Potion', fields: { Type: 'POTION', Use: 'HEAL', Model: 62, Texture: 2, Stackable: 'true' }, damage: {}, protection: {}, calls: [{ name: 'UseParameters', args: [10] }] },
+      { name: 'Invisibility Potion', fields: { Type: 'POTION', Use: 'HEAL', Model: 62, Texture: 0, Stackable: 'true' }, damage: {}, protection: {}, calls: [{ name: 'UseParameters', args: [5] }] },
+    ] });
+    expect(catalog.get('healing_potion')).toMatchObject({ model: 62, texture: 2 });
+    expect(catalog.get('invisibility_potion')!.texture).toBeUndefined();
+  });
+
   it('recognises the original sword, shield and armour shapes at the grid edges', () => {
     expect(fitsGrid(INVENTORY_GRID, { x: 7, y: 1, width: 1, height: 3 })).toBe(true); // sword 1×3
     expect(fitsGrid(INVENTORY_GRID, { x: 6, y: 4, width: 2, height: 2 })).toBe(true); // shield 2×2

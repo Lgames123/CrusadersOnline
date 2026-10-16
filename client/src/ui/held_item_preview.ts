@@ -37,7 +37,7 @@ export class HeldItemPreview {
    * Shows the held item over everything: `cell` is the bag cell size in CSS pixels, `grab` the
    * point of the footprint (pixels from its top-left) that stays under the cursor.
    */
-  show(item: { model?: number; width: number; height: number; glyph: string }, cell: number, grab: { x: number; y: number }): void {
+  show(item: { model?: number; texture?: number; width: number; height: number; glyph: string }, cell: number, grab: { x: number; y: number }): void {
     this.hide();
     const token = ++this.token;
     const w = Math.round(item.width * cell * LIFT);
@@ -50,7 +50,7 @@ export class HeldItemPreview {
     document.body.append(this.element);
     if (item.model === undefined || !this.ensureRenderer()) return;
     this.renderer!.setSize(w, h, false);
-    void ItemThumbnails.get().loadModel(item.model).then((source) => {
+    void ItemThumbnails.get().loadModel(item.model, item.texture).then((source) => {
       if (!source || token !== this.token) return;
       const pivot = new THREE.Group();
       const size = poseItem(pivot, clone(source), item.model!, item.width, item.height);

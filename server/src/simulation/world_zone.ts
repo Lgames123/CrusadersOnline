@@ -1321,6 +1321,7 @@ export class WorldZone {
         equipped: e.equipped,
         ...(!e.equipped && e.x !== undefined && e.y !== undefined ? { x: e.x, y: e.y } : {}),
         ...(def.model !== undefined ? { model: def.model } : {}),
+        ...(def.texture ? { texture: def.texture } : {}),
         ...(def.damage ? { damage: def.damage } : {}),
         ...(def.speed !== undefined ? { speed: def.speed } : {}),
         ...(def.protection ? { protection: def.protection } : {}),
