@@ -11,11 +11,11 @@ export type ToZone =
   | { t: 'attack'; connId: number; kind: AttackKind }
   | { t: 'cast'; connId: number }
   | { t: 'selectSpell'; connId: number; spell: SpellId }
-  | { t: 'equip'; connId: number; slot: number; equip: boolean }
-  | { t: 'moveInventoryItem'; connId: number; slot: number; x: number; y: number }
+  | { t: 'equip'; connId: number; slot: number; equip: boolean; itemId?: string; to?: { x: number; y: number } }
+  | { t: 'moveInventoryItem'; connId: number; slot: number; x: number; y: number; itemId?: string }
   | { t: 'mergeInventoryStacks'; connId: number; fromSlot: number; toSlot: number }
   | { t: 'splitInventoryStack'; connId: number; slot: number; quantity: number }
-  | { t: 'dropInventoryItem'; connId: number; slot: number }
+  | { t: 'dropInventoryItem'; connId: number; slot: number; itemId?: string }
   | { t: 'interact'; connId: number; object: number; key: boolean }
   | { t: 'talk'; connId: number; entity: number; ms: number }
   | { t: 'use'; connId: number; slot: number }

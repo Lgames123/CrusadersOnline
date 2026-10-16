@@ -41,8 +41,8 @@ export interface WorldObjectDef {
   z: number;
   /** Breakables: hit points. */
   hp?: number;
-  /** Ground items. */
-  item?: { name: string; quantity: number };
+  /** Ground items (`itemId`: catalog id of an item a player dropped, so it is picked up as itself). */
+  item?: { name: string; quantity: number; itemId?: string };
   /** Chests. */
   contents?: { name: string; quantity: number }[];
   /** Doors: bounds (metres, [min x, y, z, max x, y, z]) and the key that unlocks it, if locked. */

@@ -234,10 +234,10 @@ export class SessionManager implements TransportHandlers {
         if (s.state === 'in_world') this.zoneOf(s)?.useItem(conn.id, msg.d.slot);
         return;
       case CS.EQUIP_ITEM:
-        if (s.state === 'in_world') this.zoneOf(s)?.equip(conn.id, msg.d.slot, msg.d.equip);
+        if (s.state === 'in_world') this.zoneOf(s)?.equip(conn.id, msg.d.slot, msg.d.equip, msg.d.itemId, msg.d.x !== undefined && msg.d.y !== undefined ? { x: msg.d.x, y: msg.d.y } : undefined);
         return;
       case CS.MOVE_INVENTORY_ITEM:
-        if (s.state === 'in_world') this.zoneOf(s)?.moveInventoryItem(conn.id, msg.d.slot, msg.d.x, msg.d.y);
+        if (s.state === 'in_world') this.zoneOf(s)?.moveInventoryItem(conn.id, msg.d.slot, msg.d.x, msg.d.y, msg.d.itemId);
         return;
       case CS.MERGE_INVENTORY_STACK:
         if (s.state === 'in_world') this.zoneOf(s)?.mergeInventoryStacks(conn.id, msg.d.fromSlot, msg.d.toSlot);
@@ -246,7 +246,7 @@ export class SessionManager implements TransportHandlers {
         if (s.state === 'in_world') this.zoneOf(s)?.splitInventoryStack(conn.id, msg.d.slot, msg.d.quantity);
         return;
       case CS.DROP_INVENTORY_ITEM:
-        if (s.state === 'in_world') this.zoneOf(s)?.dropInventoryItem(conn.id, msg.d.slot);
+        if (s.state === 'in_world') this.zoneOf(s)?.dropInventoryItem(conn.id, msg.d.slot, msg.d.itemId);
         return;
       case CS.CAST_SPELL:
         if (s.state === 'in_world') this.zoneOf(s)?.castSpell(conn.id);

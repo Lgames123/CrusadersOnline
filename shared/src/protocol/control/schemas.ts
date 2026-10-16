@@ -46,19 +46,26 @@ export const PingPacketSchema = z.object({
   d: z.object({ clientTime: z.number() }),
 });
 
+const ItemIdSchema = z.string().min(1).max(64);
+
 export const EquipItemPacketSchema = z.object({
   op: z.literal(CS.EQUIP_ITEM),
   seq: z.number().int().positive(),
   d: z.object({
     slot: z.number().int().min(0).max(63),
     equip: z.boolean(),
+    /** The item the client believes is in `slot`: a stale request for another item is refused. */
+    itemId: ItemIdSchema.optional(),
+    /** Unequipping: the bag cell to put it in (must be free). */
+    x: z.number().int().min(0).max(7).optional(),
+    y: z.number().int().min(0).max(5).optional(),
   }),
 });
 
 export const MoveInventoryItemPacketSchema = z.object({
   op: z.literal(CS.MOVE_INVENTORY_ITEM),
   seq: z.number().int().positive(),
-  d: z.object({ slot: z.number().int().min(0).max(63), x: z.number().int().min(0).max(7), y: z.number().int().min(0).max(5) }),
+  d: z.object({ slot: z.number().int().min(0).max(63), x: z.number().int().min(0).max(7), y: z.number().int().min(0).max(5), itemId: ItemIdSchema.optional() }),
 });
 
 export const MergeInventoryStackPacketSchema = z.object({
@@ -76,7 +83,7 @@ export const SplitInventoryStackPacketSchema = z.object({
 export const DropInventoryItemPacketSchema = z.object({
   op: z.literal(CS.DROP_INVENTORY_ITEM),
   seq: z.number().int().positive(),
-  d: z.object({ slot: z.number().int().min(0).max(63) }),
+  d: z.object({ slot: z.number().int().min(0).max(63), itemId: ItemIdSchema.optional() }),
 });
 
 export const InteractPacketSchema = z.object({

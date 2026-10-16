@@ -94,11 +94,11 @@ port.on('message', (msg: ToZone) => {
       flush();
       break;
     case 'equip':
-      zone.equip(msg.connId, msg.slot, msg.equip);
+      zone.equip(msg.connId, msg.slot, msg.equip, msg.itemId, msg.to);
       flush();
       break;
     case 'moveInventoryItem':
-      zone.moveInventoryItem(msg.connId, msg.slot, msg.x, msg.y);
+      zone.moveInventoryItem(msg.connId, msg.slot, msg.x, msg.y, msg.itemId);
       flush();
       break;
     case 'mergeInventoryStacks':
@@ -110,7 +110,7 @@ port.on('message', (msg: ToZone) => {
       flush();
       break;
     case 'dropInventoryItem':
-      zone.dropInventoryItem(msg.connId, msg.slot);
+      zone.dropInventoryItem(msg.connId, msg.slot, msg.itemId);
       flush();
       break;
     case 'interact':

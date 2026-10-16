@@ -49,6 +49,7 @@ import {
   equipmentOf,
   sanitizeInventory,
   setEquipped,
+  isEquippable,
   startingInventory,
   INVENTORY_SLOTS,
   type InventoryEntry,
@@ -305,7 +306,11 @@ interface WorldObject {
   ownerKey?: string;
   /** Tick at which the dropped item expires (5 minutes from drop). */
   expiresAt?: number;
+  /** What a full bag left behind (chest contents or a ground stack); reset on respawn. */
+  left?: GroundGrant[];
 }
+
+type GroundGrant = { name: string; quantity: number; itemId?: string };
 
 /** One change in an OBJECT_STATE message. */
 interface ObjectChange {
@@ -464,7 +469,7 @@ interface Player extends ActorBase {
   inventory: InventoryEntry[];
   inventoryDirty: boolean;
   /** Equipment change requested mid-swing, applied when the swing ends. */
-  pendingEquip: { slot: number; equip: boolean } | null;
+  pendingEquip: { slot: number; equip: boolean; itemId?: string; to?: { x: number; y: number } } | null;
   weapon: ItemDef;
   armor: ItemDef | null;
   damageMultiplier: number;
@@ -809,31 +814,33 @@ export class WorldZone {
       this.openDoor(p, o, key);
       return;
     }
+    if (p.cutscene) return;
     const pos = p.character.position;
     if (Math.hypot(o.def.x - pos.x, o.def.z - pos.z) > INTERACT_RANGE || Math.abs(o.def.y - pos.y) > INTERACT_HEIGHT) return;
-    const grants = o.def.kind === 'item' ? (o.def.item ? [o.def.item] : []) : (o.def.contents ?? []);
+    const grants: GroundGrant[] = o.left ?? (o.def.kind === 'item' ? (o.def.item ? [o.def.item] : []) : (o.def.contents ?? []));
     const loot: string[] = [];
-    for (const g of grants) if (this.grantItem(p, g.name, g.quantity)) loot.push(g.quantity > 1 ? `${g.quantity} ${g.name}` : g.name);
-    const anyDef = grants.some((g) => this.items.get(g.name) || this.items.get(itemSlug(g.name)));
-    if (o.def.kind === 'item' && grants.length && !loot.length) {
-      if (anyDef) {
-        this.sendJson(connId, { op: SC.ERROR, d: { code: 'bag_full', message: 'Inventory full.' } }); // leave it there
-      }
-      return;
+    // What a full bag cannot take stays there (never lost): known items only, books not learned.
+    const left: GroundGrant[] = [];
+    for (const g of grants) {
+      const got = this.grantItem(p, g.name, g.quantity, g.itemId);
+      if (got > 0) loot.push(got > 1 ? `${got} ${g.name}` : g.name);
+      const def = this.groundItemDef(g);
+      if (got < Math.max(1, g.quantity) && def && def.type !== 'spellbook') left.push({ ...g, quantity: Math.max(1, g.quantity) - got });
     }
-    if (o.dynamic) {
+    if (left.length) {
+      o.left = left;
+      this.sendJson(connId, { op: SC.ERROR, d: { code: 'bag_full', message: 'Inventory full.' } }); // leave it there
+      if (!loot.length) return;
+      this.broadcastObjects([{ id, state: 'present', by: p.entityId, loot }]);
+    } else if (o.def.kind === 'item' && grants.length && !loot.length) {
+      return; // unknown item, or a book already known
+    } else if (o.dynamic) {
       o.state = 'gone';
       this.objects.delete(id);
-      if (o.ownerKey) {
-        const list = this.playerDroppedItems.get(o.ownerKey);
-        if (list) {
-          const idx = list.indexOf(id);
-          if (idx !== -1) list.splice(idx, 1);
-          if (!list.length) this.playerDroppedItems.delete(o.ownerKey);
-        }
-      }
+      this.forgetDropped(o, id);
       this.broadcastObjects([{ id, state: 'gone', by: p.entityId, loot }]);
     } else {
+      delete o.left;
       o.state = o.def.kind === 'chest' ? 'open' : 'gone';
       o.respawnAt = this.tick + OBJECT_RESPAWN_TICKS;
       this.broadcastObjects([{ id, state: o.state, by: p.entityId, loot }]);
@@ -890,22 +897,29 @@ export class WorldZone {
     this.broadcastObjects(changes);
   }
 
-  /** Gold goes to the purse; known items to the bag (stacking potions). False if not taken. */
-  private grantItem(p: Player, name: string, quantity: number): boolean {
+  /** Catalog item of a ground grant: a dropped item by its id, a level item by its name. */
+  private groundItemDef(g: GroundGrant): ItemDef | undefined {
+    return (g.itemId !== undefined ? this.items.get(g.itemId) : undefined) ?? this.items.get(g.name) ?? this.items.get(itemSlug(g.name));
+  }
+
+  /**
+   * Gold goes to the purse; known items to the bag (stacking potions). Returns how many were
+   * taken: a stack is taken whole or not at all, single items one by one until the bag is full.
+   */
+  private grantItem(p: Player, name: string, quantity: number, itemId?: string): number {
+    const n = Math.max(1, quantity);
     if (name === GOLD_ITEM) {
-      p.gold += Math.max(1, quantity);
+      p.gold += n;
       p.statsDirty = true;
-      return true;
+      return n;
     }
-    const def = this.items.get(name) ?? this.items.get(itemSlug(name));
-    if (!def) return false;
+    const def = this.groundItemDef({ name, quantity, ...(itemId !== undefined ? { itemId } : {}) });
+    if (!def) return 0;
     // A spell book is used as soon as it is touched (items.ctx): the spell is learned.
-    if (def.type === 'spellbook' && def.spell) return this.learnSpell(p, def.spell);
-    let added = false;
-    for (let i = 0; i < Math.max(1, def.stackable ? 1 : quantity); i++) {
-      if (addItem(p.inventory, def.id, def.stackable ? Math.max(1, quantity) : 1, this.items) === null) break;
-      added = true;
-    }
+    if (def.type === 'spellbook' && def.spell) return this.learnSpell(p, def.spell) ? n : 0;
+    let added = 0;
+    if (def.stackable) added = addItem(p.inventory, def.id, n, this.items) === null ? 0 : n;
+    else while (added < n && addItem(p.inventory, def.id, 1, this.items) !== null) added++;
     if (added) {
       p.inventoryDirty = true;
       this.sendInventory(p);
@@ -1125,77 +1139,112 @@ export class WorldZone {
     for (const [id, o] of this.objects) {
       if (!o.dynamic || !o.expiresAt || this.tick < o.expiresAt) continue;
       this.objects.delete(id);
-      if (o.ownerKey) {
-        const list = this.playerDroppedItems.get(o.ownerKey);
-        if (list) {
-          const idx = list.indexOf(id);
-          if (idx !== -1) list.splice(idx, 1);
-          if (!list.length) this.playerDroppedItems.delete(o.ownerKey);
-        }
-      }
+      this.forgetDropped(o, id);
       expired.push({ id, state: 'gone' });
     }
     if (expired.length) this.broadcastObjects(expired);
   }
 
-  /**
-   * Equip or unequip the item in an inventory slot (CS_EQUIP_ITEM). Ignored while dead; during a
-   * swing the request is deferred to the swing's end so a weapon change never alters a swing
-   * already in progress (the latest request wins).
-   */
-  equip(connId: number, slot: number, equip: boolean): void {
-    const p = this.players.get(connId);
-    if (!p || !alive(p)) return;
-    if (p.swing) {
-      p.pendingEquip = { slot, equip };
-      return;
-    }
-    this.applyEquipRequest(p, slot, equip);
+  /** A dropped item left the ground: it no longer counts against its owner's cap. */
+  private forgetDropped(o: WorldObject, id: number): void {
+    if (!o.ownerKey) return;
+    const list = this.playerDroppedItems.get(o.ownerKey);
+    if (!list) return;
+    const idx = list.indexOf(id);
+    if (idx !== -1) list.splice(idx, 1);
+    if (!list.length) this.playerDroppedItems.delete(o.ownerKey);
   }
 
-  /** Server-authoritative bag move; invalid bounds, collisions and equipped items are rejected. */
-  moveInventoryItem(connId: number, slot: number, x: number, y: number): void {
-    const p = this.players.get(connId);
-    if (!p || !alive(p) || p.swing || !moveInventoryGridItem(p.inventory, slot, x, y, this.items)) return;
+  /** Bag changes wait for a free player: not dead, swinging or in a scripted sequence. */
+  private inventoryBusy(p: Player): boolean {
+    return !alive(p) || !!p.swing || !!p.cutscene;
+  }
+
+  /** The entry in `slot`, unless the client named another item (its view of the slot is stale). */
+  private inventoryEntry(p: Player, slot: number, itemId?: string): InventoryEntry | undefined {
+    const entry = p.inventory.find((e) => e.slot === slot);
+    return entry && (itemId === undefined || entry.itemId === itemId) ? entry : undefined;
+  }
+
+  /** A change that went through: the client's copy and the save follow. */
+  private inventoryChanged(p: Player): void {
     p.inventoryDirty = true;
     this.sendInventory(p);
     const record = this.persistRecord(p);
     if (record) this.outbox.persist?.([record], 'progress');
+  }
+
+  /**
+   * Equip or unequip the item in an inventory slot (CS_EQUIP_ITEM), unequipping into bag cell
+   * `to` when given. Refused while dead or in a scripted sequence; during a swing the request is
+   * deferred to the swing's end so a weapon change never alters a swing already in progress (the
+   * latest request wins).
+   */
+  equip(connId: number, slot: number, equip: boolean, itemId?: string, to?: { x: number; y: number }): void {
+    const p = this.players.get(connId);
+    if (!p) return;
+    if (!alive(p) || p.cutscene) {
+      this.sendInventory(p);
+      return;
+    }
+    if (p.swing) {
+      p.pendingEquip = { slot, equip, ...(itemId !== undefined ? { itemId } : {}), ...(to ? { to } : {}) };
+      return;
+    }
+    this.applyEquipRequest(p, slot, equip, itemId, to);
+  }
+
+  /**
+   * Server-authoritative bag move; invalid bounds, collisions, equipped items and stale slots are
+   * rejected. Every refusal sends the inventory back so the client drops its stale view.
+   */
+  moveInventoryItem(connId: number, slot: number, x: number, y: number, itemId?: string): void {
+    const p = this.players.get(connId);
+    if (!p) return;
+    if (this.inventoryBusy(p) || !this.inventoryEntry(p, slot, itemId) || !moveInventoryGridItem(p.inventory, slot, x, y, this.items)) {
+      this.sendInventory(p);
+      return;
+    }
+    this.inventoryChanged(p);
   }
 
   mergeInventoryStacks(connId: number, fromSlot: number, toSlot: number): void {
     const p = this.players.get(connId);
-    if (!p || !alive(p) || p.swing || !mergeInventoryStacks(p.inventory, fromSlot, toSlot, this.items)) return;
-    p.inventoryDirty = true;
-    this.sendInventory(p);
-    const record = this.persistRecord(p);
-    if (record) this.outbox.persist?.([record], 'progress');
+    if (!p) return;
+    if (this.inventoryBusy(p) || !mergeInventoryStacks(p.inventory, fromSlot, toSlot, this.items)) {
+      this.sendInventory(p);
+      return;
+    }
+    this.inventoryChanged(p);
   }
 
   splitInventoryStack(connId: number, slot: number, quantity: number): void {
     const p = this.players.get(connId);
-    if (!p || !alive(p) || p.swing || !splitInventoryStack(p.inventory, slot, quantity, this.items)) return;
-    p.inventoryDirty = true;
-    this.sendInventory(p);
-    const record = this.persistRecord(p);
-    if (record) this.outbox.persist?.([record], 'progress');
+    if (!p) return;
+    if (this.inventoryBusy(p) || !splitInventoryStack(p.inventory, slot, quantity, this.items)) {
+      this.sendInventory(p);
+      return;
+    }
+    this.inventoryChanged(p);
   }
 
-  /** Server-authoritative item drop: removes from inventory and spawns a dynamic ground item. */
-  dropInventoryItem(connId: number, slot: number): void {
+  /**
+   * Server-authoritative item drop (carried or worn): removes it from the inventory and spawns a
+   * dynamic ground item that is picked up as the same catalog item.
+   */
+  dropInventoryItem(connId: number, slot: number, itemId?: string): void {
     const p = this.players.get(connId);
-    if (!p || !alive(p) || p.swing) return;
-    const idx = p.inventory.findIndex((e) => e.slot === slot && !e.equipped);
-    if (idx === -1) return;
-    const entry = p.inventory[idx]!;
-    const def = this.items.get(entry.itemId);
-    if (!def) return;
+    if (!p) return;
+    const entry = this.inventoryBusy(p) ? undefined : this.inventoryEntry(p, slot, itemId);
+    const def = entry && this.items.get(entry.itemId);
+    if (!entry || !def) {
+      this.sendInventory(p);
+      return;
+    }
 
-    p.inventory.splice(idx, 1);
-    p.inventoryDirty = true;
-    this.sendInventory(p);
-    const record = this.persistRecord(p);
-    if (record) this.outbox.persist?.([record], 'progress');
+    p.inventory.splice(p.inventory.indexOf(entry), 1);
+    if (entry.equipped) this.applyEquipment(p);
+    this.inventoryChanged(p);
 
     // Enforce 20-item ground limit per player: oldest item disappears immediately when dropping the 21st.
     const ownerKey = p.characterId ?? String(connId);
@@ -1216,7 +1265,7 @@ export class WorldZone {
       x: pos.x,
       y: pos.y,
       z: pos.z,
-      item: { name: def.name, quantity: entry.quantity ?? 1 },
+      item: { name: def.name, quantity: entry.quantity ?? 1, itemId: def.id },
     };
     this.objects.set(id, {
       def: objDef,
@@ -1232,16 +1281,21 @@ export class WorldZone {
     this.broadcastObjects([{ id, state: 'present', def: objDef }]);
   }
 
-  private applyEquipRequest(p: Player, slot: number, equip: boolean): void {
-    if (!setEquipped(p.inventory, slot, equip, this.items)) {
-      this.sendJson(p.connId, { op: SC.ERROR, d: { code: 'bag_full', message: 'Inventory full.' } });
+  private applyEquipRequest(p: Player, slot: number, equip: boolean, itemId?: string, to?: { x: number; y: number }): void {
+    const entry = this.inventoryEntry(p, slot, itemId);
+    const def = entry && this.items.get(entry.itemId);
+    // A repeated request (double click) or a stale one is not an error: the client just resyncs.
+    if (!entry || !def || entry.equipped === equip || !isEquippable(def.type)) {
+      this.sendInventory(p);
+      return;
+    }
+    if (!setEquipped(p.inventory, slot, equip, this.items, to)) {
+      if (!to) this.sendJson(p.connId, { op: SC.ERROR, d: { code: 'bag_full', message: 'Inventory full.' } });
+      this.sendInventory(p);
       return;
     }
     this.applyEquipment(p);
-    p.inventoryDirty = true;
-    this.sendInventory(p);
-    const record = this.persistRecord(p);
-    if (record) this.outbox.persist?.([record], 'progress');
+    this.inventoryChanged(p);
   }
 
   private applyEquipment(p: Player): void {
@@ -2189,9 +2243,9 @@ export class WorldZone {
       a.lastCombo = s.kind === 'normal' ? s.combo : 0;
       if (a.kind === 'player') {
         if (a.pendingEquip) {
-          const { slot, equip } = a.pendingEquip;
+          const { slot, equip, itemId, to } = a.pendingEquip;
           a.pendingEquip = null;
-          this.applyEquipRequest(a, slot, equip);
+          this.applyEquipRequest(a, slot, equip, itemId, to);
         }
         if (a.queuedAttack) this.startPlayerSwing(a, a.queuedKind);
       }

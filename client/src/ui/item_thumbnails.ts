@@ -3,6 +3,50 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { itemPreviewModelFile } from '../assets/item_models.ts';
 
+/** Lights shared by the slot thumbnails and the held-item preview, so both read the same. */
+export function addItemLights(scene: THREE.Scene): void {
+  scene.add(new THREE.HemisphereLight(0xffeed0, 0x1f1912, 2.8));
+  const key = new THREE.DirectionalLight(0xffdf88, 3.2);
+  key.position.set(3, 5, 4);
+  scene.add(key);
+  const fill = new THREE.DirectionalLight(0x7ea0c0, 1.4);
+  fill.position.set(-3, -2, 2);
+  scene.add(fill);
+}
+
+/**
+ * Angles an item's mesh for display by its footprint and centres it in `pivot`; returns its
+ * posed size. Tall weapons tilt to show blade and guard, square items show their face.
+ */
+export function poseItem(pivot: THREE.Group, mesh: THREE.Object3D, model: number, width: number, height: number): THREE.Vector3 {
+  const isArmor = (model >= 80 && model <= 83) || model === 247;
+  if (isArmor) {
+    mesh.rotation.set(-0.05, 0.22, 0);
+  } else if (height > width) {
+    mesh.rotation.set(0.08, 0.38, -0.15);
+  } else if (width > height) {
+    mesh.rotation.set(0, 0.35, 0.25);
+  } else {
+    mesh.rotation.set(-0.08, 0.25, 0);
+  }
+  mesh.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(mesh);
+  const center = box.getCenter(new THREE.Vector3());
+  mesh.position.set(-center.x, -center.y, -center.z);
+  pivot.add(mesh);
+  return box.getSize(new THREE.Vector3());
+}
+
+/** Puts the camera on +Z so a posed item of `size` fills a viewport of `aspect` (`margin` > 1 leaves room). */
+export function fitItemCamera(camera: THREE.PerspectiveCamera, size: THREE.Vector3, aspect: number, margin: number): void {
+  camera.aspect = aspect;
+  camera.updateProjectionMatrix();
+  const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const dist = Math.max(size.y / 2 / tan, size.x / 2 / (tan * aspect)) * margin + size.z / 2;
+  camera.position.set(0, 0, Math.max(0.2, dist));
+  camera.lookAt(0, 0, 0);
+}
+
 /**
  * Renders static, crisp 3D thumbnails of items sized to fit their grid bounding boxes (width × height).
  * Reuses one offscreen WebGL renderer and caches data URLs to avoid multiple WebGL contexts.
@@ -27,13 +71,7 @@ export class ItemThumbnails {
   constructor() {
     this.canvas.width = 128;
     this.canvas.height = 128;
-    this.scene.add(new THREE.HemisphereLight(0xffeed0, 0x1f1912, 2.8));
-    const key = new THREE.DirectionalLight(0xffdf88, 3.2);
-    key.position.set(3, 5, 4);
-    this.scene.add(key);
-    const fill = new THREE.DirectionalLight(0x7ea0c0, 1.4);
-    fill.position.set(-3, -2, 2);
-    this.scene.add(fill);
+    addItemLights(this.scene);
   }
 
   onChange(cb: (key: string, url: string) => void): () => void {
@@ -91,47 +129,11 @@ export class ItemThumbnails {
     const renderWidth = Math.max(64, width * 54);
     const renderHeight = Math.max(64, height * 54);
     this.renderer.setSize(renderWidth, renderHeight, false);
-    this.camera.aspect = renderWidth / renderHeight;
-    this.camera.updateProjectionMatrix();
 
     const pivot = new THREE.Group();
-    const mesh = clone(source);
-    // Align & angle appropriately:
-    const isArmor = (model >= 80 && model <= 83) || model === 247;
-    if (isArmor) {
-      mesh.rotation.y = 0.22;
-      mesh.rotation.x = -0.05;
-      mesh.rotation.z = 0;
-    } else if (height > width) {
-      // Tall weapons (swords, staves, axes): tilt ~12 deg to showcase full blade & guard
-      mesh.rotation.z = -0.15;
-      mesh.rotation.y = 0.38;
-      mesh.rotation.x = 0.08;
-    } else if (width > height) {
-      mesh.rotation.z = 0.25;
-      mesh.rotation.y = 0.35;
-    } else {
-      // Shields / Potions / Rings (square): showcase surface
-      mesh.rotation.y = 0.25;
-      mesh.rotation.x = -0.08;
-    }
-
-    mesh.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(mesh);
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-    mesh.position.set(-center.x, -center.y, -center.z);
-    pivot.add(mesh);
+    const size = poseItem(pivot, clone(source), model, width, height);
     this.scene.add(pivot);
-
-    const fovRad = THREE.MathUtils.degToRad(this.camera.fov / 2);
-    const aspect = renderWidth / renderHeight;
-    const distY = (size.y / 2) / Math.tan(fovRad);
-    const distX = (size.x / 2) / (Math.tan(fovRad) * aspect);
-    const distZ = size.z;
-    const dist = Math.max(distY, distX) * 1.06 + distZ / 2;
-    this.camera.position.set(0, 0, Math.max(0.2, dist));
-    this.camera.lookAt(0, 0, 0);
+    fitItemCamera(this.camera, size, renderWidth / renderHeight, 1.06);
 
     this.renderer.render(this.scene, this.camera);
     pivot.removeFromParent();

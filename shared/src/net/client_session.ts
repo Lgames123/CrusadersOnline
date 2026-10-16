@@ -344,16 +344,19 @@ export class ClientSession {
     this.sendJson({ op: CS.PLAYER_ATTACK, seq: ++this.seq, d: { comboIndex: 1, clientTick: this.clientTick, kind } });
   }
 
-  /** Equips or unequips the item in an inventory slot; the server answers with INVENTORY_UPDATE. */
-  equip(slot: number, equip: boolean): void {
+  /**
+   * Equips or unequips the item in an inventory slot (unequipping into bag cell `to` when given);
+   * the server answers with INVENTORY_UPDATE. `itemId` makes a request for a stale slot fail.
+   */
+  equip(slot: number, equip: boolean, itemId?: string, to?: { x: number; y: number }): void {
     if (!this.connected) return;
-    this.sendJson({ op: CS.EQUIP_ITEM, seq: ++this.seq, d: { slot, equip } });
+    this.sendJson({ op: CS.EQUIP_ITEM, seq: ++this.seq, d: { slot, equip, ...(itemId !== undefined ? { itemId } : {}), ...(to ?? {}) } });
   }
 
-  /** Requests an authoritative move of a carried item to an 8×4 grid origin. */
-  moveInventoryItem(slot: number, x: number, y: number): void {
+  /** Requests an authoritative move of a carried item to an 8×6 grid origin. */
+  moveInventoryItem(slot: number, x: number, y: number, itemId?: string): void {
     if (!this.connected || this.dead) return;
-    this.sendJson({ op: CS.MOVE_INVENTORY_ITEM, seq: ++this.seq, d: { slot, x, y } });
+    this.sendJson({ op: CS.MOVE_INVENTORY_ITEM, seq: ++this.seq, d: { slot, x, y, ...(itemId !== undefined ? { itemId } : {}) } });
   }
 
   mergeInventoryStacks(fromSlot: number, toSlot: number): void {
@@ -367,9 +370,9 @@ export class ClientSession {
   }
 
   /** Drops an inventory item to the ground at the player's position. */
-  dropInventoryItem(slot: number): void {
+  dropInventoryItem(slot: number, itemId?: string): void {
     if (!this.connected || this.dead) return;
-    this.sendJson({ op: CS.DROP_INVENTORY_ITEM, seq: ++this.seq, d: { slot } });
+    this.sendJson({ op: CS.DROP_INVENTORY_ITEM, seq: ++this.seq, d: { slot, ...(itemId !== undefined ? { itemId } : {}) } });
   }
 
   /**

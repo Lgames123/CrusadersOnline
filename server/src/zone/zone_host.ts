@@ -86,12 +86,12 @@ export class ZoneHost {
     this.post({ t: 'selectSpell', connId, spell });
   }
 
-  equip(connId: number, slot: number, equip: boolean): void {
-    this.post({ t: 'equip', connId, slot, equip });
+  equip(connId: number, slot: number, equip: boolean, itemId?: string, to?: { x: number; y: number }): void {
+    this.post({ t: 'equip', connId, slot, equip, ...(itemId !== undefined ? { itemId } : {}), ...(to ? { to } : {}) });
   }
 
-  moveInventoryItem(connId: number, slot: number, x: number, y: number): void {
-    this.post({ t: 'moveInventoryItem', connId, slot, x, y });
+  moveInventoryItem(connId: number, slot: number, x: number, y: number, itemId?: string): void {
+    this.post({ t: 'moveInventoryItem', connId, slot, x, y, ...(itemId !== undefined ? { itemId } : {}) });
   }
 
   mergeInventoryStacks(connId: number, fromSlot: number, toSlot: number): void {
@@ -102,8 +102,8 @@ export class ZoneHost {
     this.post({ t: 'splitInventoryStack', connId, slot, quantity });
   }
 
-  dropInventoryItem(connId: number, slot: number): void {
-    this.post({ t: 'dropInventoryItem', connId, slot });
+  dropInventoryItem(connId: number, slot: number, itemId?: string): void {
+    this.post({ t: 'dropInventoryItem', connId, slot, ...(itemId !== undefined ? { itemId } : {}) });
   }
 
   interact(connId: number, object: number, key = false): void {

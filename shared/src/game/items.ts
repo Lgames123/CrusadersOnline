@@ -1,6 +1,6 @@
 import { damageVector, type DamageType, type DamageVector } from './ruleset.ts';
 import { SPELL_BOOK_PARAMS, type SpellId } from './spells.ts';
-import { firstFreeGridPosition, INVENTORY_GRID, layoutInventoryGrid } from './inventory_grid.ts';
+import { canPlaceGrid, firstFreeGridPosition, INVENTORY_GRID, layoutInventoryGrid } from './inventory_grid.ts';
 
 /**
  * Equipment items. The built-in catalog holds the numbers of the items the slice uses, recorded
@@ -244,18 +244,24 @@ export function addItem(inv: InventoryEntry[], itemId: string, quantity = 1, cat
   return null;
 }
 
+/** Item types worn on the character (one of each). */
+export function isEquippable(type: ItemType): boolean {
+  return type === 'weapon' || type === 'shield' || type === 'armor';
+}
+
 /**
- * Equips (unequipping whatever occupies the same equipment slot) or unequips the item in `slot`.
+ * Equips (unequipping whatever occupies the same equipment slot) or unequips the item in `slot`,
+ * into the bag cell `to` when given (it must be free), else the first free area.
  * Returns false for an empty slot, an unknown item or a no-op.
  */
-export function setEquipped(inv: InventoryEntry[], slot: number, equip: boolean, catalog: ItemCatalog): boolean {
+export function setEquipped(inv: InventoryEntry[], slot: number, equip: boolean, catalog: ItemCatalog, to?: { x: number; y: number }): boolean {
   const entry = inv.find((e) => e.slot === slot);
   const def = entry && catalog.get(entry.itemId);
-  if (!entry || !def || entry.equipped === equip || def.type === 'potion' || def.type === 'spellbook' || def.type === 'key') return false;
+  if (!entry || !def || entry.equipped === equip || !isEquippable(def.type)) return false;
   // Unequipping must reserve the item's complete rectangle before changing any state.
   if (!equip) {
     const occupied = [...layoutInventoryGrid(inv, catalog)].map(([, placement]) => placement);
-    const at = firstFreeGridPosition(INVENTORY_GRID, def, occupied);
+    const at = to ? (canPlaceGrid(INVENTORY_GRID, { ...to, width: def.width, height: def.height }, occupied) ? to : null) : firstFreeGridPosition(INVENTORY_GRID, def, occupied);
     if (!at) return false;
     entry.x = at.x;
     entry.y = at.y;

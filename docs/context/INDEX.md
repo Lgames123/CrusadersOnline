@@ -1,5 +1,6 @@
 # Context notes
 
+- 2026-10-16 [MU-style inventory window and inventory authority](2026-10-16-inventory-mu-window-and-authority.md) — one bottom-right window (equipment over bag), Ctrl+G ground window, drag from worn slots, stale-slot/cutscene/full-chest guards with resync (Claude Code)
 - 2026-10-16 [Exit crossings and arrivals as the original](2026-10-16-exit-arrival-as-original.md) — decoded entry point + crossing offset with heading kept, body-vs-volume test, original Citadel stair volumes, script-only act changes (Claude Code)
 - 2026-10-15 [Zone transfer continuity and collision mesh connectivity](2026-10-15-zone-transfer-continuity-and-connectivity.md) — starts-by-exit removed, shared-frame yaw preservation, and BFS connectivity interior arrival (Antigravity)
 - 2026-10-15 [Zone transfer arrival positioning and facing synchronization](2026-10-15-zone-transfer-arrival-and-facing.md) — Cap start dispatch, geometric interior derivation, and yaw sync preventing portal bounce loops (Antigravity)

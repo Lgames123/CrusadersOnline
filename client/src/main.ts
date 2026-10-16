@@ -334,6 +334,7 @@ async function main(): Promise<void> {
           correction: (dx, dy, dz) => player?.correct(dx, dy, dz),
           stats: (s) => {
             hud.stats(s);
+            inventoryPanel.setGold(s.gold);
             myTorch.distance = s.light;
             myTorch.visible = s.light > 0;
             if (!myTorch.visible) dynamicLights.remove(MY_TORCH_KEY);
@@ -1005,10 +1006,11 @@ async function main(): Promise<void> {
     updateHint();
   };
 
-  // Inventory panels (online only): each can be toggled without closing the other two.
+  // Inventory window (online only); the ground window opens beside it (and opens it).
   function setInventoryPanelOpen(kind: InventoryPanelKind, open: boolean): void {
     if (!session || open === inventoryPanel.isOpen(kind)) return;
     inventoryPanel.setOpen(kind, open);
+    if (open && kind === 'ground') updateGroundItems();
     if (open && input.locked) {
       releasing = true;
       document.exitPointerLock();
@@ -1016,7 +1018,7 @@ async function main(): Promise<void> {
     updateHint();
   }
   function setInventoryOpen(open: boolean): void {
-    setInventoryPanelOpen('bag', open);
+    setInventoryPanelOpen('inventory', open);
   }
   function closeInventoryPanels(): void {
     if (!inventoryPanel.open) return;
@@ -1024,17 +1026,14 @@ async function main(): Promise<void> {
     if (!optionsOpen) input.requestLock();
     updateHint();
   }
-  inventoryPanel.onToggleEquip = (slot, equip) => {
-    const item = session?.inventory?.items.find((i) => i.slot === slot);
-    if (item?.type === 'potion') session?.useItem(slot);
-    else session?.equip(slot, equip);
-  };
-  inventoryPanel.onMove = (slot, x, y) => session?.moveInventoryItem(slot, x, y);
+  inventoryPanel.onEquip = (slot, itemId, equip, to) => session?.equip(slot, equip, itemId, to);
+  inventoryPanel.onUse = (slot) => session?.useItem(slot);
+  inventoryPanel.onMove = (slot, itemId, x, y) => session?.moveInventoryItem(slot, x, y, itemId);
   inventoryPanel.onMerge = (fromSlot, toSlot) => session?.mergeInventoryStacks(fromSlot, toSlot);
   inventoryPanel.onSplit = (slot, quantity) => session?.splitInventoryStack(slot, quantity);
-  inventoryPanel.onDrop = (slot) => session?.dropInventoryItem(slot);
+  inventoryPanel.onDrop = (slot, itemId) => session?.dropInventoryItem(slot, itemId);
   inventoryPanel.onPickup = (object) => session?.interact(object);
-  inventoryPanel.onClose = (kind) => setInventoryPanelOpen(kind, false);
+  inventoryPanel.onToggle = (kind, open) => setInventoryPanelOpen(kind, open);
   inventoryPanel.onNotice = (message) => {
     if (!player) return;
     headPos.copy(player.object.position);
@@ -1071,11 +1070,14 @@ async function main(): Promise<void> {
     }
     if (optionsOpen) return;
     const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target as HTMLElement | null)?.isContentEditable;
-    if (!typing && e.shiftKey && !e.repeat && (e.code === 'KeyI' || e.code === 'KeyC' || e.code === 'KeyG')) {
+    if (!typing && (e.ctrlKey || e.shiftKey) && !e.altKey && !e.repeat && e.code === 'KeyG') {
+      // Ctrl+G (Shift+G too): the ground window beside the inventory.
       e.preventDefault();
-      const kind: InventoryPanelKind = e.code === 'KeyI' ? 'bag' : e.code === 'KeyC' ? 'character' : 'ground';
-      setInventoryPanelOpen(kind, !inventoryPanel.isOpen(kind));
-    } else if ((input.isKeyForAction('inventory', e.code) || e.code === 'KeyI') && !e.repeat) setInventoryOpen(!inventoryPanel.isOpen('bag'));
+      setInventoryPanelOpen('ground', !inventoryPanel.isOpen('ground'));
+    } else if (!typing && e.shiftKey && !e.repeat && e.code === 'KeyC') {
+      e.preventDefault();
+      setInventoryOpen(!inventoryPanel.open);
+    } else if ((input.isKeyForAction('inventory', e.code) || e.code === 'KeyI') && !e.repeat) setInventoryOpen(!inventoryPanel.open);
     else if ((input.isKeyForAction('questBook', e.code) || e.code === 'F2') && !e.repeat) {
       e.preventDefault();
       setQuestBookOpen(!questBook.open);
