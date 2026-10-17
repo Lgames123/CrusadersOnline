@@ -1,5 +1,8 @@
 import {
   SHOP_REOPEN_MS,
+  entryPrice,
+  giftFlag,
+  isGiftShop,
   merchantBuys,
   shopStock,
   tradePrice,
@@ -502,7 +505,7 @@ interface Player extends ActorBase {
   /** Walk-in sound triggers the player stands in (each plays on entering). */
   insideSounds: Set<number>;
   /** The shop visit in progress: this visit's copy of its items (0x46D3D0). */
-  shop: { id: number; stock: ShopEntry[]; openedAt: number } | null;
+  shop: { id: number; stock: ShopEntry[]; openedAt: number; gift: boolean } | null;
   /** A scripted sequence the client is playing; the server finishes it by `until` at the latest. */
   cutscene: { sequence: StorySequence; until: number } | null;
 }
@@ -2120,21 +2123,26 @@ export class WorldZone {
     if (!visit) return;
     const stock = visit.stock.flatMap((e) => {
       const def = this.items.get(e.itemId);
-      return def ? [{ ...this.itemFacts(def), ...(e.quantity > 1 ? { quantity: e.quantity } : {}), price: tradePrice(def, e.quantity) }] : [];
+      return def ? [{ ...this.itemFacts(def), ...(e.quantity > 1 ? { quantity: e.quantity } : {}), price: entryPrice(def, e) }] : [];
     });
-    this.sendJson(p.connId, { op: SC.SHOP, d: { shop: visit.id, stock, ...(greeting !== undefined && greeting >= 0 ? { greeting } : {}) } });
+    const gift = visit.gift ? { gift: true } : {};
+    this.sendJson(p.connId, { op: SC.SHOP, d: { shop: visit.id, stock, ...gift, ...(greeting !== undefined && greeting >= 0 ? { greeting } : {}) } });
   }
 
   /**
    * The use key in a shop's volume (fire 0x464170): at most every 500 ms, the merchant's greeting
-   * and a fresh copy of the shop's items (0x46D3D0) for this visit.
+   * and a fresh copy of the shop's items (0x46D3D0) for this visit. A gift shop leaves out what
+   * this character already took.
    */
   shopOpen(connId: number, id: number): void {
     const p = this.players.get(connId);
     const shop = p && this.shopAt(p, id);
     if (!p || !shop) return;
     if (p.shop && this.tick - p.shop.openedAt < Math.ceil(SHOP_REOPEN_MS / TICK_MS)) return;
-    p.shop = { id, stock: shopStock(shop, this.items), openedAt: this.tick };
+    const act = this.act ?? '';
+    const gift = isGiftShop(shop);
+    const stock = shopStock(shop, this.items, (i) => p.storyFlags.has(giftFlag(act, id, i)));
+    p.shop = { id, stock, openedAt: this.tick, gift };
     this.sendShop(p, shop.greeting);
   }
 
@@ -2148,7 +2156,7 @@ export class WorldZone {
       this.sendShop(p);
       return;
     }
-    const cost = tradePrice(def, entry.quantity);
+    const cost = entryPrice(def, entry);
     if (p.gold < cost) {
       this.sendJson(connId, { op: SC.ERROR, d: { code: 'shop_gold', message: 'Not enough gold.' } });
       return;
@@ -2160,8 +2168,17 @@ export class WorldZone {
     p.shop.stock.splice(index, 1);
     p.gold -= cost;
     p.statsDirty = true;
+    if (entry.gift !== undefined) {
+      const flag = giftFlag(this.act ?? '', id, entry.gift);
+      p.storyFlags.add(flag);
+      p.story.flags.push(flag);
+    }
     this.inventoryChanged(p);
     this.sendShop(p);
+    if (entry.gift !== undefined) {
+      const record = this.persistRecord(p);
+      if (record) this.outbox.persist?.([record], 'progress');
+    }
   }
 
   /** Puts a bag item (its whole stack; worn ones too) into the shop for its Price × count. */
@@ -2174,8 +2191,8 @@ export class WorldZone {
       this.sendInventory(p);
       return;
     }
-    if (!merchantBuys(def)) {
-      this.sendJson(connId, { op: SC.ERROR, d: { code: 'shop_refuse', message: 'The merchant will not take that.' } });
+    if (p.shop.gift || !merchantBuys(def)) {
+      this.sendJson(connId, { op: SC.ERROR, d: { code: 'shop_refuse', message: p.shop.gift ? 'Nothing is bought here.' : 'The merchant will not take that.' } });
       return;
     }
     const quantity = entry.quantity ?? 1;

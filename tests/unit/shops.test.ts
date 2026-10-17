@@ -5,6 +5,7 @@ import {
   LEVEL_UNIT_METRES,
   SC,
   createSyntheticArena,
+  emptyQuestLog,
   initPhysics,
   tradePrice,
   type InventoryEntry,
@@ -19,14 +20,14 @@ beforeAll(async () => {
 });
 
 interface Internal {
-  players: Map<number, { inventory: InventoryEntry[]; gold: number }>;
+  players: Map<number, { inventory: InventoryEntry[]; gold: number; story: { flags: string[] } }>;
 }
 
 const FT = 1 / LEVEL_UNIT_METRES;
 const SHOP = 7000;
 
 /** A level act with one shop (cap type 0x1C) whose volume holds the player at the origin. */
-function shopZone(gold: number, inventory: InventoryEntry[] = [], at = { x: 0, z: 0 }) {
+function shopZone(gold: number, inventory: InventoryEntry[] = [], at = { x: 0, z: 0 }, greeting = 1466, story?: { flags: string[] }) {
   const arena = createSyntheticArena();
   arena.name = 'level:t1a';
   arena.mobSpawns = [];
@@ -34,7 +35,7 @@ function shopZone(gold: number, inventory: InventoryEntry[] = [], at = { x: 0, z
     id: SHOP,
     activation: 8,
     volume: { polygon: [[-3 * FT, -3 * FT], [3 * FT, -3 * FT], [3 * FT, 3 * FT], [-3 * FT, 3 * FT]], yMin: -10, yMax: 20 * FT },
-    greeting: 1466,
+    greeting,
     stock: [{ name: 'Long Sword', quantity: 1 }, { name: 'Healing Potion', quantity: 1 }, { name: 'Healing Potion', quantity: 1 }],
   };
   arena.story = { triggers: [], cameras: [], sequences: [], shops: [shop] };
@@ -42,7 +43,7 @@ function shopZone(gold: number, inventory: InventoryEntry[] = [], at = { x: 0, z
   const zone = new WorldZone(rapier, arena.name, arena, {
     send: (_c, data) => { if (typeof data === 'string') messages.push(JSON.parse(data) as ServerControlMsg); },
   }, { items: new Map(BUILTIN_ITEMS) });
-  zone.join(1, { name: 'Buyer', characterId: null, position: { x: at.x, y: 0.5, z: at.z }, gold, inventory });
+  zone.join(1, { name: 'Buyer', characterId: null, position: { x: at.x, y: 0.5, z: at.z }, gold, inventory, ...(story ? { story: { flags: story.flags, quests: emptyQuestLog() } } : {}) });
   const me = (zone as unknown as Internal).players.get(1)!;
   const shops = () => messages.filter((m) => m.op === SC.SHOP).map((m) => m.d);
   const errors = () => messages.filter((m) => m.op === SC.ERROR).map((m) => m.d.code);
@@ -91,5 +92,24 @@ describe('shops (cap type 0x1C)', () => {
     for (let i = 0; i < 20; i++) t.zone.step(); // past the 500 ms between openings
     t.zone.shopOpen(1, SHOP);
     expect(t.shops().at(-1)!.stock.map((s) => s.itemId)).toEqual(['long_sword', 'healing_potion', 'healing_potion']);
+  });
+  it('a gift shop (greeting not a merchant line) gives each item free, once per character, and buys nothing', () => {
+    const t = shopZone(0, [{ slot: 0, itemId: 'scale_armor', equipped: false }], undefined, 792);
+    t.zone.shopOpen(1, SHOP);
+    const shop = t.shops()[0]!;
+    expect(shop.gift).toBe(true);
+    expect(shop.stock.every((s) => s.price === 0)).toBe(true);
+    t.zone.shopBuy(1, SHOP, 0, 'long_sword');
+    expect(t.me.inventory.some((e) => e.itemId === 'long_sword')).toBe(true);
+    expect(t.me.gold).toBe(0);
+    t.zone.shopSell(1, SHOP, 0, 'scale_armor');
+    expect(t.errors()).toContain('shop_refuse');
+    for (let i = 0; i < 20; i++) t.zone.step();
+    t.zone.shopOpen(1, SHOP);
+    expect(t.shops().at(-1)!.stock.map((s) => s.itemId)).toEqual(['healing_potion', 'healing_potion']);
+    // The taken flag is saved with the story: the next session's shop lacks it too.
+    const again = shopZone(0, [], undefined, 792, { flags: [...t.me.story.flags] });
+    again.zone.shopOpen(1, SHOP);
+    expect(again.shops()[0]!.stock.map((s) => s.itemId)).toEqual(['healing_potion', 'healing_potion']);
   });
 });

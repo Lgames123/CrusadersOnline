@@ -113,7 +113,7 @@ export class InventoryPanels {
   private readonly shopWindow: HTMLElement;
   private readonly shopList: HTMLElement;
   /** The shop open (its trigger id) and this visit's offer, or null. */
-  private shop: { shop: number; stock: ShopItemView[] } | null = null;
+  private shop: { shop: number; stock: ShopItemView[]; gift: boolean } | null = null;
   private gold = 0;
 
   onEquip: (slot: number, itemId: string, equip: boolean, to?: { x: number; y: number }) => void = () => {};
@@ -241,8 +241,9 @@ export class InventoryPanels {
   }
 
   /** Opens a shop beside the inventory (which opens too), or shows its offer after a trade. */
-  openShop(shop: { shop: number; stock: ShopItemView[] }): void {
-    this.shop = { shop: shop.shop, stock: [...shop.stock] };
+  openShop(shop: { shop: number; stock: ShopItemView[]; gift?: boolean }): void {
+    this.shop = { shop: shop.shop, stock: [...shop.stock], gift: shop.gift === true };
+    this.shopWindow.querySelector('.shop-title')!.textContent = this.shop.gift ? 'Reward' : 'Merchant';
     this.awaitingUntil = 0;
     this.shopWindow.hidden = false;
     this.dock.classList.add('shop-open');
@@ -268,12 +269,12 @@ export class InventoryPanels {
       const thumbUrl = item.model !== undefined ? ItemThumbnails.get().getThumbnail(item.model, width, height, item.texture) : null;
       const poor = item.price > this.gold;
       const name = `${item.name}${item.quantity && item.quantity > 1 ? ` ×${item.quantity}` : ''}`;
-      return `<button type="button" class="shop-item inv-${escape(item.type)}${poor ? ' shop-poor' : ''}" data-stock="${i}" title="${escape(`Buy ${name} for ${item.price} gold`)}">
+      return `<button type="button" class="shop-item inv-${escape(item.type)}${poor ? ' shop-poor' : ''}" data-stock="${i}" title="${escape(shop.gift ? `Take ${name}` : `Buy ${name} for ${item.price} gold`)}">
         <span class="shop-thumb">${item.model !== undefined ? `<img data-thumb-key="${thumbKey}" src="${thumbUrl ?? ''}" alt="" ${thumbUrl ? '' : 'hidden'} />` : ''}<span class="inv-mark" aria-hidden="true">${ITEM_MARK[item.type]}</span></span>
         <span class="shop-name">${escape(name)}<small>${TYPE_LABEL[item.type]}</small></span>
-        <span class="shop-price"><i aria-hidden="true"></i>${item.price.toLocaleString('en-US')}</span>
+        <span class="shop-price">${shop.gift ? 'Free' : `<i aria-hidden="true"></i>${item.price.toLocaleString('en-US')}`}</span>
       </button>`;
-    }).join('') || '<p class="inv-empty">Nothing for sale.</p>';
+    }).join('') || `<p class="inv-empty">${shop.gift ? 'Nothing left to take.' : 'Nothing for sale.'}</p>`;
   }
 
   setGroundItems(items: readonly GroundItemView[]): void {
@@ -472,7 +473,8 @@ export class InventoryPanels {
   private sell(item: InventoryItemView): void {
     const shop = this.shop;
     if (!shop) return;
-    if (!item.value) this.onNotice?.('The merchant will not take that.');
+    if (shop.gift) this.onNotice?.('Nothing is bought here.');
+    else if (!item.value) this.onNotice?.('The merchant will not take that.');
     else this.request(() => this.onSell(shop.shop, item.slot, item.itemId));
   }
 

@@ -193,11 +193,12 @@ export interface StorySoundMsg {
 
 /**
  * A shop (cap type 0x1C) opened for this player, or its offer after a trade. `greeting`: the
- * merchant's line (Sound.ctx id), on opening only.
+ * merchant's line (Sound.ctx id), on opening only. `gift`: a reward handed out (every item free,
+ * taken once per character, nothing bought).
  */
 export interface ShopMsg {
   op: typeof SC.SHOP;
-  d: { shop: number; stock: ShopItemView[]; greeting?: number };
+  d: { shop: number; stock: ShopItemView[]; greeting?: number; gift?: boolean };
 }
 
 export interface EntityDespawnMsg {
