@@ -290,23 +290,47 @@ describe('directional attacks (original controls)', () => {
 });
 
 describe('shield rush (original controls)', () => {
-  it('a rush that meets the skeleton reels it back and knocks it down, unharmed; Drake loses HP on contact', () => {
+  it('a rush that meets the skeleton pushes it, reels it back and knocks it down, unharmed; Drake loses 1 HP per contact roll', () => {
+    // random() = 0: every contact roll (5 % per original step, 0x493F20) comes up.
     const t = setup();
     t.run(APPROACH, INPUT.FORWARD, 0);
     // Wait until the skeleton stands within reach of the charge, then rush (shield + jump).
     for (let i = 0; i < 200 && Math.hypot(t.mob().x - t.me().x, t.mob().z - t.me().z) > 1.6; i++) t.run(1);
     const hp = t.mob().hp;
     const myHp = t.me().hp;
+    const from = { x: t.mob().x, z: t.mob().z };
     const anims: number[] = [];
     for (let i = 0; i < 30; i++) {
       t.run(1, i === 0 ? INPUT.BLOCK | INPUT.JUMP : INPUT.BLOCK, 0);
       anims.push(t.mob().anim);
+      // The body stops the charge: Drake never passes through it.
+      expect(Math.hypot(t.mob().x - t.me().x, t.mob().z - t.me().z)).toBeGreaterThan(0.5);
     }
     const reel = anims.indexOf(ANIM.HIT);
     expect(reel).toBeGreaterThanOrEqual(0);
     expect(anims.indexOf(ANIM.KNOCKDOWN)).toBeGreaterThan(reel);
     expect(t.mob().hp).toBe(hp);
-    expect(t.me().hp).toBeLessThan(myHp);
+    expect(Math.hypot(t.mob().x - from.x, t.mob().z - from.z)).toBeGreaterThan(0);
+    const rolls = t.events().filter((e) => e.rush && e.target === t.mob().id);
+    expect(rolls.filter((e) => e.reel)).toHaveLength(1);
+    expect(t.me().hp).toBe(myHp - rolls.length);
+  });
+
+  it("a creature's bash stuns the player through a raised shield, without damage", () => {
+    // Alternating rolls: the special against a raised shield (> 800 / 1000), then its bash (< 2 / 3).
+    let flip = false;
+    const t = setup({ random: () => ((flip = !flip) ? 0.9 : 0.1) });
+    t.run(APPROACH, INPUT.FORWARD, 0);
+    const myHp = t.me().hp;
+    // Hold the shield: the skeleton's special against it (0x004087A0) includes the bash.
+    let stunned = false;
+    for (let i = 0; i < 600 && !stunned; i++) {
+      t.run(1, INPUT.BLOCK, 0);
+      stunned = t.me().anim === ANIM.STUNNED;
+    }
+    expect(stunned).toBe(true);
+    expect(t.events().some((e) => e.rush && e.target === t.entityId)).toBe(true);
+    expect(t.me().hp).toBe(myHp);
   });
 });
 

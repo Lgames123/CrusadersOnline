@@ -144,8 +144,10 @@ import {
   MOB_UPPER_SWING_CODES,
   type MobAttack,
   type MobSequence,
-  RUSH_CONTACT_TICKS,
-  RUSH_REACH,
+  RUSH_CONTACT_SLACK,
+  RUSH_PUSH_SHARE,
+  RUSH_STEP_CHANCE,
+  RUSH_STEPS_PER_SECOND,
   ACTION_IMPACT,
   ACTION_IMPACT_FRONT_ALT,
   ACTION_IMPACT_LEFT_ALT,
@@ -443,6 +445,8 @@ interface ActorBase {
   deadUntil: number;
   /** Tick until which a hit reaction (impact, stun, knock-down) keeps the actor from acting; 0 = none. */
   hitUntil: number;
+  /** Characters the current shield rush has already put into their impact. */
+  rushHit: Set<number>;
 }
 
 interface Player extends ActorBase {
@@ -465,8 +469,6 @@ interface Player extends ActorBase {
   queuedAttack: boolean;
   /** Swings started (entity flags bit 3 flips with it, so clients restart a repeated layered swing). */
   swingSerial: number;
-  /** Creatures already met by the current shield rush. */
-  rushHit: Set<number>;
   mana: number;
   maxMana: number;
   spells: KnownSpell[];
@@ -583,6 +585,8 @@ const isCitizen = (m: Mob) => m.archetype.passive && m.weapon.id === UNARMED.id;
 const CHARACTER_SPACING = 2 * PLAYER_RADIUS;
 /** Quick shield block clip (PE07, 20 frames at 1000/30 fps). */
 const MOB_BLOCK_ANIM_TICKS = Math.round((20 / (1000 / 30)) * 20);
+/** A blocked rush step's 5 % roll, over the original's steps in one tick. */
+const RUSH_TICK_CHANCE = 1 - (1 - RUSH_STEP_CHANCE) ** (RUSH_STEPS_PER_SECOND / TICK_RATE);
 
 /**
  * One authoritative world zone: shared collision world, player characters driven only by
@@ -716,6 +720,7 @@ export class WorldZone {
       walkShield: false,
       swingSerial: 0,
       knockdownAt: 0,
+      rushHit: new Set(),
       path: at.path ?? null,
       pathIndex: 0,
       pathForward: false,
@@ -1888,6 +1893,7 @@ export class WorldZone {
         // sides); the dead do not act. The client mirrors the dead rule.
         // During a scripted sequence the player's character stands where it was (the stand-in plays).
         if (!alive(p) || p.cutscene) this.frame.flags = 0;
+        const before = { x: p.character.position.x, z: p.character.position.z };
         stepCharacter(this.mw, p.character, this.frame, p.moveStats, TICK_DT);
         p.lastProcessedInput = this.frame.clientTick;
         if (alive(p) && !p.cutscene) p.yaw = this.frame.yaw;
@@ -1895,7 +1901,7 @@ export class WorldZone {
         this.catchFall(p);
         const moving = (this.frame.flags & MOVE_MASK) !== 0 && !(this.frame.flags & INPUT.ROOTED);
         p.blocking = alive(p) && p.shield !== null && (this.frame.flags & INPUT.BLOCK) !== 0 && !p.swing && p.hitUntil <= tick && p.character.rollDir !== ACTION_BASH;
-        if (alive(p) && p.character.rollDir === ACTION_BASH) this.rushContact(p);
+        if (alive(p) && p.character.rollDir === ACTION_BASH) this.rushContact(p, before);
         // On diagonals the body turns into the motion, except with the shield up (it faces the view).
         p.facingOffset = moving && !(this.frame.flags & INPUT.BLOCK) ? movementFacingOffset(this.frame.flags, this.features.diagonalMoves) : 0;
         // Hit reactions are timed movement actions, so movementAnim() covers them too.
@@ -2032,7 +2038,9 @@ export class WorldZone {
     // Lunges, leaping strikes, bashes and hit reactions are timed actions of the shared step
     // (their clips' root motion); other input is ignored meanwhile.
     if (m.hitUntil > this.tick) m.input.flags = 0;
+    const before = { x: m.character.position.x, z: m.character.position.z };
     stepCharacter(this.mw, m.character, m.input, m.stats, TICK_DT);
+    if (m.character.rollDir === ACTION_BASH) this.rushContact(m, before);
     this.separate(m);
     m.anim = m.hitUntil > this.tick
       ? (m.character.rollDir === ACTION_KNOCKDOWN ? ANIM.KNOCKDOWN : ANIM.HIT)
@@ -2321,10 +2329,8 @@ export class WorldZone {
       pz += nz * (CHARACTER_SPACING - d);
     }
     if (px === 0 && pz === 0) return;
-    const push = { x: px, y: 0, z: pz };
-    this.mw.controller.computeColliderMovement(m.character.collider, push, undefined, CHARACTER_GROUPS);
-    const moved = this.mw.controller.computedMovement();
-    setCharacterState(m.character, { x: pos.x + moved.x, y: pos.y, z: pos.z + moved.z }, m.character.velocityY, m.character.grounded);
+    // Its action carries on (a charge or an impact is not cut short by the nudge).
+    this.moveBy(m, px, pz);
   }
 
   /**
@@ -2522,45 +2528,86 @@ export class WorldZone {
     return m.shield !== null && !m.swing && m.hitUntil <= this.tick && (m.blockUntil > this.tick || m.shieldUntil > this.tick || m.walkShield);
   }
 
-  /** Drake's shield rush: a creature met during the charge takes an impact (no damage). */
-  private rushContact(p: Player): void {
-    const c = p.character;
-    const done = c.actionLength - c.rollTicks;
-    if (done <= 1) p.rushHit.clear();
-    if (done < RUSH_CONTACT_TICKS[0] || done > RUSH_CONTACT_TICKS[1]) return;
+  /**
+   * The shield rush meeting a body (0x493F20 with physics flag 0x40000, the whole RAM_SHOULDER
+   * state). Characters do not collide here, so the charge's run into a body is redone: the body
+   * takes 0.3 of the overlap and the rusher stops against it. Each blocked tick rolls the
+   * original's 5 % per step: the victim's impact (creatures reel back and are knocked down, the
+   * live log; players are stunned, ASM_IMPACT_MEDIUM) and a rushing player's 1 HP loss.
+   */
+  private rushContact(a: Actor, before: { x: number; z: number }): void {
+    const c = a.character;
+    if (c.actionLength - c.rollTicks <= 1) a.rushHit.clear();
+    const f = forwardXZ(dequantizeAngle(a.yaw));
     const pos = c.position;
-    const yaw = dequantizeAngle(p.yaw);
-    for (const m of this.actors.values()) {
-      if (m.kind !== 'mob' || !alive(m)) continue;
-      const mp = m.character.position;
-      if (!inMeleeArc(pos.x, pos.z, yaw, mp.x, mp.z, RUSH_REACH + PLAYER_RADIUS, PLAYER_ARC_DEG, PLAYER_RADIUS)) continue;
-      // Logged in the original: the rushing player loses 1 HP per tick of contact (2-5 per rush).
-      if (p.hp > 1) {
-        p.hp -= 1;
-        p.statsDirty = true;
+    const advance = (pos.x - before.x) * f.x + (pos.z - before.z) * f.z;
+    for (const v of this.actors.values()) {
+      if (v === a || v.kind === a.kind || !alive(v)) continue;
+      const vp = v.character.position;
+      if (Math.abs(vp.y - pos.y) > PLAYER_HEIGHT) continue;
+      const dx = vp.x - pos.x;
+      const dz = vp.z - pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist >= CHARACTER_SPACING + RUSH_CONTACT_SLACK || dx * f.x + dz * f.z <= 0) continue;
+      // The body stops the charge: it is pushed by its share of the overlap, the rusher held at contact.
+      const overlap = Math.min(Math.max(0, advance), CHARACTER_SPACING - dist);
+      if (overlap > 0 && dist > 1e-4) {
+        const nx = dx / dist;
+        const nz = dz / dist;
+        const pushed = this.moveBy(v, nx * overlap * RUSH_PUSH_SHARE, nz * overlap * RUSH_PUSH_SHARE);
+        const back = overlap - (pushed.x * nx + pushed.z * nz);
+        this.moveBy(a, -nx * back, -nz * back);
       }
-      if (p.rushHit.has(m.entityId)) continue;
-      p.rushHit.add(m.entityId);
-      if (!m.character.grounded) continue;
-      if (isCitizen(m)) {
-        this.raiseAlarm(p);
-        continue;
-      }
-      // The creature reels back (IMPACT_BACK) and is knocked down (IMPACT_SEVERE) - no damage.
-      this.hitReaction(m, ACTION_IMPACT);
-      this.broadcastNear(m, { op: SC.COMBAT_EVENT, d: { attacker: p.entityId, target: m.entityId, damage: 0, hp: Math.ceil(m.hp), killed: false, rush: true } });
-      m.knockdownAt = this.tick + hitReactionTicks(ACTION_IMPACT);
-      m.hitUntil = m.knockdownAt + hitReactionTicks(ACTION_KNOCKDOWN);
-      if (m.state !== 'chase') m.state = 'chase';
-      m.threat.set(p.entityId, (m.threat.get(p.entityId) ?? 0) + 1);
+      if (this.random() >= RUSH_TICK_CHANCE) continue;
+      this.rushImpact(a, v);
+      if (!alive(a)) return;
     }
+  }
+
+  /** One successful rush roll: the victim's impact, the rusher's HP, the contact sounds (client). */
+  private rushImpact(a: Actor, v: Actor): void {
+    let reel = false;
+    if (v.kind === 'mob' && isCitizen(v)) {
+      if (a.kind === 'player') this.raiseAlarm(a);
+    } else if (!a.rushHit.has(v.entityId) && v.character.grounded && v.hitUntil <= this.tick) {
+      a.rushHit.add(v.entityId);
+      reel = true;
+      if (v.kind === 'mob') {
+        // Logged: the creature reels back (IMPACT_BACK, from being pushed) and ~0.5 s later is
+        // knocked down (IMPACT_SEVERE), losing no HP.
+        this.hitReaction(v, ACTION_IMPACT);
+        v.knockdownAt = this.tick + hitReactionTicks(ACTION_IMPACT);
+        v.hitUntil = v.knockdownAt + hitReactionTicks(ACTION_KNOCKDOWN);
+        if (v.state !== 'chase') v.state = 'chase';
+        v.threat.set(a.entityId, (v.threat.get(a.entityId) ?? 0) + 1);
+      } else {
+        this.hitReaction(v, ACTION_STUN);
+      }
+    }
+    this.broadcastNear(v, { op: SC.COMBAT_EVENT, d: { attacker: a.entityId, target: v.entityId, damage: 0, hp: Math.ceil(v.hp), killed: false, rush: true, ...(reel ? { reel } : {}) } });
+    // A rushing player loses 1 HP each time (Stats_LoseHp: its flinch roll, and it can kill).
+    if (a.kind === 'player') this.loseHp(a, a, 1, true);
+  }
+
+  /** Moves a character against the level, keeping its action, jump and clip; returns the move made. */
+  private moveBy(a: Actor, x: number, z: number): { x: number; z: number } {
+    const c = a.character;
+    this.mw.controller.computeColliderMovement(c.collider, { x, y: 0, z }, undefined, CHARACTER_GROUPS);
+    const moved = this.mw.controller.computedMovement();
+    const p = c.position;
+    const air = { kind: c.airKind, velX: c.airVelX, velZ: c.airVelZ, travel: c.airTravel };
+    const length = c.actionLength;
+    setCharacterState(c, { x: p.x + moved.x, y: p.y, z: p.z + moved.z }, c.velocityY, c.grounded, c.rollDir, c.rollTicks, air, { state: c.locoState, frame: c.locoFrame });
+    c.actionLength = length;
+    return { x: moved.x, z: moved.z };
   }
 
   private updateSwing(a: Actor): void {
     const s = a.swing!;
     const elapsed = this.tick - s.start;
     const t = s.timing;
-    if (elapsed >= t.startup && elapsed < t.startup + t.active) {
+    // A creature's shield bash meets bodies through its charge (rushContact), not a hit window.
+    if (s.kind !== 'bash' && elapsed >= t.startup && elapsed < t.startup + t.active) {
       const pos = a.character.position;
       const yaw = dequantizeAngle(a.yaw);
       const reach = a.kind === 'player' ? PLAYER_REACH + PLAYER_RADIUS : s.reach ?? a.archetype.reach + PLAYER_RADIUS;
@@ -2578,20 +2625,14 @@ export class WorldZone {
             // stopped-blow event): the creature decides again, and the target is attacking.
             if (target.brain === 'post') target.brainUntil = this.tick;
           }
+          // 0x44D290: the stopped blow's sound by the attacker's edge, its sparks along the blade's sweep.
+          const dmg = a.weapon.damage;
+          const sweep = this.worldSweep(a, s);
           this.broadcastNear(target, {
             op: SC.COMBAT_EVENT,
-            d: { attacker: a.entityId, target: target.entityId, damage: 0, hp: Math.ceil(target.hp), killed: false, blocked: true },
+            d: { attacker: a.entityId, target: target.entityId, damage: 0, hp: Math.ceil(target.hp), killed: false, blocked: true, sharp: !!dmg && dmg[1]! < dmg[0]!, ...(sweep ? { sweep } : {}) },
           });
           this.shove(a, target, s, true);
-          continue;
-        }
-        if (s.kind === 'bash') {
-          // The shield bash stuns without damage (ASM_IMPACT_MEDIUM).
-          if (target.kind === 'player' && target.character.grounded) this.hitReaction(target, ACTION_STUN);
-          this.broadcastNear(target, {
-            op: SC.COMBAT_EVENT,
-            d: { attacker: a.entityId, target: target.entityId, damage: 0, hp: Math.ceil(target.hp), killed: false, blocked: false },
-          });
           continue;
         }
         this.applyDamage(a, target, this.rollDamage(a, s.combo));
@@ -2642,22 +2683,20 @@ export class WorldZone {
   private shove(a: Actor, target: Actor, s: Swing, blocked: boolean): void {
     const sweep = attackSweep(s.kind, s.combo);
     if (!sweep) return;
-    const h = Math.hypot(sweep[0], sweep[1]);
-    const d = hitShove(h, blocked);
+    const d = hitShove(Math.hypot(sweep[0], sweep[1]), blocked);
     if (d <= 0) return;
+    const [ux, uz] = this.worldSweep(a, s)!;
+    this.moveBy(target, ux * d, uz * d);
+  }
+
+  /** The horizontal direction of the attacker's blade sweep in the world (unit x, z), or null. */
+  private worldSweep(a: Actor, s: Swing): [number, number] | null {
+    const sweep = attackSweep(s.kind, s.combo);
+    if (!sweep) return null;
+    const h = Math.hypot(sweep[0], sweep[1]);
     const f = forwardXZ(dequantizeAngle(a.yaw));
     // x right, z forward in the attacker's frame; right = (-f.z, f.x).
-    const ux = (sweep[0] * -f.z + sweep[1] * f.x) / h;
-    const uz = (sweep[0] * f.x + sweep[1] * f.z) / h;
-    const c = target.character;
-    this.mw.controller.computeColliderMovement(c.collider, { x: ux * d, y: 0, z: uz * d }, undefined, CHARACTER_GROUPS);
-    const moved = this.mw.controller.computedMovement();
-    const p = c.position;
-    // Everything but the position carries on (a timed action, a jump, the locomotion clip).
-    const air = { kind: c.airKind, velX: c.airVelX, velZ: c.airVelZ, travel: c.airTravel };
-    const length = c.actionLength;
-    setCharacterState(c, { x: p.x + moved.x, y: p.y, z: p.z + moved.z }, c.velocityY, c.grounded, c.rollDir, c.rollTicks, air, { state: c.locoState, frame: c.locoFrame });
-    c.actionLength = length;
+    return [(sweep[0] * -f.z + sweep[1] * f.x) / h, (sweep[0] * f.x + sweep[1] * f.z) / h];
   }
 
   /** Starts a hit reaction: the current swing / hop / retreat is interrupted. */
@@ -2716,6 +2755,11 @@ export class WorldZone {
     const resist = target.kind === 'player' ? target.resist : target.archetype.resist;
     const protection = target.kind === 'player' ? target.armor?.protection : undefined;
     const damage = Math.round(originalDamageTaken(incoming, resist, protection) * 100) / 100;
+    this.loseHp(attacker, target, damage);
+  }
+
+  /** Stats_LoseHp (0x0044CA00): the HP loss, the player's flinch roll, death; `rush`: a rush's own cost. */
+  private loseHp(attacker: Actor, target: Actor, damage: number, rush = false): void {
     const hpBefore = target.hp;
     let impact: number | undefined;
     target.hp = Math.max(0, target.hp - damage);
@@ -2725,14 +2769,17 @@ export class WorldZone {
       // Every landed hit interrupts with an impact (the original skips airborne targets). The
       // player rolls for a stun or a knock-down (confirmed live: v = 0.771 knocked Drake down,
       // 0.845 and 1.145 stunned him). Creatures take a directional impact, often a long one.
-      let reaction = ACTION_IMPACT;
+      // The rush's own cost has no blow (0x44D290's impact flag): only the roll's stun / knock-down.
+      let reaction: number | null = ACTION_IMPACT;
       if (target.kind === 'player') {
         const roll = originalFlinch(damage, hpBefore, this.random());
-        reaction = roll === 'knockdown' ? ACTION_KNOCKDOWN : roll === 'stun' ? ACTION_STUN : ACTION_IMPACT;
+        reaction = roll === 'knockdown' ? ACTION_KNOCKDOWN : roll === 'stun' ? ACTION_STUN : rush ? null : ACTION_IMPACT;
       } else reaction = this.creatureImpact(target, attacker);
-      impact = IMPACT_VARIANTS[reaction]?.state;
-      // A knock-down is not cut short by another hit's lighter reaction.
-      if (!(isHitAction(target.character.rollDir) && target.character.rollDir === ACTION_KNOCKDOWN && target.hitUntil > this.tick)) this.hitReaction(target, reaction);
+      if (reaction !== null) {
+        impact = IMPACT_VARIANTS[reaction]?.state;
+        // A knock-down is not cut short by another hit's lighter reaction.
+        if (!(isHitAction(target.character.rollDir) && target.character.rollDir === ACTION_KNOCKDOWN && target.hitUntil > this.tick)) this.hitReaction(target, reaction);
+      }
     }
     let reward: CombatEventMsg['d']['reward'];
 
@@ -2767,7 +2814,7 @@ export class WorldZone {
 
     this.broadcastNear(target, {
       op: SC.COMBAT_EVENT,
-      d: { attacker: attacker.entityId, target: target.entityId, damage, hp: Math.ceil(target.hp), killed, ...(impact ? { impact } : {}), ...(reward ? { reward } : {}) },
+      d: { attacker: attacker.entityId, target: target.entityId, damage, hp: Math.ceil(target.hp), killed, ...(rush ? { rush } : {}), ...(impact ? { impact } : {}), ...(reward ? { reward } : {}) },
     });
   }
 

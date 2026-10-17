@@ -12,7 +12,6 @@ import {
   THRUST_WALL_HEIGHT,
   wallAhead,
   wallDistance,
-  ACTION_BASH,
   PLAYER_REACH,
   attackTiming,
   LEVEL_PREFIX,
@@ -61,7 +60,7 @@ import { LocalPlayer } from './entities/local_player.ts';
 import { RemoteEntities, type RemoteEntity } from './entities/remote_entities.ts';
 import { loadOriginalAvatars, type HeldOverride } from './assets/original_models.ts';
 import { loadOriginalLevel, type OriginalLevel } from './assets/original_level.ts';
-import { CREATURE_SFX, SFX, SoundBank, pick } from './audio/sound_bank.ts';
+import { CREATURE_SFX, SFX, SoundBank, impactSound, pick } from './audio/sound_bank.ts';
 import { registerAssetServiceWorker } from './assets/game_files.ts';
 import { GameFilesPanel } from './ui/game_files_panel.ts';
 import { InputManager } from './input/input_manager.ts';
@@ -97,6 +96,12 @@ const EVIL_LIGHT_COLOR = 0x60ff50;
 const SPARK_LIGHT_INTENSITY = 2.5;
 const SPARK_LIGHT_RADIUS = 3;
 const SPARK_LIGHT_SECONDS = 0.18;
+/** A stopped blow's light (0x44D290 → 0x44BEA0: grey 150 / 255, fading over 300 ms). */
+const BLOCK_LIGHT_COLOR = new THREE.Color(150 / 255, 150 / 255, 150 / 255);
+const BLOCK_LIGHT_SECONDS = 0.3;
+/** Its sparks: SWORD_DAMAGE + SWORD_METAL this many times (1 at low detail), 0.8 ft apart along the sweep. */
+const BLOCK_SPARK_PAIRS = 3;
+const BLOCK_SPARK_SPACING = 0.8 * LEVEL_UNIT_METRES;
 
 /** Side of `target` (facing its rotation.y, 0 = -Z) that `from` stands on: 0 front, 1 left, 2 right, 3 back. */
 function impactSide(target: THREE.Object3D, from: THREE.Object3D): number {
@@ -337,8 +342,6 @@ async function main(): Promise<void> {
   const fxPos = new THREE.Vector3();
   /** Pending wall-spark checks of the local swings (seconds to the impact frame, heading). */
   const wallChecks: { t: number; yaw: number }[] = [];
-  /** The local character's timed action on the previous step (to catch a rush starting). */
-  let lastAction = 0;
   const fxDir = new THREE.Vector3();
   /** Spawns `count` copies of an effect along a short line from `at` (the engine spaces them ~0.2 m apart). */
   const fxBurst = (name: string, count: number, at: THREE.Vector3, step: THREE.Vector3, dir: THREE.Vector3 | null = null) => {
@@ -398,10 +401,13 @@ async function main(): Promise<void> {
             const avatar = isMe ? player?.avatar : target?.avatar;
             if (from && avatar?.react && !e.blocked && !e.killed && e.damage > 0) avatar.react(impactSide(obj, from), e.impact);
             if (e.rush) {
-              // Shield rush contact: the shield's thud and a blunt impact on the target's material.
-              const sfx = CREATURE_SFX[target?.info.archetype ?? ''];
-              sounds?.play(SFX.shieldBlockWood, headPos);
-              sounds?.play(SFX.impact[sfx?.material ?? 'flesh'].blunt, headPos);
+              // A shield rush's contact roll: DDam01 and HitMetal01 at the rusher (0x493F20). The
+              // rush's own 1 HP cost (target = the rusher) has no sound of its own.
+              if (e.attacker === e.target || !from) return;
+              for (const id of SFX.rushContact) sounds?.play(id, from.position);
+              // The victim is pushed away from the rusher, so its impact is the other way round
+              // (0x4273F0 reads the push: met from the front, IMPACT_BACK).
+              if (e.reel && target?.info.kind === 'mob' && avatar?.react) avatar.react([3, 1, 2, 0][impactSide(obj, from)]!);
               return;
             }
             // Original hit effects (executable-analysis §8.6): a blocked blow throws sparks and an
@@ -412,9 +418,14 @@ async function main(): Promise<void> {
               at.y += 1.2;
               const step = new THREE.Vector3(0, 0.2, 0).addScaledVector(toward, -0.1);
               if (e.blocked) {
-                dynamicLights.flash(at, SPARK_LIGHT_COLOR, SPARK_LIGHT_INTENSITY, SPARK_LIGHT_RADIUS, SPARK_LIGHT_SECONDS);
-                fxBurst('SWORD_DAMAGE', 3, at, step);
-                fxBurst('SWORD_METAL', 3, at, step);
+                // 0x44D290: pairs of SWORD_DAMAGE + SWORD_METAL spaced along the attacker's blade sweep, a grey light.
+                dynamicLights.flash(at, BLOCK_LIGHT_COLOR, SPARK_LIGHT_INTENSITY, SPARK_LIGHT_RADIUS, BLOCK_LIGHT_SECONDS);
+                const along = e.sweep ? new THREE.Vector3(e.sweep[0], 0, e.sweep[1]).multiplyScalar(BLOCK_SPARK_SPACING) : step;
+                for (let i = 0; i < BLOCK_SPARK_PAIRS; i++) {
+                  fxPos.copy(at).addScaledVector(along, i);
+                  effects.spawn('SWORD_DAMAGE', fxPos, null);
+                  effects.spawn('SWORD_METAL', fxPos, null);
+                }
               } else if (e.damage > 0) {
                 const bone = !isMe && CREATURE_SFX[target?.info.archetype ?? '']?.material === 'bone';
                 // Undead blows carry dark damage: the original adds its green flame on the victim.
@@ -445,13 +456,18 @@ async function main(): Promise<void> {
             }
             // Original impact / cry sounds (executable sound tables, Sound.ctx ids).
             if (sounds) {
-              if (e.blocked) sounds.play(SFX.shieldBlockWood, headPos);
-              else if (isMe) {
-                sounds.play(SFX.impact.flesh.sharp, headPos);
+              if (e.blocked) {
+                // 0x44D290, at the attacker: a player's shield one fixed sound, a creature's the
+                // metal row by the attacker's edge.
+                const at = from?.position ?? headPos;
+                const player = isMe || (target !== undefined && target.info.kind === 'player');
+                sounds.play(player ? SFX.blockPlayer : impactSound(SFX.impact.metal[e.sharp ? 'sharp' : 'blunt']), at);
+              } else if (isMe) {
+                sounds.play(SFX.hitOther, headPos);
                 sounds.play(pick(e.killed ? SFX.drakeDeath : SFX.drakeDamage), headPos);
               } else if (target) {
                 const sfx = CREATURE_SFX[target.info.archetype ?? ''];
-                sounds.play(SFX.impact[sfx?.material ?? 'flesh'][mine ? myEdge : 'sharp'], headPos);
+                sounds.play(impactSound(SFX.impact[sfx?.material ?? 'flesh'][mine ? myEdge : 'sharp']), headPos);
                 if (sfx) sounds.play(e.killed ? sfx.death : sfx.damage, headPos);
               }
             }
@@ -485,7 +501,7 @@ async function main(): Promise<void> {
                 const light = new THREE.Color(0.8, 0.8, 0.8);
                 levelView?.light?.sample(centre, light);
                 debris?.spawn(view.object, 5, new THREE.Vector3(chip, chip, chip), centre, 40, box.min.y, light);
-                sounds?.play(SFX.impact.flesh[mine ? myEdge : 'sharp'], centre);
+                sounds?.play(SFX.hitOther, centre);
                 if (o.state === 'gone') {
                   const base = new THREE.Vector3(centre.x, box.min.y, centre.z);
                   debris?.spawn(view.object, 3 + Math.floor(Math.random() * 10), size.clone().multiplyScalar(0.5), base, 1, box.min.y, light);
@@ -707,10 +723,10 @@ async function main(): Promise<void> {
         headPos.copy(p.object.position);
         headPos.y += p.avatar.headHeight;
         if (state === 'ASM_HIT_POINTS_DEPLETED') {
-          sounds.play(SFX.impact[sfx.material].sharp, headPos);
+          sounds.play(impactSound(SFX.impact[sfx.material].sharp), headPos);
           sounds.play(sfx.death, headPos);
         } else if (state.startsWith('ASM_IMPACT')) {
-          sounds.play(SFX.impact[sfx.material].sharp, headPos);
+          sounds.play(impactSound(SFX.impact[sfx.material].sharp), headPos);
           sounds.play(sfx.damage, headPos);
         }
       },
@@ -1230,10 +1246,6 @@ async function main(): Promise<void> {
       // An attack whose clip carries Drake starts its root motion on this step (shared movement).
       frame.flags |= local.takeAttackMotion() << INPUT_ATTACK_SHIFT;
       local.fixedStep(frame);
-      // The shield rush starts with Drake's effort grunt.
-      const action = local.character.rollDir;
-      if (action === ACTION_BASH && lastAction !== ACTION_BASH) sounds?.play(SFX.swingGrunt, local.object.position);
-      lastAction = action;
       acc -= TICK_MS;
     }
     const dt = frameMs / 1000;

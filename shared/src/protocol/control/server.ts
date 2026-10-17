@@ -76,8 +76,17 @@ export interface CombatEventMsg {
     killed: boolean;
     /** The target's raised shield stopped the hit (damage 0). */
     blocked?: boolean;
-    /** A shield rush met the target (no damage; it reels and is knocked down). */
+    /** Blocked: the attacker's weapon is sharp (slash above bash), which picks the clank (0x44D290). */
+    sharp?: boolean;
+    /** Blocked: the attacker's blade sweep, world x / z (unit); the sparks line up along it. */
+    sweep?: [number, number];
+    /**
+     * A shield rush's roll came up (contact sounds at the attacker). Target = the rusher itself: the
+     * rush's own 1 HP cost.
+     */
     rush?: boolean;
+    /** Rush: this roll put the target into its impact (it reels; later rolls only sound). */
+    reel?: boolean;
     /** A creature's long impact (its ASM state id, IMPACT_VARIANTS); absent: the directional one. */
     impact?: number;
     /** Present when the attacker is a player who got rewarded for the kill (loot = item names added). */

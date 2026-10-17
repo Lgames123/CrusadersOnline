@@ -140,12 +140,20 @@ export const MOB_THRUST: MobAttack = { kind: 'thrust', clip: { swing: 6, impact:
  */
 export const MOB_BASH: MobAttack = { kind: 'bash', clip: { swing: 4, impact: 9, recovery: 24 }, reach: reachFt(6) };
 /**
- * Drake's shield rush (Space + RMB in the game's Readme): the same PL01 charge. Logged live: a
- * creature it meets reels back (IMPACT_BACK) and ~0.5 s later is knocked down (IMPACT_SEVERE,
- * ~1.3-1.9 s) without losing HP, while Drake loses 1 HP per tick of contact (2-5 per rush).
+ * The shield rush (ASM_RAM_SHOULDER; Drake's is Space + RMB). Decompiled (0x48CF00 / 0x4920A0 set
+ * physics flag 0x40000 while the state is RAM_SHOULDER; the body sweep 0x493F20 uses it): a charge
+ * that runs into another character's body pushes it by 0.3 of the rest of the move and stops
+ * against it; then each such blocked step rolls round(rand x 10) == 0 (5 %) for: the victim's
+ * impact (controller 0x8000) and stun (physics 0x80000), 1 HP lost by a rushing player (the
+ * normal HP loss, flinch roll and death included), sounds 0 and 338 at the rusher. No shield
+ * check. The roll runs per rendered frame; at RUSH_STEPS_PER_SECOND it matches the live log
+ * (impact at once, Drake losing 2-5 HP per rush).
  */
-export const RUSH_CONTACT_TICKS: readonly [number, number] = [2, 8];
-export const RUSH_REACH = 3 * FT;
+export const RUSH_PUSH_SHARE = 0.3;
+export const RUSH_STEP_CHANCE = 0.05;
+export const RUSH_STEPS_PER_SECOND = 120;
+/** Bodies still count as touching this far apart (the original's sweep meets them on contact). */
+export const RUSH_CONTACT_SLACK = 0.5 * FT;
 /** Leaping strike (ASM_JUMP_ATTACK, PN05). */
 export const MOB_JUMP_ATTACK: MobAttack = { kind: 'jump', clip: { swing: 17, impact: 20, recovery: 24 }, reach: reachFt(7.5) };
 

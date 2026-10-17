@@ -145,14 +145,33 @@ export const SFX = {
   click: 401,
   /** Turning a quest book page (UITurnPage). */
   turnPage: 412,
-  shieldBlockWood: 345,
+  /** A blow stopped by the player's shield (0x44D290: no creature type, 0x157 HitStone02). */
+  blockPlayer: 343,
+  /** A shield rush's contact roll, at the rusher (0x493F20: DDam01, then HitMetal01). */
+  rushContact: [0, 338],
   chestOpen: 520,
   /** A debris piece landing (HitMetal02; logged ~0.3 s after a barrel broke). */
   debrisLand: 339,
   fireLoop: 533,
-  /** Impact by target material x weapon edge (executable table 0x004EEDA8): bone / flesh. */
-  impact: { bone: { sharp: 308, blunt: 302 }, flesh: { sharp: 306, blunt: 303 } },
+  /**
+   * Impact by material x weapon edge (sharp: slash above bash), five each (executable table
+   * 0x004EEDA8; pick with impactSound). Landed blows use the creature's material, blows its
+   * shield stops the metal row (sound table +4: 2 for every shielded creature).
+   */
+  impact: {
+    bone: { sharp: [308, 308, 308, 308, 308], blunt: [302, 302, 302, 302, 302] },
+    flesh: { sharp: [304, 305, 306, 307, 336], blunt: [300, 303, 303, 337, 353] },
+    metal: { sharp: [339, 339, 340, 341, 357], blunt: [338, 338, 346, 346, 355] },
+    ice: { sharp: [356, 356, 356, 356, 356], blunt: [354, 354, 354, 354, 354] },
+  },
+  /** A landed blow on what has no creature type: the player, a breakable prop (0x44CEF0: 0x132). */
+  hitOther: 306,
 } as const;
+
+/** One of an impact row's five sounds: the original's index round(rand x 4) (ends half as likely). */
+export function impactSound(row: readonly number[]): number {
+  return row[Math.round(Math.random() * 4)]!;
+}
 
 /**
  * Per-creature damage / death cries and impact material (executable creature sound table at
