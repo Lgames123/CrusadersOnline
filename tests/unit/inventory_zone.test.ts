@@ -142,19 +142,19 @@ describe('inventory authority in the zone', () => {
     expect(t.dynamic()).toHaveLength(0);
   });
 
-  it('a full bag leaves what it cannot take in the chest instead of losing it', () => {
+  it('a bag that cannot hold all of a chest takes none of it', () => {
     const t = zone();
     const p = t.join(1, FULL_BAG);
+    const chest = () => t.sent(1).filter((m) => m.op === SC.OBJECT_STATE).flatMap((m) => m.d.objects).filter((o) => o.id === CHEST);
     t.z.interact(1, CHEST);
-    expect(count(p.inventory, 'long_sword')).toBe(0);
     expect(t.errors(1).at(-1)).toMatchObject({ d: { code: 'bag_full' } });
-    expect(t.internal.objects.get(CHEST)!.state).toBe('present');
-    t.z.interact(1, CHEST); // gold is not granted twice
+    expect(count(p.inventory, 'long_sword')).toBe(0);
+    expect((p as unknown as { gold: number }).gold).toBe(0); // not even the gold
+    expect(chest()).toHaveLength(0);
     t.z.dropInventoryItem(1, 1, 'scale_armor');
     t.z.interact(1, CHEST);
     expect(count(p.inventory, 'long_sword')).toBe(1);
-    expect(t.sent(1).filter((m) => m.op === SC.OBJECT_STATE).flatMap((m) => m.d.objects).filter((o) => o.id === CHEST).at(-1)?.state).toBe('open');
-    const gold = t.sent(1).filter((m) => m.op === SC.OBJECT_STATE).flatMap((m) => m.d.objects).filter((o) => o.id === CHEST).flatMap((o) => o.loot ?? []);
-    expect(gold).toEqual(['5 Gold Pieces', 'Long Sword']);
+    expect((p as unknown as { gold: number }).gold).toBe(5);
+    expect(chest()).toEqual([expect.objectContaining({ state: 'open', loot: ['Long Sword', '5 Gold Pieces'] })]);
   });
 });

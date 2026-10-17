@@ -1,5 +1,6 @@
 # Context notes
 
+- 2026-10-17 [Pickups: all or nothing on a full bag](2026-10-17-pickups-all-or-nothing.md) — an item or chest whose contents do not all fit gives nothing (gold included) and stays; no leftover state, so no relog duplicate (Claude Code)
 - 2026-10-17 [Level items and chests: once per character](2026-10-17-per-character-pickups.md) — ground items and chests are instanced: each character takes each once, for good (story flag `<level>-took:<id>`), only the picker sees it go; no more 5-min respawn (dropped items and breakables unchanged) (Claude Code)
 - 2026-10-17 [Reward shops: free, once per character](2026-10-17-gift-shops.md) — a shop whose greeting is not a merchant line (only the Cs2b hermit lady, HL_13_02, Torch Light Spell Book) gives each item at 0 gold, once per character (story flag `<act>-gift<i>:<shop>`), buys nothing; original sells it at Price (Claude Code)
 - 2026-10-17 [Drake's rolls, jumps and combo as the original](2026-10-17-drake-rolls-jumps-combo.md) — C + direction held rolls back to back; jumps stand to the clip's JUMP event (6–12 frames), drag on the 3-D speed, vertical limit, soft landing: running jump 19.7 ft (was 27); swings hold to clip end, combo queues from 10 % while the button is held, weapon rate 1 + 1.5 (Speed − 1) (Claude Code)

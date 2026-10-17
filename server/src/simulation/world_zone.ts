@@ -320,8 +320,6 @@ interface WorldObject {
   ownerKey?: string;
   /** Tick at which the dropped item expires (5 minutes from drop). */
   expiresAt?: number;
-  /** Dropped items: what a full bag left behind of the stack. */
-  left?: GroundGrant[];
 }
 
 type GroundGrant = { name: string; quantity: number; itemId?: string };
@@ -506,8 +504,6 @@ interface Player extends ActorBase {
   insideSounds: Set<number>;
   /** The shop visit in progress: this visit's copy of its items (0x46D3D0). */
   shop: { id: number; stock: ShopEntry[]; openedAt: number; gift: boolean } | null;
-  /** Level items and chests this character's full bag left something in, by object id. */
-  leftovers: Map<number, GroundGrant[]>;
   /** A scripted sequence the client is playing; the server finishes it by `until` at the latest. */
   cutscene: { sequence: StorySequence; until: number } | null;
 }
@@ -826,7 +822,6 @@ export class WorldZone {
       storyFlags: new Set(opts.story?.flags ?? []),
       insideSounds: new Set(),
       shop: null,
-      leftovers: new Map(),
       cutscene: null,
     };
     this.players.set(connId, p);
@@ -884,26 +879,18 @@ export class WorldZone {
     if (p.cutscene) return;
     const pos = p.character.position;
     if (Math.hypot(o.def.x - pos.x, o.def.z - pos.z) > INTERACT_RANGE || Math.abs(o.def.y - pos.y) > INTERACT_HEIGHT) return;
-    const own = this.instanced(o);
-    const grants: GroundGrant[] = (own ? p.leftovers.get(id) : o.left) ?? (o.def.kind === 'item' ? (o.def.item ? [o.def.item] : []) : (o.def.contents ?? []));
+    const grants: GroundGrant[] = o.def.kind === 'item' ? (o.def.item ? [o.def.item] : []) : (o.def.contents ?? []);
+    // All or nothing: a bag that cannot hold everything takes nothing, and it all stays there.
+    if (!this.fitsAll(p, grants)) {
+      this.sendJson(connId, { op: SC.ERROR, d: { code: 'bag_full', message: 'Inventory full.' } });
+      return;
+    }
     const loot: string[] = [];
-    // What a full bag cannot take stays there (never lost): known items only, books not learned.
-    const left: GroundGrant[] = [];
     for (const g of grants) {
       const got = this.grantItem(p, g.name, g.quantity, g.itemId);
       if (got > 0) loot.push(got > 1 ? `${got} ${g.name}` : g.name);
-      const def = this.groundItemDef(g);
-      if (got < Math.max(1, g.quantity) && def && def.type !== 'spellbook') left.push({ ...g, quantity: Math.max(1, g.quantity) - got });
     }
-    if (left.length) {
-      if (own) p.leftovers.set(id, left);
-      else o.left = left;
-      this.sendJson(connId, { op: SC.ERROR, d: { code: 'bag_full', message: 'Inventory full.' } }); // leave it there
-      if (!loot.length) return;
-      const change: ObjectChange = { id, state: 'present', by: p.entityId, loot };
-      if (own) this.sendObjects(p, [change]);
-      else this.broadcastObjects([change]);
-    } else if (o.def.kind === 'item' && grants.length && !loot.length) {
+    if (o.def.kind === 'item' && grants.length && !loot.length) {
       return; // unknown item, or a book already known
     } else if (o.dynamic) {
       o.state = 'gone';
@@ -912,7 +899,6 @@ export class WorldZone {
       this.broadcastObjects([{ id, state: 'gone', by: p.entityId, loot }]);
     } else {
       // A level item or chest: gone for this character for good, still there for the others.
-      p.leftovers.delete(id);
       const flag = this.takenFlag(id);
       p.storyFlags.add(flag);
       p.story.flags.push(flag);
@@ -973,6 +959,22 @@ export class WorldZone {
   /** Catalog item of a ground grant: a dropped item by its id, a level item by its name. */
   private groundItemDef(g: GroundGrant): ItemDef | undefined {
     return (g.itemId !== undefined ? this.items.get(g.itemId) : undefined) ?? this.items.get(g.name) ?? this.items.get(itemSlug(g.name));
+  }
+
+  /** Whether the bag takes every bag item of `grants` whole (grantItem's placement, on a copy). */
+  private fitsAll(p: Player, grants: readonly GroundGrant[]): boolean {
+    const bag = structuredClone(p.inventory);
+    for (const g of grants) {
+      const def = g.name === GOLD_ITEM ? undefined : this.groundItemDef(g);
+      if (!def || def.type === 'spellbook') continue;
+      const n = Math.max(1, g.quantity);
+      if (def.stackable) {
+        if (addItem(bag, def.id, n, this.items) === null) return false;
+      } else {
+        for (let i = 0; i < n; i++) if (addItem(bag, def.id, 1, this.items) === null) return false;
+      }
+    }
+    return true;
   }
 
   /**
