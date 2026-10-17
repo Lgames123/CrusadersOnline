@@ -21,6 +21,10 @@ export const CS = {
   SPLIT_INVENTORY_STACK: 0x11,
   /** Drop one carried item to the ground. */
   DROP_INVENTORY_ITEM: 0x12,
+  /** Merchant shops (merchantShops feature): open a merchant's shop, buy from it, sell to it. */
+  SHOP_OPEN: 0x13,
+  SHOP_BUY: 0x14,
+  SHOP_SELL: 0x15,
 } as const;
 
 /** Server -> client opcodes. */
@@ -46,6 +50,8 @@ export const SC = {
   ERROR: 0x4f,
   /** A sound a relay's sound trigger plays (0x461490), heard by everyone in the zone. */
   STORY_SOUND: 0x50,
+  /** A merchant's shop opened for this player: its stock and prices (merchantShops feature). */
+  SHOP: 0x51,
 } as const;
 
 /** Input flag bits carried in CS_PLAYER_INPUT. */

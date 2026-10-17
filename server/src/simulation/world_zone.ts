@@ -1,4 +1,11 @@
 import {
+  MAX_BUY,
+  MERCHANT_STOCK,
+  SELL_RATE,
+  SHOP_REACH,
+  sellPrice,
+  shopOffer,
+  type MerchantKind,
   ANIM,
   BUILTIN_ITEMS,
   LEVEL_PREFIX,
@@ -55,6 +62,7 @@ import {
   INVENTORY_SLOTS,
   type InventoryEntry,
   type InventoryItemView,
+  type ShopItemView,
   type ItemCatalog,
   type ItemDef,
   COMBO_MULTIPLIERS,
@@ -542,6 +550,8 @@ interface Mob extends ActorBase {
   talkLine: number;
   /** It gestures through its line (idle behaviour +0x3C set; 0x40E8C0): else it just faces the player. */
   gestures: boolean;
+  /** A merchant's people (merchantShops feature): the use key opens its shop. */
+  merchant?: MerchantKind;
   /** Fleeing citizen: on the alert until this tick, then running from `fleeFrom` until `fleeUntil`. */
   alertUntil: number;
   fleeUntil: number;
@@ -710,6 +720,7 @@ export class WorldZone {
       watchTo: 0,
       talkLine: at.talk ?? (at.placement === undefined ? 0 : -1),
       gestures: at.gesture !== undefined || at.placement === undefined,
+      ...(at.merchant ? { merchant: at.merchant } : {}),
       alertUntil: 0,
       fleeUntil: 0,
       waryUntil: 0,
@@ -1345,27 +1356,37 @@ export class WorldZone {
     if (!p.shield) p.blocking = false;
   }
 
+  /** What the client is told of an item kind (inventory cards, shop stock). */
+  private itemFacts(def: ItemDef): Omit<ShopItemView, 'price'> {
+    return {
+      itemId: def.id,
+      name: def.name,
+      type: def.type,
+      width: def.width,
+      height: def.height,
+      ...(def.model !== undefined ? { model: def.model } : {}),
+      ...(def.texture ? { texture: def.texture } : {}),
+      ...(def.damage ? { damage: def.damage } : {}),
+      ...(def.speed !== undefined ? { speed: def.speed } : {}),
+      ...(def.protection ? { protection: def.protection } : {}),
+      ...(def.heal ? { heal: def.heal } : {}),
+    };
+  }
+
   private sendInventory(p: Player): void {
     const items: InventoryItemView[] = [];
     for (const e of p.inventory) {
       const def = this.items.get(e.itemId);
       if (!def) continue;
+      const value = this.features.merchantShops ? sellPrice(def) : 0;
       items.push({
-        slot: e.slot,
+        ...this.itemFacts(def),
         itemId: e.itemId,
-        name: def.name,
-        type: def.type,
-        width: def.width,
-        height: def.height,
+        slot: e.slot,
         equipped: e.equipped,
         ...(!e.equipped && e.x !== undefined && e.y !== undefined ? { x: e.x, y: e.y } : {}),
-        ...(def.model !== undefined ? { model: def.model } : {}),
-        ...(def.texture ? { texture: def.texture } : {}),
-        ...(def.damage ? { damage: def.damage } : {}),
-        ...(def.speed !== undefined ? { speed: def.speed } : {}),
-        ...(def.protection ? { protection: def.protection } : {}),
         ...(e.quantity && e.quantity > 1 ? { quantity: e.quantity } : {}),
-        ...(def.heal ? { heal: def.heal } : {}),
+        ...(value ? { value } : {}),
       });
     }
     this.sendJson(p.connId, { op: SC.INVENTORY_UPDATE, d: { items, slots: INVENTORY_SLOTS, weaponSpeed: p.weapon.speed ?? 1 } });
@@ -2047,6 +2068,78 @@ export class WorldZone {
         }
       }
     }
+  }
+
+  // --- Merchant shops (merchantShops feature; not in the original: game/shops.ts)
+
+  /** A living merchant within reach of a player free to trade, or null. */
+  private merchantFor(p: Player, entity: number): (Mob & { merchant: MerchantKind }) | null {
+    if (!this.features.merchantShops || this.inventoryBusy(p)) return null;
+    const m = this.actors.get(entity);
+    if (!m || m.kind !== 'mob' || !m.merchant || !alive(m) || m.state === 'chase' || m.state === 'flee') return null;
+    const a = p.character.position;
+    const b = m.character.position;
+    if (Math.hypot(a.x - b.x, a.z - b.z) > SHOP_REACH + 0.5 || Math.abs(a.y - b.y) > AGGRO_HEIGHT) return null;
+    return m as Mob & { merchant: MerchantKind };
+  }
+
+  /** The use key on a merchant: it faces the player and its shop opens (SC_SHOP). */
+  shopOpen(connId: number, entity: number): void {
+    const p = this.players.get(connId);
+    const m = p && this.merchantFor(p, entity);
+    if (!p || !m) return;
+    if (m.state === 'idle') {
+      m.state = 'watch';
+      m.watchSince = this.tick;
+    }
+    if (m.state === 'watch') m.watchTo = p.entityId;
+    this.sendJson(connId, { op: SC.SHOP, d: { entity, title: MERCHANT_STOCK[m.merchant].title, stock: shopOffer(m.merchant, this.items).map((o) => ({ ...this.itemFacts(this.items.get(o.itemId)!), price: o.price })), sellRate: SELL_RATE } });
+  }
+
+  /** Buys `quantity` of a stocked item (several only for stackable ones) for its price each. */
+  shopBuy(connId: number, entity: number, itemId: string, quantity: number): void {
+    const p = this.players.get(connId);
+    const m = p && this.merchantFor(p, entity);
+    if (!p || !m) return;
+    const offer = shopOffer(m.merchant, this.items).find((o) => o.itemId === itemId);
+    const def = offer && this.items.get(itemId);
+    if (!offer || !def) return;
+    const n = def.stackable ? Math.max(1, Math.min(MAX_BUY, Math.floor(quantity))) : 1;
+    const cost = offer.price * n;
+    if (p.gold < cost) {
+      this.sendJson(connId, { op: SC.ERROR, d: { code: 'shop_gold', message: 'Not enough gold.' } });
+      return;
+    }
+    if (addItem(p.inventory, def.id, n, this.items) === null) {
+      this.sendJson(connId, { op: SC.ERROR, d: { code: 'bag_full', message: 'Inventory full.' } });
+      return;
+    }
+    p.gold -= cost;
+    p.statsDirty = true;
+    this.inventoryChanged(p);
+  }
+
+  /** Sells the item (the whole stack) in a bag slot for half its price each; worn items too. */
+  shopSell(connId: number, entity: number, slot: number, itemId?: string): void {
+    const p = this.players.get(connId);
+    const m = p && this.merchantFor(p, entity);
+    if (!p || !m) return;
+    const entry = this.inventoryEntry(p, slot, itemId);
+    const def = entry && this.items.get(entry.itemId);
+    if (!entry || !def) {
+      this.sendInventory(p);
+      return;
+    }
+    const each = sellPrice(def);
+    if (!each) {
+      this.sendJson(connId, { op: SC.ERROR, d: { code: 'shop_refuse', message: 'The merchant will not buy that.' } });
+      return;
+    }
+    p.inventory.splice(p.inventory.indexOf(entry), 1);
+    if (entry.equipped) this.applyEquipment(p);
+    p.gold += each * (entry.quantity ?? 1);
+    p.statsDirty = true;
+    this.inventoryChanged(p);
   }
 
   /**

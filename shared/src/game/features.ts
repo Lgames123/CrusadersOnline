@@ -23,13 +23,23 @@ export interface GameplayFeatures {
    * (0x42AFC0) lets a sideways key override forward / back: a diagonal is a sidestep.
    */
   diagonalMoves: boolean;
+  /**
+   * Merchants trade: the use key on one opens its shop (game/shops.ts). The original places
+   * merchants but they neither speak nor trade (executable-analysis §18). On by default: the
+   * server config switches it off with GAME_FEATURES=-merchantShops.
+   */
+  merchantShops: boolean;
 }
 
 export const ORIGINAL_FEATURES: Readonly<GameplayFeatures> = {
   reactiveBlock: false,
   sideSwingRetrigger: false,
   diagonalMoves: false,
+  merchantShops: false,
 };
+
+/** Non-original features a server has on unless its GAME_FEATURES says `-name`. */
+export const DEFAULT_ON_FEATURES: readonly FeatureName[] = ['merchantShops'];
 
 export type FeatureName = keyof GameplayFeatures;
 export const FEATURE_NAMES = Object.keys(ORIGINAL_FEATURES) as FeatureName[];

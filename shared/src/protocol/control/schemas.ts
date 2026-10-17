@@ -86,6 +86,24 @@ export const DropInventoryItemPacketSchema = z.object({
   d: z.object({ slot: z.number().int().min(0).max(63), itemId: ItemIdSchema.optional() }),
 });
 
+export const ShopOpenPacketSchema = z.object({
+  op: z.literal(CS.SHOP_OPEN),
+  seq: z.number().int().positive(),
+  d: z.object({ entity: z.number().int().min(0).max(10_000_000) }),
+});
+
+export const ShopBuyPacketSchema = z.object({
+  op: z.literal(CS.SHOP_BUY),
+  seq: z.number().int().positive(),
+  d: z.object({ entity: z.number().int().min(0).max(10_000_000), itemId: ItemIdSchema, quantity: z.number().int().min(1).max(99) }),
+});
+
+export const ShopSellPacketSchema = z.object({
+  op: z.literal(CS.SHOP_SELL),
+  seq: z.number().int().positive(),
+  d: z.object({ entity: z.number().int().min(0).max(10_000_000), slot: z.number().int().min(0).max(63), itemId: ItemIdSchema.optional() }),
+});
+
 export const InteractPacketSchema = z.object({
   op: z.literal(CS.INTERACT),
   seq: z.number().int().positive(),
@@ -132,6 +150,9 @@ export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   MergeInventoryStackPacketSchema,
   SplitInventoryStackPacketSchema,
   DropInventoryItemPacketSchema,
+  ShopOpenPacketSchema,
+  ShopBuyPacketSchema,
+  ShopSellPacketSchema,
   InteractPacketSchema,
   UseItemPacketSchema,
   ZoneReadyPacketSchema,

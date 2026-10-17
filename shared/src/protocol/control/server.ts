@@ -107,7 +107,12 @@ export interface InventoryItemView {
   damage?: number[];
   speed?: number;
   protection?: number[];
+  /** What a merchant pays for one (merchantShops feature); absent = it will not buy it. */
+  value?: number;
 }
+
+/** An item a merchant sells: its view and its price. */
+export type ShopItemView = Omit<InventoryItemView, 'slot' | 'equipped' | 'x' | 'y' | 'quantity' | 'value'> & { price: number };
 
 /** Full inventory of the owning player: on entry and after every change. */
 export interface InventoryUpdateMsg {
@@ -165,6 +170,12 @@ export interface StorySoundMsg {
   d: { sound: number; positions: [number, number, number][]; volume: number };
 }
 
+/** A merchant's shop (merchantShops feature): what it sells and the share of the price it pays. */
+export interface ShopMsg {
+  op: typeof SC.SHOP;
+  d: { entity: number; title: string; stock: ShopItemView[]; sellRate: number };
+}
+
 export interface EntityDespawnMsg {
   op: typeof SC.ENTITY_DESPAWN;
   d: { id: number };
@@ -195,7 +206,8 @@ export type ServerControlMsg =
   | CutsceneMsg
   | QuestLogMsg
   | StoryMessageMsg
-  | StorySoundMsg;
+  | StorySoundMsg
+  | ShopMsg;
 
 /** Animation state ids carried in snapshot `anim`. */
 export const ANIM = {

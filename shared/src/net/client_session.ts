@@ -5,7 +5,7 @@ import { dequantizeAngle, dequantizePosition } from '../math/quantize.ts';
 import { CS, SC } from '../protocol/opcodes.ts';
 import { INPUT_PACKET_MAX_BYTES, MAX_INPUT_FRAMES, createInputFrame, encodeInput, type InputFrame } from '../protocol/binary/input.ts';
 import { decodeSnapshot, type EntityState } from '../protocol/binary/snapshot.ts';
-import type { AttackKind, CombatEventMsg, CutsceneMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PlayerStatsMsg, QuestLogMsg, ServerControlMsg, StorySoundMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
+import type { AttackKind, CombatEventMsg, CutsceneMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PlayerStatsMsg, QuestLogMsg, ServerControlMsg, ShopMsg, StorySoundMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
 import type { ArenaDef } from '../arena/types.ts';
 import { createMovementWorld, disposeMovementWorld, setBrushPose, setDoorOpen, setDoorPose, type MovementWorld, type Rapier } from '../movement/physics.ts';
 import { stepDoorMotion, swingPose, type DoorMotion, type DoorSwing } from '../arena/door_swing.ts';
@@ -67,6 +67,8 @@ export interface ClientSessionEvents {
   storyMessage?(message: number): void;
   /** A relay's sound (positions in metres). */
   storySound?(d: StorySoundMsg['d']): void;
+  /** A merchant's shop opened (merchantShops feature). */
+  shop?(d: ShopMsg['d']): void;
 }
 
 export interface ClientSessionStats {
@@ -327,6 +329,9 @@ export class ClientSession {
       case SC.STORY_SOUND:
         this.events.storySound?.(msg.d);
         break;
+      case SC.SHOP:
+        this.events.shop?.(msg.d);
+        break;
     }
   }
 
@@ -377,6 +382,22 @@ export class ClientSession {
   splitInventoryStack(slot: number, quantity: number): void {
     if (!this.connected || this.dead) return;
     this.sendJson({ op: CS.SPLIT_INVENTORY_STACK, seq: ++this.seq, d: { slot, quantity } });
+  }
+
+  /** Opens a merchant's shop (the server answers with SC_SHOP when in reach). */
+  shopOpen(entity: number): void {
+    if (!this.connected || this.dead) return;
+    this.sendJson({ op: CS.SHOP_OPEN, seq: ++this.seq, d: { entity } });
+  }
+
+  shopBuy(entity: number, itemId: string, quantity = 1): void {
+    if (!this.connected || this.dead) return;
+    this.sendJson({ op: CS.SHOP_BUY, seq: ++this.seq, d: { entity, itemId, quantity } });
+  }
+
+  shopSell(entity: number, slot: number, itemId?: string): void {
+    if (!this.connected || this.dead) return;
+    this.sendJson({ op: CS.SHOP_SELL, seq: ++this.seq, d: { entity, slot, ...(itemId !== undefined ? { itemId } : {}) } });
   }
 
   /** Drops an inventory item to the ground at the player's position. */

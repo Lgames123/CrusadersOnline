@@ -21,6 +21,7 @@ export * from './game/creatures.ts';
 export * from './game/original_stats.ts';
 export * from './game/ruleset.ts';
 export * from './game/items.ts';
+export * from './game/shops.ts';
 export * from './game/inventory_grid.ts';
 export * from './game/spells.ts';
 export * from './game/features.ts';

@@ -117,6 +117,18 @@ port.on('message', (msg: ToZone) => {
       zone.interact(msg.connId, msg.object, msg.key);
       flush();
       break;
+    case 'shopOpen':
+      zone.shopOpen(msg.connId, msg.entity);
+      flush();
+      break;
+    case 'shopBuy':
+      zone.shopBuy(msg.connId, msg.entity, msg.itemId, msg.quantity);
+      flush();
+      break;
+    case 'shopSell':
+      zone.shopSell(msg.connId, msg.entity, msg.slot, msg.itemId);
+      flush();
+      break;
     case 'talk':
       zone.talk(msg.connId, msg.entity, msg.ms);
       break;

@@ -19,6 +19,8 @@ import {
   MAIN_QUESTS,
   NPC_VOICES,
   ASM_STATE_NAMES,
+  SHOP_REACH,
+  MERCHANT_STOCK,
   PLAYER_RADIUS,
   LEVEL_UNIT_METRES,
   floorAt,
@@ -540,6 +542,11 @@ async function main(): Promise<void> {
             const m = levelView?.arena.story?.messages?.find((x) => x.id === id);
             if (m) showMessage(m);
           },
+          // A merchant's shop (merchantShops feature): stock beside the inventory.
+          shop: (d) => {
+            shopAt = d.entity;
+            inventoryPanel.openShop(d);
+          },
           // A relay's sound trigger (gates opened by a lever, Ursan's cell door).
           storySound: (d) => {
             for (const [x, y, z] of d.positions) sounds?.play(d.sound, new THREE.Vector3(x, y, z), { volume: d.volume });
@@ -867,6 +874,10 @@ async function main(): Promise<void> {
     const lines = speakers[e.id % speakers.length]!;
     return lines[(talked.get(e.id) ?? 0) % lines.length]!;
   };
+  /** A merchant (merchantShops feature): its placement says so; the server opens its shop. */
+  let shopAt: number | null = null;
+  const merchantOf = (e: RemoteEntity) =>
+    session?.features.merchantShops && e.info.placement !== undefined ? levelView?.arena.mobSpawns.find((sp) => sp.placement === e.info.placement)?.merchant : undefined;
   const talk = (entityId: number) => {
     const e = remotes.byId.get(entityId);
     if (!e || !sounds) return;
@@ -886,15 +897,17 @@ async function main(): Promise<void> {
   const DOOR_RANGE = 1.6;
   const nearestInteractable = () => {
     if (!levelView || !session) return null;
-    let best: { id: number; label: string; d: number; key?: boolean } | null = null;
+    let best: { id: number; label: string; d: number; key?: boolean; shop?: boolean } | null = null;
     const p = local.object.position;
-    // Peaceful creatures within reach: Tab talks.
+    // Peaceful creatures within reach: Tab talks, or trades with a merchant.
     for (const [id, e] of remotes.byId) {
-      if (!e.visible || e.hp <= 0 || !e.info.archetype?.startsWith('npc_') || talkLine(e) === null) continue;
+      if (!e.visible || e.hp <= 0 || !e.info.archetype?.startsWith('npc_')) continue;
+      const merchant = merchantOf(e);
+      if (!merchant && talkLine(e) === null) continue;
       const q = e.avatar.object.position;
       const d = Math.hypot(q.x - p.x, q.z - p.z);
-      if (d > TALK_RANGE || Math.abs(q.y - p.y) > 2 || (best && best.d < d)) continue;
-      best = { id: -id, label: `Tab — talk to ${e.info.name}`, d };
+      if (d > (merchant ? SHOP_REACH : TALK_RANGE) || Math.abs(q.y - p.y) > 2 || (best && best.d < d)) continue;
+      best = { id: -id, label: merchant ? `Tab — trade with the ${MERCHANT_STOCK[merchant].title}` : `Tab — talk to ${e.info.name}`, d, ...(merchant ? { shop: true } : {}) };
     }
     // Door exits (cell doors, inns, town gates): Tab goes through.
     for (const portal of levelView.arena.portals ?? []) {
@@ -986,7 +999,8 @@ async function main(): Promise<void> {
       const sign = messagesAt(MESSAGE_USE)[0];
       if (sign) showMessage(sign);
       const target = nearestInteractable();
-      if (target && target.id < 0) talk(-target.id);
+      if (target?.shop) session?.shopOpen(-target.id);
+      else if (target && target.id < 0) talk(-target.id);
       else if (target && !target.key) {
         session?.interact(target.id);
         doorSounds(target.id);
@@ -1122,6 +1136,9 @@ async function main(): Promise<void> {
   inventoryPanel.onMerge = (fromSlot, toSlot) => session?.mergeInventoryStacks(fromSlot, toSlot);
   inventoryPanel.onSplit = (slot, quantity) => session?.splitInventoryStack(slot, quantity);
   inventoryPanel.onDrop = (slot, itemId) => session?.dropInventoryItem(slot, itemId);
+  inventoryPanel.onBuy = (entity, itemId, quantity) => session?.shopBuy(entity, itemId, quantity);
+  inventoryPanel.onSell = (entity, slot, itemId) => session?.shopSell(entity, slot, itemId);
+  inventoryPanel.onShopClosed = () => (shopAt = null);
   inventoryPanel.onPickup = (object) => session?.interact(object);
   inventoryPanel.onToggle = (kind, open) => setInventoryPanelOpen(kind, open);
   inventoryPanel.onNotice = (message) => {
@@ -1288,6 +1305,14 @@ async function main(): Promise<void> {
       updateWalkInMessages();
     }
     updateGroundItems();
+    if (shopAt !== null) {
+      const m = remotes.byId.get(shopAt);
+      const q = m?.avatar.object.position;
+      if (!m || m.hp <= 0 || !q || Math.hypot(q.x - local.object.position.x, q.z - local.object.position.z) > SHOP_REACH + 1.5 || inventoryPanel.shopEntity === null) {
+        inventoryPanel.closeShop();
+        shopAt = null;
+      }
+    }
     dynamicLights.update(viewCamera, dt);
     postFx.render(viewCamera, dt);
     combatUi.update(dt, viewCamera, remotes, container.clientWidth, container.clientHeight);

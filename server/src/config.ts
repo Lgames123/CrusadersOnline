@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { DEFAULT_ON_FEATURES } from '@crusaders/shared';
 
 export interface ServerConfig {
   host: string;
@@ -19,7 +20,8 @@ export interface ServerConfig {
   httpBurst: number;
   /**
    * Non-original gameplay features to switch on (GAME_FEATURES, comma-separated names from
-   * shared features.ts). Default: none, the original's rules.
+   * shared features.ts; `-name` switches a default-on one off). Default: DEFAULT_ON_FEATURES
+   * (merchant shops), otherwise the original's rules.
    */
   features: string[];
   /** Original difficulty column for attributes and resists. */
@@ -76,7 +78,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     sessionTtlHours: Number(process.env['SESSION_TTL_HOURS'] ?? 168),
     cookieSecure: (process.env['COOKIE_SECURE'] ?? (env === 'production' ? 'true' : 'false')) === 'true',
     difficulty: (['easy', 'medium', 'hard'].includes(process.env['DIFFICULTY'] ?? '') ? process.env['DIFFICULTY'] : 'medium') as ServerConfig['difficulty'],
-    features: (process.env['GAME_FEATURES'] ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+    features: parseFeatures(process.env['GAME_FEATURES'] ?? ''),
     httpRate: 1,
     httpBurst: 10,
     itemRulesPath: resolveItemRules(env),
@@ -86,6 +88,16 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     realmName: (process.env['REALM_NAME'] ?? '').trim().slice(0, 32) || 'Ardon',
     ...overrides,
   };
+}
+
+/** GAME_FEATURES: the default-on features plus the names listed, minus the `-name` ones. */
+export function parseFeatures(v: string): string[] {
+  const on = new Set<string>(DEFAULT_ON_FEATURES);
+  for (const t of v.split(',').map((s) => s.trim()).filter(Boolean)) {
+    if (t.startsWith('-')) on.delete(t.slice(1));
+    else on.add(t);
+  }
+  return [...on];
 }
 
 function parsePoint(v: string | undefined): { x: number; y: number; z: number } | null {

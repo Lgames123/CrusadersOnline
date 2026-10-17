@@ -1,4 +1,4 @@
-import { canPlaceGrid, DAMAGE_TYPES, firstFreeGridPosition, INVENTORY_GRID, layoutItemViews, type GridPlacement, type Inventory, type InventoryItemView } from '@crusaders/shared';
+import { canPlaceGrid, DAMAGE_TYPES, firstFreeGridPosition, INVENTORY_GRID, layoutItemViews, type GridPlacement, type Inventory, type InventoryItemView, type ShopItemView } from '@crusaders/shared';
 import { HeldItemPreview } from './held_item_preview.ts';
 import { ItemThumbnails } from './item_thumbnails.ts';
 import { itemPreviewModelFile } from '../assets/item_models.ts';
@@ -54,7 +54,7 @@ function escape(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
-function shapeOf(item: InventoryItemView): { width: number; height: number } {
+function shapeOf(item: { width?: number; height?: number }): { width: number; height: number } {
   return { width: Math.max(1, item.width ?? 1), height: Math.max(1, item.height ?? 1) };
 }
 
@@ -62,6 +62,7 @@ function shapeOf(item: InventoryItemView): { width: number; height: number } {
 type DropAction =
   | { kind: 'none' }
   | { kind: 'drop' }
+  | { kind: 'sell' }
   | { kind: 'move'; x: number; y: number; valid: boolean }
   | { kind: 'merge'; toSlot: number }
   | { kind: 'equip'; slot: number; valid: boolean }
@@ -109,6 +110,11 @@ export class InventoryPanels {
   private suppressClick = false;
   private awaitingUntil = 0;
   private readonly preview = new HeldItemPreview();
+  private readonly shopWindow: HTMLElement;
+  private readonly shopList: HTMLElement;
+  /** The merchant whose shop is open (merchantShops feature), or null. */
+  private shop: { entity: number; title: string; stock: ShopItemView[] } | null = null;
+  private gold = 0;
 
   onEquip: (slot: number, itemId: string, equip: boolean, to?: { x: number; y: number }) => void = () => {};
   onUse: (slot: number, itemId: string) => void = () => {};
@@ -117,6 +123,10 @@ export class InventoryPanels {
   onSplit: (slot: number, quantity: number) => void = () => {};
   onPickup: (object: number) => void = () => {};
   onDrop: (slot: number, itemId: string) => void = () => {};
+  /** Shops: buy `quantity` of a stocked item, sell the item (stack) in a bag slot, the shop closed. */
+  onBuy: (entity: number, itemId: string, quantity: number) => void = () => {};
+  onSell: (entity: number, slot: number, itemId: string) => void = () => {};
+  onShopClosed: () => void = () => {};
   /** The player asked to open or close a window (button, ×). */
   onToggle: (kind: InventoryPanelKind, open: boolean) => void = () => {};
   onNotice?: (message: string) => void;
@@ -141,6 +151,11 @@ export class InventoryPanels {
           <p class="inv-help">Click to pick up. Drag an item here to drop it.</p>
         </div>
       </section>
+      <section class="inv-window inv-shop" aria-label="Shop" hidden>
+        <header class="inv-title"><h2 class="shop-title">Merchant</h2><button type="button" class="inv-x" data-close="shop" aria-label="Close shop">×</button></header>
+        <div class="shop-list"></div>
+        <p class="inv-help">Click to buy (Shift: 5 potions). Right-click or drag a bag item here to sell it.</p>
+      </section>
     </div>
     <div class="inv-tooltip" role="tooltip" hidden></div>`;
     this.dock = root.querySelector('.inv-dock')!;
@@ -150,6 +165,8 @@ export class InventoryPanels {
     this.goldValue = root.querySelector('.inv-gold b')!;
     this.countValue = root.querySelector('.inv-count')!;
     this.tooltip = root.querySelector('.inv-tooltip')!;
+    this.shopWindow = root.querySelector('.inv-shop')!;
+    this.shopList = root.querySelector('.shop-list')!;
 
     root.addEventListener('click', (e) => this.click(e));
     root.addEventListener('pointerdown', (e) => this.pointerDown(e));
@@ -190,7 +207,10 @@ export class InventoryPanels {
       this.shown.inventory = open;
       if (!open) this.shown.ground = false;
     }
-    if (!this.shown.inventory) this.endDrag();
+    if (!this.shown.inventory) {
+      this.endDrag();
+      this.closeShop();
+    }
     this.root.hidden = !this.shown.inventory;
     this.dock.classList.toggle('ground-open', this.shown.ground);
     this.root.querySelector('.inv-ground-toggle')?.setAttribute('aria-pressed', String(this.shown.ground));
@@ -210,7 +230,49 @@ export class InventoryPanels {
   }
 
   setGold(gold: number): void {
+    this.gold = gold;
     this.goldValue.textContent = gold.toLocaleString('en-US');
+    if (this.shop) this.renderShop();
+  }
+
+  /** The merchant whose shop is open, or null. */
+  get shopEntity(): number | null {
+    return this.shop?.entity ?? null;
+  }
+
+  /** Opens a merchant's shop beside the inventory (which opens too). */
+  openShop(shop: { entity: number; title: string; stock: ShopItemView[] }): void {
+    this.shop = { ...shop, stock: [...shop.stock] };
+    this.shopWindow.hidden = false;
+    this.shopWindow.querySelector('.shop-title')!.textContent = shop.title;
+    this.dock.classList.add('shop-open');
+    this.setOpen('inventory', true);
+    this.renderShop();
+  }
+
+  closeShop(): void {
+    if (!this.shop) return;
+    this.shop = null;
+    this.shopWindow.hidden = true;
+    this.dock.classList.remove('shop-open');
+    this.hideTooltip();
+    this.onShopClosed();
+  }
+
+  private renderShop(): void {
+    const shop = this.shop;
+    if (!shop) return;
+    this.shopList.innerHTML = shop.stock.map((item, i) => {
+      const { width, height } = shapeOf(item);
+      const thumbKey = item.model !== undefined ? ItemThumbnails.key(item.model, width, height, item.texture) : '';
+      const thumbUrl = item.model !== undefined ? ItemThumbnails.get().getThumbnail(item.model, width, height, item.texture) : null;
+      const poor = item.price > this.gold;
+      return `<button type="button" class="shop-item inv-${escape(item.type)}${poor ? ' shop-poor' : ''}" data-stock="${i}" title="${escape(`Buy ${item.name} for ${item.price} gold`)}">
+        <span class="shop-thumb">${item.model !== undefined ? `<img data-thumb-key="${thumbKey}" src="${thumbUrl ?? ''}" alt="" ${thumbUrl ? '' : 'hidden'} />` : ''}<span class="inv-mark" aria-hidden="true">${ITEM_MARK[item.type]}</span></span>
+        <span class="shop-name">${escape(item.name)}<small>${TYPE_LABEL[item.type]}</small></span>
+        <span class="shop-price"><i aria-hidden="true"></i>${item.price.toLocaleString('en-US')}</span>
+      </button>`;
+    }).join('') || '<p class="inv-empty">Nothing for sale.</p>';
   }
 
   setGroundItems(items: readonly GroundItemView[]): void {
@@ -284,9 +346,11 @@ export class InventoryPanels {
     item.protection?.forEach((v, i) => v < 1 && lines.push(`${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} taken: ×${v}`));
     if (item.heal) lines.push(`Restores ${item.heal} health`);
     if (item.quantity && item.quantity > 1) lines.push(`Quantity: ${item.quantity}`);
+    if (this.shop) lines.push(item.value ? `Sells for ${(item.value * (item.quantity ?? 1)).toLocaleString('en-US')} gold` : 'The merchant will not buy this');
     const hints = [
+      this.shop && item.value ? 'Right-click to sell' : '',
       isEquipKind(item.type) ? (item.equipped ? 'Click to unequip' : 'Click to equip') : item.type === 'potion' ? 'Click to drink' : '',
-      item.quantity && item.quantity > 1 ? 'Right-click to split' : '',
+      !this.shop && item.quantity && item.quantity > 1 ? 'Right-click to split' : '',
       'Drag outside to drop',
     ].filter(Boolean);
     return `<strong class="tt-name tt-${item.type}">${escape(item.name)}</strong>
@@ -297,10 +361,12 @@ export class InventoryPanels {
 
   private hover(e: PointerEvent): void {
     if (this.drag || this.press) return;
-    const el = (e.target as HTMLElement).closest<HTMLElement>('.inv-item');
-    const item = el && this.itemBySlot(Number(el.dataset['slot']));
-    if (!el || !item) return;
-    this.tooltip.innerHTML = this.tooltipHtml(item);
+    const row = (e.target as HTMLElement).closest<HTMLElement>('[data-stock]');
+    const stocked = row && this.shop?.stock[Number(row.dataset['stock'])];
+    const el = row ?? (e.target as HTMLElement).closest<HTMLElement>('.inv-item');
+    const item = stocked ? null : el && this.itemBySlot(Number(el.dataset['slot']));
+    if (!el || (!item && !stocked)) return;
+    this.tooltip.innerHTML = stocked ? this.stockTooltip(stocked) : this.tooltipHtml(item!);
     this.tooltip.hidden = false;
     const r = el.getBoundingClientRect();
     const t = this.tooltip.getBoundingClientRect();
@@ -308,6 +374,20 @@ export class InventoryPanels {
     const left = r.left - t.width - 8 >= 8 ? r.left - t.width - 8 : Math.min(innerWidth - t.width - 8, r.right + 8);
     const top = Math.max(8, Math.min(innerHeight - t.height - 8, r.top));
     this.tooltip.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
+  }
+
+  private stockTooltip(item: ShopItemView): string {
+    const { width, height } = shapeOf(item);
+    const lines: string[] = [];
+    item.damage?.forEach((v, i) => v > 0 && lines.push(`${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} damage: ${v}`));
+    if (item.speed !== undefined && item.speed !== 1) lines.push(`Attack speed: ${item.speed}`);
+    item.protection?.forEach((v, i) => v < 1 && lines.push(`${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} taken: ×${v}`));
+    if (item.heal) lines.push(`Restores ${item.heal} health`);
+    lines.push(`Price: ${item.price.toLocaleString('en-US')} gold`);
+    return `<strong class="tt-name tt-${item.type}">${escape(item.name)}</strong>
+      <span class="tt-type">${TYPE_LABEL[item.type]} · ${width}×${height}</span>
+      ${lines.map((l) => `<span>${escape(l)}</span>`).join('')}
+      <small>${item.type === 'potion' ? 'Click to buy · Shift-click for 5' : 'Click to buy'}</small>`;
   }
 
   private hideTooltip(): void {
@@ -339,7 +419,18 @@ export class InventoryPanels {
     const target = e.target as HTMLElement;
     const close = target.closest<HTMLElement>('[data-close]');
     if (close) {
-      this.onToggle(close.dataset['close'] as InventoryPanelKind, false);
+      if (close.dataset['close'] === 'shop') this.closeShop();
+      else this.onToggle(close.dataset['close'] as InventoryPanelKind, false);
+      return;
+    }
+    const stock = target.closest<HTMLElement>('[data-stock]');
+    if (stock && this.shop) {
+      const shop = this.shop;
+      const item = shop.stock[Number(stock.dataset['stock'])];
+      if (!item) return;
+      const quantity = item.type === 'potion' && e.shiftKey ? Math.max(1, Math.min(5, Math.floor(this.gold / item.price))) : 1;
+      if (item.price > this.gold) this.onNotice?.('Not enough gold.');
+      else this.request(() => this.onBuy(shop.entity, item.itemId, quantity));
       return;
     }
     if (target.closest('[data-toggle="ground"]')) {
@@ -369,8 +460,19 @@ export class InventoryPanels {
     const item = el && this.itemBySlot(Number(el.dataset['slot']));
     if (!item) return;
     e.preventDefault();
+    if (this.shop) {
+      this.sell(item);
+      return;
+    }
     const quantity = item.quantity ?? 1;
     if (quantity >= 2) this.request(() => this.onSplit(item.slot, Math.floor(quantity / 2)));
+  }
+
+  private sell(item: InventoryItemView): void {
+    const shop = this.shop;
+    if (!shop) return;
+    if (!item.value) this.onNotice?.('The merchant will not buy that.');
+    else this.request(() => this.onSell(shop.entity, item.slot, item.itemId));
   }
 
   // --- Drag and drop
@@ -460,6 +562,7 @@ export class InventoryPanels {
     if (!drag) return { kind: 'none' };
     const item = drag.item;
     const under = document.elementFromPoint(x, y) as HTMLElement | null;
+    if (this.shop && under?.closest('.inv-shop')) return { kind: 'sell' };
     if (!under?.closest('.inv-main')) return { kind: 'drop' }; // the ground window, or anywhere outside
     const shape = shapeOf(item);
     if (under.closest('.inv-equipment')) {
@@ -498,6 +601,7 @@ export class InventoryPanels {
     }
     const ground = this.root.querySelector('.inv-ground');
     ground?.classList.toggle('drop-hover', action.kind === 'drop' && this.shown.ground);
+    this.shopWindow.classList.toggle('drop-hover', action.kind === 'sell');
     const slot = isEquipKind(drag.item.type) ? this.equipment.querySelector(`[data-equip="${drag.item.type}"]`) : null;
     const equipping = action.kind === 'equip';
     slot?.classList.toggle('drop-hover', equipping && action.valid);
@@ -511,6 +615,9 @@ export class InventoryPanels {
     switch (action.kind) {
       case 'drop':
         this.request(() => this.onDrop(item.slot, item.itemId));
+        return;
+      case 'sell':
+        this.sell(item);
         return;
       case 'merge':
         this.request(() => this.onMerge(item.slot, action.toSlot));

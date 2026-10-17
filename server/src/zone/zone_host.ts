@@ -114,6 +114,18 @@ export class ZoneHost {
     this.post({ t: 'talk', connId, entity, ms });
   }
 
+  shopOpen(connId: number, entity: number): void {
+    this.post({ t: 'shopOpen', connId, entity });
+  }
+
+  shopBuy(connId: number, entity: number, itemId: string, quantity: number): void {
+    this.post({ t: 'shopBuy', connId, entity, itemId, quantity });
+  }
+
+  shopSell(connId: number, entity: number, slot: number, itemId?: string): void {
+    this.post({ t: 'shopSell', connId, entity, slot, ...(itemId !== undefined ? { itemId } : {}) });
+  }
+
   cutsceneDone(connId: number, sequence: string): void {
     this.post({ t: 'cutsceneDone', connId, sequence });
   }

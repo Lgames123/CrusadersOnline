@@ -18,6 +18,9 @@ export type ToZone =
   | { t: 'dropInventoryItem'; connId: number; slot: number; itemId?: string }
   | { t: 'interact'; connId: number; object: number; key: boolean }
   | { t: 'talk'; connId: number; entity: number; ms: number }
+  | { t: 'shopOpen'; connId: number; entity: number }
+  | { t: 'shopBuy'; connId: number; entity: number; itemId: string; quantity: number }
+  | { t: 'shopSell'; connId: number; entity: number; slot: number; itemId?: string }
   | { t: 'use'; connId: number; slot: number }
   | { t: 'cutsceneDone'; connId: number; sequence: string }
   /** Remove the player for a zone transfer; answered with 'transferred'. */
