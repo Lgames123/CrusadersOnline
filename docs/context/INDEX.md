@@ -1,5 +1,6 @@
 # Context notes
 
+- 2026-10-17 [Level items and chests: once per character](2026-10-17-per-character-pickups.md) — ground items and chests are instanced: each character takes each once, for good (story flag `<level>-took:<id>`), only the picker sees it go; no more 5-min respawn (dropped items and breakables unchanged) (Claude Code)
 - 2026-10-17 [Reward shops: free, once per character](2026-10-17-gift-shops.md) — a shop whose greeting is not a merchant line (only the Cs2b hermit lady, HL_13_02, Torch Light Spell Book) gives each item at 0 gold, once per character (story flag `<act>-gift<i>:<shop>`), buys nothing; original sells it at Price (Claude Code)
 - 2026-10-17 [Drake's rolls, jumps and combo as the original](2026-10-17-drake-rolls-jumps-combo.md) — C + direction held rolls back to back; jumps stand to the clip's JUMP event (6–12 frames), drag on the 3-D speed, vertical limit, soft landing: running jump 19.7 ft (was 27); swings hold to clip end, combo queues from 10 % while the button is held, weapon rate 1 + 1.5 (Speed − 1) (Claude Code)
 - 2026-10-17 [Character statistics screen (F1)](2026-10-17-character-statistics-screen.md) — 0x454CA0 decoded: statsA/B/C frame over glass, name/level/XP/attributes, damage multiplier/mana/health, Type/Resist/Damage table; PLAYER_STATS carries the sheet; F1/F2 swap (Claude Code)

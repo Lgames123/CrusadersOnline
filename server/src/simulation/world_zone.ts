@@ -297,7 +297,7 @@ const AGGRO_HEIGHT = 3;
 const EYE_HEIGHT = 1.5;
 /** Signed difference a - b of two headings, wrapped to [-pi, pi]. */
 const angleDiff = (a: number, b: number) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
-const OBJECT_RESPAWN_TICKS = 20 * 300; // 5 min, so a persistent world refills
+const OBJECT_RESPAWN_TICKS = 20 * 300; // 5 min: broken props come back (level items and chests never do)
 const BREAKABLE_RADIUS = 0.5;
 /** Hit-set key offset so swings can record breakables next to entity ids. */
 const OBJECT_HIT_KEY = 1_000_000;
@@ -320,7 +320,7 @@ interface WorldObject {
   ownerKey?: string;
   /** Tick at which the dropped item expires (5 minutes from drop). */
   expiresAt?: number;
-  /** What a full bag left behind (chest contents or a ground stack); reset on respawn. */
+  /** Dropped items: what a full bag left behind of the stack. */
   left?: GroundGrant[];
 }
 
@@ -506,6 +506,8 @@ interface Player extends ActorBase {
   insideSounds: Set<number>;
   /** The shop visit in progress: this visit's copy of its items (0x46D3D0). */
   shop: { id: number; stock: ShopEntry[]; openedAt: number; gift: boolean } | null;
+  /** Level items and chests this character's full bag left something in, by object id. */
+  leftovers: Map<number, GroundGrant[]>;
   /** A scripted sequence the client is playing; the server finishes it by `until` at the latest. */
   cutscene: { sequence: StorySequence; until: number } | null;
 }
@@ -824,6 +826,7 @@ export class WorldZone {
       storyFlags: new Set(opts.story?.flags ?? []),
       insideSounds: new Set(),
       shop: null,
+      leftovers: new Map(),
       cutscene: null,
     };
     this.players.set(connId, p);
@@ -843,10 +846,10 @@ export class WorldZone {
     this.sendJson(connId, { op: SC.QUEST_LOG, d: { log: p.story.quests } });
     if (this.objects.size) {
       const changed = [...this.objects.values()]
-        .filter((o) => o.state !== 'present' || o.dynamic)
+        .filter((o) => this.stateFor(p, o) !== 'present' || o.dynamic)
         .map((o) => ({
           id: o.def.id,
-          state: o.state,
+          state: this.stateFor(p, o),
           ...(o.dynamic ? { def: o.def } : {}),
           ...(o.swing?.motion ? { swing: { ...o.swing.motion } } : {}),
           ...(o.mover ? { mover: { ...o.mover.motion } } : {}),
@@ -873,7 +876,7 @@ export class WorldZone {
     // A swinging door may be opened again while it swings shut.
     // A parked mover is used again to send it back (0x48EC10).
     const reopens = o?.swing?.motion?.phase === 'closing' || o?.mover?.motion.state === MOVER_PARKED;
-    if (!p || !o || !alive(p) || (o.state !== 'present' && !reopens) || o.def.kind === 'breakable') return;
+    if (!p || !o || !alive(p) || (this.stateFor(p, o) !== 'present' && !reopens) || o.def.kind === 'breakable') return;
     if (o.def.kind === 'door' || o.def.kind === 'lever') {
       this.openDoor(p, o, key);
       return;
@@ -881,7 +884,8 @@ export class WorldZone {
     if (p.cutscene) return;
     const pos = p.character.position;
     if (Math.hypot(o.def.x - pos.x, o.def.z - pos.z) > INTERACT_RANGE || Math.abs(o.def.y - pos.y) > INTERACT_HEIGHT) return;
-    const grants: GroundGrant[] = o.left ?? (o.def.kind === 'item' ? (o.def.item ? [o.def.item] : []) : (o.def.contents ?? []));
+    const own = this.instanced(o);
+    const grants: GroundGrant[] = (own ? p.leftovers.get(id) : o.left) ?? (o.def.kind === 'item' ? (o.def.item ? [o.def.item] : []) : (o.def.contents ?? []));
     const loot: string[] = [];
     // What a full bag cannot take stays there (never lost): known items only, books not learned.
     const left: GroundGrant[] = [];
@@ -892,10 +896,13 @@ export class WorldZone {
       if (got < Math.max(1, g.quantity) && def && def.type !== 'spellbook') left.push({ ...g, quantity: Math.max(1, g.quantity) - got });
     }
     if (left.length) {
-      o.left = left;
+      if (own) p.leftovers.set(id, left);
+      else o.left = left;
       this.sendJson(connId, { op: SC.ERROR, d: { code: 'bag_full', message: 'Inventory full.' } }); // leave it there
       if (!loot.length) return;
-      this.broadcastObjects([{ id, state: 'present', by: p.entityId, loot }]);
+      const change: ObjectChange = { id, state: 'present', by: p.entityId, loot };
+      if (own) this.sendObjects(p, [change]);
+      else this.broadcastObjects([change]);
     } else if (o.def.kind === 'item' && grants.length && !loot.length) {
       return; // unknown item, or a book already known
     } else if (o.dynamic) {
@@ -904,10 +911,12 @@ export class WorldZone {
       this.forgetDropped(o, id);
       this.broadcastObjects([{ id, state: 'gone', by: p.entityId, loot }]);
     } else {
-      delete o.left;
-      o.state = o.def.kind === 'chest' ? 'open' : 'gone';
-      o.respawnAt = this.tick + OBJECT_RESPAWN_TICKS;
-      this.broadcastObjects([{ id, state: o.state, by: p.entityId, loot }]);
+      // A level item or chest: gone for this character for good, still there for the others.
+      p.leftovers.delete(id);
+      const flag = this.takenFlag(id);
+      p.storyFlags.add(flag);
+      p.story.flags.push(flag);
+      this.sendObjects(p, [{ id, state: this.stateFor(p, o), by: p.entityId, loot }]);
     }
     const record = this.persistRecord(p);
     if (record) this.outbox.persist?.([record], 'progress');
@@ -1084,7 +1093,29 @@ export class WorldZone {
   }
 
   private broadcastObjects(objects: ObjectChange[]): void {
-    for (const p of this.players.values()) this.sendJson(p.connId, { op: SC.OBJECT_STATE, d: { objects } });
+    for (const p of this.players.values()) this.sendObjects(p, objects);
+  }
+
+  private sendObjects(p: Player, objects: ObjectChange[]): void {
+    this.sendJson(p.connId, { op: SC.OBJECT_STATE, d: { objects } });
+  }
+
+  /**
+   * Level items and chests are per character: each one finds them all, and what it takes never
+   * comes back for it, across restarts (story flag `<level>-took:<object>`).
+   */
+  private instanced(o: WorldObject): boolean {
+    return !o.dynamic && (o.def.kind === 'item' || o.def.kind === 'chest');
+  }
+
+  private takenFlag(id: number): string {
+    return `${this.act ?? 'arena'}-took:${id}`;
+  }
+
+  /** An object as this player sees it. */
+  private stateFor(p: Player, o: WorldObject): WorldObjectState {
+    if (!this.instanced(o) || !p.storyFlags.has(this.takenFlag(o.def.id))) return o.state;
+    return o.def.kind === 'chest' ? 'open' : 'gone';
   }
 
   /** A player's active swing against breakable props in its arc. */

@@ -153,7 +153,7 @@ describe('inventory authority in the zone', () => {
     t.z.dropInventoryItem(1, 1, 'scale_armor');
     t.z.interact(1, CHEST);
     expect(count(p.inventory, 'long_sword')).toBe(1);
-    expect(t.internal.objects.get(CHEST)!.state).toBe('open');
+    expect(t.sent(1).filter((m) => m.op === SC.OBJECT_STATE).flatMap((m) => m.d.objects).filter((o) => o.id === CHEST).at(-1)?.state).toBe('open');
     const gold = t.sent(1).filter((m) => m.op === SC.OBJECT_STATE).flatMap((m) => m.d.objects).filter((o) => o.id === CHEST).flatMap((o) => o.loot ?? []);
     expect(gold).toEqual(['5 Gold Pieces', 'Long Sword']);
   });

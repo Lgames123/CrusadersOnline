@@ -47,6 +47,7 @@ import {
   type InventoryEntry,
   type Rapier,
   type ServerControlMsg,
+  type StoryState,
 } from '@crusaders/shared';
 
 let rapier: Rapier;
@@ -757,6 +758,34 @@ describe('world objects (original level placements)', () => {
     expect(t.last(SC.OBJECT_STATE)!.d.objects[0]).toMatchObject({ id: 3, state: 'open', loot: ['Long Sword', '12 Gold Pieces'] });
     expect(t.last(SC.PLAYER_STATS)!.d.gold).toBe(12);
     expect(t.last(SC.INVENTORY_UPDATE)!.d.items.some((i) => i.itemId === 'long_sword')).toBe(true);
+  });
+
+  it('level items and chests are taken once per character, for good', () => {
+    const t = objectZone();
+    const internal = t.zone as unknown as { players: Map<number, { gold: number; story: { flags: string[]; quests: unknown } }> };
+    t.zone.join(2, { name: 'Other', characterId: null, position: { x: 0, y: 0.5, z: 0 } });
+    t.messages.length = 0;
+    t.zone.interact(1, 0);
+    t.zone.interact(1, 3);
+    // The other player still finds both and takes them too; each saw only its own pickups.
+    t.zone.interact(2, 0);
+    t.zone.interact(2, 3);
+    expect(internal.players.get(1)!.gold).toBe(42);
+    expect(internal.players.get(2)!.gold).toBe(42);
+    expect(t.messages.filter((m) => m.op === SC.OBJECT_STATE)).toHaveLength(4);
+    // Never back, not even after the respawn window or a fresh login with the saved story.
+    t.zone.step();
+    for (let i = 0; i < 20 * 300 + 40; i++) t.zone.step();
+    t.zone.interact(1, 0);
+    expect(internal.players.get(1)!.gold).toBe(42);
+    const story = structuredClone(internal.players.get(1)!.story) as StoryState;
+    t.zone.leave(1);
+    t.messages.length = 0;
+    t.zone.join(1, { name: 'Looter', characterId: null, position: { x: 0, y: 0.5, z: 0 }, story });
+    const full = t.messages.find((m) => m.op === SC.OBJECT_STATE && m.d.full) as Extract<ServerControlMsg, { op: typeof SC.OBJECT_STATE }>;
+    expect(full.d.objects.map((o) => [o.id, o.state])).toEqual([[0, 'gone'], [3, 'open']]);
+    t.zone.interact(1, 3);
+    expect(internal.players.get(1)!.gold).toBe(0);
   });
 
   it('drinks a potion to heal, capped at max HP', () => {
