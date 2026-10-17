@@ -744,11 +744,16 @@ export class WorldZone {
     const start = !opts.arrivingAt && !opts.arrivingFrom && !validPosition(opts.position) ? this.arena.starts?.[0] : undefined;
     // Through an exit: the original's entry point; the heading carries over unless it names one.
     const arr = opts.arrivingFrom ? exitArrival(this.arena, opts.arrivingFrom, opts.arrivingVia) : null;
+    const respawnSpot = this.respawnFor(opts.arrivingFrom, opts.arrivingVia);
+    // Logging in: where he logged out, unless he was dead (saved HP 0) or below the level.
+    const resume = validPosition(opts.position) && (opts.hp === undefined || opts.hp > 0) && opts.position.y >= this.fallLimit
+      ? opts.position
+      : respawnSpot;
     const spawn = opts.arrivingAt && opts.arrivingMesh && opts.arrivingMesh === this.arena.mesh && validPosition(opts.arrivingAt)
       ? opts.arrivingAt
       : arr
         ? arr
-        : validPosition(opts.position) ? opts.position : start ?? this.nextSpawnPoint();
+        : validPosition(opts.position) ? resume : start ?? this.nextSpawnPoint();
     const xp = Math.max(0, Math.floor(opts.experience ?? 0));
     const level = levelForXp(xp);
     const rules = playerRules(this.difficulty);
@@ -765,7 +770,7 @@ export class WorldZone {
       connId,
       entityId: this.nextEntityId++,
       characterId: opts.characterId,
-      respawnSpot: this.respawnFor(opts.arrivingFrom, opts.arrivingVia),
+      respawnSpot,
       name: opts.name,
       character: createCharacter(this.mw, spawn),
       moveStats: { ...this.playerStats, clipRate: originalSpeedMultiplier(rules.attributes, level) },
@@ -1398,15 +1403,19 @@ export class WorldZone {
   }
 
   /**
-   * A player below the level (fell off an open edge the edge walls missed) is put back at the
-   * nearest spawn point.
+   * A player below the level (fell off an open edge the edge walls missed) is put back where he
+   * would respawn: the beginning of the area.
    */
   private catchFall(p: Player): void {
-    const pos = p.character.position;
-    if (pos.y >= this.fallLimit) return;
-    let best = this.arena.spawnPoints[0] ?? { x: 0, y: 1, z: 0 };
-    for (const s of this.arena.spawnPoints) if (Math.hypot(s.x - pos.x, s.z - pos.z) < Math.hypot(best.x - pos.x, best.z - pos.z)) best = s;
-    setCharacterState(p.character, best, 0, false);
+    if (p.character.position.y >= this.fallLimit) return;
+    this.toRespawnSpot(p);
+  }
+
+  /** Puts a player at his respawn spot; the triggers there count as entered (never fired). */
+  private toRespawnSpot(p: Player): void {
+    setCharacterState(p.character, p.respawnSpot, 0, false);
+    p.inPortal.clear();
+    for (const portal of this.arena.portals ?? []) if (inPortal(portal, p.respawnSpot, 0.5)) p.inPortal.add(portal.id);
   }
 
   /** respawnPoint, cached per way in (its arrival search sweeps the mesh). */
@@ -2814,9 +2823,7 @@ export class WorldZone {
       a.yaw = a.spawnYaw;
       setCharacterState(a.character, a.spawn, 0, false);
     } else {
-      setCharacterState(a.character, a.respawnSpot, 0, false);
-      a.inPortal.clear();
-      for (const portal of this.arena.portals ?? []) if (inPortal(portal, a.respawnSpot, 0.5)) a.inPortal.add(portal.id);
+      this.toRespawnSpot(a);
       a.hitUntil = 0;
       a.statsDirty = true;
     }

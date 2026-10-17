@@ -54,14 +54,14 @@ describe('peaceful creatures (NPCs)', () => {
     expect(guard.events()).toEqual([]);
     expect(Math.hypot(guard.npc().x, guard.npc().z + 1.2)).toBeLessThan(0.3);
     // A citizen without a path stands too (the Ws9a prisoner no longer walks into the wall).
-    const citizen = npcZone('npc_118', 20, {}, undefined, { x: 30, z: 30 });
+    const citizen = npcZone('npc_118', 20, {}, undefined, { x: 15, z: 15 });
     citizen.run(20 * 30);
     expect(Math.hypot(citizen.npc().x, citizen.npc().z + 1.2)).toBeLessThan(0.3);
   });
 
   it('a citizen with a path walks it point by point, back and forth, pausing at each', () => {
     const path = { points: [{ x: 0, y: 0.5, z: -1.2 }, { x: 4, y: 0.5, z: -1.2 }, { x: 4, y: 0.5, z: -5.2 }], pause: 1000, loop: false };
-    const t = npcZone('npc_118', 20, { path }, undefined, { x: -30, z: 30 });
+    const t = npcZone('npc_118', 20, { path }, undefined, { x: -15, z: 15 });
     const reached = new Set<number>();
     let order: number[] = [];
     t.run(20 * 40, () => {

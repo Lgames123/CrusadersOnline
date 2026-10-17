@@ -1,5 +1,6 @@
 # Context notes
 
+- 2026-10-17 [Falls and logins use the respawn spot](2026-10-17-falls-and-logins-use-respawn.md) — falls out of a level land at the respawn spot; logins keep their saved position unless saved dead (HP 0) or below the level (Claude Code)
 - 2026-10-17 [Respawn at the beginning of the area](2026-10-17-respawn-at-area-start.md) — dead players come back a few metres past the trigger they entered by (arrivalNear), else start 0 / lowest entry; arrivalNear no longer stands on ceilings (Claude Code)
 - 2026-10-16 [Title music start](2026-10-16-title-music-start.md) — title screen starts track 14 at 3.5 s, past its near-silent intro; the loop still wraps to 0 (Claude Code)
 - 2026-10-16 [Shops as the original](2026-10-16-original-shops.md) — shops are cap type 0x1C counters (use key in volume, 0x464170 → trade mode 5), stock per act, items.ctx Price both ways (sell = full price); supersedes the invented merchant shops (Claude Code)

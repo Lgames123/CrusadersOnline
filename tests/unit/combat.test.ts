@@ -62,7 +62,7 @@ function lcg(seed: number): () => number {
 }
 
 /** In-process zone with one player; captures JSON messages and persist requests. */
-function setup(opts: { experience?: number; inventory?: InventoryEntry[]; random?: () => number; reactiveBlock?: boolean; features?: Partial<GameplayFeatures> } = {}) {
+function setup(opts: { position?: { x: number; y: number; z: number }; hp?: number; experience?: number; inventory?: InventoryEntry[]; random?: () => number; reactiveBlock?: boolean; features?: Partial<GameplayFeatures> } = {}) {
   const messages: ServerControlMsg[] = [];
   const persisted: { records: PersistRecord[]; reason: string }[] = [];
   const zone = new WorldZone(rapier, 'test', createSyntheticArena(), {
@@ -209,6 +209,20 @@ describe('authoritative melee', () => {
     const back = createSyntheticArena().spawnPoints[0]!;
     expect(t.me().x).toBeCloseTo(back.x, 1);
     expect(t.me().z).toBeCloseTo(back.z, 1);
+  });
+
+  it('logs in where he left, unless he was dead there or below the level; a fall lands at the respawn spot', () => {
+    const back = createSyntheticArena().spawnPoints[0]!;
+    const near = (a: { x: number; z: number }, p: { x: number; z: number }) => Math.hypot(a.x - p.x, a.z - p.z) < 0.1;
+    expect(near(setup({ position: { x: 5, y: 0.5, z: 5 }, hp: 30 }).me(), { x: 5, z: 5 })).toBe(true);
+    const dead = setup({ position: { x: 5, y: 0.5, z: 5 }, hp: 0 });
+    expect(near(dead.me(), back)).toBe(true);
+    expect(dead.me()).toMatchObject({ alive: true, hp: 65 });
+    expect(near(setup({ position: { x: 5, y: -40, z: 5 } }).me(), back)).toBe(true);
+    // Under the floor but above the fall limit: drops through, then is caught.
+    const fall = setup({ position: { x: 5, y: -15, z: 5 } });
+    fall.run(60);
+    expect(near(fall.me(), back)).toBe(true);
   });
 
   it('levels up at the original threshold; the max-HP gain is added to current HP', () => {
