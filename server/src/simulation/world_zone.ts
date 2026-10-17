@@ -18,6 +18,7 @@ import {
   stagedPlayerSpot,
   stagedPlayerYaw,
   inStoryVolume,
+  worldTrigger,
   storyFlag,
   type StorySequence,
   type StoryState,
@@ -1836,9 +1837,11 @@ export class WorldZone {
     const act = this.act;
     if (!act || depth > 8) return;
     const flag = storyFlag(act, t.id);
-    if (p.storyFlags.has(flag)) return;
-    p.storyFlags.add(flag);
-    p.story.flags.push(flag);
+    if (!worldTrigger(t)) {
+      if (p.storyFlags.has(flag)) return;
+      p.storyFlags.add(flag);
+      p.story.flags.push(flag);
+    }
     if (t.kind === 'quest' && t.quest) this.applyQuest(p, t);
     if (t.kind === 'relay') {
       if (touched && t.delay) this.pendingRelays.push({ connId: p.connId, trigger: t, due: this.tick + Math.ceil(t.delay / TICK_MS), played });
@@ -1924,7 +1927,7 @@ export class WorldZone {
     const pos = p.character.position;
     const x = pos.x / LEVEL_UNIT_METRES, y = pos.y / LEVEL_UNIT_METRES, z = pos.z / LEVEL_UNIT_METRES;
     for (const t of story.triggers) {
-      if (!(t.activation & 8) || !t.volume || p.storyFlags.has(storyFlag(act, t.id))) continue;
+      if (!(t.activation & 8) || !t.volume || (!worldTrigger(t) && p.storyFlags.has(storyFlag(act, t.id)))) continue;
       if (inStoryVolume(t.volume, x, y, z)) this.fireTrigger(p, t, 0, false, true);
     }
   }

@@ -83,7 +83,7 @@ export function createMovementWorld(rapier: Rapier, arena: ArenaDef): MovementWo
   const doors = new Map<number, RAPIER.Collider>();
   for (const b of arena.brushes ?? []) {
     if (!b.solid) continue;
-    const desc = rapier.ColliderDesc.convexHull(b.points);
+    const desc = b.indices ? rapier.ColliderDesc.trimesh(b.points, b.indices) : rapier.ColliderDesc.convexHull(b.points);
     if (!desc) continue;
     const c = world.createCollider(desc.setCollisionGroups(WORLD_GROUPS));
     if (b.door !== undefined) doors.set(b.door, c);

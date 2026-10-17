@@ -215,6 +215,16 @@ export interface LevelStory {
 /** First actor index of a sequence (0 = the player, 1 = the stand-in, as step references use them). */
 export const SEQUENCE_ACTOR_BASE = 2;
 
+/**
+ * A use-key relay without the once bit (0x200) that only moves brushes and plays sounds (Ca*a's
+ * lever and floor rings, Ws1a/9a's gate levers): it fires on every press, as the original; the
+ * movers' own state keeps a done ring still. Not a story step, so no per-character flag: one saved
+ * would leave the floor shut for that character once the zone restarts.
+ */
+export function worldTrigger(t: StoryTrigger): boolean {
+  return t.kind === 'relay' && (t.activation & 0x209) === 8 && !t.delay && !t.targets?.length && !t.creatureOps?.length && !!(t.brushes?.length || t.sounds?.length);
+}
+
 /** Whether a point (original units, Z mirrored) is inside a story volume. */
 export function inStoryVolume(v: StoryVolume, x: number, y: number, z: number): boolean {
   if (y < v.yMin - 1.5 || y > v.yMax) return false;

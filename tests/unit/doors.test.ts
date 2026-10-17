@@ -16,6 +16,7 @@ import {
   MOVER_FORWARD,
   MOVER_SHUT,
   doorSwingFromMotion,
+  emptyStoryState,
   swingKeyAwayFrom,
   wallDistance,
   type DoorSwing,
@@ -135,6 +136,36 @@ describe('doors', () => {
     expect(messages.length).toBe(sent);
     for (let i = 0; i < 20 * 6.5; i++) z.step();
     expect(last(500_000)).toMatchObject({ state: 'present', mover: { state: MOVER_SHUT } });
+  });
+
+  it("the use key in a mover trigger's volume moves its brush, which the hand alone does not (Ca*a's floor)", () => {
+    // Ca1a: a use-key mover trigger per bPlat ring beside the lever; the rings sink once (mode 6).
+    const FT = 1 / 0.3048;
+    const arena = doorArena();
+    arena.objects![0]!.byLever = true;
+    arena.name = 'level:ca1a';
+    arena.brushes![0]!.name = 'bPlat1';
+    arena.brushes![0]!.mover = moverFromMotion({ flags: 0x1001006, start: 0, delayMs: 0, types: [0x42], keys: [[0, -4, 0]], speeds: [1 / 400, 1 / 40] }, 1)!;
+    const volume = { polygon: [[-1 * FT, 1 * FT], [1 * FT, 1 * FT], [1 * FT, -1 * FT], [-1 * FT, -1 * FT]] as [number, number][], yMin: -FT, yMax: 3 * FT };
+    arena.story = { triggers: [{ id: 1, kind: 'relay', activation: 8, volume, targets: [], brushes: ['bPlat1'] }], cameras: [], sequences: [] };
+    const messages: ServerControlMsg[] = [];
+    const z = new WorldZone(rapier, 'floor', arena, {
+      send: (_c, data) => { if (typeof data === 'string') messages.push(JSON.parse(data) as ServerControlMsg); },
+    });
+    const blocked = () => wallDistance((z as unknown as { mw: Parameters<typeof wallDistance>[0] }).mw, { x: 0, y: 0, z: 0 }, 0, 3, 1) !== null;
+    const last = () => messages.flatMap((m) => (m.op === SC.OBJECT_STATE ? m.d.objects.filter((o) => o.id === 500_000) : [])).at(-1);
+    z.join(1, { name: 'Puller', characterId: null, position: { x: 3, y: 0.5, z: 3 } });
+    z.interact(1, 500_000); // outside the volume: nothing
+    expect(last()).toBeUndefined();
+    z.leave(1);
+    // Its flag saved from a pull before the server restarted: the floor, shut again, still opens.
+    z.join(1, { name: 'Puller', characterId: null, position: { x: 0, y: 0.5, z: 0 }, story: { ...emptyStoryState(), flags: ['ca1a:1'] } });
+    expect(blocked()).toBe(true);
+    z.interact(1, 500_000);
+    expect(last()).toMatchObject({ state: 'open', mover: { state: MOVER_FORWARD } });
+    for (let i = 0; i < 20 * 2; i++) z.step();
+    expect(last()).toMatchObject({ mover: { state: MOVER_DONE } });
+    expect(blocked()).toBe(false); // sunk 4 m, its collider with it
   });
 
   it('a door exit is taken with the interact key, not by walking in', () => {

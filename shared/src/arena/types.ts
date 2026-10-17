@@ -48,7 +48,7 @@ export interface WorldObjectDef {
   /** Doors: bounds (metres, [min x, y, z, max x, y, z]) and the key that unlocks it, if locked. */
   bounds?: [number, number, number, number, number, number];
   lock?: string;
-  /** Doors opened by a lever only (not by hand). */
+  /** Doors opened by a lever only (not by hand); also brushes only the story moves (Ca*a's bPlat rings). */
   byLever?: boolean;
   /** Levers: the doors (object ids) pulling it opens. */
   opens?: number[];
@@ -66,6 +66,8 @@ export interface BrushDef {
   points: Float32Array;
   /** Solid for movement (doors, gates, bridges, platforms); the rest is drawn only. */
   solid: boolean;
+  /** Triangles of its faces (into `points`): solid non-door pieces collide as these, not as a hull. */
+  indices?: Uint32Array;
   /** World object id when the brush is a door or a lever. */
   door?: number;
   /** A door that swings about its hinge (the original's turning mover, door_swing.ts). */

@@ -438,6 +438,33 @@ export function parseStory(data: Uint8Array, dv: DataView, types: ReadonlyMap<nu
     });
   }
 
+  // --- Use-key mover triggers no relay fires (Ca*a's lever and its five bPlat rings, Ca*c's
+  // bTortTop1): the use key in their volume fires them directly (0x460320 -> slot 5, 0x461B10),
+  // written as one-op relays. Use-key sound triggers sharing such a volume play with them (Ca*a's
+  // 519). Doors and gates are left out: their own use opens them and plays their sounds.
+  const relayed = new Set<number>();
+  for (const r of types.get(T_RELAY) ?? []) {
+    const n = dv.getInt32(r + 0x3c, true);
+    const list = ptr(r + 0x40);
+    for (let i = 0; n > 0 && n < 64 && i < n && inRange(list + 16 * i, 16); i++) relayed.add(ptr(list + 16 * i + 12));
+  }
+  const useVolumes = new Set<number>();
+  const useTrigger = (o: number, extra: Pick<CapStoryTrigger, 'brushes' | 'sounds'>) => {
+    const volume = ctx.parseVolume(ptr(o + 4));
+    if (volume) triggers.push({ id: o, kind: 'relay', activation: dv.getUint32(o + 8, true), volume, targets: [], ...extra });
+    return !!volume;
+  };
+  for (const o of types.get(T_MOVER) ?? []) {
+    if (!inRange(o, 0x3c) || relayed.has(o) || !(dv.getUint32(o + 8, true) & 8) || !inRange(ptr(o + 4), 0x40)) continue;
+    const name = brushName(ptr(o + 0x38));
+    if (name && !/door|gate/i.test(name) && useTrigger(o, { brushes: [name] })) useVolumes.add(ptr(o + 4));
+  }
+  for (const o of types.get(T_SOUND) ?? []) {
+    if (!inRange(o, 0x48) || relayed.has(o) || !(dv.getUint32(o + 8, true) & 8) || !useVolumes.has(ptr(o + 4))) continue;
+    const sound = soundAt(o);
+    if (sound.id >= 0) useTrigger(o, { sounds: [sound] });
+  }
+
   // --- Death triggers: a creature's health object (inside its record) names the trigger its death fires.
   const deaths: CapDeathTrigger[] = [];
   for (const o of types.get(T_HEALTH) ?? []) {

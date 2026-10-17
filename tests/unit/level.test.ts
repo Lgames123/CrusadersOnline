@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { explode, DclError } from '@crusaders/converter/formats/dcl';
 import { packCollision } from '@crusaders/converter/emit/gltf_level';
-import { LEVEL_UNIT_METRES, MOB_ARCHETYPES, buildLevelArena, floorAt, parseLevelCollision, type LevelPlacements } from '@crusaders/shared';
+import { LEVEL_UNIT_METRES, MOB_ARCHETYPES, buildLevelArena, createMovementWorld, floorAt, initPhysics, parseLevelCollision, rayDistance, type LevelPlacements } from '@crusaders/shared';
 
 describe('PKWARE DCL explode', () => {
   it('decodes the published test vector', () => {
@@ -105,6 +105,35 @@ describe('original level arenas', () => {
     // Skeleton01 dies in the sequence; Skeleton02 only gestures there, and the guard is not cast.
     expect(arena.mobSpawns.map((m) => m.placement)).toEqual([0, 2]);
     expect(arena.puppets).toEqual([{ archetype: 'skeleton_warrior', placement: 1, x: 20 * LEVEL_UNIT_METRES, y: 100 * LEVEL_UNIT_METRES + 0.1, z: -20 * LEVEL_UNIT_METRES }]);
+  });
+
+  it('makes the brushes a mover trigger moves world objects, never opened by hand (converter 1.26)', () => {
+    const motion = { flags: 0x1001006, start: 0, delayMs: 0, types: [0x42], keys: [[0, -4, 0]] as [number, number, number][], speeds: [1 / 400, 1 / 40] };
+    const slab = (name: string) => ({ name, points: [[0, 100, 0], [0, 100, -10], [10, 100, -10], [10, 96, 0]] as [number, number, number][], motion });
+    const placements: LevelPlacements = {
+      mesh: 'test',
+      creatures: [],
+      brushes: [slab('bPlat1'), slab('bPlat2')],
+      story: { triggers: [{ id: 1, kind: 'relay', activation: 8, targets: [], brushes: ['bPlat1'] }], cameras: [], sequences: [] },
+    };
+    const arena = buildLevelArena('level:test', floorCollision(), placements);
+    const [moved, still] = arena.brushes!;
+    expect(arena.objects!.find((o) => o.id === moved!.door)).toMatchObject({ kind: 'door', byLever: true });
+    expect(moved!.mover).toBeDefined();
+    expect(still!.door).toBeUndefined();
+  });
+
+  it("collides a solid piece as its faces, so a ring's hole stays open (Ca*a's bPlat rings)", async () => {
+    // A flat 30 x 30 ft ring at 100 ft round a 10 x 10 ft hole; points[0] is the pivot.
+    const o = [[0, -0], [30, -0], [30, -30], [0, -30]], n = [[10, -10], [20, -10], [20, -20], [10, -20]];
+    const points = [[0, 100, 0], ...o.map(([x, z]) => [x, 100, z]), ...n.map(([x, z]) => [x, 100, z])] as [number, number, number][];
+    const faces = [0, 1, 2, 3].map((k) => ({ texture: 't', texels: [], indices: [1 + k, 1 + ((k + 1) % 4), 5 + ((k + 1) % 4), 5 + k] }));
+    const arena = buildLevelArena('level:test', floorCollision(), { mesh: 'test', creatures: [], brushes: [{ name: 'bPlat1', points, faces }] });
+    arena.meshes = [];
+    const mw = createMovementWorld(await initPhysics(), arena);
+    const down = (x: number, z: number) => rayDistance(mw, { x: x * LEVEL_UNIT_METRES, y: 110 * LEVEL_UNIT_METRES, z: z * LEVEL_UNIT_METRES }, { x: 0, y: -1, z: 0 }, 20 * LEVEL_UNIT_METRES);
+    expect(down(5, -5)).toBeCloseTo(10 * LEVEL_UNIT_METRES, 3);
+    expect(down(15, -15)).toBeNull();
   });
 
   it('finds floors, never the ceiling above them', () => {

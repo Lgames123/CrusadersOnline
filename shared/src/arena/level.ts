@@ -649,12 +649,22 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
     ...(p.trigger ? { trigger: { polygon: p.trigger.polygon.map(([x, z]) => [x * s, z * s] as [number, number]), yMin: p.trigger.yMin * s, yMax: p.trigger.yMax * s } } : {}),
   }));
   const act = name.slice(LEVEL_PREFIX.length);
+  // Brushes the story moves (mover triggers: Ca*a's bPlat rings...) are world objects too, so their
+  // mover and collider run; they move only so, never by hand.
+  const storyBrushes = new Set<string>((placements.story?.triggers ?? []).flatMap((t) => t.brushes ?? []));
   const brushes: BrushDef[] = [];
   (placements.brushes ?? []).forEach((b, i) => {
     // Drop the pivot (first vertex): the rest are the piece's corners.
     const pts = b.points.length > 4 ? b.points.slice(1) : b.points;
     const points = new Float32Array(pts.flatMap((p) => [p[0] * s, p[1] * s, p[2] * s]));
     const brush: BrushDef = { name: b.name, points, solid: SOLID_BRUSH.test(b.name) };
+    // Solid pieces other than doors collide as their faces: a hull would fill a ring's hole (Ca*a's
+    // bPlat rings, whose sunk hull kept the pit covered). Face indices count the pivot.
+    if (brush.solid && !DOOR_BRUSH.test(b.name) && b.faces?.length && pts !== b.points) {
+      const tris: number[] = [];
+      for (const f of b.faces) for (let k = 2; k < f.indices.length; k++) tris.push(f.indices[0]! - 1, f.indices[k - 1]! - 1, f.indices[k]! - 1);
+      if (tris.every((v) => v >= 0 && v < pts.length)) brush.indices = new Uint32Array(tris);
+    }
     const swing = b.motion ? doorSwingFromMotion(b.motion, s) : null;
     if (swing && DOOR_BRUSH.test(b.name)) brush.swing = swing;
     else if (b.motion) {
@@ -662,7 +672,8 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
       if (mover) brush.mover = mover;
     }
     const lever = LEVER_BRUSH.test(b.name);
-    if (DOOR_BRUSH.test(b.name) || lever) {
+    const door = DOOR_BRUSH.test(b.name);
+    if (door || lever || (brush.mover && storyBrushes.has(b.name))) {
       const min = [Infinity, Infinity, Infinity];
       const max = [-Infinity, -Infinity, -Infinity];
       for (let k = 0; k < points.length; k++) {
@@ -680,6 +691,7 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
         bounds: [min[0]!, min[1]!, min[2]!, max[0]!, max[1]!, max[2]!],
         ...(lock ? { lock } : {}),
         ...(b.sounds?.length ? { sounds: b.sounds } : {}),
+        ...(!door && !lever ? { byLever: true } : {}),
       });
       brush.door = id;
     }
