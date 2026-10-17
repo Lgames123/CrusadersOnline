@@ -30,7 +30,7 @@ const FT = 1 / LEVEL_UNIT_METRES;
  * actor; the sequence completes quest 1 (assigned before by a walk-in quest trigger at the
  * spawn), walks the stand-in to z = -10 m and loads another act.
  */
-function storyZone(load = true) {
+function storyZone(load = true, extra: Partial<LevelStory> = {}) {
   const arena = createSyntheticArena();
   arena.name = 'level:t1a';
   arena.mesh = 't_a';
@@ -55,7 +55,7 @@ function storyZone(load = true) {
       ],
     }],
   };
-  arena.story = story;
+  arena.story = { ...story, ...extra };
   const messages: ServerControlMsg[] = [];
   const portals: { target: string; keep?: { mesh: string } }[] = [];
   const saves: PersistRecord[] = [];
@@ -140,6 +140,28 @@ describe('story triggers and sequences (server)', () => {
     t.run(60, INPUT.BACK);
     t.run(60, INPUT.FORWARD);
     expect(t.messages.filter((m) => m.op === SC.CUTSCENE).length).toBe(n);
+  });
+
+  it('a walk-in sound trigger plays its line on entering: a 0x200 one once, others each time', () => {
+    const square = (z0: number, z1: number): [number, number][] => [[-3 * FT, z0 * FT], [3 * FT, z0 * FT], [3 * FT, z1 * FT], [-3 * FT, z1 * FT]];
+    const sound = (id: number) => ({ id, positions: [[0, 0, -3 * FT]] as [number, number, number][], volume: 1 });
+    const t = storyZone(false, {
+      triggers: [],
+      sequences: [],
+      soundTriggers: [
+        { id: 500, activation: 0x201, volume: { polygon: square(-4, -2), yMin: -10, yMax: 20 * FT }, sound: sound(721) },
+        { id: 501, activation: 0x001, volume: { polygon: square(-4, -2), yMin: -10, yMax: 20 * FT }, sound: sound(871) },
+      ],
+    });
+    const played = () => t.messages.flatMap((m) => (m.op === SC.STORY_SOUND ? [m.d.sound] : []));
+    t.run(2);
+    expect(played()).toEqual([]);
+    for (let i = 0; i < 60 && !played().length; i++) t.run(1, INPUT.FORWARD);
+    expect(played().sort()).toEqual([721, 871]);
+    // Out and back in: only the one without 0x200 plays again.
+    t.run(60, INPUT.BACK);
+    for (let i = 0; i < 60 && played().length < 3; i++) t.run(1, INPUT.FORWARD);
+    expect(played().sort()).toEqual([721, 871, 871]);
   });
 
   it('story progress comes back with the character', () => {

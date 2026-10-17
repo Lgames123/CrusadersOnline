@@ -18,6 +18,7 @@ import {
   LEVEL_PREFIX,
   MAIN_QUESTS,
   NPC_VOICES,
+  ASM_STATE_NAMES,
   PLAYER_RADIUS,
   LEVEL_UNIT_METRES,
   floorAt,
@@ -57,8 +58,8 @@ import { CONTROLS_HELP } from './input/keybindings.ts';
 import { buildArenaMeshes } from './entities/arena.ts';
 import { ProceduralAvatar, type Avatar, type AvatarKind } from './entities/avatar.ts';
 import { LocalPlayer } from './entities/local_player.ts';
-import { RemoteEntities } from './entities/remote_entities.ts';
-import { loadOriginalAvatars } from './assets/original_models.ts';
+import { RemoteEntities, type RemoteEntity } from './entities/remote_entities.ts';
+import { loadOriginalAvatars, type HeldOverride } from './assets/original_models.ts';
 import { loadOriginalLevel, type OriginalLevel } from './assets/original_level.ts';
 import { CREATURE_SFX, SFX, SoundBank, pick } from './audio/sound_bank.ts';
 import { registerAssetServiceWorker } from './assets/game_files.ts';
@@ -150,7 +151,7 @@ async function main(): Promise<void> {
     const def = levelView?.arena.puppets?.find((q) => q.placement === placement);
     if (!def) return null;
     const kind = def.archetype as AvatarKind;
-    const avatar = originals?.(kind) ?? new ProceduralAvatar(kind);
+    const avatar = originals?.(kind, placementLooks.get(placement)?.held) ?? new ProceduralAvatar(kind);
     avatar.object.position.set(def.x, def.y, def.z);
     avatar.object.rotation.y = def.yaw ?? 0;
     avatar.setState(ANIM.IDLE, 0);
@@ -253,6 +254,30 @@ async function main(): Promise<void> {
   const lighting = new ModelLighting(scene);
   const lightingKeys = new Set<unknown>();
   const PROP_KEY = 'prop:';
+  /**
+   * What each placed creature holds (the cap's inventory header: Captain Ursan nothing, a skeleton
+   * its own weapon) and the gesture it talks with, by placement; their models are loaded first.
+   */
+  const placementLooks = new Map<number, { held?: HeldOverride; talkState?: string }>();
+  remotes.placementLook = (placement) => placementLooks.get(placement);
+  const loadPlacementLooks = async (def: ArenaDef) => {
+    placementLooks.clear();
+    const files = new Set<string>();
+    for (const sp of [...def.mobSpawns, ...(def.puppets ?? [])]) {
+      if (sp.placement === undefined) continue;
+      const look: { held?: HeldOverride; talkState?: string } = {};
+      if (sp.weapon !== undefined || sp.shield !== undefined) {
+        const outfit = await outfitFor({ ...(sp.weapon ? { weapon: sp.weapon } : {}), ...(sp.shield ? { shield: sp.shield } : {}) });
+        look.held = { right: outfit.right ?? null, left: outfit.left ?? null };
+        if (outfit.right) files.add(outfit.right);
+        if (outfit.left) files.add(outfit.left);
+      }
+      const gesture = 'gesture' in sp && sp.gesture !== undefined ? ASM_STATE_NAMES[sp.gesture] : undefined;
+      if (gesture) look.talkState = gesture;
+      placementLooks.set(sp.placement, look);
+    }
+    await originals?.preload?.([...files]);
+  };
   const showArena = async (name: string): Promise<ArenaDef | null> => {
     let next: ArenaDef;
     let view: OriginalLevel | null = null;
@@ -274,6 +299,7 @@ async function main(): Promise<void> {
     scene.add(arenaObject);
     view?.applyAtmosphere(scene);
     levelView = view;
+    await loadPlacementLooks(next);
     messagesDone.clear();
     messagesInside.clear();
     lighting.setLevel(view?.light ?? null);
@@ -517,6 +543,9 @@ async function main(): Promise<void> {
           // A relay's sound trigger (gates opened by a lever, Ursan's cell door).
           storySound: (d) => {
             for (const [x, y, z] of d.positions) sounds?.play(d.sound, new THREE.Vector3(x, y, z), { volume: d.volume });
+            // A spoken line (a guard's "Celestia is expecting you", Drake's remarks): its text too.
+            const line = sounds?.lines.get(d.sound);
+            if (line) showSubtitle(null, line.text, line.ms);
           },
           quests: (d) => {
             questBook.update(d.log);
@@ -812,11 +841,11 @@ async function main(): Promise<void> {
     if (e.target === overlay) setOptionsOpen(false);
   });
 
-  // Talking (provisional): the original links each NPC to its lines in the acts' sequence scripts
-  // (not decoded). Here a peaceful creature gets a speaker of its voice role (Sound.ctx files
-  // <speaker>_<role>_nn: townsman TM, townswoman TF, guards HG / OG, dwarves DM / DF, dashers DU):
-  // each NPC keeps its own set of lines and every Tab plays the next one, round and round.
-  const TALK_RANGE = 2.5;
+  // Talking (0x408980): each placed creature has one line of its own (stats +0x1E4), played by
+  // the use key from within 12 ft (0x40DEB0); most have none and say nothing. Creatures of
+  // synthetic arenas (no placement) keep a speaker of their voice role (Sound.ctx files
+  // <speaker>_<role>_nn), every Tab the next line.
+  const TALK_RANGE = 12 * 0.3048;
   const subtitle = document.getElementById('subtitle')!;
   let subtitleTimer = 0;
   const showSubtitle = (who: string | null, text: string, ms: number) => {
@@ -827,16 +856,23 @@ async function main(): Promise<void> {
   };
   const talked = new Map<number, number>();
   const npcVoice = (archetype: string): string | null => NPC_VOICES[Number(archetype.slice(4))] ?? null;
+  /** A creature's talk line: its placement's own, or (no placement) one of its voice role's; null = none. */
+  const talkLine = (e: RemoteEntity): number | null => {
+    if (e.info.placement !== undefined && levelView) {
+      return levelView.arena.mobSpawns.find((sp) => sp.placement === e.info.placement)?.talk ?? null;
+    }
+    const role = e.info.archetype ? npcVoice(e.info.archetype) : null;
+    const speakers = role && sounds ? sounds.speakers(role) : [];
+    if (!speakers.length) return null;
+    const lines = speakers[e.id % speakers.length]!;
+    return lines[(talked.get(e.id) ?? 0) % lines.length]!;
+  };
   const talk = (entityId: number) => {
     const e = remotes.byId.get(entityId);
-    const role = e?.info.archetype ? npcVoice(e.info.archetype) : null;
-    if (!e || !role || !sounds) return;
-    const speakers = sounds.speakers(role);
-    if (!speakers.length) return;
-    const lines = speakers[entityId % speakers.length]!;
-    const n = talked.get(entityId) ?? 0;
-    talked.set(entityId, n + 1);
-    const id = lines[n % lines.length]!;
+    if (!e || !sounds) return;
+    const id = talkLine(e);
+    if (id === null) return;
+    talked.set(entityId, (talked.get(entityId) ?? 0) + 1);
     const line = sounds.lines.get(id);
     if (!line) return;
     sounds.play(id, e.avatar.object.position, { volume: 1 });
@@ -854,7 +890,7 @@ async function main(): Promise<void> {
     const p = local.object.position;
     // Peaceful creatures within reach: Tab talks.
     for (const [id, e] of remotes.byId) {
-      if (!e.visible || e.hp <= 0 || !e.info.archetype?.startsWith('npc_') || !npcVoice(e.info.archetype)) continue;
+      if (!e.visible || e.hp <= 0 || !e.info.archetype?.startsWith('npc_') || talkLine(e) === null) continue;
       const q = e.avatar.object.position;
       const d = Math.hypot(q.x - p.x, q.z - p.z);
       if (d > TALK_RANGE || Math.abs(q.y - p.y) > 2 || (best && best.d < d)) continue;

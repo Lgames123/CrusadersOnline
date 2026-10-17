@@ -173,8 +173,21 @@ export interface StoryDeath {
   trigger: number;
 }
 
+/**
+ * A sound trigger walked into (cap type 0x0B, activation bit 0): its sound plays at its points
+ * when the player enters (Ci1b's guard: "Celestia is expecting you"). 0x200: once.
+ */
+export interface StorySoundTrigger {
+  id: number;
+  activation: number;
+  volume: StoryVolume;
+  sound: StorySound;
+}
+
 export interface LevelStory {
   triggers: StoryTrigger[];
+  /** Absent in levels converted before walk-in sound triggers were read (1.24). */
+  soundTriggers?: StorySoundTrigger[];
   /** Absent in levels converted before message triggers were read. */
   messages?: StoryMessage[];
   /** Absent in levels converted before death triggers were read. */

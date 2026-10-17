@@ -1,5 +1,6 @@
 # Context notes
 
+- 2026-10-16 [NPC pass: loadouts, talk lines, idle paths, guards' alarm](2026-10-16-npc-pass.md) — placements hold their own items (Ursan empty-handed), one line each (+0x1E4), stand or walk their path (0x405AC0), one blow alarms every guard in sight (0x52FDC4), walk-in sound triggers (Ci1b "Celestia is expecting you"); side quests unshipped (Claude Code)
 - 2026-10-16 [Relay ops decoded](2026-10-16-relay-ops.md) — exits fired by relays (0x462890), mover (0x1E) / sound (0x0B) triggers replace the brush guess, Ws5a creature ops (brain events), use-key lever relays, SC.STORY_SOUND (Claude Code)
 - 2026-10-16 [Script-fired message triggers](2026-10-16-script-fired-messages.md) — type 0x2B is vtable 0x4E1E84 (op list +0x3C/+0x40, timer +0x38); creature death triggers (0x44CA00); SC.STORY_MESSAGE; Du2a ogre and Cs4b talisman texts (Claude Code)
 - 2026-10-16 [Signs and tutorial hints show their text](2026-10-16-sign-messages.md) — cap type 0x1A message triggers + script/messages.ctx; Tab reads signs, walk-in hints in train; script-fired ones not wired (Claude Code)

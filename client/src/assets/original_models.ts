@@ -267,7 +267,10 @@ class OriginalAvatar implements Avatar {
     if (anim === ANIM.HOP_FORWARD) return { name: m.hop ?? m.run, loop: false };
     if (anim === ANIM.SHIELD_IDLE) return { name: m.idle, loop: true };
     if (anim === ANIM.ALERT) return { name: m.shieldIdle ?? m.idle, loop: true };
-    if (anim === ANIM.GESTURE) return { name: m.talk ?? m.idle, loop: true };
+    if (anim === ANIM.GESTURE) {
+      const own = this.talkState ? m.asm?.[this.talkState] : undefined;
+      return { name: (own && this.clips.has(own) ? own : undefined) ?? m.talk ?? m.idle, loop: true };
+    }
     if (anim === ANIM.HOP_LEFT) return { name: m.hopLeft ?? m.run, loop: false };
     if (anim === ANIM.HOP_RIGHT) return { name: m.hopRight ?? m.run, loop: false };
     if (anim === ANIM.ATTACK_OVERHEAD) return { name: m.attackOverhead ?? m.attacks[0]!, loop: false };
@@ -329,6 +332,13 @@ class OriginalAvatar implements Avatar {
 
   /** Scripted clip (playAsm) stops at this clip time, seconds (0: none). */
   private holdAt = 0;
+
+  /** The placement's talk gesture (idle behaviour +0x3C, an ASM state name), or null. */
+  private talkState: string | null = null;
+
+  setTalkState(state: string | null): void {
+    this.talkState = state;
+  }
 
   playAsm(state: string, opts: { t0: number; t1: number; speed: number; loop: boolean; freeze: boolean }): number | null {
     const name = this.map.asm?.[state];
@@ -655,9 +665,17 @@ function findBlade(model: THREE.Object3D): { mount: THREE.Object3D; held: THREE.
   return { mount, held: mount.children[0], base: near, tip: far };
 }
 
-export type AvatarFactory = ((kind: AvatarKind) => Avatar | null) & {
+/** Held models replacing an avatar kind's own: a model file, null = nothing, absent = the kind's. */
+export interface HeldOverride {
+  right?: string | null;
+  left?: string | null;
+}
+
+export type AvatarFactory = ((kind: AvatarKind, held?: HeldOverride) => Avatar | null) & {
   /** Drake wearing an outfit (the character screen): its weapon, shield and armour body. */
   dressed?(outfit: DrakeOutfit): Promise<Avatar | null>;
+  /** Loads held-item models so that the factory can put them in hands at once. */
+  preload?(files: readonly string[]): Promise<void>;
 };
 
 /** Resolves to a factory for original-model avatars, or null when not available. */
@@ -710,12 +728,24 @@ export async function loadOriginalAvatars(): Promise<AvatarFactory | null> {
     }
     if (loaded.size === 0) return null;
     console.info(`[assets] using original models from your installation: ${[...loaded.keys()].join(', ')}`);
-    const factory: AvatarFactory = (kind) => {
+    const factory: AvatarFactory = (kind, held) => {
       const entry = loaded.get(kind === 'player' ? 'self' : kind);
       if (!entry) return null;
-      const avatar = new OriginalAvatar(entry.gltf, entry.clips, entry.texture, entry.equipment);
+      let equipment = entry.equipment;
+      if (held) {
+        // A placement's own loadout (the cap's inventory header): its items, or empty hands.
+        const side = (file: string | null | undefined, own: THREE.Object3D | undefined) =>
+          file === undefined ? own : file === null ? undefined : props.get(file) ?? undefined;
+        const right = side(held.right, entry.equipment.right);
+        const left = side(held.left, entry.equipment.left);
+        equipment = { ...(right ? { right } : {}), ...(left ? { left } : {}) };
+      }
+      const avatar = new OriginalAvatar(entry.gltf, entry.clips, entry.texture, equipment);
       avatar.events = entry.events;
       return avatar;
+    };
+    factory.preload = async (files) => {
+      for (const f of files) await prop(f);
     };
     factory.dressed = async (outfit) => {
       const self = loaded.get('self');

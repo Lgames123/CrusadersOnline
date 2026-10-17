@@ -165,9 +165,22 @@ export interface CapDeathTrigger {
   trigger: number;
 }
 
+/**
+ * A sound trigger walked into (type 0x0B with activation bit 0 and a volume): the line or sound
+ * plays at its points when the player enters (Ci1b's "Celestia is expecting you" by the guards,
+ * Drake's remarks, the prisoners' pleas in train). 0x200: once.
+ */
+export interface CapSoundTrigger {
+  id: number;
+  activation: number;
+  volume: CapTriggerVolume;
+  sound: { id: number; positions: [number, number, number][]; volume: number };
+}
+
 export interface CapStory {
   triggers: CapStoryTrigger[];
   messages: CapMessage[];
+  soundTriggers: CapSoundTrigger[];
   deaths: CapDeathTrigger[];
   cameras: CapCamera[];
   sequences: CapSequence[];
@@ -225,6 +238,14 @@ export function parseStory(data: Uint8Array, dv: DataView, types: ReadonlyMap<nu
   const ptr = (o: number) => dv.getUint32(o, true) - CAP_BASE;
   const f32 = (o: number) => Math.round(dv.getFloat32(o, true) * 1000) / 1000;
   const is = (o: number, t: number) => types.get(t)?.includes(o) ?? false;
+  /** A sound trigger's sound (0x461490): Sound.ctx id +0x34, point count +0x3E, points +0x40, volume +0x44. */
+  const soundAt = (at: number) => {
+    const count = dv.getUint16(at + 0x3e, true);
+    const pts = ptr(at + 0x40);
+    const positions: [number, number, number][] = [];
+    for (let k = 0; k < count && k < 16 && inRange(pts + 12 * k, 12); k++) positions.push([f32(pts + 12 * k), f32(pts + 12 * k + 4), f32(pts + 12 * k + 8)]);
+    return { id: dv.getInt16(at + 0x34, true), positions, volume: f32(at + 0x44) };
+  };
 
   // --- Triggers
   const triggers: CapStoryTrigger[] = [];
@@ -248,6 +269,18 @@ export function parseStory(data: Uint8Array, dv: DataView, types: ReadonlyMap<nu
     const vol = ptr(o + 4);
     const volume = vol > 0 && inRange(vol, 0x40) ? ctx.parseVolume(vol) : null;
     messages.push({ id: o, activation: dv.getUint32(o + 8, true), ...(volume ? { volume } : {}), message: dv.getInt32(o + 0x34, true) });
+  }
+
+  // --- Sound triggers walked into (relay-fired ones are read with their relays).
+  const soundTriggers: CapSoundTrigger[] = [];
+  for (const o of types.get(T_SOUND) ?? []) {
+    if (!inRange(o, 0x48)) continue;
+    const activation = dv.getUint32(o + 8, true);
+    const vol = ptr(o + 4);
+    const volume = activation & 1 && vol > 0 && inRange(vol, 0x40) ? ctx.parseVolume(vol) : null;
+    if (!volume) continue;
+    const sound = soundAt(o);
+    if (sound.id >= 0) soundTriggers.push({ id: o, activation, volume, sound });
   }
 
   // --- Cameras
@@ -340,11 +373,7 @@ export function parseStory(data: Uint8Array, dv: DataView, types: ReadonlyMap<nu
           const name = brushName(ptr(at + 0x38));
           if (name) brushes.push(name);
         } else if (op === 8 && is(at, T_SOUND) && inRange(at, 0x48)) {
-          const count = dv.getUint16(at + 0x3e, true);
-          const pts = ptr(at + 0x40);
-          const positions: [number, number, number][] = [];
-          for (let k = 0; k < count && k < 16 && inRange(pts + 12 * k, 12); k++) positions.push([f32(pts + 12 * k), f32(pts + 12 * k + 4), f32(pts + 12 * k + 8)]);
-          sounds.push({ id: dv.getInt16(at + 0x34, true), positions, volume: f32(at + 0x44) });
+          sounds.push(soundAt(at));
         } else if (op === 8) targets.push(resolveRef(value));
         else if (op <= 3) flagOps.push({ op: op as 0 | 1 | 2 | 3, target: resolveRef(value) });
       } else if (argType === 1 && op in CREATURE_OPS) {
@@ -465,5 +494,5 @@ export function parseStory(data: Uint8Array, dv: DataView, types: ReadonlyMap<nu
       steps,
     });
   }
-  return { triggers, messages, deaths, cameras, sequences };
+  return { triggers, messages, soundTriggers, deaths, cameras, sequences };
 }

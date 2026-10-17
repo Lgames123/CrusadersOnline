@@ -1,6 +1,7 @@
 import { doorSwingFromMotion, type LevelBrushMotion } from './door_swing.ts';
 import { moverFromMotion } from './mover.ts';
 import { CREATURE_TEMPLATES, npcArchetypeId } from '../game/creatures.ts';
+import { itemSlug } from '../game/items.ts';
 import type { ArenaDef, BrushDef, PortalDef, TriMeshDef, WorldObjectDef } from './types.ts';
 import { SEQUENCE_ACTOR_BASE, type LevelStory } from '../game/story.ts';
 import { PLAYER_HEIGHT, PLAYER_RADIUS } from '../constants.ts';
@@ -29,6 +30,19 @@ export interface LevelCreature {
   resist: number[];
   /** Facing direction (x, z), Z mirrored; absent in placements converted before it was read. */
   facing?: [number, number];
+  /**
+   * Items it holds (items.ctx names): the cap's inventory header names its weapon and shield
+   * slots, replacing the type template's loadout (converter 1.24+; absent before: the template).
+   */
+  held?: { weapon?: string; shield?: string };
+  /** Everything it carries (converter 1.24+). */
+  items?: { name: string; quantity: number }[];
+  /** Its talk line (Sound.ctx id, stats +0x1E4): the use key plays it; none = it says nothing. */
+  talk?: number;
+  /** ASM state it plays through its line (idle behaviour +0x3C). */
+  gesture?: number;
+  /** Its idle walk (stats +0x1DC kinds 1 / 3): points (original units, Z mirrored), pause ms at each, loop or back and forth. */
+  path?: { kind: number; points: [number, number, number][]; pause: number; loop: boolean };
 }
 
 export interface LevelObject {
@@ -485,6 +499,24 @@ function scriptedDeaths(story: LevelStory | undefined): Set<number> {
   return out;
 }
 
+/**
+ * A placement's own loadout, talk line and idle walk (converter 1.24+): what it holds replaces
+ * the archetype's template loadout; placements converted before keep the template.
+ */
+function placementExtras(c: LevelCreature, s: number): Partial<ArenaDef['mobSpawns'][number]> {
+  const out: Partial<ArenaDef['mobSpawns'][number]> = {};
+  if (c.held) {
+    out.weapon = c.held.weapon ? itemSlug(c.held.weapon) : null;
+    out.shield = c.held.shield ? itemSlug(c.held.shield) : null;
+  }
+  if (c.talk !== undefined) out.talk = c.talk;
+  if (c.gesture !== undefined) out.gesture = c.gesture;
+  if (c.path && c.path.points.length > 1) {
+    out.path = { points: c.path.points.map((p) => ({ x: p[0] * s, y: p[1] * s, z: p[2] * s })), pause: c.path.pause, loop: c.path.loop };
+  }
+  return out;
+}
+
 export function buildLevelArena(name: string, collision: Uint8Array, placements: LevelPlacements): ArenaDef {
   const mesh = parseLevelCollision(collision);
   const s = LEVEL_UNIT_METRES;
@@ -506,6 +538,7 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
           y: c.position[1] * s + 0.1,
           z: c.position[2] * s,
           ...(c.facing ? { yaw: Math.atan2(-c.facing[0], -c.facing[1]) } : {}),
+          ...(c.held ? { weapon: c.held.weapon ? itemSlug(c.held.weapon) : null, shield: c.held.shield ? itemSlug(c.held.shield) : null } : {}),
         });
       }
       return;
@@ -519,9 +552,8 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
         y: c.position[1] * s + 0.1,
         z: c.position[2] * s,
         ...(c.hp > 0 ? { hp: c.hp } : {}),
-        // Citizens (disposition 1) stroll about their place; guards and merchants stand.
-        ...(c.disposition === 1 ? { wander: true } : {}),
         ...(c.facing ? { yaw: Math.atan2(-c.facing[0], -c.facing[1]) } : {}),
+        ...placementExtras(c, s),
       });
       return;
     }
@@ -537,6 +569,7 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
       xp: c.xp,
       resist: c.resist,
       ...(c.facing ? { yaw: Math.atan2(-c.facing[0], -c.facing[1]) } : {}),
+      ...placementExtras(c, s),
     });
   });
   const objects: WorldObjectDef[] = [];

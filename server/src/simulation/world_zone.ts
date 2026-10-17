@@ -365,26 +365,32 @@ function circleTouchesPolygon(poly: [number, number][], x: number, z: number, r:
   return inside;
 }
 
-/** Citizens' strolls: radius around their place (m), longest walk and the pause between walks. */
-const STROLL_RADIUS = 4;
-const STROLL_MAX_TICKS = 20 * 8;
-const STROLL_PAUSE_MIN = 20 * 4;
-const STROLL_PAUSE_SPREAD = 20 * 8;
+/**
+ * Peaceful creatures watching the player (brain mode 2, 0x40C190 / 0x408980): within 12 ft they
+ * stop and face him; they go back to their idle behaviour once he is beyond 20 ft, at least 3 s
+ * after they began. Their talk target (0x40DEB0) is one in this mode within 12 ft.
+ */
+const WATCH_NEAR = 12 * 0.3048;
+const WATCH_FAR = 20 * 0.3048;
+const WATCH_MIN_TICKS = 20 * 3;
+/** Path walkers (0x405AC0): an arrival is this close to the point (metres; not decoded, slice value). */
+const PATH_ARRIVE = 0.4;
 
 /**
  * Citizens and an assault (logged in the original, Cs1a): the one struck flinches (ASM_IMPACT_*),
- * then it and every citizen within ~60 ft on the same floor stand on the alert facing it
- * (ASM_COMBAT_STANDING, ~0.25 s) and run away from it (~7 s). Frightened, they stay wary: a
+ * then it and every citizen who sees the player (raiseAlarm) stands on the alert facing it
+ * (ASM_COMBAT_STANDING, ~0.25 s) and runs away from it (~7 s). Frightened, they stay wary: a
  * player coming within ~30 ft sets them off again at once.
  */
-const WITNESS_RADIUS = 18;
 const ALERT_TICKS = 5;
 const FLEE_TICKS = 20 * 7;
 const WARY_RADIUS = 9;
 const REALERT_TICKS = 2;
-/** Talking: reach (the client's Tab range plus slack) and turn rate (logged ~90 degrees a second). */
-const TALK_REACH = 3;
+/** Talking: reach (12 ft, 0x40DEB0, plus slack) and turn rate (logged ~90 degrees a second). */
+const TALK_REACH = WATCH_NEAR + 0.5;
 const TALK_TURN_RATE = Math.PI / 2;
+/** Longest line a client may ask a creature to gesture through (the longest NPC line is ~14 s). */
+const TALK_MAX_MS = 20_000;
 /** How long a frightened citizen stays wary (not measured: the capture ended first). */
 const WARY_TICKS = 20 * 60;
 
@@ -482,6 +488,8 @@ interface Player extends ActorBase {
   /** Story progress (fired triggers, quest book). */
   story: StoryState;
   storyFlags: Set<string>;
+  /** Walk-in sound triggers the player stands in (each plays on entering). */
+  insideSounds: Set<number>;
   /** A scripted sequence the client is playing; the server finishes it by `until` at the latest. */
   cutscene: { sequence: StorySequence; until: number } | null;
 }
@@ -497,7 +505,7 @@ interface Mob extends ActorBase {
   spawn: { x: number; y: number; z: number };
   /** Heading at its placement (radians, quantized). */
   spawnYaw: number;
-  state: 'idle' | 'chase' | 'return' | 'flee' | 'talk';
+  state: 'idle' | 'chase' | 'return' | 'flee' | 'talk' | 'watch';
   threat: Map<number, number>;
   /**
    * The original's melee brain (0x00409520): deciding, running in (beyond 12 ft), walking in
@@ -519,11 +527,21 @@ interface Mob extends ActorBase {
   swingSerial: number;
   /** Tick at which a shield rush's reel turns into the knock-down (0 = none). */
   knockdownAt: number;
-  /** Peaceful creatures: strolls about its place (citizens), the current stroll target and the next start. */
-  wanders: boolean;
-  strollTo: { x: number; z: number } | null;
-  strollAt: number;
-  strollUntil: number;
+  /**
+   * Its idle walk (stats +0x1DC, 0x405AC0): the point it heads for, the direction along the path
+   * (0x405FF0) and the end of its pause at the last point reached.
+   */
+  path: { points: { x: number; y: number; z: number }[]; pause: number; loop: boolean } | null;
+  pathIndex: number;
+  pathForward: boolean;
+  pathWaitUntil: number;
+  /** Watching a player (brain mode 2): since this tick; the player it faces. */
+  watchSince: number;
+  watchTo: number;
+  /** Its talk line (Sound.ctx id; -1 = it has none: the use key does nothing). */
+  talkLine: number;
+  /** It gestures through its line (idle behaviour +0x3C set; 0x40E8C0): else it just faces the player. */
+  gestures: boolean;
   /** Fleeing citizen: on the alert until this tick, then running from `fleeFrom` until `fleeUntil`. */
   alertUntil: number;
   fleeUntil: number;
@@ -644,8 +662,15 @@ export class WorldZone {
       ...(at.xp !== undefined ? { xpReward: at.xp } : {}),
       ...(at.resist?.length === 11 ? { resist: at.resist } : {}),
     };
-    const weapon = this.items.get(archetype.weapon) ?? (archetype.passive ? UNARMED : undefined);
+    // Original placements hold what their inventory header names (null: nothing); an item this
+    // catalogue lacks keeps the archetype's.
+    const placed = (id: string | null | undefined) => (id === undefined ? undefined : id === null ? null : this.items.get(id));
+    const heldWeapon = placed(at.weapon);
+    const heldShield = placed(at.shield);
+    const weapon = (heldWeapon === null ? UNARMED : heldWeapon?.type === 'weapon' ? heldWeapon : undefined)
+      ?? this.items.get(archetype.weapon) ?? (archetype.passive ? UNARMED : undefined);
     if (!weapon) throw new Error(`unknown weapon ${archetype.weapon} for ${archetypeId}`);
+    const shield = heldShield === null ? null : heldShield?.type === 'shield' ? heldShield : archetype.shield ? this.items.get(archetype.shield) ?? null : null;
     const mob: Mob = {
       kind: 'mob',
       entityId: this.nextEntityId++,
@@ -662,7 +687,7 @@ export class WorldZone {
       hitUntil: 0,
       archetype,
       weapon,
-      shield: archetype.shield ? this.items.get(archetype.shield) ?? null : null,
+      shield,
       blockUntil: 0,
       nextBlockTick: 0,
       spawn: { x: at.x, y: at.y, z: at.z },
@@ -677,10 +702,14 @@ export class WorldZone {
       walkShield: false,
       swingSerial: 0,
       knockdownAt: 0,
-      wanders: !!at.wander,
-      strollTo: null,
-      strollAt: 0,
-      strollUntil: 0,
+      path: at.path ?? null,
+      pathIndex: 0,
+      pathForward: false,
+      pathWaitUntil: 0,
+      watchSince: 0,
+      watchTo: 0,
+      talkLine: at.talk ?? (at.placement === undefined ? 0 : -1),
+      gestures: at.gesture !== undefined || at.placement === undefined,
       alertUntil: 0,
       fleeUntil: 0,
       waryUntil: 0,
@@ -769,6 +798,7 @@ export class WorldZone {
       blocking: false,
       story: opts.story ? { flags: [...opts.story.flags], quests: structuredClone(opts.story.quests) } : emptyStoryState(),
       storyFlags: new Set(opts.story?.flags ?? []),
+      insideSounds: new Set(),
       cutscene: null,
     };
     this.players.set(connId, p);
@@ -1467,6 +1497,27 @@ export class WorldZone {
       // timer together: "Got Talisman of True Sight" shows during the scene).
       this.fireTrigger(p, t, 0, false, true);
     }
+    // Sound triggers walked into (0x0B, bit 0): the sound plays on entering, for this player
+    // (an MMO deviation: the original has only him); 0x200 ones once per character.
+    for (const t of story.soundTriggers ?? []) {
+      const inside = inStoryVolume(t.volume, x, y, z);
+      const was = p.insideSounds.has(t.id);
+      if (inside === was) continue;
+      if (!inside) {
+        p.insideSounds.delete(t.id);
+        continue;
+      }
+      p.insideSounds.add(t.id);
+      const flag = storyFlag(act, t.id);
+      if (t.activation & 0x200) {
+        if (p.storyFlags.has(flag)) continue;
+        p.storyFlags.add(flag);
+        p.story.flags.push(flag);
+      }
+      const s = LEVEL_UNIT_METRES;
+      const positions = t.sound.positions.map(([px, py, pz]) => [px * s, py * s, pz * s] as [number, number, number]);
+      this.sendJson(p.connId, { op: SC.STORY_SOUND, d: { sound: t.sound.id, positions, volume: t.sound.volume } });
+    }
   }
 
   /**
@@ -1866,9 +1917,9 @@ export class WorldZone {
     const pos = m.character.position;
     const fromSpawn = Math.hypot(pos.x - m.spawn.x, pos.z - m.spawn.z);
     m.input.flags = 0;
-    // Peaceful creatures stand (or stroll) until hit; armed ones then fight like any creature.
+    // Peaceful creatures stand (or walk their path) until hit; armed ones then fight like any creature.
     if (arch.passive && m.state === 'idle' && m.waryUntil > this.tick) this.keepWary(m);
-    if (arch.passive && m.state === 'idle') this.stroll(m);
+    if (arch.passive && (m.state === 'idle' || m.state === 'watch')) this.watchOrIdle(m);
     if (m.state === 'flee') this.flee(m);
     if (m.state === 'talk') this.keepTalking(m);
 
@@ -1876,10 +1927,15 @@ export class WorldZone {
       const seen = this.noticedPlayer(m);
       if (seen) {
         m.threat.set(seen.entityId, (m.threat.get(seen.entityId) ?? 0) + 1);
+        // A hostile entering combat cries its +0x1E4 sound (0x40C830; Greater Black Knights).
+        if (m.talkLine >= 0 && m.placement !== undefined) {
+          const c = m.character.position;
+          this.broadcastNear(m, { op: SC.STORY_SOUND, d: { sound: m.talkLine, positions: [[c.x, c.y, c.z]], volume: 1 } });
+        }
         m.state = 'chase';
         m.brain = 'decide';
         m.lastPick = null;
-      }
+      } else this.walkPath(m); // its idle walk until then (brain mode 1, 0x405950)
     }
 
     if (m.state === 'chase') {
@@ -1937,7 +1993,7 @@ export class WorldZone {
         ? ANIM.BLOCK
         : m.state === 'flee' && m.alertUntil > this.tick
           ? ANIM.ALERT
-          : m.state === 'talk'
+          : m.state === 'talk' && m.gestures
             ? ANIM.GESTURE
             : m.seq?.hop && this.tick < m.seq.hopUntil
               ? ANIM.HOP_FORWARD
@@ -1953,8 +2009,6 @@ export class WorldZone {
     if (m.hitUntil > this.tick) return; // the flinch plays out first
     if (this.tick >= m.fleeUntil) {
       m.state = 'idle';
-      m.strollTo = null;
-      m.strollAt = this.tick + STROLL_PAUSE_MIN;
       m.waryUntil = this.tick + WARY_TICKS;
       return;
     }
@@ -1967,16 +2021,31 @@ export class WorldZone {
     m.input.flags = INPUT.FORWARD;
   }
 
-  /** An assault at `at`: the citizens around see it and run (the alerted keep running further). */
-  private witnessAssault(at: { x: number; y: number; z: number }): void {
+  /**
+   * A player struck a peaceful creature: the brain's hit event (0x40F890) raises a one-frame
+   * alarm (0x52FDC8 -> 0x52FDC4) when the struck one's disposition is 0-2, and that frame every
+   * peaceful creature that can see the player (0x40D910: an eye-to-eye ray, 0x406AF0; no range)
+   * takes him as its target: guards and other armed ones attack, citizens run from him.
+   */
+  private raiseAlarm(player: Player): void {
+    const at = player.character.position;
     for (const m of this.actors.values()) {
-      if (m.kind !== 'mob' || !alive(m) || !isCitizen(m)) continue;
+      if (m.kind !== 'mob' || !alive(m) || !m.archetype.passive) continue;
       const p = m.character.position;
-      if (Math.abs(p.y - at.y) > AGGRO_HEIGHT || Math.hypot(p.x - at.x, p.z - at.z) > WITNESS_RADIUS) continue;
-      if (m.state !== 'flee') m.alertUntil = Math.max(this.tick, m.hitUntil) + ALERT_TICKS;
-      m.state = 'flee';
-      m.fleeUntil = Math.max(m.alertUntil, this.tick) + FLEE_TICKS;
-      m.fleeFrom = { x: at.x, z: at.z };
+      if (!lineOfSight(this.mw, p, at, EYE_HEIGHT)) continue;
+      if (isCitizen(m)) {
+        if (m.state !== 'flee') m.alertUntil = Math.max(this.tick, m.hitUntil) + ALERT_TICKS;
+        m.state = 'flee';
+        m.fleeUntil = Math.max(m.alertUntil, this.tick) + FLEE_TICKS;
+        m.fleeFrom = { x: at.x, z: at.z };
+      } else {
+        m.threat.set(player.entityId, (m.threat.get(player.entityId) ?? 0) + 1);
+        if (m.state !== 'chase') {
+          m.state = 'chase';
+          m.brain = 'decide';
+          m.lastPick = null;
+        }
+      }
     }
   }
 
@@ -1989,21 +2058,23 @@ export class WorldZone {
     const p = this.players.get(connId);
     const m = this.actors.get(entity);
     if (!p || !alive(p) || !m || m.kind !== 'mob' || !alive(m) || !m.archetype.passive) return;
-    if (m.state !== 'idle' && m.state !== 'talk') return;
+    // Only a creature with a line speaks (stats +0x1E4 = -1: the use key does nothing, 0x408980).
+    if (m.talkLine < 0) return;
+    if (m.state !== 'idle' && m.state !== 'talk' && m.state !== 'watch') return;
     const a = p.character.position;
     const b = m.character.position;
     if (Math.hypot(a.x - b.x, a.z - b.z) > TALK_REACH || Math.abs(a.y - b.y) > AGGRO_HEIGHT) return;
     m.state = 'talk';
     m.talkTo = p.entityId;
-    m.talkUntil = this.tick + Math.ceil(ms / TICK_MS);
-    m.strollTo = null;
+    m.talkUntil = this.tick + Math.ceil(Math.min(ms, TALK_MAX_MS) / TICK_MS);
   }
 
   private keepTalking(m: Mob): void {
     const p = this.actors.get(m.talkTo);
     if (!p || !alive(p) || this.tick >= m.talkUntil) {
-      m.state = 'idle';
-      m.strollAt = this.tick + STROLL_PAUSE_MIN;
+      // Back to watching (brain mode 2) the player it spoke to.
+      m.state = 'watch';
+      m.watchTo = m.talkTo;
       return;
     }
     const pos = m.character.position;
@@ -2028,24 +2099,71 @@ export class WorldZone {
     }
   }
 
-  /** A citizen's stroll: now and then a short walk to a point near its place, then a pause. */
-  private stroll(m: Mob): void {
-    if (!m.wanders) return;
+  /**
+   * A peaceful creature's idle behaviour (brain modes 1 and 2): a living player within 12 ft on
+   * its floor makes it stop and face him (0x40C520 -> mode 2; 0x408980 faces him), and it goes
+   * back once he is beyond 20 ft, after at least 3 s (0x40C190). Otherwise it stands, or walks
+   * its path (0x405AC0).
+   */
+  private watchOrIdle(m: Mob): void {
     const pos = m.character.position;
-    if (!m.strollTo) {
-      if (this.tick < m.strollAt) return;
-      const ang = this.random() * Math.PI * 2;
-      const r = 1 + this.random() * (STROLL_RADIUS - 1);
-      m.strollTo = { x: m.spawn.x + Math.cos(ang) * r, z: m.spawn.z + Math.sin(ang) * r };
-      m.strollUntil = this.tick + STROLL_MAX_TICKS;
+    let near: Player | null = null;
+    let nearD = Infinity;
+    for (const p of this.players.values()) {
+      if (!alive(p)) continue;
+      const q = p.character.position;
+      if (Math.abs(q.y - pos.y) > AGGRO_HEIGHT) continue;
+      const d = Math.hypot(q.x - pos.x, q.z - pos.z);
+      if (d < nearD) {
+        near = p;
+        nearD = d;
+      }
     }
-    const d = Math.hypot(m.strollTo.x - pos.x, m.strollTo.z - pos.z);
-    if (d < 0.4 || this.tick >= m.strollUntil) {
-      m.strollTo = null;
-      m.strollAt = this.tick + STROLL_PAUSE_MIN + Math.floor(this.random() * STROLL_PAUSE_SPREAD);
+    if (m.state === 'idle' && near && nearD <= WATCH_NEAR) {
+      m.state = 'watch';
+      m.watchSince = this.tick;
+      m.watchTo = near.entityId;
+    }
+    if (m.state === 'watch') {
+      if (this.tick - m.watchSince >= WATCH_MIN_TICKS && (!near || nearD > WATCH_FAR)) {
+        m.state = 'idle';
+      } else {
+        const p = this.actors.get(m.watchTo);
+        const target = p && alive(p) && Math.hypot(p.character.position.x - pos.x, p.character.position.z - pos.z) <= WATCH_FAR ? p : near;
+        if (target) this.turnTowards(m, yawTowards(pos.x, pos.z, target.character.position.x, target.character.position.z));
+        return;
+      }
+    }
+    this.walkPath(m);
+  }
+
+  /**
+   * The idle walk (0x405AC0): walk to the current point, pause there (the behaviour's first int,
+   * 1000 ms in every shipped path), then the next one (0x405FF0): on and back along the points,
+   * or from the last to the first when its mode int is under 1. It begins with the first point.
+   */
+  private walkPath(m: Mob): void {
+    const path = m.path;
+    if (!path || this.tick < m.pathWaitUntil) return;
+    const pos = m.character.position;
+    const to = path.points[m.pathIndex]!;
+    if (Math.hypot(to.x - pos.x, to.z - pos.z) < PATH_ARRIVE) {
+      m.pathWaitUntil = this.tick + Math.ceil(path.pause / TICK_MS);
+      let next = m.pathIndex + (m.pathForward ? 1 : -1);
+      if (next < 0) {
+        next = 1;
+        m.pathForward = true;
+      } else if (next >= path.points.length) {
+        if (path.loop) next = 0;
+        else {
+          next = path.points.length - 2;
+          m.pathForward = false;
+        }
+      }
+      m.pathIndex = next;
       return;
     }
-    m.yaw = quantizeAngle(yawTowards(pos.x, pos.z, m.strollTo.x, m.strollTo.z));
+    m.yaw = quantizeAngle(yawTowards(pos.x, pos.z, to.x, to.z));
     m.input.flags = INPUT.FORWARD | INPUT.WALK;
   }
 
@@ -2294,7 +2412,7 @@ export class WorldZone {
       p.rushHit.add(m.entityId);
       if (!m.character.grounded) continue;
       if (isCitizen(m)) {
-        this.witnessAssault(pos);
+        this.raiseAlarm(p);
         continue;
       }
       // The creature reels back (IMPACT_BACK) and is knocked down (IMPACT_SEVERE) - no damage.
@@ -2492,11 +2610,10 @@ export class WorldZone {
       // Unarmed peaceful creatures (citizens) take the blows; armed ones (guards) fight back.
       const fightsBack = !target.archetype.passive || target.weapon.id !== UNARMED.id;
       if (target.state !== 'chase' && fightsBack) target.state = 'chase';
+      if (attacker.kind === 'player' && target.archetype.passive) this.raiseAlarm(attacker);
     } else {
       target.statsDirty = true;
     }
-
-    if (attacker.kind === 'player' && damage > 0) this.witnessAssault(attacker.character.position);
 
     if (killed) {
       target.swing = null;

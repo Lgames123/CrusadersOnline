@@ -10,7 +10,7 @@ import {
   type RemoteSample,
 } from '@crusaders/shared';
 import { ProceduralAvatar, type Avatar, type AvatarKind } from './avatar.ts';
-import type { AvatarFactory } from '../assets/original_models.ts';
+import type { AvatarFactory, HeldOverride } from '../assets/original_models.ts';
 import { TORCH_LIGHT_COLOR, TORCH_LIGHT_HEIGHT, TORCH_LIGHT_INTENSITY, TORCH_DYNAMIC_INTENSITY, torchRadius } from './torch_light.ts';
 import { dynamicLights } from '../engine/dynamic_lights.ts';
 
@@ -31,6 +31,9 @@ export class RemoteEntities {
   private readonly scene: THREE.Scene;
   private readonly originals: AvatarFactory | null;
   private readonly sample: RemoteSample = { x: 0, y: 0, z: 0, yaw: 0, anim: 0, animPhase: 0, hp: 0, flags: 0 };
+
+  /** Original levels: what a placement holds and gestures with while talking (by placement index). */
+  placementLook: (placement: number) => { held?: HeldOverride; talkState?: string } | undefined = () => undefined;
 
   /** Entities a scripted sequence is playing on this client: not moved by snapshots meanwhile. */
   readonly scripted = new Set<number>();
@@ -70,7 +73,9 @@ export class RemoteEntities {
   spawn(id: number, info: EntityInfo): void {
     if (this.byId.has(id)) return;
     const kind: AvatarKind = info.kind === 'mob' ? ((info.archetype ?? 'skeleton_warrior') as AvatarKind) : 'player';
-    const avatar = this.originals?.(kind) ?? new ProceduralAvatar(kind);
+    const look = info.kind === 'mob' && info.placement !== undefined ? this.placementLook(info.placement) : undefined;
+    const avatar: Avatar = this.originals?.(kind, look?.held) ?? new ProceduralAvatar(kind);
+    if (look?.talkState) avatar.setTalkState?.(look.talkState);
     avatar.object.visible = false; // until the first sample arrives
     avatar.seed = id;
     this.scene.add(avatar.object);

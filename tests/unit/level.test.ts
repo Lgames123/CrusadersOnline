@@ -57,6 +57,30 @@ describe('original level arenas', () => {
     expect(buildLevelArena('level:test', floorCollision(), placements)).toEqual(arena);
   });
 
+  it("gives placements their own held items, talk line, gesture and idle path (converter 1.24)", () => {
+    const placements: LevelPlacements = {
+      mesh: 'test',
+      creatures: [
+        // Captain Ursan as Ws9a places him: nothing held (the template has a sword and shield), no line.
+        { type: 151, name: 'CaptainUrsan', position: [0, 100, 0], hp: 100, xp: -10, disposition: 0, resist: [], held: {}, items: [] },
+        { type: 145, name: 'SkeletonWarrior', position: [20, 100, -20], hp: 25, xp: 40, disposition: 3, resist: [], held: { weapon: 'Battle Axe' }, items: [{ name: 'Battle Axe', quantity: 1 }] },
+        {
+          type: 118, name: 'Citizen', position: [10, 100, -10], hp: 20, xp: -10, disposition: 1, resist: [], held: {}, items: [], talk: 1114, gesture: 82,
+          path: { kind: 1, points: [[10, 100, -10], [30, 100, -10]], pause: 1000, loop: false },
+        },
+        { type: 113, name: 'OldConversion', position: [5, 100, -5], hp: 100, xp: -10, disposition: 2, resist: [] },
+      ],
+    };
+    const [ursan, skeleton, citizen, old] = buildLevelArena('level:test', floorCollision(), placements).mobSpawns;
+    expect(ursan).toMatchObject({ archetype: 'npc_151', weapon: null, shield: null });
+    expect(ursan!.talk).toBeUndefined();
+    expect(skeleton).toMatchObject({ archetype: 'skeleton_warrior', weapon: 'battle_axe', shield: null });
+    expect(citizen).toMatchObject({ talk: 1114, gesture: 82, path: { pause: 1000, loop: false } });
+    expect(citizen!.path!.points[1]!.x).toBeCloseTo(30 * LEVEL_UNIT_METRES);
+    // Placements converted before 1.24 keep the template's loadout.
+    expect(old!.weapon).toBeUndefined();
+  });
+
   it('leaves the creatures a sequence kills to the sequence: no mob, a puppet at its place', () => {
     const skeleton = (name: string, x: number) => ({ type: 145, name, position: [x, 100, -20] as [number, number, number], hp: 100, xp: 10, disposition: 3, resist: [] });
     const placements: LevelPlacements = {

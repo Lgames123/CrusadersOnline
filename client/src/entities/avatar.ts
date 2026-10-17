@@ -47,6 +47,8 @@ export interface Avatar {
    * it plays for, or null without such a clip. Any later setState() takes over again.
    */
   playAsm?(state: string, opts: { t0: number; t1: number; speed: number; loop: boolean; freeze: boolean }): number | null;
+  /** The ASM state (ASM_STATE_NAMES) ANIM.GESTURE plays: a placement's own talk gesture; null = the model's default. */
+  setTalkState?(state: string | null): void;
   /** Shows or hides what the right hand (weapon) or left forearm (shield) holds. */
   showHeld?(side: 'right' | 'left', visible: boolean): void;
   /** Seconds into an ASM state's clip, played by playAsm at `speed`, at which its authored `event` falls. */

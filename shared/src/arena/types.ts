@@ -111,9 +111,17 @@ export interface ArenaDef {
    * placement's own HP, XP value and resists, which override the archetype's.
    */
   mobSpawns: {
-    archetype: string; x: number; y: number; z: number; hp?: number; xp?: number; resist?: number[]; wander?: boolean;
+    archetype: string; x: number; y: number; z: number; hp?: number; xp?: number; resist?: number[];
     /** Heading (radians, 0 = -Z). */ yaw?: number;
     /** Original levels: the creature's index in the act's placements (sequences name actors by it). */ placement?: number;
+    /** Original levels: the item ids it holds (null: nothing), replacing the archetype's loadout. */
+    weapon?: string | null;
+    shield?: string | null;
+    /** Original levels: its talk line (Sound.ctx id) and the ASM state it gestures with meanwhile. */
+    talk?: number;
+    gesture?: number;
+    /** Original levels: its idle walk (metres): pause ms at each point, loop or back and forth. */
+    path?: { points: { x: number; y: number; z: number }[]; pause: number; loop: boolean };
   }[];
   /** Items, chests and breakable props (original levels). */
   objects?: WorldObjectDef[];
@@ -130,7 +138,7 @@ export interface ArenaDef {
    * Original levels: creatures only a scripted sequence plays (it kills them). Not simulated;
    * the client of the player who triggers the sequence shows them, as the server's mobs are shared.
    */
-  puppets?: { archetype: string; placement: number; x: number; y: number; z: number; /** Radians, 0 = -Z. */ yaw?: number }[];
+  puppets?: { archetype: string; placement: number; x: number; y: number; z: number; /** Radians, 0 = -Z. */ yaw?: number; /** Held item ids (null: nothing); absent: the archetype's. */ weapon?: string | null; shield?: string | null }[];
   /** Triggers, scripted sequences and cameras (original levels; original units, Z mirrored). */
   story?: LevelStory;
   /** Original levels: the mesh the act is built on (acts of one mesh share its coordinates). */

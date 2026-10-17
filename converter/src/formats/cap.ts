@@ -22,6 +22,24 @@ export interface CapCreature {
   resist: number[];
   /** Facing (the transform's third row, x and z), original axes. */
   facing: [number, number];
+  /**
+   * What it holds: the items in the inventory slots its inventory header (XP block - 0x10)
+   * names as weapon (+0x0A) and shield (+0x0C). The cap is the creature as the level editor
+   * left it, so this replaces the type template's loadout (Captain Ursan holds nothing).
+   */
+  held: { weapon?: string; shield?: string };
+  /** Everything it carries (inventory slots of 0x44 bytes: count +0x10, item name +0x24). */
+  items: { name: string; quantity: number }[];
+  /** Its talk line (stats +0x1E4, Sound.ctx id), played by the use key (0x408980); hostiles cry it on noticing. */
+  talk?: number;
+  /** ASM state it plays while its line lasts (idle behaviour +0x3C, read by 0x40E8C0; 1..0x80). */
+  gesture?: number;
+  /**
+   * Idle behaviour (stats +0x1DC): kind 0 stands; kinds 1 and 3 walk a path (0x405AC0): pause
+   * at each point (ms), back and forth unless `loop` (then from the last point to the first).
+   * Points in original units and axes.
+   */
+  path?: { kind: number; points: [number, number, number][]; pause: number; loop: boolean };
 }
 
 export type CapObjectKind = 'prop' | 'item' | 'sprite' | 'chest' | 'flag';
@@ -146,6 +164,59 @@ export interface CapBrushFace {
   texels: number[];
 }
 
+/**
+ * A creature's held items, talk line and idle behaviour, from its stats object (base = the XP
+ * block - 0x1C0, executable-analysis.md §18): inventory header at +0x1B0, idle behaviour pointer
+ * +0x1DC, talk line +0x1E4.
+ */
+function creatureExtras(data: Uint8Array, dv: DataView, x: number): Pick<CapCreature, 'held' | 'items' | 'talk' | 'gesture' | 'path'> {
+  const inRange = (o: number, n: number) => o >= 0 && o + n <= data.length;
+  const ptr = (o: number) => dv.getUint32(o, true) - CAP_BASE;
+  const text = (o: number) => {
+    let e = o;
+    while (e < data.length && e - o < 0x20 && data[e] !== 0) e++;
+    return new TextDecoder('latin1').decode(data.subarray(o, e)).trim();
+  };
+  const items: CapCreature['items'] = [];
+  const held: CapCreature['held'] = {};
+  const h = x - 0x10;
+  const slots = ptr(h + 4);
+  const count = data[h + 9]!;
+  if (count > 0 && count <= 16 && inRange(slots, 0x44 * count)) {
+    for (let i = 0; i < count; i++) items.push({ name: text(slots + 0x44 * i + 0x24), quantity: Math.max(1, dv.getInt32(slots + 0x44 * i + 0x10, true)) });
+    const weapon = data[h + 0x0a]!;
+    const shield = data[h + 0x0c]!;
+    if (weapon < count && items[weapon]!.name) held.weapon = items[weapon]!.name;
+    if (shield < count && items[shield]!.name) held.shield = items[shield]!.name;
+  }
+  const out: ReturnType<typeof creatureExtras> = { held, items: items.filter((i) => i.name) };
+  const talk = dv.getInt32(x + 0x24, true);
+  if (talk >= 0 && talk < 0x10000) out.talk = talk;
+  const b = ptr(x + 0x1c);
+  if (inRange(b, 0x40)) {
+    const gesture = dv.getInt32(b + 0x3c, true);
+    if (gesture > 0 && gesture <= 0x80) out.gesture = gesture;
+    const kind = dv.getUint32(b, true);
+    const n = dv.getUint32(b + 4, true);
+    const steps = ptr(b + 8);
+    // Steps are typed arguments (8 bytes: type, value +4): [int pause ms, int mode, 0x10 path].
+    if ((kind === 1 || kind === 3) && n > 2 && n < 16 && inRange(steps, 8 * n) && data[steps + 0x10] === 0x10) {
+      const p = ptr(steps + 0x14);
+      const np = inRange(p, 0x10) ? dv.getInt32(p + 8, true) : 0;
+      const pts = np > 0 ? ptr(p + 0x0c) : -1;
+      if (np > 1 && np < 256 && inRange(pts, 12 * np)) {
+        const points: [number, number, number][] = [];
+        for (let i = 0; i < np; i++) points.push([0, 4, 8].map((k) => Math.round(dv.getFloat32(pts + 12 * i + k, true) * 1000) / 1000) as [number, number, number]);
+        const pause = data[steps] === 0x0a ? dv.getInt32(steps + 4, true) : 1000;
+        // 0x405FF0: past the last point, a mode int under 1 starts over at the first; else it turns back.
+        const loop = data[steps + 8] === 0x0a && dv.getInt32(steps + 0x0c, true) < 1;
+        if (points.flat().every(Number.isFinite)) out.path = { kind, points, pause, loop };
+      }
+    }
+  }
+  return out;
+}
+
 /** Object class (record +0x00) -> kind. 0x2D = creature. */
 const OBJECT_CLASSES: Readonly<Record<number, CapObjectKind>> = { 0x34: 'prop', 0x35: 'item', 0x36: 'sprite', 0x38: 'chest', 0x3a: 'flag' };
 export const CAP_BASE = 0x08000000;
@@ -192,7 +263,9 @@ export function parseCap(bytes: Uint8Array, itemNames: ReadonlySet<string> = new
     // The transform's 3x3 rotation sits just before the position; its third row is the facing.
     const facing: [number, number] = [f32(x - 0x200 - 0xc), f32(x - 0x200 - 0x4)];
     creatureAt.set(a, creatures.length);
+    const npc = creatureExtras(data, dv, x);
     creatures.push({
+      ...npc,
       type,
       name,
       position,
