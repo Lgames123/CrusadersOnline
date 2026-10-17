@@ -618,13 +618,8 @@ function attachEquipment(model: THREE.Object3D, equipment: { right?: THREE.Objec
     const held = item.clone(true);
     held.traverse((o) => (o.castShadow = true));
     // Items are mounted by their node frame: undo the node transform baked into their vertices.
-    let node: { rotation: number[]; translation: number[] } | undefined;
-    held.traverse((o) => (node ??= (o.userData as { nodeTransform?: { rotation: number[]; translation: number[] } }).nodeTransform));
-    if (node) {
-      const q = new THREE.Quaternion(node.rotation[0], node.rotation[1], node.rotation[2], node.rotation[3]).normalize().invert();
-      held.quaternion.copy(q);
-      held.position.set(node.translation[0]!, node.translation[1]!, node.translation[2]!).applyQuaternion(q).negate();
-    }
+    const undo = nodeFrameInverse(held);
+    if (undo) undo.decompose(held.position, held.quaternion, held.scale);
     mount.add(held);
     bone.add(mount);
   }
@@ -666,6 +661,21 @@ function findBlade(model: THREE.Object3D): { mount: THREE.Object3D; held: THREE.
 }
 
 /** Held models replacing an avatar kind's own: a model file, null = nothing, absent = the kind's. */
+/**
+ * The inverse of the node transform the converter bakes into a single-node model's vertices
+ * (glTF extras `nodeTransform`), or null when it has none: the engine draws a model in its own
+ * node frame, so a held item (mounted at a dummy) and a placed object (its .cap matrix) both need
+ * it undone.
+ */
+export function nodeFrameInverse(model: THREE.Object3D): THREE.Matrix4 | null {
+  let node: { rotation: number[]; translation: number[] } | undefined;
+  model.traverse((o) => (node ??= (o.userData as { nodeTransform?: { rotation: number[]; translation: number[] } }).nodeTransform));
+  if (!node) return null;
+  const q = new THREE.Quaternion(node.rotation[0], node.rotation[1], node.rotation[2], node.rotation[3]).normalize();
+  const t = new THREE.Vector3(node.translation[0], node.translation[1], node.translation[2]);
+  return new THREE.Matrix4().compose(t, q, new THREE.Vector3(1, 1, 1)).invert();
+}
+
 export interface HeldOverride {
   right?: string | null;
   left?: string | null;

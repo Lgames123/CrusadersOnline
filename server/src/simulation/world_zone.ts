@@ -335,6 +335,8 @@ interface ObjectChange {
   /** Breakables: damage of this hit and remaining HP. */
   damage?: number;
   hp?: number;
+  /** Breakables: the attacker's blade sweep (unit x, z), for the hit's sparks. */
+  sweep?: [number, number];
   /** Swinging doors: the motion as of now. */
   swing?: DoorMotion;
   /** Other movers: the motion as of now. */
@@ -1104,7 +1106,8 @@ export class WorldZone {
         o.respawnAt = this.tick + OBJECT_RESPAWN_TICKS;
         setDoorOpen(this.mw, o.def.id, true); // broken: no longer in the way
       }
-      this.broadcastObjects([{ id: o.def.id, state: o.state, by: a.entityId, damage, hp: Math.ceil(o.hp) }]);
+      const sweep = this.worldSweep(a, s);
+      this.broadcastObjects([{ id: o.def.id, state: o.state, by: a.entityId, damage, hp: Math.ceil(o.hp), ...(sweep ? { sweep } : {}) }]);
     }
   }
 

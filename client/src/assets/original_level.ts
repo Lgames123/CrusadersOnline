@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LevelLight } from '../engine/level_light.ts';
 import { dynamicLights } from '../engine/dynamic_lights.ts';
 import { propFixes } from './prop_fixes.ts';
+import { nodeFrameInverse } from './original_models.ts';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, DYNAMIC_OBJECT_BASE, type ArenaDef, type LevelObject, type LevelBrush, type LevelPlacements, type WorldObjectDef, type WorldObjectState, type DoorMotion, type DoorSwing, stepDoorMotion, swingPose, type MoverDef, type MoverMotion, moverPose, shutMover, stepMover, useMover } from '@crusaders/shared';
@@ -470,7 +471,13 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
       }
     }
     obj.matrixAutoUpdate = false;
+    // The .cap matrix places the model in its own node frame: the node transform baked into a
+    // single-node model's vertices (the woodbasket's and fruit's 180 degrees about X, the large
+    // crate's 90, offsets of up to 90 ft on bushes, fences and light volumes) is undone, as for
+    // held items. Baskets stood upside down and crates floated half their height without it.
+    const undo = nodeFrameInverse(src);
     obj.matrix.copy(placementMatrix(o));
+    if (undo) obj.matrix.multiply(undo);
     obj.traverse((m) => {
       m.castShadow = false;
       m.receiveShadow = false;

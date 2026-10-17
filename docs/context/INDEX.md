@@ -1,5 +1,6 @@
 # Context notes
 
+- 2026-10-17 [Placed objects in their own node frame](2026-10-17-placed-objects-node-frame.md) — the .cap matrix places the raw model: the baked node transform is undone (baskets upright, crates on the floor, bushes/fences/light volumes back in place); prop hit sparks at the contact point, 0.7 ft along the sweep; out-of-cell objects left as placed (Claude Code)
 - 2026-10-17 [Drake's shield clanks like a creature's](2026-10-17-drake-block-sounds.md) — Frida: Drake is type 142 (row: flesh impact, metal block), so his blocks play the metal row by attacker edge (339/340/341 off swords) and hits on him the flesh row (Claude Code)
 - 2026-10-17 [Shield rush and stopped blows as the original](2026-10-17-shield-rush-and-blocks.md) — rush = body block + 5 % roll per step (impact, rusher −1 HP, sounds 0+338), no shield check; block sound by attacker edge (player 343, creatures metal row), no wood/metal shield difference, sparks along the sweep, grey light (Claude Code)
 - 2026-10-17 [Falls and logins use the respawn spot](2026-10-17-falls-and-logins-use-respawn.md) — falls out of a level land at the respawn spot; logins keep their saved position unless saved dead (HP 0) or below the level (Claude Code)

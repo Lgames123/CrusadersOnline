@@ -102,6 +102,10 @@ const BLOCK_LIGHT_SECONDS = 0.3;
 /** Its sparks: SWORD_DAMAGE + SWORD_METAL this many times (1 at low detail), 0.8 ft apart along the sweep. */
 const BLOCK_SPARK_PAIRS = 3;
 const BLOCK_SPARK_SPACING = 0.8 * LEVEL_UNIT_METRES;
+/** A blow on a prop: its sparks 0.7 ft apart along the sweep (0x44CEF0, constant 0x4E0904). */
+const PROP_SPARK_SPACING = 0.7 * LEVEL_UNIT_METRES;
+/** Height above the attacker's feet where his blade meets a prop (stand-in for the contact point). */
+const PROP_HIT_HEIGHT = 1.0;
 
 /** Side of `target` (facing its rotation.y, 0 = -Z) that `from` stands on: 0 front, 1 left, 2 right, 3 back. */
 function impactSide(target: THREE.Object3D, from: THREE.Object3D): number {
@@ -472,7 +476,7 @@ async function main(): Promise<void> {
             }
           },
           objects: (d) => {
-            for (const o of d.objects as { id: number; state: 'present' | 'gone' | 'open'; def?: WorldObjectDef; by?: number; loot?: string[]; damage?: number; swing?: DoorMotion; mover?: MoverMotion }[]) {
+            for (const o of d.objects as { id: number; state: 'present' | 'gone' | 'open'; def?: WorldObjectDef; by?: number; loot?: string[]; damage?: number; sweep?: [number, number]; swing?: DoorMotion; mover?: MoverMotion }[]) {
               if (o.def && !levelView?.objects.has(o.id) && o.state === 'present') {
                 levelView?.spawnDynamicObject(o.def);
               }
@@ -486,24 +490,29 @@ async function main(): Promise<void> {
               if (view.def.kind === 'chest' && o.state === 'open') sounds?.play(SFX.chestOpen, at);
               else if (view.def.kind === 'item' && o.state === 'gone' && mine) sounds?.play(SFX.click);
               else if (view.def.kind === 'prop') {
-                // As logged on barrels: every hit throws 5 SWORD_STONE sparks down the blade and 5
-                // chips of the prop (±1.2 ft, speed 40) and plays its material's impact (306, the
-                // sharp flesh one, on a barrel; a mace's blunt one by the same table); breaking it
-                // adds 3-12 pieces through its volume (speed 1) and no sound of its own, only a
-                // piece landing (339, ~0.3 s later).
+                // As logged on barrels and decompiled (0x44CEF0): every hit throws 5 SWORD_STONE
+                // sparks from the blade's contact point, 0.7 ft apart along its sweep (0x4E0904),
+                // and 5 chips of the prop about that point (±1.2 ft, speed 40), and plays its
+                // material's impact (306, the sharp flesh one, on a barrel; a mace's blunt one by
+                // the same table); breaking it (0x4514E0) adds 3-12 pieces in a box of the prop's
+                // extents about its origin (logged on a barrel: 3.77 × 4.67 × 3.77 ft about its
+                // base, speed 1) and no sound of its own, only a piece landing (339, ~0.3 s later).
                 const box = new THREE.Box3().setFromObject(view.object);
-                const centre = box.getCenter(new THREE.Vector3());
                 const size = box.getSize(new THREE.Vector3());
-                fxPos.copy(centre);
-                fxBurst('SWORD_STONE', 5, fxPos.clone(), new THREE.Vector3(0, -0.2, 0), new THREE.Vector3(0, 1, 0));
+                // Contact: the prop's box point nearest the attacker, at the height of his blade.
+                const by = o.by === undefined ? undefined : mine ? player?.object : remotes.byId.get(o.by)?.avatar.object;
+                const contact = box.getCenter(new THREE.Vector3());
+                if (by) contact.set(by.position.x, by.position.y + PROP_HIT_HEIGHT, by.position.z).clamp(box.min, box.max);
+                const along = o.sweep ? new THREE.Vector3(o.sweep[0], 0, o.sweep[1]).multiplyScalar(PROP_SPARK_SPACING) : new THREE.Vector3(0, -0.2, 0);
+                fxBurst('SWORD_STONE', 5, contact, along, new THREE.Vector3(0, 1, 0));
                 const chip = 1.2 * LEVEL_UNIT_METRES;
                 const light = new THREE.Color(0.8, 0.8, 0.8);
-                levelView?.light?.sample(centre, light);
-                debris?.spawn(view.object, 5, new THREE.Vector3(chip, chip, chip), centre, 40, box.min.y, light);
-                sounds?.play(SFX.hitOther, centre);
+                levelView?.light?.sample(contact, light);
+                debris?.spawn(view.object, 5, new THREE.Vector3(chip, chip, chip), contact, 40, box.min.y, light);
+                sounds?.play(SFX.hitOther, contact);
                 if (o.state === 'gone') {
-                  const base = new THREE.Vector3(centre.x, box.min.y, centre.z);
-                  debris?.spawn(view.object, 3 + Math.floor(Math.random() * 10), size.clone().multiplyScalar(0.5), base, 1, box.min.y, light);
+                  const base = view.position.clone();
+                  debris?.spawn(view.object, 3 + Math.floor(Math.random() * 10), size, base, 1, box.min.y, light);
                   window.setTimeout(() => sounds?.play(SFX.debrisLand, base), 300);
                 }
               }
