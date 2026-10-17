@@ -2,7 +2,6 @@ import { doorSwingFromMotion, type LevelBrushMotion } from './door_swing.ts';
 import { moverFromMotion } from './mover.ts';
 import { CREATURE_TEMPLATES, npcArchetypeId } from '../game/creatures.ts';
 import { itemSlug } from '../game/items.ts';
-import { merchantKindOf } from '../game/shops.ts';
 import type { ArenaDef, BrushDef, PortalDef, TriMeshDef, WorldObjectDef } from './types.ts';
 import { SEQUENCE_ACTOR_BASE, type LevelStory } from '../game/story.ts';
 import { PLAYER_HEIGHT, PLAYER_RADIUS } from '../constants.ts';
@@ -511,8 +510,6 @@ function placementExtras(c: LevelCreature, s: number): Partial<ArenaDef['mobSpaw
     out.shield = c.held.shield ? itemSlug(c.held.shield) : null;
   }
   if (c.talk !== undefined) out.talk = c.talk;
-  const merchant = merchantKindOf(c.type, c.name);
-  if (merchant) out.merchant = merchant;
   if (c.gesture !== undefined) out.gesture = c.gesture;
   if (c.path && c.path.points.length > 1) {
     out.path = { points: c.path.points.map((p) => ({ x: p[0] * s, y: p[1] * s, z: p[2] * s })), pause: c.path.pause, loop: c.path.loop };

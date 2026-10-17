@@ -107,12 +107,12 @@ export interface InventoryItemView {
   damage?: number[];
   speed?: number;
   protection?: number[];
-  /** What a merchant pays for one (merchantShops feature); absent = it will not buy it. */
+  /** What a merchant pays for it (items.ctx Price × count); absent = it takes no item without a price. */
   value?: number;
 }
 
-/** An item a merchant sells: its view and its price. */
-export type ShopItemView = Omit<InventoryItemView, 'slot' | 'equipped' | 'x' | 'y' | 'quantity' | 'value'> & { price: number };
+/** An item a shop offers this visit: its view, its count and its price (Price × count). */
+export type ShopItemView = Omit<InventoryItemView, 'slot' | 'equipped' | 'x' | 'y' | 'value'> & { price: number };
 
 /** Full inventory of the owning player: on entry and after every change. */
 export interface InventoryUpdateMsg {
@@ -170,10 +170,13 @@ export interface StorySoundMsg {
   d: { sound: number; positions: [number, number, number][]; volume: number };
 }
 
-/** A merchant's shop (merchantShops feature): what it sells and the share of the price it pays. */
+/**
+ * A shop (cap type 0x1C) opened for this player, or its offer after a trade. `greeting`: the
+ * merchant's line (Sound.ctx id), on opening only.
+ */
 export interface ShopMsg {
   op: typeof SC.SHOP;
-  d: { entity: number; title: string; stock: ShopItemView[]; sellRate: number };
+  d: { shop: number; stock: ShopItemView[]; greeting?: number };
 }
 
 export interface EntityDespawnMsg {

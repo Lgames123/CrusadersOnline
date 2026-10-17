@@ -118,15 +118,15 @@ port.on('message', (msg: ToZone) => {
       flush();
       break;
     case 'shopOpen':
-      zone.shopOpen(msg.connId, msg.entity);
+      zone.shopOpen(msg.connId, msg.shop);
       flush();
       break;
     case 'shopBuy':
-      zone.shopBuy(msg.connId, msg.entity, msg.itemId, msg.quantity);
+      zone.shopBuy(msg.connId, msg.shop, msg.index, msg.itemId);
       flush();
       break;
     case 'shopSell':
-      zone.shopSell(msg.connId, msg.entity, msg.slot, msg.itemId);
+      zone.shopSell(msg.connId, msg.shop, msg.slot, msg.itemId);
       flush();
       break;
     case 'talk':

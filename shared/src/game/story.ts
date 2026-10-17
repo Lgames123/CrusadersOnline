@@ -184,8 +184,24 @@ export interface StorySoundTrigger {
   sound: StorySound;
 }
 
+/**
+ * A shop (cap type 0x1C): the use key in its volume plays `greeting` and opens the inventory
+ * screen in trade mode with a fresh copy of `stock` (items.ctx names), executable-analysis §19.
+ */
+export interface StoryShop {
+  id: number;
+  /** Bit 3: the use key (every shipped shop). */
+  activation: number;
+  volume: StoryVolume;
+  /** Sound.ctx id of the merchant's line ("Please, please check out my fine wares."). */
+  greeting: number;
+  stock: { name: string; quantity: number }[];
+}
+
 export interface LevelStory {
   triggers: StoryTrigger[];
+  /** Absent in levels converted before shops were read (1.25). */
+  shops?: StoryShop[];
   /** Absent in levels converted before walk-in sound triggers were read (1.24). */
   soundTriggers?: StorySoundTrigger[];
   /** Absent in levels converted before message triggers were read. */

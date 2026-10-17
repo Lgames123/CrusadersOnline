@@ -67,7 +67,7 @@ export interface ClientSessionEvents {
   storyMessage?(message: number): void;
   /** A relay's sound (positions in metres). */
   storySound?(d: StorySoundMsg['d']): void;
-  /** A merchant's shop opened (merchantShops feature). */
+  /** A shop opened, or its offer after a trade. */
   shop?(d: ShopMsg['d']): void;
 }
 
@@ -384,20 +384,21 @@ export class ClientSession {
     this.sendJson({ op: CS.SPLIT_INVENTORY_STACK, seq: ++this.seq, d: { slot, quantity } });
   }
 
-  /** Opens a merchant's shop (the server answers with SC_SHOP when in reach). */
-  shopOpen(entity: number): void {
+  /** The use key in a shop's volume (the server answers with SC_SHOP when the player is in it). */
+  shopOpen(shop: number): void {
     if (!this.connected || this.dead) return;
-    this.sendJson({ op: CS.SHOP_OPEN, seq: ++this.seq, d: { entity } });
+    this.sendJson({ op: CS.SHOP_OPEN, seq: ++this.seq, d: { shop } });
   }
 
-  shopBuy(entity: number, itemId: string, quantity = 1): void {
+  /** Buys offer entry `index` (the item the client shows there: `itemId`). */
+  shopBuy(shop: number, index: number, itemId: string): void {
     if (!this.connected || this.dead) return;
-    this.sendJson({ op: CS.SHOP_BUY, seq: ++this.seq, d: { entity, itemId, quantity } });
+    this.sendJson({ op: CS.SHOP_BUY, seq: ++this.seq, d: { shop, index, itemId } });
   }
 
-  shopSell(entity: number, slot: number, itemId?: string): void {
+  shopSell(shop: number, slot: number, itemId?: string): void {
     if (!this.connected || this.dead) return;
-    this.sendJson({ op: CS.SHOP_SELL, seq: ++this.seq, d: { entity, slot, ...(itemId !== undefined ? { itemId } : {}) } });
+    this.sendJson({ op: CS.SHOP_SELL, seq: ++this.seq, d: { shop, slot, ...(itemId !== undefined ? { itemId } : {}) } });
   }
 
   /** Drops an inventory item to the ground at the player's position. */

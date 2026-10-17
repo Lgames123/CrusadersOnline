@@ -177,10 +177,25 @@ export interface CapSoundTrigger {
   sound: { id: number; positions: [number, number, number][]; volume: number };
 }
 
+/**
+ * A shop (type 0x1C, vtable 0x4E1D94): the use key in its volume plays the greeting (+0x36,
+ * Sound.ctx) and opens the inventory screen in trade mode (fire 0x464170 -> 0x4572E0(2, 5)) with
+ * a fresh copy of its items (+0x35 count, +0x38 slots of 0x44 bytes: count +0x10, name +0x24;
+ * 0x46D3D0). Each act has its own (the stock changes as the story goes on).
+ */
+export interface CapShop {
+  id: number;
+  activation: number;
+  volume: CapTriggerVolume;
+  greeting: number;
+  stock: { name: string; quantity: number }[];
+}
+
 export interface CapStory {
   triggers: CapStoryTrigger[];
   messages: CapMessage[];
   soundTriggers: CapSoundTrigger[];
+  shops: CapShop[];
   deaths: CapDeathTrigger[];
   cameras: CapCamera[];
   sequences: CapSequence[];
@@ -199,6 +214,7 @@ const T_SOUND = 0x0b;
 const T_EXIT = 0x13;
 const T_FLAG = 0x14;
 const T_MESSAGE = 0x1a;
+const T_SHOP = 0x1c;
 const T_QUEST = 0x1d;
 const T_MOVER = 0x1e;
 const T_CAMERA = 0x28;
@@ -281,6 +297,23 @@ export function parseStory(data: Uint8Array, dv: DataView, types: ReadonlyMap<nu
     if (!volume) continue;
     const sound = soundAt(o);
     if (sound.id >= 0) soundTriggers.push({ id: o, activation, volume, sound });
+  }
+
+  // --- Shops (type 0x1C)
+  const shops: CapShop[] = [];
+  for (const o of types.get(T_SHOP) ?? []) {
+    if (!inRange(o, 0x3c)) continue;
+    const vol = ptr(o + 4);
+    const volume = vol > 0 && inRange(vol, 0x40) ? ctx.parseVolume(vol) : null;
+    if (!volume) continue;
+    const n = data[o + 0x35]!;
+    const slots = ptr(o + 0x38);
+    const stock: CapShop['stock'] = [];
+    for (let i = 0; i < n && inRange(slots + 0x44 * i, 0x44); i++) {
+      const name = ascii(data, slots + 0x44 * i + 0x24, 0x20).trim();
+      if (name) stock.push({ name, quantity: Math.max(1, dv.getInt32(slots + 0x44 * i + 0x10, true)) });
+    }
+    shops.push({ id: o, activation: dv.getUint32(o + 8, true), volume, greeting: dv.getInt16(o + 0x36, true), stock });
   }
 
   // --- Cameras
@@ -494,5 +527,5 @@ export function parseStory(data: Uint8Array, dv: DataView, types: ReadonlyMap<nu
       steps,
     });
   }
-  return { triggers, messages, soundTriggers, deaths, cameras, sequences };
+  return { triggers, messages, soundTriggers, shops, deaths, cameras, sequences };
 }

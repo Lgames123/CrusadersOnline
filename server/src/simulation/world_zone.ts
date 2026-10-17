@@ -1,11 +1,9 @@
 import {
-  MAX_BUY,
-  MERCHANT_STOCK,
-  SELL_RATE,
-  SHOP_REACH,
-  sellPrice,
-  shopOffer,
-  type MerchantKind,
+  SHOP_REOPEN_MS,
+  merchantBuys,
+  shopStock,
+  tradePrice,
+  type ShopEntry,
   ANIM,
   BUILTIN_ITEMS,
   LEVEL_PREFIX,
@@ -22,6 +20,7 @@ import {
   type StoryState,
   type StoryCreatureOp,
   type StoryTrigger,
+  type StoryShop,
   TICK_MS,
   setDoorPose,
   setBrushPose,
@@ -498,6 +497,8 @@ interface Player extends ActorBase {
   storyFlags: Set<string>;
   /** Walk-in sound triggers the player stands in (each plays on entering). */
   insideSounds: Set<number>;
+  /** The shop visit in progress: this visit's copy of its items (0x46D3D0). */
+  shop: { id: number; stock: ShopEntry[]; openedAt: number } | null;
   /** A scripted sequence the client is playing; the server finishes it by `until` at the latest. */
   cutscene: { sequence: StorySequence; until: number } | null;
 }
@@ -550,8 +551,6 @@ interface Mob extends ActorBase {
   talkLine: number;
   /** It gestures through its line (idle behaviour +0x3C set; 0x40E8C0): else it just faces the player. */
   gestures: boolean;
-  /** A merchant's people (merchantShops feature): the use key opens its shop. */
-  merchant?: MerchantKind;
   /** Fleeing citizen: on the alert until this tick, then running from `fleeFrom` until `fleeUntil`. */
   alertUntil: number;
   fleeUntil: number;
@@ -720,7 +719,6 @@ export class WorldZone {
       watchTo: 0,
       talkLine: at.talk ?? (at.placement === undefined ? 0 : -1),
       gestures: at.gesture !== undefined || at.placement === undefined,
-      ...(at.merchant ? { merchant: at.merchant } : {}),
       alertUntil: 0,
       fleeUntil: 0,
       waryUntil: 0,
@@ -810,6 +808,7 @@ export class WorldZone {
       story: opts.story ? { flags: [...opts.story.flags], quests: structuredClone(opts.story.quests) } : emptyStoryState(),
       storyFlags: new Set(opts.story?.flags ?? []),
       insideSounds: new Set(),
+      shop: null,
       cutscene: null,
     };
     this.players.set(connId, p);
@@ -1378,7 +1377,7 @@ export class WorldZone {
     for (const e of p.inventory) {
       const def = this.items.get(e.itemId);
       if (!def) continue;
-      const value = this.features.merchantShops ? sellPrice(def) : 0;
+      const value = merchantBuys(def) ? tradePrice(def, e.quantity ?? 1) : 0;
       items.push({
         ...this.itemFacts(def),
         itemId: e.itemId,
@@ -2070,76 +2069,88 @@ export class WorldZone {
     }
   }
 
-  // --- Merchant shops (merchantShops feature; not in the original: game/shops.ts)
+  // --- Shops (cap type 0x1C; game/shops.ts, executable-analysis §19)
 
-  /** A living merchant within reach of a player free to trade, or null. */
-  private merchantFor(p: Player, entity: number): (Mob & { merchant: MerchantKind }) | null {
-    if (!this.features.merchantShops || this.inventoryBusy(p)) return null;
-    const m = this.actors.get(entity);
-    if (!m || m.kind !== 'mob' || !m.merchant || !alive(m) || m.state === 'chase' || m.state === 'flee') return null;
-    const a = p.character.position;
-    const b = m.character.position;
-    if (Math.hypot(a.x - b.x, a.z - b.z) > SHOP_REACH + 0.5 || Math.abs(a.y - b.y) > AGGRO_HEIGHT) return null;
-    return m as Mob & { merchant: MerchantKind };
+  /** The act's shop `id` if the player, free to trade, stands in its volume (use-key trigger). */
+  private shopAt(p: Player, id: number): StoryShop | null {
+    if (this.inventoryBusy(p)) return null;
+    const shop = this.arena.story?.shops?.find((s) => s.id === id);
+    if (!shop || !(shop.activation & 8)) return null;
+    const pos = p.character.position;
+    return inStoryVolume(shop.volume, pos.x / LEVEL_UNIT_METRES, pos.y / LEVEL_UNIT_METRES, pos.z / LEVEL_UNIT_METRES) ? shop : null;
   }
 
-  /** The use key on a merchant: it faces the player and its shop opens (SC_SHOP). */
-  shopOpen(connId: number, entity: number): void {
+  private sendShop(p: Player, greeting?: number): void {
+    const visit = p.shop;
+    if (!visit) return;
+    const stock = visit.stock.flatMap((e) => {
+      const def = this.items.get(e.itemId);
+      return def ? [{ ...this.itemFacts(def), ...(e.quantity > 1 ? { quantity: e.quantity } : {}), price: tradePrice(def, e.quantity) }] : [];
+    });
+    this.sendJson(p.connId, { op: SC.SHOP, d: { shop: visit.id, stock, ...(greeting !== undefined && greeting >= 0 ? { greeting } : {}) } });
+  }
+
+  /**
+   * The use key in a shop's volume (fire 0x464170): at most every 500 ms, the merchant's greeting
+   * and a fresh copy of the shop's items (0x46D3D0) for this visit.
+   */
+  shopOpen(connId: number, id: number): void {
     const p = this.players.get(connId);
-    const m = p && this.merchantFor(p, entity);
-    if (!p || !m) return;
-    if (m.state === 'idle') {
-      m.state = 'watch';
-      m.watchSince = this.tick;
+    const shop = p && this.shopAt(p, id);
+    if (!p || !shop) return;
+    if (p.shop && this.tick - p.shop.openedAt < Math.ceil(SHOP_REOPEN_MS / TICK_MS)) return;
+    p.shop = { id, stock: shopStock(shop, this.items), openedAt: this.tick };
+    this.sendShop(p, shop.greeting);
+  }
+
+  /** Takes offer entry `index` into the bag for its Price × count in gold (0x46E290). */
+  shopBuy(connId: number, id: number, index: number, itemId: string): void {
+    const p = this.players.get(connId);
+    if (!p || !p.shop || p.shop.id !== id || !this.shopAt(p, id)) return;
+    const entry = p.shop.stock[index];
+    const def = entry && entry.itemId === itemId ? this.items.get(entry.itemId) : undefined;
+    if (!entry || !def) {
+      this.sendShop(p);
+      return;
     }
-    if (m.state === 'watch') m.watchTo = p.entityId;
-    this.sendJson(connId, { op: SC.SHOP, d: { entity, title: MERCHANT_STOCK[m.merchant].title, stock: shopOffer(m.merchant, this.items).map((o) => ({ ...this.itemFacts(this.items.get(o.itemId)!), price: o.price })), sellRate: SELL_RATE } });
-  }
-
-  /** Buys `quantity` of a stocked item (several only for stackable ones) for its price each. */
-  shopBuy(connId: number, entity: number, itemId: string, quantity: number): void {
-    const p = this.players.get(connId);
-    const m = p && this.merchantFor(p, entity);
-    if (!p || !m) return;
-    const offer = shopOffer(m.merchant, this.items).find((o) => o.itemId === itemId);
-    const def = offer && this.items.get(itemId);
-    if (!offer || !def) return;
-    const n = def.stackable ? Math.max(1, Math.min(MAX_BUY, Math.floor(quantity))) : 1;
-    const cost = offer.price * n;
+    const cost = tradePrice(def, entry.quantity);
     if (p.gold < cost) {
       this.sendJson(connId, { op: SC.ERROR, d: { code: 'shop_gold', message: 'Not enough gold.' } });
       return;
     }
-    if (addItem(p.inventory, def.id, n, this.items) === null) {
+    if (addItem(p.inventory, def.id, entry.quantity, this.items) === null) {
       this.sendJson(connId, { op: SC.ERROR, d: { code: 'bag_full', message: 'Inventory full.' } });
       return;
     }
+    p.shop.stock.splice(index, 1);
     p.gold -= cost;
     p.statsDirty = true;
     this.inventoryChanged(p);
+    this.sendShop(p);
   }
 
-  /** Sells the item (the whole stack) in a bag slot for half its price each; worn items too. */
-  shopSell(connId: number, entity: number, slot: number, itemId?: string): void {
+  /** Puts a bag item (its whole stack; worn ones too) into the shop for its Price × count. */
+  shopSell(connId: number, id: number, slot: number, itemId?: string): void {
     const p = this.players.get(connId);
-    const m = p && this.merchantFor(p, entity);
-    if (!p || !m) return;
+    if (!p || !p.shop || p.shop.id !== id || !this.shopAt(p, id)) return;
     const entry = this.inventoryEntry(p, slot, itemId);
     const def = entry && this.items.get(entry.itemId);
     if (!entry || !def) {
       this.sendInventory(p);
       return;
     }
-    const each = sellPrice(def);
-    if (!each) {
-      this.sendJson(connId, { op: SC.ERROR, d: { code: 'shop_refuse', message: 'The merchant will not buy that.' } });
+    if (!merchantBuys(def)) {
+      this.sendJson(connId, { op: SC.ERROR, d: { code: 'shop_refuse', message: 'The merchant will not take that.' } });
       return;
     }
+    const quantity = entry.quantity ?? 1;
     p.inventory.splice(p.inventory.indexOf(entry), 1);
     if (entry.equipped) this.applyEquipment(p);
-    p.gold += each * (entry.quantity ?? 1);
+    p.gold += tradePrice(def, quantity);
     p.statsDirty = true;
+    p.shop.stock.push({ itemId: def.id, quantity });
     this.inventoryChanged(p);
+    this.sendShop(p);
   }
 
   /**

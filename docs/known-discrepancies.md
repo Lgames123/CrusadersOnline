@@ -26,8 +26,5 @@ original. Behaviours that differ are kept switched off rather than deleted:
   to swings), `sideSwingRetrigger` (side swings re-trigger 0.3 s in, alternating), `diagonalMoves` (diagonals
   run along the diagonal with the body turned). Enable with
   `GAME_FEATURES=reactiveBlock,sideSwingRetrigger,diagonalMoves`; the client receives them in SC_WORLD_ENTER.
-- Merchant shops (`merchantShops`, `shared/src/game/shops.ts`): the original's merchants neither speak
-  nor trade; here Tab on one opens a shop (items.ctx prices, half back when selling). The one feature
-  **on by default**; `GAME_FEATURES=-merchantShops` restores the original.
 - Presentation (client settings, marked "not original"): silhouette shadows, smaller hit effects,
   the modern camera.

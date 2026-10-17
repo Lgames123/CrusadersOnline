@@ -558,5 +558,15 @@ A `.cap` creature record is the creature as the level editor left it, so its sta
 
 **Sound triggers walked into** (type 0x0B, activation bit 0, a volume; 0x200 once): the sound plays at its points (0x461490). Fourteen carry dialogue: Ci1b's guard line CG2_03_01 "Celestia is expecting you." by the throne-room doors, Drake's remarks (Ci4a, Gl2a) and train's prisoners. CG1_03_01 "Ursan sent word of your arrival" is referenced by nothing.
 
-**Side quests.** The quest manager's 26 side quests (§17.2: offer, reminder and completion lines, items) are never offered: no shipped placement has a talk trigger, no quest trigger names a side quest, and the givers (Nai, Sir Marik, Raven, …) are not placed in any act. There is no shop: "merchants" are ordinary NPCs without a line.
+**Side quests.** The quest manager's 26 side quests (§17.2: offer, reminder and completion lines, items) are never offered: no shipped placement has a talk trigger, no quest trigger names a side quest, and the givers (Nai, Sir Marik, Raven, …) are not placed in any act. Shops are not NPCs but level triggers (§19).
+
+## 19. Shops (decompiled, 2026-10-16)
+
+A shop is a cap object of **type 0x1C** (loader case 0x4786B4, vtable 0x4E1D94), placed at a merchant's counter: +4 volume, +8 activation (8 = the use key in every shipped one), +0x35 item count, +0x36 the merchant's greeting (Sound.ctx: mm_ci_01 "Please, please check out my fine wares.", mm_ci_02, mm_co_02, HL_13_02), +0x38 the items (inventory slots of 0x44 bytes: count +0x10, name +0x24). The merchant NPC standing there (eMerchant1, DwarfMerchant*, DasherMerchant1) has no part in it.
+
+Fire (slot 5, 0x464170): if the inventory screen is already in trade mode it closes (0x4573E0); else, at most every 500 ms (0x58C31C), it plays the greeting, fills the screen's other container with a **copy** of the shop's items (0x46D3D0 → 0x46A8A0 copies each slot, 0x46C360 tags them) and opens the inventory screen in mode 5 (0x4572E0(2, 5) → 0x46D4A0; modes: 1 ground and corpses within 96 ft² (0x471940), 2 a chest (0x4717E0), 3 / 4 a quest giving or taking an item (0x497170), 5 trade). Closing (0x46CD80) writes nothing back: every opening starts from the shop's own list.
+
+Trade (0x46E290, mode 5): dropping a shop item into the bag or a worn slot costs its items.ctx **Price** (item definition +0x24, `Price` keyword handler 0x474860) × its count, compared with the gold stack (gold is an inventory item of type 8: 0x46B800(8), added by 0x46A940); too little and it springs back (0x46FC50). Dropping a bag item into the shop pays the same Price × count (the cost × −1.0 at 0x4DE87C). Sound 0x198 (408) on a paid trade, 0x199 (409) when the price is 0 (the item still changes hands).
+
+The stock differs per act, so it changes as the story goes on: Citadel (Ci1b / 2b / 9b) Longsword of Quality, Metal Shield, Scale Armor, potions; Ci3b / 4b Longsword of the Crusader, Dragon Scale Armor, Light Plate Mail; Cador Sul (Cs1b / 2b) Mace, Scale Armor, Long Sword, Cs2b also a Torch Light Spell Book, Cs3b Holy Avenger, Heavy Plate Mail, Shield of Swiftness in Action; Corantha two shops per act (Co1a/2a/8a weapons and armour, Co3a/9a, Co4a the finest: Divine Justice, Boomer Axe, Enoch's Plate of Might); Duskwood (Du1c–Du9c) potions and the Dasher Hand Bow, Du3c Chl'Tk. 25 shops in all.
 

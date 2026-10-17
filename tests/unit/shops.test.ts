@@ -2,16 +2,16 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { WorldZone } from '@crusaders/server/simulation/world_zone';
 import {
   BUILTIN_ITEMS,
+  LEVEL_UNIT_METRES,
   SC,
   createSyntheticArena,
   initPhysics,
-  merchantKindOf,
-  sellPrice,
+  tradePrice,
   type InventoryEntry,
   type Rapier,
   type ServerControlMsg,
+  type StoryShop,
 } from '@crusaders/shared';
-import { parseFeatures } from '@crusaders/server/config';
 
 let rapier: Rapier;
 beforeAll(async () => {
@@ -22,71 +22,74 @@ interface Internal {
   players: Map<number, { inventory: InventoryEntry[]; gold: number }>;
 }
 
-/** A player with `gold` beside a human merchant 1.5 m ahead (merchantShops on unless `off`). */
-function shopZone(gold: number, inventory: InventoryEntry[] = [], off = false) {
+const FT = 1 / LEVEL_UNIT_METRES;
+const SHOP = 7000;
+
+/** A level act with one shop (cap type 0x1C) whose volume holds the player at the origin. */
+function shopZone(gold: number, inventory: InventoryEntry[] = [], at = { x: 0, z: 0 }) {
   const arena = createSyntheticArena();
-  arena.mobSpawns = [{ archetype: 'npc_117', x: 0, y: 0.5, z: -1.5, hp: 20, placement: 0, merchant: 'human' }];
+  arena.name = 'level:t1a';
+  arena.mobSpawns = [];
+  const shop: StoryShop = {
+    id: SHOP,
+    activation: 8,
+    volume: { polygon: [[-3 * FT, -3 * FT], [3 * FT, -3 * FT], [3 * FT, 3 * FT], [-3 * FT, 3 * FT]], yMin: -10, yMax: 20 * FT },
+    greeting: 1466,
+    stock: [{ name: 'Long Sword', quantity: 1 }, { name: 'Healing Potion', quantity: 1 }, { name: 'Healing Potion', quantity: 1 }],
+  };
+  arena.story = { triggers: [], cameras: [], sequences: [], shops: [shop] };
   const messages: ServerControlMsg[] = [];
-  const zone = new WorldZone(rapier, 'shop', arena, {
+  const zone = new WorldZone(rapier, arena.name, arena, {
     send: (_c, data) => { if (typeof data === 'string') messages.push(JSON.parse(data) as ServerControlMsg); },
-  }, { items: new Map(BUILTIN_ITEMS), features: off ? {} : { merchantShops: true } });
-  zone.join(1, { name: 'Buyer', characterId: null, position: { x: 0, y: 0.5, z: 0 }, gold, inventory });
+  }, { items: new Map(BUILTIN_ITEMS) });
+  zone.join(1, { name: 'Buyer', characterId: null, position: { x: at.x, y: 0.5, z: at.z }, gold, inventory });
   const me = (zone as unknown as Internal).players.get(1)!;
-  const merchant = zone.inspect().find((a) => a.kind === 'mob')!.id;
   const shops = () => messages.filter((m) => m.op === SC.SHOP).map((m) => m.d);
   const errors = () => messages.filter((m) => m.op === SC.ERROR).map((m) => m.d.code);
-  return { zone, me, merchant, shops, errors };
+  return { zone, me, shops, errors };
 }
 
-describe('merchant shops (merchantShops feature)', () => {
-  it('knows merchants by their placement name and people', () => {
-    expect(merchantKindOf(117, 'eMerchant1')).toBe('human');
-    expect(merchantKindOf(127, 'DwarfMerchant3')).toBe('dwarf');
-    expect(merchantKindOf(132, 'DasherMerchant1')).toBe('dasher');
-    expect(merchantKindOf(117, 'StockyHumanMaleCitizen')).toBeNull();
-  });
+const price = (id: string) => tradePrice(BUILTIN_ITEMS.get(id)!);
 
-  it('is on by default; GAME_FEATURES=-merchantShops keeps the original', () => {
-    expect(parseFeatures('')).toContain('merchantShops');
-    expect(parseFeatures('-merchantShops,diagonalMoves')).toEqual(['diagonalMoves']);
-  });
-
-  it('the use key opens the shop: stock with items.ctx prices', () => {
+describe('shops (cap type 0x1C)', () => {
+  it('the use key in its volume opens it: the greeting and a copy of its items at items.ctx prices', () => {
     const t = shopZone(0);
-    t.zone.shopOpen(1, t.merchant);
+    t.zone.shopOpen(1, SHOP);
     const shop = t.shops()[0]!;
-    expect(shop.entity).toBe(t.merchant);
-    expect(shop.stock.length).toBeGreaterThan(0);
-    const potion = shop.stock.find((s) => s.itemId === 'healing_potion')!;
-    expect(potion.price).toBe(BUILTIN_ITEMS.get('healing_potion')!.price);
-    // The original (feature off): merchants do not trade.
-    const off = shopZone(0, [], true);
-    off.zone.shopOpen(1, off.merchant);
-    expect(off.shops()).toEqual([]);
+    expect(shop).toMatchObject({ shop: SHOP, greeting: 1466 });
+    expect(shop.stock.map((s) => s.itemId)).toEqual(['long_sword', 'healing_potion', 'healing_potion']);
+    expect(shop.stock[0]!.price).toBe(price('long_sword'));
+    // Outside the volume nothing opens.
+    const away = shopZone(0, [], { x: 10, z: 10 });
+    away.zone.shopOpen(1, SHOP);
+    expect(away.shops()).toEqual([]);
   });
 
-  it('buys for gold, refuses without enough, stacks potions', () => {
-    const price = BUILTIN_ITEMS.get('healing_potion')!.price;
-    const t = shopZone(price * 3);
-    t.zone.shopBuy(1, t.merchant, 'healing_potion', 2);
-    expect(t.me.gold).toBe(price);
-    expect(t.me.inventory.find((e) => e.itemId === 'healing_potion')?.quantity).toBe(2);
-    t.zone.shopBuy(1, t.merchant, 'healing_potion', 2);
+  it('buying takes the entry for its price; without the gold it is refused', () => {
+    const t = shopZone(price('healing_potion') * 2 - 1, [{ slot: 0, itemId: 'long_sword', equipped: true }]);
+    t.zone.shopOpen(1, SHOP);
+    t.zone.shopBuy(1, SHOP, 1, 'healing_potion');
+    expect(t.me.gold).toBe(price('healing_potion') - 1);
+    const potions = () => t.me.inventory.filter((e) => e.itemId === 'healing_potion').reduce((n, e) => n + (e.quantity ?? 1), 0);
+    const before = potions();
+    expect(before).toBeGreaterThan(0);
+    // The visit's copy lost that entry: one potion left in the offer.
+    expect(t.shops().at(-1)!.stock.map((s) => s.itemId)).toEqual(['long_sword', 'healing_potion']);
+    t.zone.shopBuy(1, SHOP, 1, 'healing_potion');
     expect(t.errors()).toContain('shop_gold');
-    expect(t.me.gold).toBe(price);
-    // Not stocked: nothing happens.
-    t.zone.shopBuy(1, t.merchant, 'heavy_plate_mail', 1);
-    expect(t.me.gold).toBe(price);
+    expect(potions()).toBe(before);
   });
 
-  it('sells a bag item for half its price, worn ones too; not from afar', () => {
-    const sword = BUILTIN_ITEMS.get('long_sword')!;
-    const t = shopZone(0, [{ slot: 0, itemId: 'long_sword', equipped: true }, { slot: 1, itemId: 'healing_potion', equipped: false, quantity: 3 }]);
-    t.zone.shopSell(1, t.merchant, 0, 'long_sword');
-    expect(t.me.gold).toBe(sellPrice(sword));
-    expect(sellPrice(sword)).toBe(Math.floor(sword.price / 2));
-    t.zone.shopSell(1, t.merchant, 1);
-    expect(t.me.gold).toBe(sellPrice(sword) + 3 * sellPrice(BUILTIN_ITEMS.get('healing_potion')!));
+  it('selling pays the full price, and what was sold can be bought back until it is reopened', () => {
+    const t = shopZone(0, [{ slot: 0, itemId: 'scale_armor', equipped: true }]);
+    t.zone.shopOpen(1, SHOP);
+    t.zone.shopSell(1, SHOP, 0, 'scale_armor');
+    expect(t.me.gold).toBe(price('scale_armor'));
     expect(t.me.inventory).toEqual([]);
+    expect(t.shops().at(-1)!.stock.map((s) => s.itemId)).toContain('scale_armor');
+    t.zone.step();
+    for (let i = 0; i < 20; i++) t.zone.step(); // past the 500 ms between openings
+    t.zone.shopOpen(1, SHOP);
+    expect(t.shops().at(-1)!.stock.map((s) => s.itemId)).toEqual(['long_sword', 'healing_potion', 'healing_potion']);
   });
 });

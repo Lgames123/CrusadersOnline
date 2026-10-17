@@ -1,76 +1,43 @@
 import type { ItemCatalog, ItemDef } from './items.ts';
+import { itemSlug } from './items.ts';
+import type { StoryShop } from './story.ts';
 
 /**
- * Merchant shops (non-original: the `merchantShops` gameplay feature). The original places
- * merchants (eMerchant1 in the Citadel and Cador Sul, DwarfMerchant* in Corantha, DasherMerchant1
- * in Duskwood) but they neither speak nor trade (executable-analysis.md §18). Here the use key on
- * one opens its shop: items.ctx prices to buy, half of them back when selling.
+ * The original's shops (executable-analysis.md §19). A shop is a level trigger (cap type 0x1C)
+ * by a merchant: the use key in its volume plays the merchant's greeting and opens the inventory
+ * screen in trade mode with a fresh copy of the shop's items (each act has its own, so the stock
+ * changes as the story goes on). Dropping one of its items into the bag costs its items.ctx Price
+ * times its count, taken from the gold (0x46E290; refused without enough); dropping a bag item
+ * into the shop pays that same price back (× −1.0 at 0x4DE87C). The copy lasts the visit: what
+ * was bought is gone and what was sold can be bought back until the shop is opened again.
  */
-export type MerchantKind = 'human' | 'dwarf' | 'dasher';
 
-export interface MerchantStock {
-  title: string;
-  /** Item ids (itemSlug of items.ctx names); ones the server's catalogue lacks are left out. */
-  items: readonly string[];
+/** One item on offer this visit (an items.ctx item and its count). */
+export interface ShopEntry {
+  itemId: string;
+  quantity: number;
 }
 
-/** What each merchant people sells (slice choice: the original has no stock lists). */
-export const MERCHANT_STOCK: Readonly<Record<MerchantKind, MerchantStock>> = {
-  human: {
-    title: 'Merchant',
-    items: [
-      'healing_potion', 'greater_healing_potion', 'mana_potion', 'speed_potion',
-      'long_sword', 'broad_sword', 'mace', 'morning_star',
-      'wooden_shield', 'metal_shield', 'scale_armor', 'banded_armor',
-    ],
-  },
-  dwarf: {
-    title: 'Dwarf Merchant',
-    items: [
-      'healing_potion', 'greater_healing_potion', 'mana_potion',
-      'axe', 'battle_axe', 'heavy_mace', 'war_hammer', 'pick_axe',
-      'metal_shield', 'banded_armor', 'light_plate_mail', 'heavy_plate_mail',
-    ],
-  },
-  dasher: {
-    title: 'Dasher Merchant',
-    items: [
-      'healing_potion', 'greater_healing_potion', 'mana_potion', 'speed_potion',
-      'fire_resistance_potion', 'air_resistance_potion', 'earth_resistance_potion', 'water_resistance_potion',
-      'dasher_weapon', 'axe', 'wooden_shield', 'scale_armor',
-    ],
-  },
-};
+/** The use key opens a shop at most this often (0x464170: 500 ms since the last). */
+export const SHOP_REOPEN_MS = 500;
 
-/** Merchants are placements named "…Merchant…": the people by creature type (dwarf 127, dasher 132). */
-export function merchantKindOf(type: number, name: string): MerchantKind | null {
-  if (!/merchant/i.test(name)) return null;
-  return type === 127 ? 'dwarf' : type === 132 ? 'dasher' : 'human';
+/** What a shop entry costs, and what the merchant pays for it: Price × count. */
+export function tradePrice(def: ItemDef, quantity = 1): number {
+  return Math.max(0, Math.round(def.price)) * Math.max(1, quantity);
 }
 
-/** Selling pays this share of the price. */
-export const SELL_RATE = 0.5;
-
-/** Use-key reach to a merchant (metres): the talk reach, 12 ft (0x40DEB0). */
-export const SHOP_REACH = 12 * 0.3048;
-
-/** Most of one item bought at once (a stack of potions). */
-export const MAX_BUY = 20;
-
-export function buyPrice(def: ItemDef): number {
-  return Math.max(1, Math.round(def.price));
+/**
+ * Whether a merchant takes this item. The original takes anything, paying 0 for an item without
+ * a price (it plays 0x199 and the item is gone); here those (keys, quest items) are refused.
+ */
+export function merchantBuys(def: ItemDef): boolean {
+  return def.type !== 'key' && def.price > 0;
 }
 
-/** What the merchant pays for one; 0 = it will not buy it (no price: quest items, keys). */
-export function sellPrice(def: ItemDef): number {
-  if (def.type === 'key' || !(def.price > 0)) return 0;
-  return Math.max(1, Math.floor(def.price * SELL_RATE));
-}
-
-/** A merchant's offer: its stock that the catalogue knows, with prices. */
-export function shopOffer(kind: MerchantKind, catalog: ItemCatalog): { itemId: string; price: number }[] {
-  return MERCHANT_STOCK[kind].items.flatMap((id) => {
-    const def = catalog.get(id);
-    return def && def.id === id ? [{ itemId: id, price: buyPrice(def) }] : [];
+/** A fresh copy of a shop's stock (0x46D3D0), its items resolved in the catalogue. */
+export function shopStock(shop: StoryShop, catalog: ItemCatalog): ShopEntry[] {
+  return shop.stock.flatMap((s) => {
+    const def = catalog.get(s.name) ?? catalog.get(itemSlug(s.name));
+    return def ? [{ itemId: def.id, quantity: Math.max(1, s.quantity) }] : [];
   });
 }

@@ -89,19 +89,20 @@ export const DropInventoryItemPacketSchema = z.object({
 export const ShopOpenPacketSchema = z.object({
   op: z.literal(CS.SHOP_OPEN),
   seq: z.number().int().positive(),
-  d: z.object({ entity: z.number().int().min(0).max(10_000_000) }),
+  d: z.object({ shop: z.number().int().min(0).max(100_000_000) }),
 });
 
 export const ShopBuyPacketSchema = z.object({
   op: z.literal(CS.SHOP_BUY),
   seq: z.number().int().positive(),
-  d: z.object({ entity: z.number().int().min(0).max(10_000_000), itemId: ItemIdSchema, quantity: z.number().int().min(1).max(99) }),
+  /** `index`: the entry in the offer the client shows; `itemId` the item it believes is there. */
+  d: z.object({ shop: z.number().int().min(0).max(100_000_000), index: z.number().int().min(0).max(255), itemId: ItemIdSchema }),
 });
 
 export const ShopSellPacketSchema = z.object({
   op: z.literal(CS.SHOP_SELL),
   seq: z.number().int().positive(),
-  d: z.object({ entity: z.number().int().min(0).max(10_000_000), slot: z.number().int().min(0).max(63), itemId: ItemIdSchema.optional() }),
+  d: z.object({ shop: z.number().int().min(0).max(100_000_000), slot: z.number().int().min(0).max(63), itemId: ItemIdSchema.optional() }),
 });
 
 export const InteractPacketSchema = z.object({

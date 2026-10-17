@@ -231,13 +231,13 @@ export class SessionManager implements TransportHandlers {
         else this.zoneOf(s)?.interact(conn.id, msg.d.object, msg.d.key ?? false);
         return;
       case CS.SHOP_OPEN:
-        if (s.state === 'in_world') this.zoneOf(s)?.shopOpen(conn.id, msg.d.entity);
+        if (s.state === 'in_world') this.zoneOf(s)?.shopOpen(conn.id, msg.d.shop);
         return;
       case CS.SHOP_BUY:
-        if (s.state === 'in_world') this.zoneOf(s)?.shopBuy(conn.id, msg.d.entity, msg.d.itemId, msg.d.quantity);
+        if (s.state === 'in_world') this.zoneOf(s)?.shopBuy(conn.id, msg.d.shop, msg.d.index, msg.d.itemId);
         return;
       case CS.SHOP_SELL:
-        if (s.state === 'in_world') this.zoneOf(s)?.shopSell(conn.id, msg.d.entity, msg.d.slot, msg.d.itemId);
+        if (s.state === 'in_world') this.zoneOf(s)?.shopSell(conn.id, msg.d.shop, msg.d.slot, msg.d.itemId);
         return;
       case CS.USE_ITEM:
         if (s.state === 'in_world') this.zoneOf(s)?.useItem(conn.id, msg.d.slot);

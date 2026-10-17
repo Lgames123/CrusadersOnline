@@ -1,5 +1,6 @@
 # Context notes
 
+- 2026-10-16 [Shops as the original](2026-10-16-original-shops.md) — shops are cap type 0x1C counters (use key in volume, 0x464170 → trade mode 5), stock per act, items.ctx Price both ways (sell = full price); supersedes the invented merchant shops (Claude Code)
 - 2026-10-16 [Merchant shops](2026-10-16-merchant-shops.md) — non-original `merchantShops` feature, on by default (`GAME_FEATURES=-merchantShops` = original): Tab on any *Merchant* placement opens a shop, items.ctx prices, sells for half (Claude Code)
 - 2026-10-16 [NPC pass: loadouts, talk lines, idle paths, guards' alarm](2026-10-16-npc-pass.md) — placements hold their own items (Ursan empty-handed), one line each (+0x1E4), stand or walk their path (0x405AC0), one blow alarms every guard in sight (0x52FDC4), walk-in sound triggers (Ci1b "Celestia is expecting you"); side quests unshipped (Claude Code)
 - 2026-10-16 [Relay ops decoded](2026-10-16-relay-ops.md) — exits fired by relays (0x462890), mover (0x1E) / sound (0x0B) triggers replace the brush guess, Ws5a creature ops (brain events), use-key lever relays, SC.STORY_SOUND (Claude Code)

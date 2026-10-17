@@ -112,8 +112,8 @@ export class InventoryPanels {
   private readonly preview = new HeldItemPreview();
   private readonly shopWindow: HTMLElement;
   private readonly shopList: HTMLElement;
-  /** The merchant whose shop is open (merchantShops feature), or null. */
-  private shop: { entity: number; title: string; stock: ShopItemView[] } | null = null;
+  /** The shop open (its trigger id) and this visit's offer, or null. */
+  private shop: { shop: number; stock: ShopItemView[] } | null = null;
   private gold = 0;
 
   onEquip: (slot: number, itemId: string, equip: boolean, to?: { x: number; y: number }) => void = () => {};
@@ -124,8 +124,8 @@ export class InventoryPanels {
   onPickup: (object: number) => void = () => {};
   onDrop: (slot: number, itemId: string) => void = () => {};
   /** Shops: buy `quantity` of a stocked item, sell the item (stack) in a bag slot, the shop closed. */
-  onBuy: (entity: number, itemId: string, quantity: number) => void = () => {};
-  onSell: (entity: number, slot: number, itemId: string) => void = () => {};
+  onBuy: (shop: number, index: number, itemId: string) => void = () => {};
+  onSell: (shop: number, slot: number, itemId: string) => void = () => {};
   onShopClosed: () => void = () => {};
   /** The player asked to open or close a window (button, ×). */
   onToggle: (kind: InventoryPanelKind, open: boolean) => void = () => {};
@@ -154,7 +154,7 @@ export class InventoryPanels {
       <section class="inv-window inv-shop" aria-label="Shop" hidden>
         <header class="inv-title"><h2 class="shop-title">Merchant</h2><button type="button" class="inv-x" data-close="shop" aria-label="Close shop">×</button></header>
         <div class="shop-list"></div>
-        <p class="inv-help">Click to buy (Shift: 5 potions). Right-click or drag a bag item here to sell it.</p>
+        <p class="inv-help">Click to buy. Right-click or drag a bag item here to sell it.</p>
       </section>
     </div>
     <div class="inv-tooltip" role="tooltip" hidden></div>`;
@@ -235,18 +235,18 @@ export class InventoryPanels {
     if (this.shop) this.renderShop();
   }
 
-  /** The merchant whose shop is open, or null. */
-  get shopEntity(): number | null {
-    return this.shop?.entity ?? null;
+  /** The shop open (its trigger id), or null. */
+  get shopId(): number | null {
+    return this.shop?.shop ?? null;
   }
 
-  /** Opens a merchant's shop beside the inventory (which opens too). */
-  openShop(shop: { entity: number; title: string; stock: ShopItemView[] }): void {
-    this.shop = { ...shop, stock: [...shop.stock] };
+  /** Opens a shop beside the inventory (which opens too), or shows its offer after a trade. */
+  openShop(shop: { shop: number; stock: ShopItemView[] }): void {
+    this.shop = { shop: shop.shop, stock: [...shop.stock] };
+    this.awaitingUntil = 0;
     this.shopWindow.hidden = false;
-    this.shopWindow.querySelector('.shop-title')!.textContent = shop.title;
     this.dock.classList.add('shop-open');
-    this.setOpen('inventory', true);
+    if (!this.shown.inventory) this.setOpen('inventory', true);
     this.renderShop();
   }
 
@@ -267,9 +267,10 @@ export class InventoryPanels {
       const thumbKey = item.model !== undefined ? ItemThumbnails.key(item.model, width, height, item.texture) : '';
       const thumbUrl = item.model !== undefined ? ItemThumbnails.get().getThumbnail(item.model, width, height, item.texture) : null;
       const poor = item.price > this.gold;
-      return `<button type="button" class="shop-item inv-${escape(item.type)}${poor ? ' shop-poor' : ''}" data-stock="${i}" title="${escape(`Buy ${item.name} for ${item.price} gold`)}">
+      const name = `${item.name}${item.quantity && item.quantity > 1 ? ` ×${item.quantity}` : ''}`;
+      return `<button type="button" class="shop-item inv-${escape(item.type)}${poor ? ' shop-poor' : ''}" data-stock="${i}" title="${escape(`Buy ${name} for ${item.price} gold`)}">
         <span class="shop-thumb">${item.model !== undefined ? `<img data-thumb-key="${thumbKey}" src="${thumbUrl ?? ''}" alt="" ${thumbUrl ? '' : 'hidden'} />` : ''}<span class="inv-mark" aria-hidden="true">${ITEM_MARK[item.type]}</span></span>
-        <span class="shop-name">${escape(item.name)}<small>${TYPE_LABEL[item.type]}</small></span>
+        <span class="shop-name">${escape(name)}<small>${TYPE_LABEL[item.type]}</small></span>
         <span class="shop-price"><i aria-hidden="true"></i>${item.price.toLocaleString('en-US')}</span>
       </button>`;
     }).join('') || '<p class="inv-empty">Nothing for sale.</p>';
@@ -346,7 +347,7 @@ export class InventoryPanels {
     item.protection?.forEach((v, i) => v < 1 && lines.push(`${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} taken: ×${v}`));
     if (item.heal) lines.push(`Restores ${item.heal} health`);
     if (item.quantity && item.quantity > 1) lines.push(`Quantity: ${item.quantity}`);
-    if (this.shop) lines.push(item.value ? `Sells for ${(item.value * (item.quantity ?? 1)).toLocaleString('en-US')} gold` : 'The merchant will not buy this');
+    if (this.shop) lines.push(item.value ? `Sells for ${item.value.toLocaleString('en-US')} gold` : 'The merchant will not take this');
     const hints = [
       this.shop && item.value ? 'Right-click to sell' : '',
       isEquipKind(item.type) ? (item.equipped ? 'Click to unequip' : 'Click to equip') : item.type === 'potion' ? 'Click to drink' : '',
@@ -387,7 +388,7 @@ export class InventoryPanels {
     return `<strong class="tt-name tt-${item.type}">${escape(item.name)}</strong>
       <span class="tt-type">${TYPE_LABEL[item.type]} · ${width}×${height}</span>
       ${lines.map((l) => `<span>${escape(l)}</span>`).join('')}
-      <small>${item.type === 'potion' ? 'Click to buy · Shift-click for 5' : 'Click to buy'}</small>`;
+      <small>Click to buy</small>`;
   }
 
   private hideTooltip(): void {
@@ -426,11 +427,11 @@ export class InventoryPanels {
     const stock = target.closest<HTMLElement>('[data-stock]');
     if (stock && this.shop) {
       const shop = this.shop;
-      const item = shop.stock[Number(stock.dataset['stock'])];
+      const index = Number(stock.dataset['stock']);
+      const item = shop.stock[index];
       if (!item) return;
-      const quantity = item.type === 'potion' && e.shiftKey ? Math.max(1, Math.min(5, Math.floor(this.gold / item.price))) : 1;
       if (item.price > this.gold) this.onNotice?.('Not enough gold.');
-      else this.request(() => this.onBuy(shop.entity, item.itemId, quantity));
+      else this.request(() => this.onBuy(shop.shop, index, item.itemId));
       return;
     }
     if (target.closest('[data-toggle="ground"]')) {
@@ -471,8 +472,8 @@ export class InventoryPanels {
   private sell(item: InventoryItemView): void {
     const shop = this.shop;
     if (!shop) return;
-    if (!item.value) this.onNotice?.('The merchant will not buy that.');
-    else this.request(() => this.onSell(shop.entity, item.slot, item.itemId));
+    if (!item.value) this.onNotice?.('The merchant will not take that.');
+    else this.request(() => this.onSell(shop.shop, item.slot, item.itemId));
   }
 
   // --- Drag and drop

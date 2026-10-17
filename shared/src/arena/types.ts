@@ -120,8 +120,6 @@ export interface ArenaDef {
     /** Original levels: its talk line (Sound.ctx id) and the ASM state it gestures with meanwhile. */
     talk?: number;
     gesture?: number;
-    /** Original levels: a merchant's people (shops.ts), when its placement is a merchant. */
-    merchant?: 'human' | 'dwarf' | 'dasher';
     /** Original levels: its idle walk (metres): pause ms at each point, loop or back and forth. */
     path?: { points: { x: number; y: number; z: number }[]; pause: number; loop: boolean };
   }[];
