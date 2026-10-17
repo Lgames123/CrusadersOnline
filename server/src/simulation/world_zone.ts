@@ -73,6 +73,7 @@ import {
   DEFAULT_MOVEMENT_STATS,
   uniformMovementStats,
   locomotionAnim,
+  isLocomotionAnim,
   movementAnim,
   looksGrounded,
   movementFacingOffset,
@@ -83,10 +84,17 @@ import {
   MANA_REGEN_TICKS,
   MAX_SPELL_LEVEL,
   SPELL_CONJURE_TICKS,
+  SPELL_INFO,
+  SPELL_RULES,
+  SPELLS,
+  CREATURE_TEMPLATES,
+  dequantizePitch,
+  spellClipSeconds,
   originalMaxMana,
   type KnownSpell,
   type SpellId,
   type SpellTable,
+  type StatusTag,
   isLayeredSwing,
   SIDE_SWING_RECHAIN_TICKS,
   enabledFeatures,
@@ -194,6 +202,7 @@ import {
   type SwingTiming,
 } from '@crusaders/shared';
 import { InputQueue } from './input_queue.ts';
+import { SpellRuntime, type ActiveStatus, type SpellHost } from './spell_runtime.ts';
 
 /** Snapshots older than this are not used as delta baselines (full snapshot instead). */
 const MAX_BASELINE_AGE = 20;
@@ -407,6 +416,10 @@ const TALK_MAX_MS = 20_000;
 /** How long a frightened citizen stays wary (not measured: the capture ended first). */
 const WARY_TICKS = 20 * 60;
 
+/** Spectral ally: keeps within this of its owner (walking beyond, running beyond twice it), gives up a fight beyond the leash (not decoded; slice values). */
+const ALLY_FOLLOW = 3;
+const ALLY_LEASH = 25;
+
 /** Metres below the lowest level geometry at which a falling player is caught. */
 const FALL_MARGIN = 20;
 
@@ -448,6 +461,10 @@ interface ActorBase {
   hitUntil: number;
   /** Characters the current shield rush has already put into their impact. */
   rushHit: Set<number>;
+  /** Timed spell effects on it (spell_runtime.ts): slowed, frozen, heroism, stone skin... */
+  statuses: Map<StatusTag, ActiveStatus>;
+  /** Slowed: the part of a tick carried over (it acts on whole ticks only). */
+  timeAcc: number;
 }
 
 interface Player extends ActorBase {
@@ -474,8 +491,16 @@ interface Player extends ActorBase {
   maxMana: number;
   spells: KnownSpell[];
   selectedSpell: SpellId | null;
-  /** Spell being conjured (ASM_SPELL_CONJURE) until `end`. */
-  cast: { spell: SpellId; level: number; end: number } | null;
+  /**
+   * The spell being cast: conjuring (ASM_SPELL_CONJURE, self spells) until `clipAt`, then its own
+   * state; it takes effect at `releaseAt` (the clip's SPELL event) and is over at `end`. `upper`:
+   * cast while moving, on the upper body (the feet are free).
+   */
+  cast: { spell: SpellId; level: number; clipAt: number; releaseAt: number; end: number; released: boolean; upper: boolean } | null;
+  /** View pitch of the latest input (radians, up positive): spells aim with it. */
+  pitch: number;
+  /** Speed multiplier before spell effects (stats +0x24C). */
+  baseClipRate: number;
   /** Tick of the next mana point while below the maximum. */
   manaRegenAt: number;
   /** Torch light around the player (radius in metres) until `until`. */
@@ -574,6 +599,10 @@ interface Mob extends ActorBase {
    * players in sight at any range and any angle. Cleared when it respawns.
    */
   fightsNearest?: boolean;
+  /** A spectral ally (disposition 6): the player it fights for (entity id). */
+  ally?: number;
+  /** Its weapon's damage when not the item's (the spectral ally's, by spell level). */
+  damage?: DamageVector;
 }
 
 type Actor = Player | Mob;
@@ -630,6 +659,8 @@ export class WorldZone {
   private readonly playerDroppedItems = new Map<string, number[]>();
   /** Height below which a player has fallen out of the level (catchFall). */
   private readonly fallLimit: number;
+  /** The spell objects and timed effects (spell_runtime.ts). */
+  private readonly magic: SpellRuntime;
 
   constructor(rapier: Rapier, name: string, arena: ArenaDef, outbox: ZoneOutbox, opts: WorldZoneOptions = {}) {
     this.name = name;
@@ -655,6 +686,116 @@ export class WorldZone {
       if (o && b.swing) o.swing = { def: b.swing, points: b.points, hull: hullXZ(b.points), motion: null, blocked: false };
       else if (o && b.mover) o.mover = { def: b.mover, motion: shutMover() };
     }
+    this.magic = new SpellRuntime(this.spellHost());
+  }
+
+  /** What the spell runtime may do to the zone's characters. */
+  private spellHost(): SpellHost {
+    const actor = (a: unknown) => a as Actor;
+    return {
+      mw: this.mw,
+      tick: () => this.tick,
+      random: () => this.random(),
+      characters: () => this.actors.values(),
+      alive: (a) => alive(actor(a)),
+      hostile: (a, b) => this.hostile(actor(a), actor(b)),
+      creatureType: (a) => (actor(a).kind === 'player' ? 0x96 : (actor(a) as Mob).archetype.type ?? 0),
+      resist: (a, t) => {
+        const x = actor(a);
+        return x.kind === 'player' ? (x.resist[t] ?? 1) * (x.armor?.protection?.[t] ?? 1) : x.archetype.resist[t] ?? 1;
+      },
+      damage: (a, t, vector, push) => {
+        const target = actor(t);
+        if (!alive(target)) return;
+        this.applyDamage(actor(a), target, vector);
+        if (push && alive(target)) this.moveBy(target, push.x * push.d, push.z * push.d);
+      },
+      drain: (a, v, amount) => {
+        const victim = actor(v);
+        const take = Math.min(victim.hp, amount);
+        if (take <= 0 || !alive(victim)) return 0;
+        victim.hp -= take;
+        if (victim.kind === 'player') victim.statsDirty = true;
+        // Drawn dry: the death (no blow of its own).
+        if (victim.hp <= 1e-6) {
+          victim.hp = 0;
+          this.loseHp(actor(a), victim, 0);
+        }
+        return take;
+      },
+      heal: (a, amount) => {
+        const x = actor(a);
+        if (!alive(x)) return;
+        x.hp = Math.min(x.maxHp, x.hp + amount);
+        if (x.kind === 'player') x.statsDirty = true;
+      },
+      emit: (at, d) => this.broadcastAt(at, { op: SC.SPELL_EVENT, d }),
+      statusChanged: (a) => {
+        const x = actor(a);
+        if (x.kind !== 'player') return;
+        // Haste (SPED) and slows change the clip rate the movement follows (the client predicts it from PLAYER_STATS speed).
+        x.moveStats = { ...x.moveStats, clipRate: x.baseClipRate * this.playerRate(x) };
+        x.statsDirty = true;
+      },
+      summonAlly: (owner, level, at, yaw, until) => this.summonAlly(actor(owner), level, at, yaw, until),
+      dismissAlly: (a) => this.removeMob(actor(a) as Mob),
+    };
+  }
+
+  /** A player's speed from spell effects (haste, slows; a freeze stops his input instead). */
+  private playerRate(p: Player): number {
+    let rate = 1;
+    for (const st of p.statuses.values()) if (st.rate !== undefined && st.rate > 0) rate *= st.rate;
+    return rate;
+  }
+
+  /**
+   * Whether `a` may harm `b`: players and their spectral allies on one side, creatures on the
+   * other. Allies leave peaceful creatures alone.
+   */
+  private hostile(a: Actor, b: Actor): boolean {
+    if (a === b) return false;
+    const players = (x: Actor) => x.kind === 'player' || x.ally !== undefined;
+    if (players(a) === players(b)) return false;
+    if (a.kind === 'mob' && a.ally !== undefined && b.kind === 'mob' && b.archetype.passive) return false;
+    return true;
+  }
+
+  /** Summons a spectral ally (type 155) for `owner` (0x00440230: HP, weapon and resists by level). */
+  private summonAlly(owner: Actor, level: number, at: { x: number; y: number; z: number }, yaw: number, until: number): Actor | null {
+    if (owner.kind !== 'player') return null;
+    const R = SPELL_RULES;
+    const i = Math.max(0, Math.min(2, level - 1));
+    const [slash, bash, light] = R.allyDamage[i]!;
+    const base = MOB_ARCHETYPES['spectral_ally']!;
+    const id = this.spawnMob('spectral_ally', { archetype: 'spectral_ally', x: at.x, y: at.y, z: at.z, yaw: dequantizeAngle(yaw), hp: R.allyHp[i]!, resist: base.resist.map(() => R.allyResist[i]!) });
+    const m = this.actors.get(id) as Mob | undefined;
+    if (!m) return null;
+    m.ally = owner.entityId;
+    m.name = 'Spectral Ally';
+    m.damage = damageVector({ SLASH: slash, BASH: bash, LIGHT: light });
+    void until;
+    return m;
+  }
+
+  /** Takes a creature out of the zone (a dismissed ally). */
+  private removeMob(m: Mob): void {
+    if (!this.actors.has(m.entityId)) return;
+    this.magic.forget(m);
+    removeCharacter(this.mw, m.character);
+    this.grid.remove(m.entityId);
+    this.states.delete(m.entityId);
+    this.actors.delete(m.entityId);
+    for (const a of this.actors.values()) if (a.kind === 'mob') a.threat.delete(m.entityId);
+  }
+
+  /** Sends to every player within interest range of a point. */
+  private broadcastAt(at: { x: number; z: number }, msg: ServerControlMsg): void {
+    const text = JSON.stringify(msg);
+    for (const p of this.players.values()) {
+      const pp = p.character.position;
+      if (Math.hypot(pp.x - at.x, pp.z - at.z) <= INTEREST_RADIUS) this.outbox.send(p.connId, text);
+    }
   }
 
   get playerCount(): number {
@@ -672,7 +813,7 @@ export class WorldZone {
     this.grid.update(a.entityId, p.x, p.z);
   }
 
-  private spawnMob(archetypeId: string, at: ArenaDef['mobSpawns'][number]): void {
+  private spawnMob(archetypeId: string, at: ArenaDef['mobSpawns'][number]): number {
     const base = MOB_ARCHETYPES[archetypeId];
     if (!base) throw new Error(`unknown mob archetype ${archetypeId}`);
     // Original level placements carry their own HP, XP value and resists.
@@ -739,8 +880,11 @@ export class WorldZone {
       // Creatures share the humanoid rig's root-motion speeds (run, walk); no jumping.
       stats: { ...DEFAULT_MOVEMENT_STATS, jumpVelocity: 0 },
       ...(at.placement !== undefined ? { placement: at.placement } : {}),
+      statuses: new Map(),
+      timeAcc: 0,
     };
     this.register(mob);
+    return mob.entityId;
   }
 
   join(connId: number, opts: JoinOptions): number {
@@ -779,6 +923,10 @@ export class WorldZone {
       name: opts.name,
       character: createCharacter(this.mw, spawn),
       moveStats: { ...this.playerStats, clipRate: originalSpeedMultiplier(rules.attributes, level) },
+      baseClipRate: originalSpeedMultiplier(rules.attributes, level),
+      pitch: 0,
+      statuses: new Map(),
+      timeAcc: 0,
       queue: new InputQueue(),
       yaw: start ? quantizeAngle(start.yaw) : arr?.yaw !== undefined ? quantizeAngle(arr.yaw) : (opts.yaw ?? 0) & 0xffff,
       anim: ANIM.IDLE,
@@ -1003,14 +1151,13 @@ export class WorldZone {
   }
 
   /**
-   * Learns a spell (level 1), or raises a known one by a level (assumption: the original's
-   * level rule is not measured yet). False when already at the top level.
+   * Learns a spell (level 1), or raises a known one by a level (0x004BCD10: a known spell's level
+   * index + 1, capped at 2). A book of a spell already at the top is used up all the same.
    */
   private learnSpell(p: Player, spell: SpellId): boolean {
     const known = p.spells.find((s) => s.spell === spell);
     if (known) {
-      if (known.level >= MAX_SPELL_LEVEL) return false;
-      known.level++;
+      known.level = Math.min(MAX_SPELL_LEVEL, known.level + 1);
     } else {
       p.spells.push({ spell, level: 1 });
       p.selectedSpell ??= spell;
@@ -1027,42 +1174,91 @@ export class WorldZone {
     p.statsDirty = true;
   }
 
+  /** Whether a player's spell effects hold him still (frozen, the thaw's stun). */
+  private held(a: Actor): boolean {
+    return a.statuses.has('FRZE') || a.statuses.has('THAW');
+  }
+
   /**
-   * Casts the selected spell (CS_CAST_SPELL): standing, not swinging or reeling, with the mana
-   * for its level. Conjures for 1.54 s (ASM_SPELL_CONJURE), then takes effect (finishCast).
+   * Casts the selected spell (CS_CAST_SPELL; 0x0042B7A0): on the ground, not swinging or reeling,
+   * with the mana for its level (+0x20). Self spells conjure first (ASM_SPELL_CONJURE, 1.54 s)
+   * with the feet planted; the others go straight to their state, on the upper body when the
+   * player is moving. The wind-up (+0x24) shows at once; the spell takes effect on its clip's
+   * SPELL event (finishCast).
    */
   castSpell(connId: number): void {
     const p = this.players.get(connId);
-    if (!p || !alive(p) || p.cast || p.swing || p.hitUntil > this.tick || !p.character.grounded) return;
+    if (!p || !alive(p) || p.cast || p.swing || p.hitUntil > this.tick || !p.character.grounded || p.cutscene || this.held(p)) return;
     const spell = p.selectedSpell;
     const known = spell && p.spells.find((s) => s.spell === spell);
     if (!spell || !known || !CASTABLE_SPELLS.has(spell)) return;
     const values = this.spells[spell]?.[known.level - 1];
     if (!values || p.mana < values.mana) return;
-    // ASM_SPELL_CONJURE (PK15) plays at the character's clip rate.
-    p.cast = { spell, level: known.level, end: this.tick + Math.round(SPELL_CONJURE_TICKS / (p.moveStats.clipRate ?? 1)) };
+    const info = SPELL_INFO[spell];
+    const rate = p.moveStats.clipRate ?? 1;
+    const clipAt = this.tick + (info.conjure ? Math.round(SPELL_CONJURE_TICKS / rate) : 0);
+    const clip = spellClipSeconds(spell, rate);
+    const upper = !info.conjure && isLocomotionAnim(p.anim);
+    p.cast = {
+      spell, level: known.level, clipAt, upper, released: false,
+      releaseAt: clipAt + Math.max(1, Math.round(clip.release * TICK_RATE)),
+      end: clipAt + Math.max(1, Math.round(clip.end * TICK_RATE)),
+    };
     p.blocking = false;
+    p.queuedAttack = false;
+    // The wind-up and the cast sound at the hand (+0x24; fire ball and lightning sound on release).
+    const hand = this.magic.hand(p);
+    const at: [number, number, number] = [hand.x, hand.y, hand.z];
+    const quiet = spell === 'fireball' || spell === 'lightning';
+    this.broadcastAt(hand, {
+      op: SC.SPELL_EVENT,
+      d: {
+        cast: { caster: p.entityId, spell, level: known.level, phase: 'begin', ...(upper ? { upper } : {}) },
+        fx: [{ name: info.windup, level: known.level, at: [0, hand.y - p.character.position.y, 0], entity: p.entityId }],
+        ...(quiet ? {} : { sounds: [{ id: info.sounds[known.level - 1]!, at }] }),
+      },
+    });
   }
 
-  /** The conjured spell takes effect. Torch light: a light around the caster for its duration. */
+  /** The aim of a player's spells: the view heading and pitch of his latest input (the original's camera aim, 0x53C218 +0x1BC). */
+  private aimOf(p: Player): { x: number; y: number; z: number } {
+    const yaw = dequantizeAngle(p.yaw);
+    const cp = Math.cos(p.pitch);
+    return { x: -Math.sin(yaw) * cp, y: Math.sin(p.pitch), z: -Math.cos(yaw) * cp };
+  }
+
+  /**
+   * The SPELL event (0x004BCF70): with the mana still there (+0x20) the spell spends it (+0x58)
+   * and takes effect (+0x28). Torch Light recast while lit does nothing (0x004BADE0).
+   */
   private finishCast(p: Player): void {
     const c = p.cast!;
-    p.cast = null;
+    c.released = true;
     const values = this.spells[c.spell]?.[c.level - 1];
-    if (!values) return;
+    if (!values || p.mana < values.mana) return;
     if (c.spell === 'torch_light') {
-      // Recasting while the light is on spent no mana in the original (logged).
       if (p.light && p.light.until > this.tick) return;
-      if (p.mana < values.mana) return;
       p.mana -= values.mana;
       p.light = { radius: values.value1 * 0.3048, level: c.level, until: this.tick + Math.round(values.duration * TICK_RATE) };
       p.statsDirty = true;
+      const pos = p.character.position;
+      this.broadcastAt(pos, { op: SC.SPELL_EVENT, d: { cast: { caster: p.entityId, spell: c.spell, level: c.level, phase: 'release' }, fx: [{ name: 'LIGHT_CAST', level: c.level, at: [0, 6 * 0.3048, 0], entity: p.entityId }] } });
+      return;
     }
+    p.mana -= values.mana;
+    p.statsDirty = true;
+    this.broadcastAt(p.character.position, { op: SC.SPELL_EVENT, d: { cast: { caster: p.entityId, spell: c.spell, level: c.level, phase: 'release' } } });
+    this.magic.release(p, c.spell, c.level, values, this.magic.hand(p), this.aimOf(p));
   }
 
-  /** Per-tick spell state: conjuring, mana regeneration, light expiry. */
+  /** Per-tick spell state: casting, mana regeneration, light expiry. */
   private updateMagic(p: Player): void {
-    if (p.cast && this.tick >= p.cast.end) this.finishCast(p);
+    const c = p.cast;
+    if (c) {
+      if (!c.released && this.tick >= c.releaseAt) this.finishCast(p);
+      if (p.cast && this.tick >= c.end) p.cast = null;
+    }
+    // One mana point every 5 s (0x004BCFC0).
     if (p.mana < p.maxMana) {
       if (p.manaRegenAt === 0) p.manaRegenAt = this.tick + MANA_REGEN_TICKS;
       else if (this.tick >= p.manaRegenAt) {
@@ -1838,6 +2034,8 @@ export class WorldZone {
     const p = this.players.get(connId);
     if (!p) return null;
     const record = this.persistRecord(p);
+    this.magic.dropOwner(p);
+    this.magic.forget(p);
     removeCharacter(this.mw, p.character);
     this.grid.remove(p.entityId);
     this.states.delete(p.entityId);
@@ -1928,7 +2126,8 @@ export class WorldZone {
         // The client roots itself during its own swing (INPUT.ROOTED, same tick on both
         // sides); the dead do not act. The client mirrors the dead rule.
         // During a scripted sequence the player's character stands where it was (the stand-in plays).
-        if (!alive(p) || p.cutscene) this.frame.flags = 0;
+        if (!alive(p) || p.cutscene || this.held(p)) this.frame.flags = 0;
+        p.pitch = dequantizePitch(this.frame.pitch);
         const before = { x: p.character.position.x, z: p.character.position.z };
         stepCharacter(this.mw, p.character, this.frame, p.moveStats, TICK_DT);
         p.lastProcessedInput = this.frame.clientTick;
@@ -1942,7 +2141,10 @@ export class WorldZone {
         p.facingOffset = moving && !(this.frame.flags & INPUT.BLOCK) ? movementFacingOffset(this.frame.flags, this.features.diagonalMoves) : 0;
         // Hit reactions are timed movement actions, so movementAnim() covers them too.
         p.anim = movementAnim(p.blocking ? this.frame.flags : this.frame.flags & ~INPUT.BLOCK, looksGrounded(p.character), p.character.rollDir, this.features.diagonalMoves, p.character.airKind);
-        if (p.cast) p.anim = ANIM.SPELL_CONJURE;
+        if (p.cast) {
+          if (tick < p.cast.clipAt) p.anim = ANIM.SPELL_CONJURE;
+          else if (!p.cast.upper) p.anim = ANIM.SPELL_CAST + SPELLS.indexOf(p.cast.spell);
+        }
       }
       if (alive(p)) this.updateMagic(p);
       if (p.cutscene) {
@@ -1956,6 +2158,9 @@ export class WorldZone {
 
     // 3. Swings: hit windows, recovery, combo buffering.
     for (const a of this.actors.values()) if (a.swing && alive(a)) this.updateSwing(a);
+
+    // 3b. Spell objects (projectiles, explosions, storms, lightning, drains) and timed effects.
+    this.magic.step();
 
     // 4. Deaths and respawns (actors and world objects).
     if (this.objects.size && tick % 20 === 0) {
@@ -2002,17 +2207,31 @@ export class WorldZone {
   }
 
   private updateMob(m: Mob): void {
+    // Spell effects (slow, freeze, the thaw, slow time): a creature at rate r moves at r of its
+    // speed and thinks, swings and waits on a fraction r of the ticks (0x0044C3F0's rate).
+    const rate = this.magic.rate(m);
+    const moveStats = rate < 1 ? { ...m.stats, clipRate: (m.stats.clipRate ?? 1) * rate } : m.stats;
+    if (rate < 1) {
+      m.timeAcc += rate;
+      if (m.timeAcc < 1) {
+        this.pauseMob(m);
+        if (rate > 0) stepCharacter(this.mw, m.character, m.input, moveStats, TICK_DT);
+        return;
+      }
+      m.timeAcc -= 1;
+    } else m.timeAcc = 0;
     const arch = m.archetype;
     const pos = m.character.position;
     const fromSpawn = Math.hypot(pos.x - m.spawn.x, pos.z - m.spawn.z);
     m.input.flags = 0;
+    if (m.ally !== undefined) this.allyThink(m);
     // Peaceful creatures stand (or walk their path) until hit; armed ones then fight like any creature.
     if (arch.passive && m.state === 'idle' && m.waryUntil > this.tick) this.keepWary(m);
     if (arch.passive && (m.state === 'idle' || m.state === 'watch')) this.watchOrIdle(m);
     if (m.state === 'flee') this.flee(m);
     if (m.state === 'talk') this.keepTalking(m);
 
-    if (m.state === 'idle' && !arch.passive) {
+    if (m.state === 'idle' && !arch.passive && m.ally === undefined) {
       const seen = this.noticedPlayer(m);
       if (seen) {
         m.threat.set(seen.entityId, (m.threat.get(seen.entityId) ?? 0) + 1);
@@ -2028,11 +2247,11 @@ export class WorldZone {
     }
 
     if (m.state === 'chase') {
-      let target: Player | null = null;
+      let target: Actor | null = null;
       let top = 0;
       for (const [id, threat] of m.threat) {
         const p = this.actors.get(id);
-        if (!p || p.kind !== 'player' || !alive(p)) {
+        if (!p || !this.hostile(m, p) || !alive(p)) {
           m.threat.delete(id);
           continue;
         }
@@ -2075,7 +2294,7 @@ export class WorldZone {
     // (their clips' root motion); other input is ignored meanwhile.
     if (m.hitUntil > this.tick) m.input.flags = 0;
     const before = { x: m.character.position.x, z: m.character.position.z };
-    stepCharacter(this.mw, m.character, m.input, m.stats, TICK_DT);
+    stepCharacter(this.mw, m.character, m.input, moveStats, TICK_DT);
     if (m.character.rollDir === ACTION_BASH) this.rushContact(m, before);
     this.separate(m);
     m.anim = m.hitUntil > this.tick
@@ -2093,6 +2312,76 @@ export class WorldZone {
                 : m.input.flags & MOVE_MASK ? (m.input.flags & INPUT.WALK ? ANIM.WALK : ANIM.RUN) : ANIM.IDLE;
   }
 
+
+  /** A slowed creature's tick without thought: its timers and swing wait a tick. */
+  private pauseMob(m: Mob): void {
+    const t = this.tick;
+    const later = (v: number) => (v > t ? v + 1 : v);
+    if (m.swing) m.swing.start++;
+    m.hitUntil = later(m.hitUntil);
+    m.brainUntil = later(m.brainUntil);
+    m.blockUntil = later(m.blockUntil);
+    m.shieldUntil = later(m.shieldUntil);
+    m.knockdownAt = later(m.knockdownAt);
+    m.alertUntil = later(m.alertUntil);
+    m.fleeUntil = later(m.fleeUntil);
+    m.talkUntil = later(m.talkUntil);
+    m.pathWaitUntil = later(m.pathWaitUntil);
+    if (m.seq) {
+      m.seq.upperAt = later(m.seq.upperAt);
+      m.seq.hopUntil = later(m.seq.hopUntil);
+    }
+  }
+
+  /**
+   * A spectral ally (disposition 6): it fights the hostile creatures near it or its owner and
+   * otherwise keeps up with its owner. Its fights use the melee brain like any creature's.
+   */
+  private allyThink(m: Mob): void {
+    const owner = this.actors.get(m.ally!);
+    const pos = m.character.position;
+    if (m.state === 'return' || m.state === 'flee' || m.state === 'talk' || m.state === 'watch') {
+      m.state = 'idle';
+      this.calmDown(m);
+    }
+    const o = owner?.character.position;
+    const fromOwner = o ? Math.hypot(o.x - pos.x, o.z - pos.z) : 0;
+    if (m.state === 'chase' && fromOwner > ALLY_LEASH) {
+      m.threat.clear();
+      m.state = 'idle';
+      this.calmDown(m);
+    }
+    if (m.state !== 'idle') return;
+    const foe = this.allyFoe(m, owner);
+    if (foe) {
+      m.threat.set(foe.entityId, 1);
+      m.state = 'chase';
+      m.brain = 'decide';
+      m.lastPick = null;
+      return;
+    }
+    if (!o || fromOwner <= ALLY_FOLLOW) return;
+    m.yaw = quantizeAngle(yawTowards(pos.x, pos.z, o.x, o.z));
+    m.input.flags = INPUT.FORWARD | (fromOwner < ALLY_FOLLOW * 2 ? INPUT.WALK : 0);
+  }
+
+  /** The hostile creature nearest an ally or its owner, within sight range and in sight. */
+  private allyFoe(m: Mob, owner: Actor | undefined): Actor | null {
+    const pos = m.character.position;
+    const o = owner?.character.position;
+    let best: Actor | null = null;
+    let bestDist = MOB_SIGHT_RANGE;
+    for (const a of this.actors.values()) {
+      if (a.kind !== 'mob' || !alive(a) || a.archetype.passive || !this.hostile(m, a)) continue;
+      const q = a.character.position;
+      if (Math.abs(q.y - pos.y) > AGGRO_HEIGHT) continue;
+      const d = Math.min(Math.hypot(q.x - pos.x, q.z - pos.z), o ? Math.hypot(q.x - o.x, q.z - o.z) : Infinity);
+      if (d >= bestDist || !lineOfSight(this.mw, pos, q, EYE_HEIGHT)) continue;
+      best = a;
+      bestDist = d;
+    }
+    return best;
+  }
 
   /** A citizen who saw an assault: on the alert facing it, then running away; calm again after. */
   private flee(m: Mob): void {
@@ -2387,13 +2676,14 @@ export class WorldZone {
    * A hostile creature notices the nearest player on its floor within 100 ft ahead (60 degrees
    * either side of its heading) or 20 ft elsewhere, with level geometry not in between.
    */
-  private noticedPlayer(m: Mob): Player | null {
+  private noticedPlayer(m: Mob): Actor | null {
     const pos = m.character.position;
     const heading = dequantizeAngle(m.yaw);
-    let best: Player | null = null;
+    let best: Actor | null = null;
     let bestDist = Infinity;
-    for (const p of this.players.values()) {
-      if (!alive(p)) continue;
+    // Players and their spectral allies.
+    for (const p of this.actors.values()) {
+      if (!alive(p) || (p.kind !== 'player' && p.ally === undefined)) continue;
       const q = p.character.position;
       // Same floor only: original levels stack rooms.
       if (Math.abs(q.y - pos.y) > AGGRO_HEIGHT) continue;
@@ -2420,7 +2710,7 @@ export class WorldZone {
    * The original's melee brain (0x00409520), run while the creature is free to act. It heads at
    * its target every tick, then follows its current phase; 'decide' (0x004096A0) picks the next.
    */
-  private think(m: Mob, target: Player): void {
+  private think(m: Mob, target: Actor): void {
     const pos = m.character.position;
     const t = target.character.position;
     const dist = Math.hypot(t.x - pos.x, t.y - pos.y, t.z - pos.z);
@@ -2469,7 +2759,7 @@ export class WorldZone {
   }
 
   /** The next phase (0x004096A0): run in, walk in, attack, or what follows an attack. */
-  private decide(m: Mob, target: Player, dist: number): void {
+  private decide(m: Mob, target: Actor, dist: number): void {
     const pick = mobBand(dist) > 1 ? 'run'
       : dist > m.archetype.engage && !this.attacking(target) ? 'walkIn'
         : m.lastPick === 'attack' ? 'post'
@@ -2481,21 +2771,26 @@ export class WorldZone {
   }
 
   /** Whether the player is in an attacking state (state flag 0x20: swings, the rush, casting). */
-  private attacking(p: Player): boolean {
+  private attacking(p: Actor): boolean {
     // Combo steps 4 and 5 (states 103 / 104) have no flags in the state table.
-    return (p.swing !== null && !(p.swing.kind === 'normal' && p.swing.combo >= 4)) || p.cast !== null || p.character.rollDir === ACTION_BASH;
+    return (p.swing !== null && !(p.swing.kind === 'normal' && p.swing.combo >= 4)) || (p.kind === 'player' && p.cast !== null) || p.character.rollDir === ACTION_BASH;
+  }
+
+  /** Its shield is raised (a player holding block, a creature's stance or block). */
+  private shieldRaised(a: Actor): boolean {
+    return a.kind === 'player' ? a.blocking : this.mobShieldUp(a);
   }
 
   /** Whether the player has turned more than 90 degrees away from the creature (0x0040E2D0). */
-  private turnedAway(p: Player, m: Mob): boolean {
+  private turnedAway(p: Actor, m: Mob): boolean {
     const a = p.character.position;
     const b = m.character.position;
     return Math.abs(angleDiff(yawTowards(a.x, a.z, b.x, b.z), dequantizeAngle(p.yaw))) > Math.PI / 2;
   }
 
   /** Starts an attack sequence (0x00409920): a special against a raised shield, else 0x004083F0's choice. */
-  private startSequence(m: Mob, target: Player, dist: number): void {
-    const special = target.blocking && Math.floor(this.random() * 1000) > MOB_SPECIAL_ROLL * 1000;
+  private startSequence(m: Mob, target: Actor, dist: number): void {
+    const special = this.shieldRaised(target) && Math.floor(this.random() * 1000) > MOB_SPECIAL_ROLL * 1000;
     const seq = special ? chooseMobSpecial(m.shield !== null, this.random()) : chooseMobSequence(dist, this.random());
     m.seq = { ...seq, main: [...seq.main], upperAt: this.tick + MOB_HOP_SWING_DELAY, hopUntil: this.tick + MOB_HOP_TICKS };
     if (seq.hop) startTimedAction(m.character, ACTION_LUNGE); // PC07's root motion, then still
@@ -2543,9 +2838,9 @@ export class WorldZone {
    * 8 ft and neither attacking nor blocking, else raise the shield for the block clip. Without
    * one (0x0040A500): for up to 1.5 s step back while within 8 ft, stand at 8-12 ft.
    */
-  private enterPost(m: Mob, target: Player, dist: number): void {
+  private enterPost(m: Mob, target: Actor, dist: number): void {
     if (m.shield) {
-      if (mobBand(dist) === 0 && !this.attacking(target) && !target.blocking) {
+      if (mobBand(dist) === 0 && !this.attacking(target) && !this.shieldRaised(target)) {
         m.brain = 'decide';
         return;
       }
@@ -2554,7 +2849,7 @@ export class WorldZone {
   }
 
   /** One tick of the post-attack phase; false when it is over. */
-  private postAttack(m: Mob, target: Player, dist: number): boolean {
+  private postAttack(m: Mob, target: Actor, dist: number): boolean {
     if (this.tick >= m.brainUntil) return false;
     if (m.shield) return true;
     const band = mobBand(dist);
@@ -2663,7 +2958,7 @@ export class WorldZone {
       const reach = a.kind === 'player' ? PLAYER_REACH + PLAYER_RADIUS : s.reach ?? a.archetype.reach + PLAYER_RADIUS;
       const arc = a.kind === 'player' ? PLAYER_ARC_DEG : a.archetype.arcDeg;
       for (const target of this.actors.values()) {
-        if (target === a || target.kind === a.kind || !alive(target) || s.hit.has(target.entityId)) continue;
+        if (!this.hostile(a, target) || !alive(target) || s.hit.has(target.entityId)) continue;
         const tp = target.character.position;
         if (!inMeleeArc(pos.x, pos.z, yaw, tp.x, tp.z, reach, arc)) continue;
         s.hit.add(target.entityId);
@@ -2791,14 +3086,17 @@ export class WorldZone {
       const bash = dmg[1]!;
       const hit = originalWeaponHit(slash, bash, a.damageMultiplier);
       const amount = hit.amount * COMBO_MULTIPLIERS[combo - 1]!;
-      return damageVector(hit.type === 'slash' ? { SLASH: amount } : { BASH: amount });
+      // Heroism (HERO, kind 4: the damage multipliers +0x11C).
+      return this.magic.outgoing(a, damageVector(hit.type === 'slash' ? { SLASH: amount } : { BASH: amount }));
     }
     // Creatures skip the stronger-of-slash/bash and Might rules (empty stats slot 45): whole weapon vector.
-    return [...a.weapon.damage!];
+    return this.magic.outgoing(a, [...(a.damage ?? a.weapon.damage!)]);
   }
 
   /** Incoming damage (engine: Stats_TakeDamage + HP loss with flinch roll). */
   private applyDamage(attacker: Actor, target: Actor, incoming: DamageVector): void {
+    // Stone skin (STON, kind 6: the resist multipliers +0x17C).
+    incoming = this.magic.incoming(target, incoming);
     const resist = target.kind === 'player' ? target.resist : target.archetype.resist;
     const protection = target.kind === 'player' ? target.armor?.protection : undefined;
     const damage = Math.round(originalDamageTaken(incoming, resist, protection) * 100) / 100;
@@ -2836,21 +3134,26 @@ export class WorldZone {
       const fightsBack = !target.archetype.passive || target.weapon.id !== UNARMED.id;
       if (target.state !== 'chase' && fightsBack) target.state = 'chase';
       if (attacker.kind === 'player' && target.archetype.passive) this.raiseAlarm(attacker);
+      // A creature that fights back turns on whoever hurt it (a spectral ally too).
     } else {
       target.statsDirty = true;
     }
 
     if (killed) {
       target.swing = null;
+      this.magic.clearStatuses(target);
+      if (target.kind === 'player') this.magic.dropOwner(target);
       // The death clip carries the body itself (client side); no timed action keeps moving it.
       startTimedAction(target.character, 0);
       if (target.kind === 'player') target.cast = null;
       if (target.kind === 'mob') {
         target.deadUntil = this.tick + target.archetype.respawnTicks;
         target.threat.clear();
-        if (attacker.kind === 'player') {
-          reward = this.grantReward(attacker, target.archetype);
-          this.fireDeathTrigger(attacker, target.placement);
+        // A spectral ally's kills are its owner's.
+        const credit = attacker.kind === 'player' ? attacker : attacker.ally !== undefined ? this.actors.get(attacker.ally) : undefined;
+        if (credit?.kind === 'player' && target.ally === undefined) {
+          reward = this.grantReward(credit, target.archetype);
+          this.fireDeathTrigger(credit, target.placement);
         }
       } else {
         target.deadUntil = this.tick + PLAYER_RESPAWN_TICKS;
@@ -2897,7 +3200,8 @@ export class WorldZone {
       p.maxHp = playerMaxHp(p.attributes, level);
       p.maxMana = originalMaxMana(p.attributes, level);
       p.damageMultiplier = originalDamageMultiplier(p.attributes, level);
-      p.moveStats = { ...p.moveStats, clipRate: originalSpeedMultiplier(p.attributes, level) };
+      p.baseClipRate = originalSpeedMultiplier(p.attributes, level);
+      p.moveStats = { ...p.moveStats, clipRate: p.baseClipRate * this.playerRate(p) };
       p.hp = Math.min(p.maxHp, p.hp + (p.maxHp - before));
     }
   }
@@ -2948,6 +3252,7 @@ export class WorldZone {
         spells: p.spells.map((s) => ({ ...s })),
         spell: p.selectedSpell,
         light: p.light ? p.light.radius : 0,
+        statuses: [...p.statuses.values()].map((st) => ({ tag: st.tag, seconds: Math.max(0, (st.until - this.tick) / TICK_RATE) })),
         speed: p.moveStats.clipRate ?? 1,
         name: p.name,
         attributes: { ...p.attributes },
@@ -2979,7 +3284,8 @@ export class WorldZone {
         op: SC.ENTITY_SPAWN,
         d: {
           id, kind, name: other.name, maxHp: other.maxHp,
-          ...(other.kind === 'mob' ? { archetype: other.archetype.id, ...(other.placement !== undefined ? { placement: other.placement } : {}) } : {}),
+          ...(other.kind === 'mob' ? { archetype: other.archetype.id, ...(other.placement !== undefined ? { placement: other.placement } : {}), ...(other.ally !== undefined ? { ally: true } : {}) } : {}),
+          ...(other.statuses.size ? { statuses: [...other.statuses.keys()] } : {}),
         },
       });
     }

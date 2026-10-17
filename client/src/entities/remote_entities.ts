@@ -38,6 +38,9 @@ export class RemoteEntities {
   /** Entities a scripted sequence is playing on this client: not moved by snapshots meanwhile. */
   readonly scripted = new Set<number>();
 
+  /** Animation rates set by spell effects (slowed 0.3, frozen 0), by entity. */
+  readonly rates = new Map<number, number>();
+
   /** Torch lights carried by other players (Torch Light spell). */
   private readonly lights = new Map<number, THREE.PointLight>();
 
@@ -93,6 +96,7 @@ export class RemoteEntities {
     this.scene.remove(e.avatar.object);
     e.avatar.dispose();
     this.byId.delete(id);
+    this.rates.delete(id);
     this.updateLight(id, 0, e.avatar.object.position);
   }
 
@@ -119,7 +123,7 @@ export class RemoteEntities {
       const upper = (this.sample.flags >> 1) & 3;
       const codes = e.info.kind === 'mob' ? MOB_UPPER_SWING_CODES : UPPER_SWING_CODES;
       e.avatar.setUpperSwing?.(upper ? codes[upper - 1]! : null, (this.sample.flags >> 3) & 1);
-      e.avatar.update(dt);
+      e.avatar.update(dt * (this.rates.get(e.id) ?? 1));
     }
   }
 }

@@ -50,6 +50,13 @@ export function wallDistance(mw: MovementWorld, feet: { x: number; y: number; z:
   return hit ? hit.timeOfImpact : null;
 }
 
+/** Distance along a unit direction from a point to level geometry (within `distance`), or null. */
+export function rayDistance(mw: MovementWorld, from: { x: number; y: number; z: number }, dir: { x: number; y: number; z: number }, distance: number): number | null {
+  const ray = new mw.rapier.Ray(from, dir);
+  const hit = mw.world.castRay(ray, distance, true, undefined, CHARACTER_GROUPS);
+  return hit ? hit.timeOfImpact : null;
+}
+
 /** Whether level geometry lies between two points `height` above their feet. */
 export function lineOfSight(mw: MovementWorld, from: { x: number; y: number; z: number }, to: { x: number; y: number; z: number }, height: number): boolean {
   const d = { x: to.x - from.x, y: to.y - from.y, z: to.z - from.z };

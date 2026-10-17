@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ANIM, INPUT, TICK_DT, SIDE_SWING_CHAIN_SECONDS, SIDE_SWING_RECHAIN_TICKS, gameplayFeatures, type GameplayFeatures, attackAnim, attackMotion, isHitAction, isLayeredSwing, dequantizeAngle, movementAnim, looksGrounded, movementFacingOffset, type AttackKind, attackTiming, COMBO_QUEUE_FRACTION, COMBO_MULTIPLIERS, type Character, type InputFrame, type Vec3, setCharacterState } from '@crusaders/shared';
+import { ANIM, INPUT, TICK_DT, isLocomotionAnim, SIDE_SWING_CHAIN_SECONDS, SIDE_SWING_RECHAIN_TICKS, gameplayFeatures, type GameplayFeatures, attackAnim, attackMotion, isHitAction, isLayeredSwing, dequantizeAngle, movementAnim, looksGrounded, movementFacingOffset, type AttackKind, attackTiming, COMBO_QUEUE_FRACTION, COMBO_MULTIPLIERS, type Character, type InputFrame, type Vec3, setCharacterState } from '@crusaders/shared';
 import type { Avatar } from './avatar.ts';
 
 /**
@@ -39,6 +39,11 @@ export class LocalPlayer {
   private swingLeft = 0;
   /** Seconds of ASM_SPELL_CONJURE left (the feet stay planted, no swings). */
   private castLeft = 0;
+  /** Then seconds of the spell's own state left, its ANIM, its ASM state and whether it plays on the upper body. */
+  private castClip = 0;
+  private castAnim: number = ANIM.IDLE;
+  private castUpper = false;
+  private castCount = 0;
   private combo = 0;
   /** Root motion of the swing just started, sent with the next input (0 = none). */
   private pendingMotion = 0;
@@ -91,6 +96,7 @@ export class LocalPlayer {
       this.queued = false;
       this.pendingMotion = 0;
       this.castLeft = 0;
+      this.castClip = 0;
     }
     const moving = !this.dead && (input.flags & MOVE_MASK) !== 0 && !(input.flags & INPUT.ROOTED);
     // On diagonals the body turns into the direction of travel (as the server replicates it).
@@ -110,7 +116,7 @@ export class LocalPlayer {
    * the next combo step (the server queues it too), or null.
    */
   swing(cameraYaw: number, kind: AttackKind = 'normal'): AttackKind | 'queued' | null {
-    if (this.dead || this.castLeft > 0 || isHitAction(this.character.rollDir)) return null;
+    if (this.dead || this.casting || isHitAction(this.character.rollDir)) return null;
     const side = (k: AttackKind) => k === 'left' || k === 'right';
     if (this.swingLeft > 0) {
       // The combo routine (0x0042CA20): once 10 % of a combo swing has played, a request queues
@@ -152,10 +158,24 @@ export class LocalPlayer {
     return this.heading;
   }
 
-  /** Starts conjuring a spell locally (the server confirms; it roots the caster the same way). */
-  startCast(seconds: number): boolean {
-    if (this.dead || this.swingLeft > 0 || this.castLeft > 0 || !this.character.grounded || isHitAction(this.character.rollDir)) return false;
-    this.castLeft = seconds;
+  /** A cast in progress (conjure or the spell's state). */
+  get casting(): boolean {
+    return this.castLeft > 0 || this.castClip > 0;
+  }
+
+  /**
+   * Starts a cast locally (the server confirms and roots the caster the same way): the conjure
+   * (`conjure` seconds, 0 for the spells that skip it), then the spell's state for `clip`
+   * seconds - on the upper body when cast on the move (no conjure, moving).
+   */
+  startCast(plan: { conjure: number; clip: number; anim: number; state: string }): boolean {
+    if (this.dead || this.swingLeft > 0 || this.casting || !this.character.grounded || isHitAction(this.character.rollDir)) return false;
+    this.castLeft = plan.conjure;
+    this.castClip = plan.clip;
+    this.castAnim = plan.anim;
+    this.castUpper = plan.conjure === 0 && isLocomotionAnim(this.moveAnim);
+    this.castCount++;
+    if (this.castUpper) this.avatar.setUpperClip?.(plan.state, this.castCount);
     return true;
   }
 
@@ -168,7 +188,7 @@ export class LocalPlayer {
 
   /** Own swing playing: the feet stay planted (sent as INPUT.ROOTED). */
   get rooted(): boolean {
-    return (this.swingLeft > 0 && !isLayeredSwing(this.kind)) || this.castLeft > 0;
+    return (this.swingLeft > 0 && !isLayeredSwing(this.kind)) || this.castLeft > 0 || (this.castClip > 0 && !this.castUpper);
   }
 
   /** A sequence left the stand-in here: the prediction goes on from it (the server moves Drake there too). */
@@ -212,9 +232,13 @@ export class LocalPlayer {
       this.sinceSwing += dt;
     }
     if (this.castLeft > 0) this.castLeft -= dt;
+    else if (this.castClip > 0) this.castClip -= dt;
     const swinging = this.swingLeft > 0 && !this.dead;
     const layered = swinging && isLayeredSwing(this.kind);
-    const anim = this.dead ? ANIM.DEAD : this.castLeft > 0 ? ANIM.SPELL_CONJURE : swinging && !layered ? attackAnim(this.kind, this.combo) : this.moveAnim;
+    const anim = this.dead ? ANIM.DEAD
+      : this.castLeft > 0 ? ANIM.SPELL_CONJURE
+        : this.castClip > 0 && !this.castUpper ? this.castAnim
+          : swinging && !layered ? attackAnim(this.kind, this.combo) : this.moveAnim;
     this.avatar.setState(anim, this.swingTime, this.swingCount);
     // Side and air swings play on the upper body over the legs' clip.
     this.avatar.setUpperSwing?.(layered ? this.kind : null, this.swingCount);

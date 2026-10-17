@@ -3,7 +3,7 @@ import type { MoverMotion } from '../../arena/mover.ts';
 import type { WorldObjectDef } from '../../arena/types.ts';
 import { JUMP_KINDS } from '../../constants.ts';
 import { INPUT, SC } from '../opcodes.ts';
-import type { SpellId } from '../../game/spells.ts';
+import type { SpellId, StatusTag } from '../../game/spells.ts';
 import type { ItemType } from '../../game/items.ts';
 import type { GameplayFeatures } from '../../game/features.ts';
 import type { QuestLog } from '../../game/story.ts';
@@ -41,7 +41,12 @@ export type EntityKind = 'player' | 'mob';
 export interface EntitySpawnMsg {
   op: typeof SC.ENTITY_SPAWN;
   /** `placement`: a creature of an original level, its index in the act's placements. */
-  d: { id: number; kind: EntityKind; name: string; maxHp: number; archetype?: string; placement?: number };
+  d: {
+    id: number; kind: EntityKind; name: string; maxHp: number; archetype?: string; placement?: number;
+    /** Timed spell effects on it now (their looks), and whether it fights on the players' side (spectral ally). */
+    statuses?: StatusTag[];
+    ally?: boolean;
+  };
 }
 
 /** Sent to the owning player on entry and whenever any of these values change. */
@@ -61,6 +66,8 @@ export interface PlayerStatsMsg {
     spell: SpellId | null;
     /** Torch light around the player: radius in metres (0 = off). */
     light: number;
+    /** Timed spell effects on the player and their seconds left. */
+    statuses?: { tag: StatusTag; seconds: number }[];
     /** Speed multiplier (stats +0x24C): the rate the character's clips play at, x 1000/30 fps. */
     speed?: number;
     /** Character name, as the statistics screen (F1) heads it. */
@@ -103,6 +110,35 @@ export interface CombatEventMsg {
     impact?: number;
     /** Present when the attacker is a player who got rewarded for the kill (loot = item names added). */
     reward?: { xp: number; gold: number; loot?: string[] };
+  };
+}
+
+type V3 = [number, number, number];
+
+/**
+ * What the spell objects show and sound (SC.SPELL_EVENT), each part optional. Positions are
+ * world metres; `level` is 1-3 (effects.stg variants level - 1).
+ */
+export interface SpellEventMsg {
+  op: typeof SC.SPELL_EVENT;
+  d: {
+    /** A cast begins (wind-up effect and sound at the hand; `upper`: on the upper body while moving) or takes effect. */
+    cast?: { caster: number; spell: SpellId; level: number; phase: 'begin' | 'release'; upper?: boolean };
+    /** effects.stg effects; `entity`: follows that character, `at` relative to its feet. */
+    fx?: { name: string; level: number; at: V3; dir?: V3; entity?: number }[];
+    sounds?: { id: number; at: V3 }[];
+    /** A flying spell (fire ball, slow, snap freeze): its state; `end` when it is gone. */
+    projectile?: { id: number; spell: SpellId; level: number; pos: V3; vel: V3; end?: boolean };
+    /** A growing sphere (explosions, holy wrath, revelation): to `radius` over `seconds`. */
+    burst?: { spell: SpellId; level: number; at: V3; radius: number; seconds: number };
+    /** Lightning bolts. */
+    bolts?: { from: V3; to: V3 }[];
+    /** Soul drinker: life flowing from one character to another for `seconds` (0 = stop). */
+    drain?: { id: number; from: number; to: number; seconds: number; level: number };
+    /** A timed effect starts (`seconds` left) or ends on a character. */
+    status?: { target: number; tag: StatusTag; on: boolean; seconds?: number; level?: number }[];
+    /** A short light (r, g, b 0-255) fading over `seconds`. */
+    light?: { at: V3; color: V3; radius: number; seconds: number };
   };
 }
 
@@ -232,7 +268,8 @@ export type ServerControlMsg =
   | QuestLogMsg
   | StoryMessageMsg
   | StorySoundMsg
-  | ShopMsg;
+  | ShopMsg
+  | SpellEventMsg;
 
 /** Animation state ids carried in snapshot `anim`. */
 export const ANIM = {
@@ -293,6 +330,8 @@ export const ANIM = {
   JUMP: 38,
   /** Soft landing (ASM_LAND_SOFT, PD03). */
   LAND_SOFT: 44,
+  /** A spell's own state after the conjure (or at once): SPELL_CAST + its index in SPELLS (ASM_SPELL_*). */
+  SPELL_CAST: 45,
 } as const;
 
 /** Animation for a character's own movement state (roll, jump, duck, airborne, locomotion, idle). */

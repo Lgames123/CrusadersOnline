@@ -621,3 +621,26 @@ Trade (0x46E290, mode 5): dropping a shop item into the bag or a worn slot costs
 
 The stock differs per act, so it changes as the story goes on: Citadel (Ci1b / 2b / 9b) Longsword of Quality, Metal Shield, Scale Armor, potions; Ci3b / 4b Longsword of the Crusader, Dragon Scale Armor, Light Plate Mail; Cador Sul (Cs1b / 2b) Mace, Scale Armor, Long Sword, Cs2b also a Torch Light Spell Book, Cs3b Holy Avenger, Heavy Plate Mail, Shield of Swiftness in Action; Corantha two shops per act (Co1a/2a/8a weapons and armour, Co3a/9a, Co4a the finest: Divine Justice, Boomer Axe, Enoch's Plate of Might); Duskwood (Du1c–Du9c) potions and the Dasher Hand Bow, Du3c Chl'Tk. 25 shops in all.
 
+
+## 20. Spells (decompiled, 2026-10-17)
+
+**Spell book.** 0x004BC720 builds eleven spell objects (slot -> object by 0x004BD270: +0x54 torch, +0x94 fire ball, +0xD8 slow, +0x118 freeze, +0x15C stone skin, +0x19C lightning, +0x1E4 heroism, +0x228 ally, +0x26C revelation, +0x2AC holy wrath, +0x300 soul drinker). Each keeps per level (index 0-2 at +6) mana (+8), duration (+0x10), value1 (+0x1C) and value2 (+0x28), filled from default.ctx `S` rows (0x00442000 -> 0x004BAC80). Vtable slots: +0x1C name string (0x5E1 + 3 x slot + level), +0x20 has-mana, +0x24 wind-up (effect and cast sound), +0x28 release, +0x30 per-frame update while active, +0x58 spend mana, +0x5C load the level's sound (table 0x004F654C: 313-315, 316-318, 322, 325, 324, 335/522/522, 319/319/351, 323, 327, 326, 321). Known mask at +2 of 0x00630C38; a book of a known spell raises the level index by one, capped at 2 (0x004BCD10). Mana: +1 every 5000 ms (0x004BCFC0).
+
+**Casting.** Input (0x0042B7A0 standing; 0x0042AFC0 / 0x0042BFE0 moving): self spells enter state 0x39 (ASM_SPELL_CONJURE) with the spell's state queued in +0xAC (0x2F torch, 0x32 freeze, 0x33 stone skin, 0x35 heroism, 0x36 ally and revelation, 0x37 holy wrath); fire ball 0x30, slow 0x31, lightning 0x34 and soul drinker 0x38 go straight to their state, as an upper-body layer while moving. The clip's SPELL event (0x00457D20 -> 0x004BCF70) checks the mana again and releases. Drake's SPELL frames: PK01 9 of 28, PK02 12 of 29, PK04 27 of 48, PK05 19 of 33. A hit reaction aborts the cast.
+
+**Releases** (objects from per-class pools, factories at 0x004E2384):
+- Torch (0x004BADE0): LIGHT_CAST, a light for the duration; recast while lit does nothing.
+- Fire ball (0x004BAF80 / 0x004BB130, class 0): 100 ft/s, life 50 s; level 3 throws three at 60 ft/s, ±0.2 sideways; levels 2-3 home (cone cos 80°, 180°/s; 0x004BE010 / 0x004BE220). Impact: FIREBALL_TARGET or FIREBALL_EXPLODE, sound 0x210, explosion (class 1, 0x004BE900): radius grows 30 / 50 / 80 ft/s for 0.25 s, FIRE = value1, knock-back 15.
+- Slow (0x004BB3F0): projectile (class 5); level 1 puts SLOW on the creature hit (status kind 1, x value1 for the duration), level 2 bursts (class 6) slowing all in it, level 3 puts SLTI on the caster (kind 8: the world slowed, the caster x4 in 0x0044C3F0).
+- Freeze (0x004BB5A0 -> 0x0043EEC0, class 4): a target in a 20° cone within 300 ft (0x00439A60); ice storm (class 13, 0x004C1370), 5 ft for 5 s: FRZE (kind 2) for duration x WATER resist, immune at 0.25 or less (0x004C1FF0). Thaw (0x0047E9B0): SNAPFREEZE_THAW, sound 0x20B, shards, kind 1 at 0 for 800 ms.
+- Stone skin (0x004BB6E0): STON kind 6 = resist multipliers (+0x17C) x value1 on SLASH..WATER; STO2 kind 13 = model texture variant 6 / 8 / 10.
+- Lightning (0x004BB910 / 0x004BB9F0): the nearest creature within cos 0.8 of the aim and 64 ft (0x004BD320), else 50 ft ahead; AIR value1; further strikes 250 ms apart at the next creature within 64 ft (0x004BD470).
+- Heroism (0x004BBC70): SPED kind 0 (+0xE4 x value2), HERO kind 4 (damage multipliers +0x11C: SLASH and BASH x value1).
+- Spectral ally (0x004BBF10, 0x00440230): type 155 10 ft ahead (6 ft clear needed), HP 80 / 100 / 120, weapon SLASH / BASH 15/15, 20/20, 20/20 + LIGHT 50, resist 1 / 0.8 / 0.6, disposition 6; replaced on recast, ALLY_APPEAR on arrival and at its end.
+- Revelation (0x00440D70, class 14): a pulse to value2 (50 ft) over 0.1 s that shows class 0xCB objects (not identified).
+- Holy wrath (0x0043FD30, class 8): a ring growing to value2 ft over 0.5 s, LIGHT value1 (DARK when a creature casts it: UNHOLY_WRATH_CAST), knock-back 10, only on the types of 0x004586D0 (0x74, 0x86, 0x8D, 0x8F-0x93, 0x96, 0x9B).
+- Soul drinker (0x0043F950, class 7, 0x004C17D0-0x004C19B0): a target in a 12° cone within 100 ft; value1 HP over 5 s to the caster; against the 0x004586D0 types the flow reverses.
+
+**Status objects** (pool 0x0058DB08, 0x54 bytes, vtable 0x004E2128): kind +4, value +8, descriptor +0x10, tag +0x40, owner +0x44; one per tag per character. Recompute by kind (0x004F326C): 0 speed x (+0xE4), 1 and 2 rate x (+0xE8), 3 bonus damage +, 4 damage x, 5 absorb +, 6 resist x, 8 SLTI, 9-12 attributes +, 13 model texture. On add 0x004F3234, on removal 0x004F32DC.
+
+Creature casters use their own spell instances (0x004BD760; difficulty overrides 0x004BD7C0): not implemented yet.

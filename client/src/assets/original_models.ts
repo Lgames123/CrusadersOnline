@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { ANIM, CREATURE_TEMPLATES, ORIGINAL_CLIP_FPS, ORIGINAL_ROLLS, isAttackAnim, isLocomotionAnim, npcArchetypeId, type AttackKind } from '@crusaders/shared';
+import { ANIM, CREATURE_TEMPLATES, ORIGINAL_CLIP_FPS, ORIGINAL_ROLLS, SPELLS, SPELL_INFO, isAttackAnim, isLocomotionAnim, npcArchetypeId, type AttackKind } from '@crusaders/shared';
 import type { Avatar, AvatarKind } from '../entities/avatar.ts';
 import type { DrakeOutfit } from './item_models.ts';
 
@@ -205,6 +205,8 @@ const MODELS: Record<string, { file: string; texture?: string; clips: ClipMap | 
   ice_titan: { file: 'male02', texture: 'male02icetitan', clips: null, equipment: { right: 'bluntclub' } },
   black_knight: { file: 'male01b', texture: 'male01bblackknight', clips: null, equipment: { right: 'broadsword03', left: 'metalshield02' } },
   deceiver: { file: 'deceiver', clips: null, equipment: { right: 'standardmace' } },
+  // The Spectral Ally spell's creature (type 155: Male04b, texture Male04bGhost; Long Sword, Wooden Shield).
+  spectral_ally: { file: 'male04b', texture: 'male04bghost', clips: null, equipment: BASIC_EQUIPMENT },
   skeleton_warrior: {
     file: 'skeletonwarriorcollision',
     equipment: BASIC_EQUIPMENT,
@@ -227,7 +229,7 @@ class OriginalAvatar implements Avatar {
     // Every sword swing leaves one but the low chop while ducking (playtest); side and air
     // swings play on the upper body over the legs' clip.
     const a = this.anim;
-    if (!((isAttackAnim(a) && a !== ANIM.ATTACK_LOW && a !== ANIM.ATTACK_BASH) || this.upperSwing)) return null;
+    if (!((isAttackAnim(a) && a !== ANIM.ATTACK_LOW && a !== ANIM.ATTACK_BASH) || (this.upperSwing && !this.upperIsCast))) return null;
     let b = this.bladeLocal;
     if (b === undefined || (b && b.held !== b.mount.children[0])) b = this.bladeLocal = findBlade(this.object);
     if (!b) return null;
@@ -296,6 +298,11 @@ class OriginalAvatar implements Avatar {
     if (anim === ANIM.STUNNED) return { name: m.impacts?.[0] ?? m.idle, loop: false };
     if (anim === ANIM.ATTACK_BASH) return { name: m.bash ?? m.attacks[0]!, loop: false };
     if (anim === ANIM.SPELL_CONJURE) return { name: m.conjure ?? m.idle, loop: false };
+    // A spell's own state (models.ctx B ASM_SPELL_*; PK01 / PK02 / PK04 / PK05 for Drake).
+    if (anim >= ANIM.SPELL_CAST && anim < ANIM.SPELL_CAST + SPELLS.length) {
+      const own = m.asm?.[SPELL_INFO[SPELLS[anim - ANIM.SPELL_CAST]!].asm];
+      return { name: (own && this.clips.has(own) ? own : undefined) ?? m.conjure ?? m.idle, loop: false };
+    }
     // Raise the shield once and hold the final pose.
     if (anim === ANIM.BLOCK) return { name: m.block, loop: false };
     if (anim === ANIM.RUN) return { name: m.run, loop: true };
@@ -433,6 +440,8 @@ class OriginalAvatar implements Avatar {
   /** Upper-body swing in progress (side / air swings) and the seconds it has left. */
   private upperSwing: { action: THREE.AnimationAction; left: number } | null = null;
   private upperSwingKey = '';
+  /** The upper-body layer plays a spell's state (cast while moving), not a swing: no blade trail. */
+  private upperIsCast = false;
   private baseClip: THREE.AnimationClip | null = null;
   private baseLoop = true;
   private baseScale = 1;
@@ -472,17 +481,19 @@ class OriginalAvatar implements Avatar {
     return this.shieldUp || this.upperSwing !== null;
   }
 
-  setUpperSwing(kind: AttackKind | null, id: number): void {
-    const key = kind ? `${kind}:${id}` : '';
+  /** A spell's state on the upper body (fire ball, slow, lightning, soul drinker cast on the move); `id` changes per cast. */
+  setUpperClip(state: string | null, id: number): void {
+    const name = state ? this.map.asm?.[state] : undefined;
+    const clip = name ? this.clips.get(name) : undefined;
+    if (!clip || this.anim === ANIM.DEAD) return;
+    const key = `cast:${state}:${id}`;
     if (key === this.upperSwingKey) return;
     this.upperSwingKey = key;
-    if (!kind || this.anim === ANIM.DEAD) return; // a swing ends with its clip
-    const m = this.map;
-    // Side swings and the air swing (Drake); a creature's hop swing plays its own attack's clip.
-    const name = kind === 'left' ? m.attackLeft : kind === 'right' ? m.attackRight : kind === 'low' ? m.attackLow
-      : kind === 'overhead' ? m.attackOverhead : kind === 'normal' ? m.attacks[0] : (m.attacks[1] ?? m.attacks[0]);
-    const clip = name ? this.clips.get(name) : undefined;
-    if (!clip) return;
+    this.playUpper(clip);
+    this.upperIsCast = true;
+  }
+
+  private playUpper(clip: THREE.AnimationClip): void {
     const was = this.layered;
     this.upperSwing?.action.stop();
     const action = this.mixer.clipAction(this.upperOf(clip));
@@ -492,7 +503,24 @@ class OriginalAvatar implements Avatar {
     action.timeScale = this.clipScale;
     action.fadeIn(0.05).play();
     this.upperSwing = { action, left: clip.duration / action.timeScale };
+    this.upperIsCast = false;
     if (!was && this.baseClip) this.play(this.baseClip, this.baseLoop, this.baseScale);
+  }
+
+  setUpperSwing(kind: AttackKind | null, id: number): void {
+    const key = kind ? `${kind}:${id}` : '';
+    // A cast on the upper body runs out on its own.
+    if (!kind && this.upperSwingKey.startsWith('cast:')) return;
+    if (key === this.upperSwingKey) return;
+    this.upperSwingKey = key;
+    if (!kind || this.anim === ANIM.DEAD) return; // a swing ends with its clip
+    const m = this.map;
+    // Side swings and the air swing (Drake); a creature's hop swing plays its own attack's clip.
+    const name = kind === 'left' ? m.attackLeft : kind === 'right' ? m.attackRight : kind === 'low' ? m.attackLow
+      : kind === 'overhead' ? m.attackOverhead : kind === 'normal' ? m.attacks[0] : (m.attacks[1] ?? m.attacks[0]);
+    const clip = name ? this.clips.get(name) : undefined;
+    if (!clip) return;
+    this.playUpper(clip);
   }
 
   setShield(up: boolean): void {
@@ -546,6 +574,7 @@ class OriginalAvatar implements Avatar {
     if (this.upperSwing && (this.upperSwing.left -= dt) <= 0) {
       this.upperSwing.action.fadeOut(0.1);
       this.upperSwing = null;
+      this.upperIsCast = false;
       if (!this.layered && this.baseClip) this.play(this.baseClip, this.baseLoop, this.baseScale);
     }
     if (this.reactLeft > 0 && (this.reactLeft -= dt) <= 0) {

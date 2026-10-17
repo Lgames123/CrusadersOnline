@@ -130,6 +130,40 @@
         "DATABASE_URL": "pglite:local/pgdata-story"
       },
       "port": 8190
+    },
+    {
+      "name": "spells-server",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/server",
+        "start"
+      ],
+      "env": {
+        "SERVER_PORT": "8191",
+        "ARENA": "synthetic-arena",
+        "DATABASE_URL": "pglite:local/pgdata-spells",
+        "DEV_GUEST_SPELLS": "slow:1,soul_drinker:1,spectral_ally:1,revelation:1,torch_light:3,lightning:2",
+        "DEV_GUEST_XP": "60000"
+      },
+      "port": 8191
+    },
+    {
+      "name": "spells-client",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/client",
+        "exec",
+        "vite",
+        "--port",
+        "3101",
+        "--strictPort"
+      ],
+      "env": {
+        "GAME_SERVER_URL": "http://127.0.0.1:8191"
+      },
+      "port": 3101
     }
   ]
 }

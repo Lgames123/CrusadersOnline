@@ -52,6 +52,8 @@ export const SC = {
   STORY_SOUND: 0x50,
   /** A shop opened for this player, or its offer after a trade: items and prices. */
   SHOP: 0x51,
+  /** Spells: casts, projectiles, bursts, bolts, drains and timed effects on characters, for every player near. */
+  SPELL_EVENT: 0x52,
 } as const;
 
 /** Input flag bits carried in CS_PLAYER_INPUT. */

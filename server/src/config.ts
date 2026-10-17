@@ -41,6 +41,12 @@ export interface ServerConfig {
    * arena, to test a spot of a level (e.g. a scripted sequence's trigger) without walking there.
    */
   devGuestSpawn: { x: number; y: number; z: number } | null;
+  /**
+   * Development only: spells guests know (DEV_GUEST_SPELLS, "fireball:2,heroism:1" or "all:3")
+   * and their experience (DEV_GUEST_XP), to try spells without finding their books.
+   */
+  devGuestSpells: string | null;
+  devGuestXp: number;
   /** Name of this world on the server selection screen (REALM_NAME). */
   realmName: string;
 }
@@ -83,6 +89,8 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     arena: process.env['ARENA'] ?? 'synthetic-arena',
     generatedDir: path.resolve(REPO_ROOT, process.env['GENERATED_DIR'] ?? 'local/generated'),
     devGuestSpawn: env === 'production' ? null : parsePoint(process.env['DEV_GUEST_SPAWN']),
+    devGuestSpells: env === 'production' ? null : process.env['DEV_GUEST_SPELLS'] ?? null,
+    devGuestXp: env === 'production' ? 0 : Math.max(0, Number(process.env['DEV_GUEST_XP'] ?? 0) || 0),
     realmName: (process.env['REALM_NAME'] ?? '').trim().slice(0, 32) || 'Ardon',
     ...overrides,
   };

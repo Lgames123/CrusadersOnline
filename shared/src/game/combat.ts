@@ -373,6 +373,8 @@ export interface MobArchetype {
   respawnTicks: number;
   /** Peaceful creature (citizens, guards, merchants): never aggressive, cannot be hit. */
   passive?: boolean;
+  /** The creature type id (template table, 113-162): what spells test (holy wrath, soul drinker, freeze resist). */
+  type?: number;
 }
 
 /**
@@ -472,7 +474,20 @@ export const MOB_ARCHETYPES: Record<string, MobArchetype> = {
     id: 'deceiver', name: 'Deceiver', maxHp: 201, xpReward: 250, weapon: 'mace', shield: null, engage: 5 * 0.3048,
     resist: [0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 1, 0],
   }),
+  // The Spectral Ally spell's creature (type 155, disposition 6: on the caster's side; 0x00440230).
+  // HP, weapon damage and resists are set per spell level when it is summoned.
+  spectral_ally: meleeVariant(SKELETON_WARRIOR, {
+    id: 'spectral_ally', name: 'Spectral Ally', maxHp: 80, xpReward: 0, goldMin: 0, goldMax: 0, respawnTicks: ticks(3_600_000),
+    resist: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], leashRadius: Infinity,
+  }),
 };
+
+/** Creature type ids of the melee archetypes (the template table's records). */
+const ARCHETYPE_TYPES: Readonly<Record<string, number>> = {
+  skeleton_warrior: 145, skeleton_ghost: 146, shadow: 147, dark_mage: 143, dark_master: 144, dasher_brute: 133,
+  ogre_outlaw: 131, dwarf_rebel: 124, dwarf_zealot: 125, ice_titan: 135, black_knight: 116, deceiver: 134, spectral_ally: 155,
+};
+for (const [id, type] of Object.entries(ARCHETYPE_TYPES)) MOB_ARCHETYPES[id]!.type = type;
 
 /**
  * Peaceful creatures of the original levels (placements whose disposition is not hostile), one
@@ -483,7 +498,7 @@ const NPC_ARCHETYPES: Record<string, MobArchetype> = Object.fromEntries(
     npcArchetypeId(Number(type)),
     meleeVariant(SKELETON_WARRIOR, {
       id: npcArchetypeId(Number(type)), name: t.name, passive: true, maxHp: 100, xpReward: 0, goldMin: 0, goldMax: 0, respawnTicks: ticks(60_000),
-      weapon: t.weapon ?? 'unarmed', shield: t.shield, resist: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+      weapon: t.weapon ?? 'unarmed', shield: t.shield, resist: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], type: Number(type),
     }),
   ]),
 );

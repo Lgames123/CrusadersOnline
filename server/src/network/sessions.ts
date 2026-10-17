@@ -1,5 +1,5 @@
 import type { Logger } from 'pino';
-import { CS, LEVEL_PREFIX, SC, parseClientControl, type ExitCrossing, type ServerControlMsg } from '@crusaders/shared';
+import { CS, LEVEL_PREFIX, SC, SPELLS, decodeSpells, encodeSpells, parseClientControl, type ExitCrossing, type KnownSpell, type ServerControlMsg } from '@crusaders/shared';
 import type { Account, TicketStore } from '../auth/tickets.ts';
 import type { CharacterPersistRecord, CharacterRepository } from '../persistence/characters.ts';
 import type { JoinOptions, PersistRecord, TransferState } from '../simulation/world_zone.ts';
@@ -54,7 +54,13 @@ export class SessionManager implements TransportHandlers {
     zones: ZoneManager,
     characters: CharacterRepository,
     log: Logger,
-    opts: { defaultArena: string; devGuestSpawn?: { x: number; y: number; z: number } | null; persist: (records: CharacterPersistRecord[]) => void },
+    opts: {
+      defaultArena: string;
+      devGuestSpawn?: { x: number; y: number; z: number } | null;
+      devGuestSpells?: string | null;
+      devGuestXp?: number;
+      persist: (records: CharacterPersistRecord[]) => void;
+    },
   ) {
     this.tickets = tickets;
     this.zones = zones;
@@ -63,9 +69,16 @@ export class SessionManager implements TransportHandlers {
     this.defaultArena = opts.defaultArena;
     this.persist = opts.persist;
     this.devGuestSpawn = opts.devGuestSpawn ?? null;
+    const all = /^all:(\d)$/.exec(opts.devGuestSpells ?? '');
+    this.devGuestSpells = all ? SPELLS.map((spell) => ({ spell, level: Number(all[1]) })) : decodeSpells(opts.devGuestSpells);
+    this.devGuestSpells = decodeSpells(encodeSpells(this.devGuestSpells));
+    this.devGuestXp = opts.devGuestXp ?? 0;
   }
 
   private readonly devGuestSpawn: { x: number; y: number; z: number } | null;
+  /** Development only: what guests know and their experience (DEV_GUEST_SPELLS / DEV_GUEST_XP). */
+  private readonly devGuestSpells: KnownSpell[];
+  private readonly devGuestXp: number;
 
   private zoneOf(s: Session): ZoneHost | null {
     return this.zones.host(s.zone);
@@ -281,7 +294,12 @@ export class SessionManager implements TransportHandlers {
   private async enterWorld(s: Session, account: Account, characterId: string, name: string): Promise<void> {
     try {
       if (account.guest) {
-        await this.sendToZone(s, this.defaultArena, { name, characterId: null, ...(this.devGuestSpawn ? { position: this.devGuestSpawn } : {}) });
+        await this.sendToZone(s, this.defaultArena, {
+          name, characterId: null,
+          ...(this.devGuestSpawn ? { position: this.devGuestSpawn } : {}),
+          ...(this.devGuestSpells.length ? { spells: this.devGuestSpells, selectedSpell: this.devGuestSpells[0]!.spell } : {}),
+          ...(this.devGuestXp ? { experience: this.devGuestXp } : {}),
+        });
       } else {
         const saved = await this.characters.loadOwned(account.id, characterId);
         if (!saved) return this.reject(s, 'character not found');

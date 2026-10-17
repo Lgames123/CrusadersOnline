@@ -8,6 +8,9 @@ import {
   BUILTIN_SPELLS,
   CASTABLE_SPELLS,
   SPELL_CONJURE_TICKS,
+  SPELL_INFO,
+  SPELLS,
+  spellClipSeconds,
   THRUST_WALL_DISTANCE,
   THRUST_WALL_HEIGHT,
   wallAhead,
@@ -67,6 +70,7 @@ import { GameFilesPanel } from './ui/game_files_panel.ts';
 import { InputManager } from './input/input_manager.ts';
 import { MusicPlayer } from './audio/music.ts';
 import { EFFECTS_SCALE, Effects, SMALL_EFFECTS_SCALE } from './engine/effects.ts';
+import { SpellVisuals } from './engine/spell_visuals.ts';
 import { Debris } from './engine/debris.ts';
 import { SwingTrails } from './engine/swing_trail.ts';
 import { ModelLighting } from './engine/model_light.ts';
@@ -355,6 +359,21 @@ async function main(): Promise<void> {
   const fxBurst = (name: string, count: number, at: THREE.Vector3, step: THREE.Vector3, dir: THREE.Vector3 | null = null) => {
     for (let i = 0; i < count; i++) effects?.spawn(name, fxPos.copy(at).addScaledVector(step, i), dir);
   };
+  /** Spells cast near the player (SC.SPELL_EVENT): effects, projectiles, bolts, bursts, timed effects. */
+  const spellVisuals = new SpellVisuals(scene, {
+    effects: () => effects,
+    sounds: () => sounds,
+    entity: (id) => {
+      if (live && id === live.entityId && player) return { object: player.object, avatar: player.avatar };
+      const e = remotes.byId.get(id);
+      return e ? { object: e.avatar.object, avatar: e.avatar } : null;
+    },
+    self: () => live?.entityId ?? null,
+    setRate: (id, rate) => {
+      if (rate === 1) remotes.rates.delete(id);
+      else remotes.rates.set(id, rate);
+    },
+  });
   /** The local player's Torch Light (radius from the server's stats). */
   const myTorch = new THREE.PointLight(TORCH_LIGHT_COLOR, TORCH_LIGHT_INTENSITY, 1, 1.4);
   myTorch.visible = false;
@@ -373,8 +392,11 @@ async function main(): Promise<void> {
             remotes.spawn(id, info);
             const e = remotes.byId.get(id);
             if (e) lighting.track(id, e.avatar.object, PLAYER_RADIUS * 1.3, false, true);
+            if (info.statuses?.length) spellVisuals.syncStatuses(id, info.statuses);
           },
+          spell: (d) => spellVisuals.handle(d),
           despawn: (id) => {
+            spellVisuals.forget(id);
             remotes.despawn(id);
             trails.forget(id);
             lighting.forget(id);
@@ -383,6 +405,7 @@ async function main(): Promise<void> {
           stats: (s) => {
             hud.stats(s);
             charSheet.update(s);
+            if (live) spellVisuals.syncStatuses(live.entityId, (s.statuses ?? []).map((x) => x.tag));
             inventoryPanel.setGold(s.gold);
             myTorch.distance = s.light;
             myTorch.visible = s.light > 0;
@@ -539,6 +562,7 @@ async function main(): Promise<void> {
             // Portal transitions (and the first entry): swap the level, then tell the server.
             errorBox.textContent = `Entering ${name.replace(LEVEL_PREFIX, '').toUpperCase()}…`;
             for (const id of remotes.byId.keys()) (lighting.forget(id), trails.forget(id));
+            spellVisuals.clear();
             remotes.clear();
             clearScenePuppets();
             void showArena(name).then((next) => {
@@ -1056,11 +1080,21 @@ async function main(): Promise<void> {
         if (potion) session?.useItem(potion.slot);
       }
     } else if (action === 'castSpell') {
-      // R: conjure the selected spell (the server checks mana and state; the caster stands still).
+      // R: cast the selected spell (the server checks mana and state). Self spells conjure first
+      // with the feet planted; fire ball, slow, lightning and soul drinker go at once.
       const st = session?.playerStats;
       const known = st?.spells.find((k) => k.spell === st.spell);
       const cost = known && st?.spell ? BUILTIN_SPELLS[st.spell]?.[known.level - 1]?.mana ?? 0 : 0;
-      if (st?.spell && CASTABLE_SPELLS.has(st.spell) && st.mana >= cost && local.startCast((SPELL_CONJURE_TICKS / local.clipRate) * TICK_DT)) session?.castSpell();
+      if (st?.spell && CASTABLE_SPELLS.has(st.spell) && st.mana >= cost) {
+        const info = SPELL_INFO[st.spell];
+        const plan = {
+          conjure: info.conjure ? (SPELL_CONJURE_TICKS / local.clipRate) * TICK_DT : 0,
+          clip: spellClipSeconds(st.spell, local.clipRate).end,
+          anim: ANIM.SPELL_CAST + SPELLS.indexOf(st.spell),
+          state: info.asm,
+        };
+        if (local.startCast(plan)) session?.castSpell();
+      }
     } else if (action === 'nextSpell') {
       // T: the next known spell.
       const st = session?.playerStats;
@@ -1304,6 +1338,7 @@ async function main(): Promise<void> {
     if (session) remotes.update(session, dt);
     for (const p of scenePuppets.values()) p.avatar.update(dt);
     effects?.update(dt);
+    spellVisuals.update(dt);
     debris?.update(dt);
     lighting.update(dt, now / 1000);
     // Players' sword trails (every swing but the ducking chop).

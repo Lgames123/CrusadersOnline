@@ -64,8 +64,22 @@ function headingOf(basis: THREE.Matrix4): number {
 /** Textures drawn with alpha (blood, chips, dust); the rest glow additively. */
 const OPAQUE = /blood|bone|rock|dust|blacksmk|icecube|snow/;
 
+/** An effect carried by something (a projectile): its flashes follow `pos` and end with stop(). */
+export interface EffectHandle {
+  readonly pos: THREE.Vector3;
+  stop(): void;
+}
+
+interface Anchor {
+  pos: THREE.Vector3;
+  stopped: boolean;
+}
+
 interface Live {
   sprite: THREE.Sprite;
+  /** Attached flashes: positioned at the anchor plus `local`. */
+  anchor?: Anchor;
+  local?: THREE.Vector3;
   flash: Flash;
   delay: number;
   age: number;
@@ -127,7 +141,7 @@ export class Effects {
    * Spawns a named effect (variant = spell level for spell effects) at `pos`. `dir` orients the
    * flashes' MOVE (+Z along it); without one they scatter around a random heading.
    */
-  spawn(name: string, pos: THREE.Vector3, dir?: THREE.Vector3 | null, variant = 0): void {
+  spawn(name: string, pos: THREE.Vector3, dir?: THREE.Vector3 | null, variant = 0, anchor?: Anchor): void {
     const variants = this.table.multis[name];
     const list = variants?.[variant] ?? variants?.[0];
     if (!list) return;
@@ -143,11 +157,22 @@ export class Effects {
     }
     for (const [flashName, delay] of list) {
       const flash = this.table.flashes[flashName];
-      if (flash) this.add(flash, pos, basis, delay);
+      if (flash) this.add(flash, pos, basis, delay, anchor);
     }
   }
 
-  private add(flash: Flash, pos: THREE.Vector3, basis: THREE.Matrix4, delay: number): void {
+  /**
+   * An effect attached to something that moves (a spell projectile, 0x00482150 on its object):
+   * its flashes follow the handle's position (their own motion relative to it) and end with
+   * stop(); their trails (SPAWN_MULTI) are left in the world as usual.
+   */
+  attach(name: string, pos: THREE.Vector3, dir?: THREE.Vector3 | null, variant = 0): EffectHandle {
+    const anchor: Anchor = { pos: pos.clone(), stopped: false };
+    this.spawn(name, anchor.pos, dir, variant, anchor);
+    return { pos: anchor.pos, stop: () => (anchor.stopped = true) };
+  }
+
+  private add(flash: Flash, pos: THREE.Vector3, basis: THREE.Matrix4, delay: number, anchor?: Anchor): void {
     if (this.live.length >= MAX_LIVE) return;
     const shape = this.table.shapes[flash.shape];
     const texName = shape?.texture ?? null;
@@ -184,6 +209,7 @@ export class Effects {
       grav: new THREE.Vector3(...flash.gravity).applyAxisAngle(Y_AXIS, headingOf(basis)).multiplyScalar(FOOT),
       spin: flash.rotating ? flash.rotationSpeed * Math.PI * 2 : 0,
       nextSpawn: flash.spawnMulti?.interval ?? 0,
+      ...(anchor ? { anchor, local: offset.clone() } : {}),
     });
     sprite.visible = delay <= 0;
     sprite.scale.set(0.001, 0.001, 1);
@@ -200,7 +226,7 @@ export class Effects {
       }
       p.age += dt;
       const f = p.flash;
-      if (p.age >= p.life) {
+      if (p.age >= p.life || p.anchor?.stopped) {
         this.scene.remove(p.sprite);
         p.sprite.material.dispose();
         this.live.splice(i, 1);
@@ -215,7 +241,8 @@ export class Effects {
       p.w = Math.max(0.001, p.w + p.vw * dt);
       p.sprite.scale.set(p.w, p.h, 1);
       p.vel.addScaledVector(p.grav, dt);
-      p.sprite.position.addScaledVector(p.vel, dt);
+      if (p.anchor) p.sprite.position.copy(p.anchor.pos).add(p.local!.addScaledVector(p.vel, dt));
+      else p.sprite.position.addScaledVector(p.vel, dt);
       p.sprite.material.rotation += p.spin * dt;
       // Trails: spawn another effect every interval while alive.
       if (f.spawnMulti && f.spawnMulti.interval > 0 && (p.nextSpawn -= dt) <= 0) {

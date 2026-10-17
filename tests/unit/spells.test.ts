@@ -59,18 +59,19 @@ describe('spells', () => {
     expect(mana).toBe(t.stats().maxMana);
 
     t.zone.castSpell(1);
-    t.run(SPELL_CONJURE_TICKS - 1);
-    expect(t.stats().light).toBe(0); // still conjuring
-    t.run(2);
+    t.run(SPELL_CONJURE_TICKS + 2);
+    expect(t.stats().light).toBe(0); // still conjuring, then the clip up to its SPELL event (PK01 frame 9)
+    t.run(6);
     expect(t.stats().mana).toBe(mana - 1); // S0 level 1 costs 1
     expect(t.stats().light).toBeCloseTo(15 * 0.3048, 3);
 
     // Recasting while the light is on spends nothing (logged in the original).
+    t.run(20);
     t.zone.castSpell(1);
-    t.run(SPELL_CONJURE_TICKS + 1);
+    t.run(SPELL_CONJURE_TICKS + 30);
     expect(t.stats().mana).toBe(mana - 1);
 
-    // One mana point comes back after ~3.9 s.
+    // One mana point comes back 5 s after it was spent (0x004BCFC0).
     t.run(MANA_REGEN_TICKS);
     expect(t.stats().mana).toBe(mana);
   });
