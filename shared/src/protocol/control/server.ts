@@ -128,9 +128,10 @@ export interface SpellEventMsg {
     fx?: { name: string; level: number; at: V3; dir?: V3; entity?: number }[];
     sounds?: { id: number; at: V3 }[];
     /** A flying spell (fire ball, slow, snap freeze): its state; `end` when it is gone. */
-    projectile?: { id: number; spell: SpellId; level: number; pos: V3; vel: V3; end?: boolean };
-    /** A growing sphere (explosions, holy wrath, revelation): to `radius` over `seconds`. */
-    burst?: { spell: SpellId; level: number; at: V3; radius: number; seconds: number };
+    /** `look`: the effect it carries when not its spell's own (a creature's FIREBALL_PROJ_EVIL). */
+    projectile?: { id: number; spell: SpellId; level: number; pos: V3; vel: V3; look?: string; end?: boolean };
+    /** A growing sphere (explosions, holy wrath, revelation): to `radius` over `seconds`; `dark`: a creature's unholy wrath. */
+    burst?: { spell: SpellId; level: number; at: V3; radius: number; seconds: number; dark?: boolean };
     /** Lightning bolts. */
     bolts?: { from: V3; to: V3 }[];
     /** Soul drinker: life flowing from one character to another for `seconds` (0 = stop). */

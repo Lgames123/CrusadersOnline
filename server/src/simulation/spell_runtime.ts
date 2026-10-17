@@ -39,6 +39,7 @@ const PROJECTILE_RADIUS = PLAYER_RADIUS + 0.25;
 const AIR = DAMAGE_TYPES.indexOf('AIR');
 const FIRE = DAMAGE_TYPES.indexOf('FIRE');
 const LIGHT = DAMAGE_TYPES.indexOf('LIGHT');
+const DARK = DAMAGE_TYPES.indexOf('DARK');
 const WATER = DAMAGE_TYPES.indexOf('WATER');
 
 /** A character as the spells see it. */
@@ -104,6 +105,8 @@ interface Projectile {
   target: SpellTarget | null;
   /** Ticks until the next state sent (homing ones turn). */
   sendIn: number;
+  /** The effect it carries when not its spell's own (creatures' fire balls: FIREBALL_PROJ_EVIL). */
+  look?: string;
 }
 
 interface Burst {
@@ -116,7 +119,22 @@ interface Burst {
   rate: number;
   life: number;
   hit: Set<number>;
+  /** A creature's holy wrath (unholy wrath): DARK, on all but the unholy. */
+  unholy?: boolean;
 }
+
+/**
+ * How a creature casts (0x004BD7C0): at its brain's target rather than along a camera aim, from
+ * its own spell instances. Their fire balls carry FIREBALL_PROJ_EVIL (instance +0x40 = 1) and
+ * sound 316 (the sound loaded with the instance at level 1); lightning strikes the target
+ * itself with sound 522 (+0x3C loaded at index 2); holy wrath is unholy (+0x50 = 1).
+ */
+export interface CreatureCast {
+  target: SpellTarget;
+}
+
+/** Creatures' fire-ball projectile effect (table 0x004E2D38, index 1). */
+const CREATURE_FIREBALL_LOOK = 'FIREBALL_PROJ_EVIL';
 
 interface Chain {
   owner: SpellTarget;
@@ -177,12 +195,12 @@ export class SpellRuntime {
    * The spell takes effect at `hand` with aim `aim` (unit): vtable +0x28 of its slot. Mana is
    * the caller's (spent before, as +0x58 does at the start of each).
    */
-  release(caster: SpellTarget, spell: SpellId, level: number, values: SpellLevel, hand: V3, aim: V3): void {
+  release(caster: SpellTarget, spell: SpellId, level: number, values: SpellLevel, hand: V3, aim: V3, creature?: CreatureCast): void {
     const info = SPELL_INFO[spell];
     if (info.cast && spell !== 'fireball' && spell !== 'slow' && spell !== 'holy_wrath') this.fx(hand, [{ name: info.cast, level, at: tuple(hand) }]);
     switch (spell) {
       case 'fireball':
-        return this.fireball(caster, level, values, hand, aim);
+        return this.fireball(caster, level, values, hand, aim, !!creature);
       case 'slow':
         return this.slow(caster, level, values, hand, aim);
       case 'freeze':
@@ -192,7 +210,7 @@ export class SpellRuntime {
         this.setStatus(caster, { tag: 'STON', level, until: this.host.tick() + ticks(values.duration), incoming: DAMAGE_TYPES.map((_, t) => (t <= WATER ? values.value1 : 1)) });
         return;
       case 'lightning':
-        return this.lightning(caster, level, values, hand, aim);
+        return this.lightning(caster, level, values, hand, aim, creature?.target);
       case 'heroism': {
         const until = this.host.tick() + ticks(values.duration);
         // SPED (kind 0): speed x value2; HERO (kind 4): SLASH and BASH dealt x value1.
@@ -205,7 +223,7 @@ export class SpellRuntime {
       case 'revelation':
         return this.revelation(caster, level, values);
       case 'holy_wrath':
-        return this.holyWrath(caster, level, values);
+        return this.holyWrath(caster, level, values, !!creature);
       case 'soul_drinker':
         return this.soulDrinker(caster, level, values, hand, aim);
       case 'torch_light':
@@ -215,7 +233,7 @@ export class SpellRuntime {
 
   // ---- Fire ball (0x004BAF80, 0x004BB130; projectile 0x004BE530, explosion 0x004BE790 / 0x004BEA70) ----
 
-  private fireball(caster: SpellTarget, level: number, values: SpellLevel, hand: V3, aim: V3): void {
+  private fireball(caster: SpellTarget, level: number, values: SpellLevel, hand: V3, aim: V3, creature = false): void {
     const R = SPELL_RULES;
     const dirs: V3[] = [aim];
     if (level === 3) {
@@ -224,18 +242,19 @@ export class SpellRuntime {
       dirs.push(norm(add(aim, side)), norm(add(aim, side, -1)));
     }
     const speed = level === 3 ? R.fireballTripleSpeed : R.fireballSpeed;
-    for (const d of dirs) this.launch(caster, 'fireball', level, values, hand, d, speed, R.projectileLife, level >= 2);
-    this.fx(hand, [{ name: 'FIREBALL_CAST', level, at: tuple(hand), dir: tuple(aim) }], [{ id: SPELL_INFO.fireball.sounds[level - 1]!, at: tuple(hand) }]);
+    for (const d of dirs) this.launch(caster, 'fireball', level, values, hand, d, speed, R.projectileLife, level >= 2, creature ? CREATURE_FIREBALL_LOOK : undefined);
+    const sound = SPELL_INFO.fireball.sounds[creature ? 0 : level - 1]!;
+    this.fx(hand, [{ name: 'FIREBALL_CAST', level, at: tuple(hand), dir: tuple(aim) }], [{ id: sound, at: tuple(hand) }]);
   }
 
-  private launch(owner: SpellTarget, spell: Projectile['spell'], level: number, values: SpellLevel, from: V3, dir: V3, speed: number, life: number, homing: boolean): void {
-    const p: Projectile = { id: this.nextId++, spell, level, owner, values, pos: { ...from }, vel: { x: dir.x * speed, y: dir.y * speed, z: dir.z * speed }, life, homing, target: null, sendIn: 4 };
+  private launch(owner: SpellTarget, spell: Projectile['spell'], level: number, values: SpellLevel, from: V3, dir: V3, speed: number, life: number, homing: boolean, look?: string): void {
+    const p: Projectile = { id: this.nextId++, spell, level, owner, values, pos: { ...from }, vel: { x: dir.x * speed, y: dir.y * speed, z: dir.z * speed }, life, homing, target: null, sendIn: 4, ...(look ? { look } : {}) };
     this.projectiles.push(p);
     this.sendProjectile(p);
   }
 
   private sendProjectile(p: Projectile, end = false): void {
-    this.host.emit(p.pos, { projectile: { id: p.id, spell: p.spell, level: p.level, pos: tuple(p.pos), vel: tuple(p.vel), ...(end ? { end } : {}) } });
+    this.host.emit(p.pos, { projectile: { id: p.id, spell: p.spell, level: p.level, pos: tuple(p.pos), vel: tuple(p.vel), ...(p.look ? { look: p.look } : {}), ...(end ? { end } : {}) } });
   }
 
   /** Homing (levels 2-3, 0x004BE010 / 0x004BE220): the target nearest the flight line within 80°, turned towards at 180°/s. */
@@ -370,7 +389,8 @@ export class SpellRuntime {
         const m = mid(c);
         const dist = Math.hypot(m.x - b.at.x, m.y - b.at.y, m.z - b.at.z);
         if (dist > b.radius + PLAYER_RADIUS) continue;
-        if (b.spell === 'holy_wrath' && !UNHOLY_TYPES.has(this.host.creatureType(c))) continue;
+        // Holy wrath strikes only the unholy; a creature's unholy wrath everyone else (0x004C1BE0).
+        if (b.spell === 'holy_wrath' && UNHOLY_TYPES.has(this.host.creatureType(c)) === !!b.unholy) continue;
         if (!lineOfSight(this.host.mw, b.at, m, 0)) continue;
         b.hit.add(c.entityId);
         this.burstHit(b, c, dist);
@@ -393,7 +413,7 @@ export class SpellRuntime {
       this.applySlow(c, b.level, b.values);
     } else if (b.spell === 'holy_wrath') {
       const v = new Array<number>(DAMAGE_TYPES.length).fill(0);
-      v[LIGHT] = b.values.value1;
+      v[b.unholy ? DARK : LIGHT] = b.values.value1;
       this.fx(mid(c), [{ name: 'HOLY_WRATH_TARGET', level: b.level, at: [0, BODY_MID, 0], entity: c.entityId }]);
       this.host.damage(b.owner, c, v, { ...away, d: SPELL_RULES.holyWrathKnock });
     }
@@ -458,10 +478,16 @@ export class SpellRuntime {
 
   // ---- Lightning (0x004BB910 / 0x004BB9F0; bolt 0x004BEE90 / 0x004BF1E0) ----
 
-  private lightning(caster: SpellTarget, level: number, values: SpellLevel, hand: V3, aim: V3): void {
+  private lightning(caster: SpellTarget, level: number, values: SpellLevel, hand: V3, aim: V3, target?: SpellTarget): void {
     const R = SPELL_RULES;
-    this.fx(hand, [], [{ id: SPELL_INFO.lightning.sounds[level - 1]!, at: tuple(hand) }]);
+    this.fx(hand, [], [{ id: target ? R.lightningSound : SPELL_INFO.lightning.sounds[level - 1]!, at: tuple(hand) }]);
     const chain: Chain = { owner: caster, level, values, left: R.lightningStrikes[level - 1] ?? 1, next: 0, last: null, hit: new Set() };
+    // A creature's bolt goes to its brain's target (0x004BD7C0: controller +0x40), wherever it is.
+    if (target && this.host.alive(target)) {
+      this.strike(chain, target);
+      if (chain.left > 0) this.chains.push(chain);
+      return;
+    }
     // The first strike: the creature nearest the aim within cos 0.8 and 64 ft (0x004BD320).
     let first: SpellTarget | null = null;
     let best = Infinity;
@@ -587,14 +613,15 @@ export class SpellRuntime {
 
   // ---- Holy wrath (0x004BC2F0 -> 0x0043FD30; hits 0x004C1BE0) ----
 
-  private holyWrath(caster: SpellTarget, level: number, values: SpellLevel): void {
+  private holyWrath(caster: SpellTarget, level: number, values: SpellLevel, unholy = false): void {
     const R = SPELL_RULES;
     const p = caster.character.position;
     const at = { x: p.x, y: p.y + BODY_MID, z: p.z };
-    this.fx(at, [{ name: 'HOLY_WRATH_CAST', level, at: tuple(p) }]);
+    // The cast effect by the instance's +0x50 (table 0x004E2D4C): HOLY_WRATH_CAST or UNHOLY_WRATH_CAST (one variant).
+    this.fx(at, [{ name: unholy ? 'UNHOLY_WRATH_CAST' : 'HOLY_WRATH_CAST', level: unholy ? 1 : level, at: tuple(p) }]);
     const radius = values.value2 * FT;
-    this.bursts.push({ spell: 'holy_wrath', level, owner: caster, values, at, radius: 0, rate: radius / R.holyWrathLife, life: R.holyWrathLife, hit: new Set() });
-    this.host.emit(at, { burst: { spell: 'holy_wrath', level, at: tuple(at), radius, seconds: R.holyWrathLife } });
+    this.bursts.push({ spell: 'holy_wrath', level, owner: caster, values, at, radius: 0, rate: radius / R.holyWrathLife, life: R.holyWrathLife, hit: new Set(), ...(unholy ? { unholy } : {}) });
+    this.host.emit(at, { burst: { spell: 'holy_wrath', level, at: tuple(at), radius, seconds: R.holyWrathLife, ...(unholy ? { dark: true } : {}) } });
   }
 
   // ---- Soul drinker (0x004BC4A0 -> 0x0043F950; 0x004C17D0 / 0x004C18B0 / 0x004C19B0) ----

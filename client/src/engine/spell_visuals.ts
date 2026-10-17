@@ -66,6 +66,8 @@ const BURST_LOOK: Partial<Record<SpellId, { color: number; opacity: number }>> =
   slow: { color: 0xa070ff, opacity: 0.25 },
 };
 
+const UNHOLY_BURST_LOOK = { color: 0x301040, opacity: 0.3 };
+
 /** Timed-effect shells: colour, opacity, additive. */
 const STATUS_LOOK: Partial<Record<StatusTag, { color: number; opacity: number; additive: boolean }>> = {
   FRZE: { color: 0xaee4ff, opacity: 0.5, additive: false },
@@ -232,7 +234,8 @@ export class SpellVisuals {
       sprite.scale.setScalar(p.spell === 'fireball' ? 0.7 + 0.15 * p.level : 0.55);
       this.scene.add(sprite);
       const at = new THREE.Vector3(...p.pos);
-      const carried = look?.carried ? this.host.effects()?.attach(look.carried, at, new THREE.Vector3(...p.vel).normalize(), p.level - 1) ?? null : null;
+      const carriedName = p.look ?? look?.carried;
+      const carried = carriedName ? this.host.effects()?.attach(carriedName, at, new THREE.Vector3(...p.vel).normalize(), p.level - 1) ?? null : null;
       v = { spell: p.spell, level: p.level, pos: new THREE.Vector3(), vel: new THREE.Vector3(), sprite, carried, key: `spell-proj:${p.id}` };
       this.projectiles.set(p.id, v);
     }
@@ -242,9 +245,10 @@ export class SpellVisuals {
   }
 
   private burst(b: NonNullable<SpellEventMsg['d']['burst']>): void {
-    const look = BURST_LOOK[b.spell];
+    // A creature's unholy wrath: a dark shell (stand-in look, like the others).
+    const look = b.dark ? UNHOLY_BURST_LOOK : BURST_LOOK[b.spell];
     if (!look) return;
-    const mat = new THREE.MeshBasicMaterial({ color: look.color, transparent: true, opacity: look.opacity, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
+    const mat = new THREE.MeshBasicMaterial({ color: look.color, transparent: true, opacity: look.opacity, depthWrite: false, side: THREE.DoubleSide, blending: b.dark ? THREE.NormalBlending : THREE.AdditiveBlending });
     const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 16), mat);
     mesh.position.set(...b.at);
     mesh.scale.setScalar(0.01);

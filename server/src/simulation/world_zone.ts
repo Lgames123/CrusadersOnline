@@ -81,6 +81,12 @@ import {
   BUILTIN_SPELLS,
   TICK_RATE,
   CASTABLE_SPELLS,
+  CREATURE_CAST,
+  CREATURE_SPELLS,
+  creatureSpellBits,
+  creatureSpellClipSeconds,
+  PLAYER_CREATURE_TYPE,
+  UNHOLY_TYPES,
   MANA_REGEN_TICKS,
   MAX_SPELL_LEVEL,
   SPELL_CONJURE_TICKS,
@@ -551,9 +557,17 @@ interface Mob extends ActorBase {
    * (shield up) to its engage distance, an attack sequence, the pause after it, and what follows
    * an attack (shield up, or stepping back without a shield).
    */
-  brain: 'decide' | 'run' | 'walkIn' | 'attack' | 'pause' | 'post';
+  brain: 'decide' | 'run' | 'walkIn' | 'attack' | 'pause' | 'post' | 'spell';
   /** The decision before the current one (an attack is followed by 'post'). */
-  lastPick: 'run' | 'walkIn' | 'attack' | 'post' | null;
+  lastPick: 'run' | 'walkIn' | 'attack' | 'post' | 'spell' | null;
+  /**
+   * A caster's spell phase (0x0040AA20): which choice of 0x004096A0 led to it, the cast playing
+   * (its template mask bit, the target, the clip's SPELL event — null when the clip has none —
+   * and its end) and the end of the cooldown (+0xE0, from the start of the last cast).
+   */
+  spellPick: 'close' | 'ranged' | null;
+  mobCast: { bit: number; target: number; releaseAt: number | null; end: number; released: boolean } | null;
+  spellReadyAt: number;
   /** End of the pause / the post-attack phase. */
   brainUntil: number;
   /** The attack sequence playing: the hop, its upper-body swing, the swings after it. */
@@ -699,7 +713,7 @@ export class WorldZone {
       characters: () => this.actors.values(),
       alive: (a) => alive(actor(a)),
       hostile: (a, b) => this.hostile(actor(a), actor(b)),
-      creatureType: (a) => (actor(a).kind === 'player' ? 0x96 : (actor(a) as Mob).archetype.type ?? 0),
+      creatureType: (a) => this.creatureType(actor(a)),
       resist: (a, t) => {
         const x = actor(a);
         return x.kind === 'player' ? (x.resist[t] ?? 1) * (x.armor?.protection?.[t] ?? 1) : x.archetype.resist[t] ?? 1;
@@ -753,6 +767,11 @@ export class WorldZone {
    * Whether `a` may harm `b`: players and their spectral allies on one side, creatures on the
    * other. Allies leave peaceful creatures alone.
    */
+  /** The creature type spells test (holy wrath, soul drinker): Drake is 142. */
+  private creatureType(a: Actor): number {
+    return a.kind === 'player' ? PLAYER_CREATURE_TYPE : a.archetype.type ?? 0;
+  }
+
   private hostile(a: Actor, b: Actor): boolean {
     if (a === b) return false;
     const players = (x: Actor) => x.kind === 'player' || x.ally !== undefined;
@@ -855,6 +874,9 @@ export class WorldZone {
       threat: new Map(),
       brain: 'decide',
       lastPick: null,
+      spellPick: null,
+      mobCast: null,
+      spellReadyAt: 0,
       brainUntil: 0,
       seq: null,
       shieldUntil: 0,
@@ -2299,6 +2321,8 @@ export class WorldZone {
     this.separate(m);
     m.anim = m.hitUntil > this.tick
       ? (m.character.rollDir === ACTION_KNOCKDOWN ? ANIM.KNOCKDOWN : ANIM.HIT)
+      : m.mobCast
+        ? ANIM.SPELL_CAST + SPELLS.indexOf(CREATURE_SPELLS[m.mobCast.bit]!.spell)
       : m.blockUntil > this.tick
         ? ANIM.BLOCK
         : m.state === 'flee' && m.alertUntil > this.tick
@@ -2323,6 +2347,11 @@ export class WorldZone {
     m.blockUntil = later(m.blockUntil);
     m.shieldUntil = later(m.shieldUntil);
     m.knockdownAt = later(m.knockdownAt);
+    m.spellReadyAt = later(m.spellReadyAt);
+    if (m.mobCast) {
+      if (m.mobCast.releaseAt !== null) m.mobCast.releaseAt = later(m.mobCast.releaseAt);
+      m.mobCast.end = later(m.mobCast.end);
+    }
     m.alertUntil = later(m.alertUntil);
     m.fleeUntil = later(m.fleeUntil);
     m.talkUntil = later(m.talkUntil);
@@ -2752,14 +2781,24 @@ export class WorldZone {
           if (this.postAttack(m, target, dist)) return;
           m.brain = 'decide';
           continue;
+        case 'spell':
+          if (this.mobSpell(m, target, dist)) return;
+          m.brain = 'decide';
+          continue;
         default:
           return;
       }
     }
   }
 
-  /** The next phase (0x004096A0): run in, walk in, attack, or what follows an attack. */
+  /** The next phase (0x004096A0): a caster's spell, run in, walk in, attack, or what follows an attack. */
   private decide(m: Mob, target: Actor, dist: number): void {
+    const spell = this.spellChoice(m, target, dist);
+    if (spell) {
+      m.lastPick = m.brain = 'spell';
+      m.spellPick = spell;
+      return;
+    }
     const pick = mobBand(dist) > 1 ? 'run'
       : dist > m.archetype.engage && !this.attacking(target) ? 'walkIn'
         : m.lastPick === 'attack' ? 'post'
@@ -2770,10 +2809,88 @@ export class WorldZone {
     else if (pick === 'post') this.enterPost(m, target, dist);
   }
 
+  /**
+   * The spell choices ahead of the melee ones (0x004096A0; Necros's Force Globe, mask 0x100, is
+   * not implemented): a close spell at 8-20 ft when floor(rand x 1000) > 700, else a ranged
+   * one beyond 8 ft with a clear line from the eyes (0x004070E0: 0.9 of its height).
+   */
+  private spellChoice(m: Mob, target: Actor, dist: number): 'close' | 'ranged' | null {
+    const type = m.archetype.type;
+    if (type === undefined) return null;
+    const band = mobBand(dist);
+    if (band === 0) return null;
+    if (band <= 2 && creatureSpellBits(type, CREATURE_CAST.closeMask).length && Math.floor(this.random() * 1000) > CREATURE_CAST.closeRoll) return 'close';
+    if (creatureSpellBits(type, CREATURE_CAST.rangedMask).length && lineOfSight(this.mw, m.character.position, target.character.position, PLAYER_HEIGHT * 0.9)) return 'ranged';
+    return null;
+  }
+
+  /**
+   * The spell phase (0x0040AA20): dropped within 8 ft; standing (and turning) until the cooldown
+   * is over and the target within 45° of its heading; the cast; then 2 s standing. False when
+   * the phase is over and the brain decides again.
+   */
+  private mobSpell(m: Mob, target: Actor, dist: number): boolean {
+    const c = m.mobCast;
+    if (!c) {
+      if (mobBand(dist) === 0) return false;
+      const t = target.character.position;
+      const p = m.character.position;
+      const facing = Math.abs(angleDiff(yawTowards(p.x, p.z, t.x, t.z), dequantizeAngle(m.yaw))) < CREATURE_CAST.facing;
+      if (this.tick <= m.spellReadyAt || !facing) return true;
+      return this.startMobCast(m, target);
+    }
+    if (!c.released && c.releaseAt !== null && this.tick >= c.releaseAt) this.releaseMobCast(m);
+    if (this.tick < c.end) return true;
+    m.mobCast = null;
+    m.brain = 'pause';
+    m.brainUntil = this.tick + Math.round(CREATURE_CAST.pause * TICK_RATE);
+    return true;
+  }
+
+  /**
+   * Picks one of the phase's spells, floor(rand x count) (0x00408840; soul drinker not at the
+   * unholy), and plays its state (template 9, the whole body, to the clip's end); the cooldown
+   * starts now. With none left the original swings once instead (template 6): not done here.
+   */
+  private startMobCast(m: Mob, target: Actor): boolean {
+    const type = m.archetype.type!;
+    let bits = creatureSpellBits(type, m.spellPick === 'close' ? CREATURE_CAST.closeMask : CREATURE_CAST.rangedMask);
+    if (UNHOLY_TYPES.has(this.creatureType(target))) bits = bits.filter((b) => CREATURE_SPELLS[b]!.spell !== 'soul_drinker');
+    if (!bits.length) return false;
+    const bit = bits[Math.min(bits.length - 1, Math.floor(this.random() * bits.length))]!;
+    const s = CREATURE_SPELLS[bit]!;
+    const clip = creatureSpellClipSeconds(type, s.spell);
+    m.spellReadyAt = this.tick + Math.round(s.cooldown * TICK_RATE);
+    m.mobCast = {
+      bit, target: target.entityId, released: false,
+      releaseAt: clip.release === null ? null : this.tick + Math.max(1, Math.round(clip.release * TICK_RATE)),
+      end: this.tick + Math.max(1, Math.round(clip.end * TICK_RATE)),
+    };
+    m.seq = null;
+    m.shieldUntil = 0;
+    this.broadcastAt(m.character.position, { op: SC.SPELL_EVENT, d: { cast: { caster: m.entityId, spell: s.spell, level: s.level, phase: 'begin' } } });
+    return true;
+  }
+
+  /** The clip's SPELL event (controller flag 0x10000 -> 0x004BD7C0): the spell at the target. */
+  private releaseMobCast(m: Mob): void {
+    const c = m.mobCast!;
+    c.released = true;
+    const t = this.actors.get(c.target);
+    if (!t || !alive(t)) return;
+    const s = CREATURE_SPELLS[c.bit]!;
+    const hand = this.magic.hand(m);
+    const tp = t.character.position;
+    const to = { x: tp.x - hand.x, y: tp.y + PLAYER_HEIGHT * 0.55 - hand.y, z: tp.z - hand.z };
+    const l = Math.hypot(to.x, to.y, to.z) || 1;
+    this.broadcastAt(m.character.position, { op: SC.SPELL_EVENT, d: { cast: { caster: m.entityId, spell: s.spell, level: s.level, phase: 'release' } } });
+    this.magic.release(m, s.spell, s.level, s.values, hand, { x: to.x / l, y: to.y / l, z: to.z / l }, { target: t });
+  }
+
   /** Whether the player is in an attacking state (state flag 0x20: swings, the rush, casting). */
   private attacking(p: Actor): boolean {
     // Combo steps 4 and 5 (states 103 / 104) have no flags in the state table.
-    return (p.swing !== null && !(p.swing.kind === 'normal' && p.swing.combo >= 4)) || (p.kind === 'player' && p.cast !== null) || p.character.rollDir === ACTION_BASH;
+    return (p.swing !== null && !(p.swing.kind === 'normal' && p.swing.combo >= 4)) || (p.kind === 'player' ? p.cast !== null : p.mobCast !== null) || p.character.rollDir === ACTION_BASH;
   }
 
   /** Its shield is raised (a player holding block, a creature's stance or block). */
@@ -2863,6 +2980,8 @@ export class WorldZone {
   private calmDown(m: Mob): void {
     m.brain = 'decide';
     m.lastPick = null;
+    m.spellPick = null;
+    m.mobCast = null;
     m.seq = null;
     m.shieldUntil = 0;
     m.walkShield = false;
@@ -3053,6 +3172,7 @@ export class WorldZone {
       // The impact aborts the behaviour (0x004800C0: the state's flag 0x800): no pause after it,
       // the brain decides again as soon as the impact is over.
       target.seq = null;
+      target.mobCast = null;
       target.shieldUntil = 0;
       target.brain = 'decide';
     }
@@ -3147,6 +3267,7 @@ export class WorldZone {
       startTimedAction(target.character, 0);
       if (target.kind === 'player') target.cast = null;
       if (target.kind === 'mob') {
+        target.mobCast = null;
         target.deadUntil = this.tick + target.archetype.respawnTicks;
         target.threat.clear();
         // A spectral ally's kills are its owner's.

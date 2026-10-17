@@ -298,10 +298,14 @@ class OriginalAvatar implements Avatar {
     if (anim === ANIM.STUNNED) return { name: m.impacts?.[0] ?? m.idle, loop: false };
     if (anim === ANIM.ATTACK_BASH) return { name: m.bash ?? m.attacks[0]!, loop: false };
     if (anim === ANIM.SPELL_CONJURE) return { name: m.conjure ?? m.idle, loop: false };
-    // A spell's own state (models.ctx B ASM_SPELL_*; PK01 / PK02 / PK04 / PK05 for Drake).
+    // A spell's own state (models.ctx B ASM_SPELL_*; PK01 / PK02 / PK04 / PK05 for Drake). A model
+    // without it plays another state of its group (0x00428220): fire ball -> ASM_THROW_ITEM (the
+    // Deceiver, the elementals).
     if (anim >= ANIM.SPELL_CAST && anim < ANIM.SPELL_CAST + SPELLS.length) {
-      const own = m.asm?.[SPELL_INFO[SPELLS[anim - ANIM.SPELL_CAST]!].asm];
-      return { name: (own && this.clips.has(own) ? own : undefined) ?? m.conjure ?? m.idle, loop: false };
+      const spell = SPELLS[anim - ANIM.SPELL_CAST]!;
+      const has = (clip: string | undefined) => (clip && this.clips.has(clip) ? clip : undefined);
+      const own = has(m.asm?.[SPELL_INFO[spell].asm]) ?? (spell === 'fireball' ? has(m.asm?.ASM_THROW_ITEM) : undefined);
+      return { name: own ?? m.conjure ?? m.idle, loop: false };
     }
     // Raise the shield once and hold the final pose.
     if (anim === ANIM.BLOCK) return { name: m.block, loop: false };

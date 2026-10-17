@@ -419,7 +419,7 @@ const SKELETON_WARRIOR: MobArchetype = {
 
 export const MOB_ARCHETYPES: Record<string, MobArchetype> = {
   skeleton_warrior: SKELETON_WARRIOR,
-  // Skeleton Ghost: Long Sword + Wooden Shield; 40 HP, 75 XP.
+  // Skeleton Ghost: Long Sword + Wooden Shield, casts lightning; 40 HP, 75 XP.
   skeleton_ghost: meleeVariant(SKELETON_WARRIOR, {
     id: 'skeleton_ghost', name: 'Skeleton Ghost', maxHp: 40, xpReward: 75,
     resist: [1, 0.75, 1, 0.75, 1.25, 1, 1.1, 1.5, 1, 1.25, 0.5],
@@ -429,12 +429,12 @@ export const MOB_ARCHETYPES: Record<string, MobArchetype> = {
     id: 'shadow', name: 'Shadow', maxHp: 60, xpReward: 200, weapon: 'heavy_mace',
     resist: [0.5, 0.25, 0.5, 0.5, 0.5, 0.5, 1.25, 1.25, 0, 1.5, 0.25],
   }),
-  // Dark Mage: Mace + Metal Shield (its spells are not implemented); 45 HP, 60 XP.
+  // Dark Mage: Mace + Metal Shield, casts soul drinker and fire balls (spells.ts CREATURE_SPELLS); 45 HP, 60 XP.
   dark_mage: meleeVariant(SKELETON_WARRIOR, {
     id: 'dark_mage', name: 'Dark Mage', maxHp: 45, xpReward: 60, weapon: 'mace', shield: 'metal_shield',
     resist: [1, 1, 0.75, 0.75, 0.75, 0.75, 1, 1, 1, 1.25, 0.5],
   }),
-  // Dark Master: Heavy Mace + Metal Shield (a caster; spells not implemented); 80 HP, 125 XP.
+  // Dark Master: Heavy Mace + Metal Shield, casts unholy wrath and fire balls; 80 HP, 125 XP.
   dark_master: meleeVariant(SKELETON_WARRIOR, {
     id: 'dark_master', name: 'Dark Master', maxHp: 80, xpReward: 125, weapon: 'heavy_mace', shield: 'metal_shield',
     resist: [1, 1, 1, 0.5, 0.5, 0.5, 0.5, 1, 1, 1.35, 0.25],
@@ -469,7 +469,7 @@ export const MOB_ARCHETYPES: Record<string, MobArchetype> = {
     id: 'black_knight', name: 'Greater Black Knight', maxHp: 100, xpReward: 180, weapon: 'broad_sword', shield: 'metal_shield',
     resist: [0.5, 0.5, 0.2, 0.5, 0.2, 0.2, 0, 0, 0, 0, 0],
   }),
-  // Deceiver: Mace (a caster; spells not implemented); 201 HP, 250 XP.
+  // Deceiver: Mace; its homing fire ball plays a throw with no SPELL event (nothing leaves); 201 HP, 250 XP.
   deceiver: meleeVariant(SKELETON_WARRIOR, {
     id: 'deceiver', name: 'Deceiver', maxHp: 201, xpReward: 250, weapon: 'mace', shield: null, engage: 5 * 0.3048,
     resist: [0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 1, 0],

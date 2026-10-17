@@ -1,5 +1,6 @@
 # Context notes
 
+- 2026-10-17 [Creature casters](2026-10-17-creature-casters.md) — template spell masks, the creatures' spell instances (0x004BD7C0) and brain (0x004096A0 / 0x0040AA20): Dark Mage, Dark Master, Skeleton Ghost cast at range / 8-20 ft with cooldowns; Deceiver's throw has no SPELL event; players are type 142 for spell tests; Necros not done (Claude Code)
 - 2026-10-17 [The spell system](2026-10-17-spell-system.md) — all eleven spells decoded and implemented (conjure / direct casts on the SPELL event, projectiles, explosions, ice storm, lightning chain, drains, statuses, spectral ally), SC.SPELL_EVENT, mana 5 s a point; creature casters still missing (Claude Code)
 - 2026-10-17 [Pickups: all or nothing on a full bag](2026-10-17-pickups-all-or-nothing.md) — an item or chest whose contents do not all fit gives nothing (gold included) and stays; no leftover state, so no relog duplicate (Claude Code)
 - 2026-10-17 [Level items and chests: once per character](2026-10-17-per-character-pickups.md) — ground items and chests are instanced: each character takes each once, for good (story flag `<level>-took:<id>`), only the picker sees it go; no more 5-min respawn (dropped items and breakables unchanged) (Claude Code)

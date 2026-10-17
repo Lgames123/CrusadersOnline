@@ -213,10 +213,92 @@ export const SPELL_RULES = {
 
 /**
  * Creatures holy wrath strikes and soul drinker turns against its caster (0x004586D0): Deceiver,
- * Greater Black Knight, Lich Arch Mage, Dark Mage / Master, the skeletons, Shadow, Necros, the
- * spectral ally (and Drake).
+ * Greater Black Knight, Lich Arch Mage, Dark Mage / Master, the skeletons, Shadow, Necros (0x96)
+ * and the spectral ally. Drake (the player) is type 142, not one of them.
  */
 export const UNHOLY_TYPES: ReadonlySet<number> = new Set([0x74, 0x86, 0x8d, 0x8f, 0x90, 0x91, 0x92, 0x93, 0x96, 0x9b]);
+
+/** Drake's creature type (the player's stats +0x34; Frida, 2026-10-17-drake-block-sounds). */
+export const PLAYER_CREATURE_TYPE = 142;
+
+/**
+ * A creature's spell: one bit of its template's spell mask (creature template table, §9.1) and
+ * what the creatures' own spell instances (0x630A50, 0x004BD760) cast for it: 0x004BD7C0 sets
+ * the level and values before every cast (no mana). Durations in seconds; `cooldown` is the
+ * wait before the next cast of any spell (brain +0xE0, 0x0040EBE0), from the start of this one.
+ */
+export interface CreatureSpell {
+  spell: SpellId;
+  level: number;
+  values: SpellLevel;
+  cooldown: number;
+}
+
+/**
+ * By mask bit (0x004BD7C0, creatures other than Necros). Bit 0 (stone skin 0.75 for 2 s) is only
+ * chosen by a brain branch nothing enters (0x0040AE40); bit 4 has no spell; bit 8 is Necros's
+ * Force Globe (class 15, 0x00441110) and bit 9 his triple fire ball; bit 10 revelation is in no
+ * creature's mask. Only these are cast here.
+ */
+export const CREATURE_SPELLS: Readonly<Partial<Record<number, CreatureSpell>>> = {
+  1: { spell: 'lightning', level: 1, values: lv(0, 1, 3, 1), cooldown: 6 },
+  2: { spell: 'soul_drinker', level: 1, values: lv(0, 1, 3, 100), cooldown: 6 },
+  // Unholy wrath (the instance's +0x50 = 1, 0x004BDE80): DARK value1, on everyone but the unholy.
+  3: { spell: 'holy_wrath', level: 1, values: lv(0, 0.02, 30, 20), cooldown: 6 },
+  5: { spell: 'fireball', level: 1, values: lv(0, 1, 3, 0), cooldown: 3 },
+  6: { spell: 'fireball', level: 2, values: lv(0, 2, 3, 0), cooldown: 3 },
+  7: { spell: 'fireball', level: 3, values: lv(0, 2, 2, 0), cooldown: 3 },
+};
+
+/** Spell masks of the creature template table (the fourth dword of each 0x30-byte record). */
+export const CREATURE_SPELL_MASKS: Readonly<Record<number, number>> = {
+  134: 0x40, // Deceiver
+  136: 0x20, // Ice Elemental
+  137: 0x20, // Rock Elemental
+  138: 0x80, // Lava Elemental
+  139: 0x34c, // Necros Before
+  143: 0x25, // Dark Mage
+  144: 0x38, // Dark Master
+  146: 0x02, // Skeleton Ghost
+  150: 0x34c, // Necros
+};
+
+/**
+ * The brain's spell choices (0x004096A0, before the melee ones; executable-analysis §20.1):
+ * `close` spells (soul drinker, unholy wrath) at 8-20 ft when floor(rand x 1000) > 700;
+ * `ranged` ones (lightning, fire balls) beyond 8 ft with a clear line. The cast (0x0040AA20)
+ * waits for the cooldown and for the target within 45° of the heading, is dropped within 8 ft,
+ * then the creature stands 2 s (Necros 0.2 s, 0x0040EC70).
+ */
+export const CREATURE_CAST = {
+  closeMask: 0x0c,
+  rangedMask: 0x2e2,
+  closeRoll: 700,
+  facing: (45 * Math.PI) / 180,
+  pause: 2,
+} as const;
+
+/**
+ * Creatures with no clip for the spell state play another of its group (0x00428220): fire ball
+ * -> ASM_THROW_ITEM. The Deceiver's (M37P02_thw_at) and the elementals' (icewalk) have no SPELL
+ * event, so their cast never takes effect. Clip length in 30 fps frames.
+ */
+const THROW_FALLBACK: Readonly<Record<number, number>> = { 134: 29, 136: 33, 137: 33, 138: 33 };
+
+/** Seconds of a creature's cast clip: to its SPELL event (null = it has none) and to its end. */
+export function creatureSpellClipSeconds(type: number, spell: SpellId): { release: number | null; end: number } {
+  const frames = spell === 'fireball' ? THROW_FALLBACK[type] : undefined;
+  if (frames !== undefined) return { release: null, end: frames / 30 };
+  return spellClipSeconds(spell);
+}
+
+/** The mask bits of `type` in `group` that have a creature spell. */
+export function creatureSpellBits(type: number, group: number): number[] {
+  const mask = (CREATURE_SPELL_MASKS[type] ?? 0) & group;
+  const out: number[] = [];
+  for (let b = 0; b < 12; b++) if (mask & (1 << b) && CREATURE_SPELLS[b]) out.push(b);
+  return out;
+}
 
 /**
  * Timed effects on a character (the status objects, pool 0x0058DB08; kinds by 0x004F326C):
