@@ -44,6 +44,7 @@ export const ACTION_KEYS = {
   interact: ['Tab'],
   healthPotion: ['KeyH'],
   inventory: ['KeyI'],
+  characterSheet: ['F1'],
   questBook: ['F2'],
   // Original R cast / T cycle spell (unchanged by the WASD shift).
   nextSpell: ['KeyT'],
@@ -92,6 +93,7 @@ export const BINDING_DEFINITIONS: readonly BindingDefinition[] = [
   // Actions & Interface
   { id: 'interact', label: 'Interact / Open / Talk', category: 'actions', defaultKeys: ['Tab'], action: 'interact' },
   { id: 'inventory', label: 'Toggle Inventory', category: 'actions', defaultKeys: ['KeyI'], action: 'inventory' },
+  { id: 'characterSheet', label: 'Toggle Character Statistics', category: 'actions', defaultKeys: ['F1'], action: 'characterSheet' },
   { id: 'questBook', label: 'Toggle Quest Book', category: 'actions', defaultKeys: ['F2'], action: 'questBook' },
 
   // Camera / View
@@ -192,4 +194,4 @@ export function actionFor(code: string): Action | null {
 /** Help line shown on the "click to play" screen. */
 export const CONTROLS_HELP =
   'WASD move · Mouse look · Wheel camera distance · Space jump · Click attack · Right click block · ' +
-  'R cast spell · T next spell · Tab interact / open · Z use item · H potion · I inventory · F2 quest log · Esc options';
+  'R cast spell · T next spell · Tab interact / open · Z use item · H potion · I inventory · F1 statistics · F2 quest log · Esc options';

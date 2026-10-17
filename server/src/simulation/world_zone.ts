@@ -1374,6 +1374,7 @@ export class WorldZone {
     p.shield = eq.shield;
     p.armor = eq.armor;
     if (!p.shield) p.blocking = false;
+    p.statsDirty = true;
   }
 
   /** What the client is told of an item kind (inventory cards, shop stock). */
@@ -2906,6 +2907,11 @@ export class WorldZone {
         spell: p.selectedSpell,
         light: p.light ? p.light.radius : 0,
         speed: p.moveStats.clipRate ?? 1,
+        name: p.name,
+        attributes: { ...p.attributes },
+        damageMultiplier: p.damageMultiplier,
+        resist: p.resist.map((r, t) => r * (p.armor?.protection?.[t] ?? 1)),
+        damage: [...(p.weapon.damage ?? [])],
       },
     });
   }

@@ -147,6 +147,13 @@
       #quest-book .qb-page { position: absolute; left: 60px; top: 132px; width: 446px; height: 280px; overflow: auto; white-space: pre-wrap; color: #f4e8c8; font: 15px/1.45 Georgia, 'Times New Roman', serif; text-shadow: 0 1px 2px #000; }
       #quest-book .qb-page:empty::before { content: '—'; color: #9a8f78; }
       #quest-book .qb-page[data-pages]:not([data-pages=""])::after { content: attr(data-pages); position: sticky; display: block; bottom: 0; margin-top: 10px; color: #bfa66a; font-size: 12px; text-align: right; }
+      #char-sheet { position: fixed; inset: 0; z-index: 12; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.25); }
+      #char-sheet[hidden] { display: none; }
+      #char-sheet .cs-screen { position: relative; width: 640px; height: 480px; transform-origin: center; scale: min(1.5, calc(100vw / 680px), calc(100vh / 520px)); cursor: default; }
+      #char-sheet .cs-screen img { position: absolute; pointer-events: none; user-select: none; }
+      #char-sheet .cs-glass { width: 621px; height: 460px; opacity: .85; }
+      #char-sheet .cs-bar-right { rotate: 90deg; }
+      #char-sheet .cs-text { position: absolute; white-space: pre; color: #cfcfcf; font: 15px/18px Georgia, 'Times New Roman', serif; text-shadow: 0 1px 2px #000; }
       #cutscene { position: fixed; inset: 0; pointer-events: none; z-index: 8; }
       #cutscene[hidden] { display: none; }
       #cutscene .bar { position: absolute; left: 0; right: 0; height: 6vh; background: #000; }
@@ -368,6 +375,7 @@
     <div id="cutscene" hidden><div class="bar top"></div><div class="bar bottom"></div></div>
     <div id="fade"></div>
     <div id="quest-book" hidden></div>
+    <div id="char-sheet" hidden></div>
     <div id="game-files" hidden></div>
     <div id="death" hidden>You have fallen — respawning…</div>
     <div id="overlay" class="overlay hidden">

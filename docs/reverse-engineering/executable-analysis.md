@@ -554,6 +554,22 @@ A loadlevel exit to another act of the same mesh (Ci1b -> Ci2b) matches no entry
 ### 17.3 Quest book
 F2 (Readme). Drawn by 0x455EE0: the frame of textures questbook1-3 and 5-14 at fixed points of a 640 x 480 screen over the glass256 pane (32,70)-(532,460); tabs Next / Previous / Assigned / Completed / Notes clicked at x 520-632, y 100 / 155 / 211 / 269 / 325 (0x455BF0); the selected tab (questbookb3-5) at x 531 and the hover outline (questbookbh) at x 545. Text (0x456240, LoadStringA): Assigned "<giver> said\n<objective>", Completed "Completed: <title> Quest", Notes the journal; with more than one entry, one per page.
 
+### 17.4 Character statistics screen
+F1 (Readme). Draw routine 0x454CA0 (textures loaded by 0x454C10, freed by 0x454C70; screen vtable 0x4E0E94, its four mouse slots the no-op 0x4569F0: nothing on it is clickable). On a 640 x 480 screen: glass256 stretched over (8,12)-(629,472); statsC (16 x 16) tiled along the top at y 7 for x = 24 + 16i < 520, and 22 times down the right from (614,120), turned a quarter (UV corners at (630,y), (630,y+16), (614,y+16), (614,y)); statsA (128²) at (512,0), statsB (64²) at (0,4).
+
+Text boxes (0x4414F0: font 0x53C320, x, y, width, line count, colour 0xFFCFCFCF, text), strings by LoadStringA id:
+- (128,48) w 384, 22 lines: "Drake the Crusader  " + "%s %d
+
+" Level 2959 / level (+0x230); " %s %d  %s %d
+
+" Experience 2957 / XP (+0x1C4), Next Level at 2958 / threshold (+0x234); " %d Might
+" (+0x264; string 2960 is passed but the literal is used), " %d %s
+" Intelligence 2961 (+0x265), Endurance 2962 (+0x266), " %d %s
+
+" Speed 2963 (+0x267).
+- (338,122) w 300, 8 lines: "%s %.1f" Damage Multiplier 2964 (+0x248); "%s %d/%d" Mana 2965; Health 2966 (current rounded, max truncated).
+- Table at y 210, columns x 160 / 260 / 360, 15 lines: headers Type 2967, Resist 2968, Damage 2969; one row per damage type 2970 + i (Slash ... Dark) except Mind, Spirit, Body; Resist " %d%%" = trunc((1 − r) × 100) with r = 1 × stats +0xA4 × equipped protection (0x46C120) × +0x17C (0x44CB60); Damage "  %d" = trunc of the weapon slot's item damage vector (0x46C0D0, zeros unarmed); last row Total 2981, blank, "  %.0f x %.1f = %.0f" (sum of all 11 damage values, damage multiplier, product).
+
 Not implemented yet (side quests: unshipped in the original, §18): relay targets other than triggers, the eye path's events and curve, the two .bik movies, DoInteraction.
 
 ## 18. Peaceful Creatures: Loadout, Talk, Idle Walk and the Guards' Alarm (decompiled, 2026-10-16)

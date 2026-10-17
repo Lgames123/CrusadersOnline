@@ -81,6 +81,7 @@ import { logout } from './frontend/api.ts';
 import { CHARACTER_SCREEN_FLAG, runFrontEnd } from './frontend/front_end.ts';
 import { TitleScene } from './frontend/title_scene.ts';
 import { QuestBook, loadGameStrings } from './ui/quest_book.ts';
+import { CharacterSheet } from './ui/character_sheet.ts';
 import { Cutscene, type Puppet } from './story/cutscene.ts';
 
 const MAX_FRAME_MS = 250;
@@ -175,6 +176,8 @@ async function main(): Promise<void> {
   const inventoryPanel = new InventoryPanels(document.getElementById('inventory')!);
   const questBook = new QuestBook(document.getElementById('quest-book')!, assetManifest?.textures ?? {});
   questBook.setStrings(gameStrings);
+  const charSheet = new CharacterSheet(document.getElementById('char-sheet')!, assetManifest?.textures ?? {});
+  charSheet.setStrings(gameStrings);
   // Scripted sequences (cutscenes): played here, the server waits for the end (CS_CUTSCENE_DONE).
   let cutscene: Cutscene | null = null;
   /** The view flying back behind Drake after a sequence (OUTRO_SECONDS). */
@@ -378,6 +381,7 @@ async function main(): Promise<void> {
           correction: (dx, dy, dz) => player?.correct(dx, dy, dz),
           stats: (s) => {
             hud.stats(s);
+            charSheet.update(s);
             inventoryPanel.setGold(s.gold);
             myTorch.distance = s.light;
             myTorch.visible = s.light > 0;
@@ -713,6 +717,7 @@ async function main(): Promise<void> {
     });
     closeInventoryPanels();
     setQuestBookOpen(false);
+    setCharSheetOpen(false);
     cutsceneUi.hidden = false;
     prompt.hidden = true;
     clickHint.hidden = true;
@@ -840,7 +845,7 @@ async function main(): Promise<void> {
   let releasing = false;
   let optionsAt = 0;
   const updateHint = () => {
-    clickHint.hidden = input.locked || optionsOpen || inventoryPanel.open || questBook.open || !!cutscene;
+    clickHint.hidden = input.locked || optionsOpen || inventoryPanel.open || questBook.open || charSheet.open || !!cutscene;
   };
   const play = () => {
     sounds?.unlock();
@@ -858,6 +863,7 @@ async function main(): Promise<void> {
       optionsAt = performance.now();
       closeInventoryPanels();
       setQuestBookOpen(false);
+      setCharSheetOpen(false);
       if (input.locked) {
         releasing = true;
         document.exitPointerLock();
@@ -1136,7 +1142,7 @@ async function main(): Promise<void> {
     const ours = releasing;
     releasing = false;
     // Esc released the pointer: the options (sequences play to their end, as in the original).
-    if (!locked && !ours && !inventoryPanel.open && !questBook.open && !cutscene) setOptionsOpen(true);
+    if (!locked && !ours && !inventoryPanel.open && !questBook.open && !charSheet.open && !cutscene) setOptionsOpen(true);
     updateHint();
   };
 
@@ -1178,19 +1184,34 @@ async function main(): Promise<void> {
     combatUi.notice(message, headPos);
   };
   // Quest book (F2, the original's key), online only.
-  function setQuestBookOpen(open: boolean): void {
+  function setQuestBookOpen(open: boolean, swapping = false): void {
     if (!session || open === questBook.open) return;
     questBook.open = open;
     if (open) {
+      setCharSheetOpen(false, true);
       if (input.locked) {
         releasing = true;
         document.exitPointerLock();
       }
       sounds?.play(SFX.turnPage);
-    } else if (!optionsOpen) input.requestLock();
+    } else if (!swapping && !optionsOpen) input.requestLock();
     updateHint();
   }
   questBook.onClose = () => setQuestBookOpen(false);
+  // Character statistics (F1, the original's key), online only; F1 and F2 take each other's place.
+  function setCharSheetOpen(open: boolean, swapping = false): void {
+    if (!session || open === charSheet.open) return;
+    charSheet.open = open;
+    if (open) {
+      setQuestBookOpen(false, true);
+      if (input.locked) {
+        releasing = true;
+        document.exitPointerLock();
+      }
+    } else if (!swapping && !optionsOpen) input.requestLock();
+    updateHint();
+  }
+  charSheet.onClose = () => setCharSheetOpen(false);
   questBook.onTurn = () => sounds?.play(SFX.turnPage);
   window.addEventListener('keydown', (e) => {
     // Sequences cannot be skipped.
@@ -1202,6 +1223,7 @@ async function main(): Promise<void> {
         if (performance.now() - optionsAt > 250) setOptionsOpen(false);
       } else if (inventoryPanel.open) closeInventoryPanels();
       else if (questBook.open) setQuestBookOpen(false);
+      else if (charSheet.open) setCharSheetOpen(false);
       else setOptionsOpen(true);
       return;
     }
@@ -1218,6 +1240,9 @@ async function main(): Promise<void> {
     else if ((input.isKeyForAction('questBook', e.code) || e.code === 'F2') && !e.repeat) {
       e.preventDefault();
       setQuestBookOpen(!questBook.open);
+    } else if ((input.isKeyForAction('characterSheet', e.code) || e.code === 'F1') && !e.repeat) {
+      e.preventDefault();
+      setCharSheetOpen(!charSheet.open);
     }
   });
 

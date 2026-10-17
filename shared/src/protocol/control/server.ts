@@ -6,6 +6,7 @@ import type { SpellId } from '../../game/spells.ts';
 import type { ItemType } from '../../game/items.ts';
 import type { GameplayFeatures } from '../../game/features.ts';
 import type { QuestLog } from '../../game/story.ts';
+import type { Attributes } from '../../game/original_stats.ts';
 
 /** JSON control messages sent by the server. Trusted direction, so plain types (no Zod). */
 
@@ -61,6 +62,16 @@ export interface PlayerStatsMsg {
     light: number;
     /** Speed multiplier (stats +0x24C): the rate the character's clips play at, x 1000/30 fps. */
     speed?: number;
+    /** Character name, as the statistics screen (F1) heads it. */
+    name: string;
+    /** Might, Intelligence, Endurance, Speed. */
+    attributes: Attributes;
+    /** Damage multiplier (stats +0x248). */
+    damageMultiplier: number;
+    /** Damage-taken multipliers per type (DAMAGE_TYPES order) with the armour's protection (0x44CB60). */
+    resist: number[];
+    /** The wielded weapon's damage per type (0x46C0D0); zeros unarmed. */
+    damage: number[];
   };
 }
 
