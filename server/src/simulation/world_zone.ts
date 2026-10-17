@@ -66,7 +66,7 @@ import {
   type ItemCatalog,
   type ItemDef,
   COMBO_MULTIPLIERS,
-  COMBO_WINDOW_TICKS,
+  COMBO_QUEUE_FRACTION,
   DEFAULT_MOVEMENT_STATS,
   uniformMovementStats,
   locomotionAnim,
@@ -441,8 +441,6 @@ interface ActorBase {
   hp: number;
   maxHp: number;
   swing: Swing | null;
-  lastSwingEnd: number;
-  lastCombo: number;
   /** Tick at which a dead actor comes back; 0 while alive. */
   deadUntil: number;
   /** Tick until which a hit reaction (impact, stun, knock-down) keeps the actor from acting; 0 = none. */
@@ -481,7 +479,6 @@ interface Player extends ActorBase {
   manaRegenAt: number;
   /** Torch light around the player (radius in metres) until `until`. */
   light: { radius: number; level: number; until: number } | null;
-  queuedKind: AttackKind;
   /** Body yaw offset from the view yaw (diagonal movement), radians; replicated in the yaw. */
   facingOffset: number;
   statsDirty: boolean;
@@ -703,8 +700,6 @@ export class WorldZone {
       hp: archetype.maxHp,
       maxHp: archetype.maxHp,
       swing: null,
-      lastSwingEnd: -1e9,
-      lastCombo: 0,
       deadUntil: 0,
       hitUntil: 0,
       archetype,
@@ -789,8 +784,6 @@ export class WorldZone {
       hp,
       maxHp,
       swing: null,
-      lastSwingEnd: -1e9,
-      lastCombo: 0,
       deadUntil: 0,
       lastProcessedInput: 0,
       ackTick: 0,
@@ -810,7 +803,6 @@ export class WorldZone {
       cast: null,
       manaRegenAt: 0,
       light: null,
-      queuedKind: 'normal',
       facingOffset: 0,
       statsDirty: true,
       attributes: rules.attributes,
@@ -1835,8 +1827,9 @@ export class WorldZone {
 
   /**
    * Player swing request (CS_PLAYER_ATTACK). The combo index is decided here, not by the
-   * client: a request during recovery is buffered, requests during startup/active are ignored,
-   * so attacking faster than the swing lifecycle has no effect.
+   * client: as the original's combo routine (0x0042CA20), a request once 10 % of a combo swing
+   * has played queues the next step, which starts when the swing ends; earlier ones, and any
+   * during other swings, are ignored, so attacking faster than the swing lifecycle has no effect.
    */
   attack(connId: number, kind: AttackKind = 'normal'): void {
     const p = this.players.get(connId);
@@ -1851,19 +1844,20 @@ export class WorldZone {
         return;
       }
       if (isLayeredSwing(p.swing.kind)) return;
-      const t = p.swing.timing;
-      if (this.tick - p.swing.start >= t.startup + t.active) {
-        p.queuedAttack = true;
-        p.queuedKind = kind;
+      // A wall ahead turns the request into the jab, which clears the queue.
+      if (kind === 'thrust') {
+        p.queuedAttack = false;
+        return;
       }
+      const t = p.swing.timing;
+      const length = t.startup + t.active + t.recovery;
+      if (p.swing.kind === 'normal' && p.swing.combo < COMBO_MULTIPLIERS.length && this.tick - p.swing.start >= Math.ceil(length * COMBO_QUEUE_FRACTION)) p.queuedAttack = true;
       return;
     }
     this.startPlayerSwing(p, kind);
   }
 
-  private startPlayerSwing(p: Player, kind: AttackKind): void {
-    const chained = kind === 'normal' && this.tick - p.lastSwingEnd <= COMBO_WINDOW_TICKS && p.lastCombo < COMBO_MULTIPLIERS.length;
-    const combo = chained ? p.lastCombo + 1 : 1;
+  private startPlayerSwing(p: Player, kind: AttackKind, combo = 1): void {
     p.swing = { combo, kind, start: this.tick, timing: attackTiming(kind, combo, p.weapon.speed ?? 1, p.moveStats.clipRate ?? 1), hit: new Set() };
     p.swingSerial++;
     p.queuedAttack = false;
@@ -1911,7 +1905,7 @@ export class WorldZone {
         // On diagonals the body turns into the motion, except with the shield up (it faces the view).
         p.facingOffset = moving && !(this.frame.flags & INPUT.BLOCK) ? movementFacingOffset(this.frame.flags, this.features.diagonalMoves) : 0;
         // Hit reactions are timed movement actions, so movementAnim() covers them too.
-        p.anim = movementAnim(p.blocking ? this.frame.flags : this.frame.flags & ~INPUT.BLOCK, looksGrounded(p.character), p.character.rollDir, this.features.diagonalMoves);
+        p.anim = movementAnim(p.blocking ? this.frame.flags : this.frame.flags & ~INPUT.BLOCK, looksGrounded(p.character), p.character.rollDir, this.features.diagonalMoves, p.character.airKind);
         if (p.cast) p.anim = ANIM.SPELL_CONJURE;
       }
       if (alive(p)) this.updateMagic(p);
@@ -2601,7 +2595,7 @@ export class WorldZone {
     this.mw.controller.computeColliderMovement(c.collider, { x, y: 0, z }, undefined, CHARACTER_GROUPS);
     const moved = this.mw.controller.computedMovement();
     const p = c.position;
-    const air = { kind: c.airKind, velX: c.airVelX, velZ: c.airVelZ, travel: c.airTravel };
+    const air = { kind: c.airKind, velX: c.airVelX, velZ: c.airVelZ, travel: c.airTravel, rise: c.airRise };
     const length = c.actionLength;
     setCharacterState(c, { x: p.x + moved.x, y: p.y, z: p.z + moved.z }, c.velocityY, c.grounded, c.rollDir, c.rollTicks, air, { state: c.locoState, frame: c.locoFrame });
     c.actionLength = length;
@@ -2648,15 +2642,13 @@ export class WorldZone {
     }
     if (elapsed >= t.startup + t.active + t.recovery) {
       a.swing = null;
-      a.lastSwingEnd = this.tick;
-      a.lastCombo = s.kind === 'normal' ? s.combo : 0;
       if (a.kind === 'player') {
         if (a.pendingEquip) {
           const { slot, equip, itemId, to } = a.pendingEquip;
           a.pendingEquip = null;
           this.applyEquipRequest(a, slot, equip, itemId, to);
         }
-        if (a.queuedAttack) this.startPlayerSwing(a, a.queuedKind);
+        if (a.queuedAttack) this.startPlayerSwing(a, 'normal', s.combo + 1);
       }
     }
   }
@@ -2963,6 +2955,7 @@ export class WorldZone {
         selfAirVelX: Math.round(p.character.airVelX * 1000),
         selfAirVelZ: Math.round(p.character.airVelZ * 1000),
         selfAirTravel: Math.round(p.character.airTravel * 1000),
+        selfAirRise: Math.round(p.character.airRise * 1000),
         selfLocoState: p.character.locoState,
         selfLocoFrame: p.character.locoFrame,
       },

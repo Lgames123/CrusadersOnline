@@ -1,6 +1,7 @@
 import type { DoorMotion } from '../../arena/door_swing.ts';
 import type { MoverMotion } from '../../arena/mover.ts';
 import type { WorldObjectDef } from '../../arena/types.ts';
+import { JUMP_KINDS } from '../../constants.ts';
 import { INPUT, SC } from '../opcodes.ts';
 import type { SpellId } from '../../game/spells.ts';
 import type { ItemType } from '../../game/items.ts';
@@ -287,10 +288,18 @@ export const ANIM = {
   ALERT: 36,
   /** Talking (ASM_GESTURE_POLITE_CONVERSATION): a peaceful creature gesturing through its line. */
   GESTURE: 37,
+  /** Jumps: JUMP + the kind's index in JUMP_KINDS (V, F, running, L, R, B), standing before take-off and in the air. */
+  JUMP: 38,
+  /** Soft landing (ASM_LAND_SOFT, PD03). */
+  LAND_SOFT: 44,
 } as const;
 
-/** Animation for a character's own movement state (roll, duck, airborne, locomotion, idle). */
-export function movementAnim(flags: number, grounded: boolean, rollDir: number, diagonalMoves = false): number {
+/** Animation for a character's own movement state (roll, jump, duck, airborne, locomotion, idle). */
+export function movementAnim(flags: number, grounded: boolean, rollDir: number, diagonalMoves = false, airKind = 0): number {
+  // A jump's clip plays from its stand before take-off through the flight.
+  const jump = JUMP_KINDS.indexOf(airKind);
+  if (jump >= 0 && (rollDir === 24 || !grounded)) return ANIM.JUMP + jump;
+  if (rollDir === 25) return ANIM.LAND_SOFT;
   if (rollDir === 5) return ANIM.HOP_LEFT;
   if (rollDir === 6) return ANIM.HOP_RIGHT;
   if (rollDir === 7) return ANIM.SHIELD_IDLE; // stand after a side hop, shield still up

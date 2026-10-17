@@ -1,5 +1,5 @@
 import type RAPIER from '@dimforge/rapier3d-deterministic-compat';
-import { IMPACT_VARIANTS, isHitAction, ACTION_ATTACK, ACTION_BASH, ACTION_LUNGE, LUNGE_TICKS, ATTACK_CURVES, actionCurve, attackMotionTicks, curveTicks, hitReactionTicks, isAttackAction, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_LEFT_FORWARD, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_RIGHT_FORWARD, shieldHopTicks, curveAtTick, ROLL_CURVES, rollTicks as rollLength, advanceLoco, LOCO_CAREFUL_LEFT, LOCO_CAREFUL_RIGHT, LOCO_HOP_LEFT, LOCO_HOP_RIGHT, LOCO_RETREAT, LOCO_RUN, LOCO_SIDE_LEFT, LOCO_SIDE_RIGHT, LOCO_WALK, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, AIR_LIMIT, AIR_LIMIT_RUNNING, GRAVITY, JUMP_HOLD_LIFT, MAX_SLOPE_DEG, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
+import { IMPACT_VARIANTS, isHitAction, ACTION_ATTACK, ACTION_BASH, ACTION_LUNGE, LUNGE_TICKS, ATTACK_CURVES, actionCurve, attackMotionTicks, curveTicks, hitReactionTicks, isAttackAction, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_LEFT_FORWARD, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_RIGHT_FORWARD, shieldHopTicks, curveAtTick, curveAtFrame, ORIGINAL_ROLLS, ROLL_CURVES, rollTicks as rollLength, advanceLoco, ACTION_JUMP, ACTION_LAND, GROUND_HOLD_SPEED, JUMP_B, JUMP_F, JUMP_L, JUMP_R, JUMP_RUN, JUMP_V, RISE_DRAG_SPENT, jumpAutoPush, jumpLimits, jumpTakeoffTicks, landSoftTicks, LOCO_CAREFUL_LEFT, LOCO_CAREFUL_RIGHT, LOCO_HOP_LEFT, LOCO_HOP_RIGHT, LOCO_RETREAT, LOCO_RUN, LOCO_SIDE_LEFT, LOCO_SIDE_RIGHT, LOCO_WALK, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, GRAVITY, JUMP_HOLD_LIFT, MAX_SLOPE_DEG, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
 import type { Vec3 } from '../math/vec3.ts';
 import { dequantizeAngle } from '../math/quantize.ts';
 import { INPUT, INPUT_ATTACK_SHIFT } from '../protocol/opcodes.ts';
@@ -20,7 +20,8 @@ export interface Character {
   /**
    * Timed movement action in progress: 0 none, 1-4 rolls (forward, back, left, right),
    * 5 / 6 shield side hops (left / right), 7 the stand after a side hop, 8-11 an attack's
-   * root motion (ACTION_ATTACK + attack motion - 1), 16-18 hit reactions (impact, stun, knock-down).
+   * root motion (ACTION_ATTACK + attack motion - 1), 16-18 hit reactions (impact, stun, knock-down),
+   * 24 a jump standing before take-off, 25 the soft landing.
    */
   rollDir: number;
   /** Ticks of the roll still to run. */
@@ -32,13 +33,15 @@ export interface Character {
    * needs no collision query. Cleared by any state reset (spawn, reconciliation).
    */
   settled: boolean;
-  /** Jump in progress: 0 none, 1 standing / back / side, 2 running (forward). */
+  /** Jump in progress (also while it stands before take-off): 0 none, else its kind (JUMP_*, the ASM state). */
   airKind: number;
   /** Horizontal physics velocity during a jump, m/s (world X/Z). */
   airVelX: number;
   airVelZ: number;
   /** Horizontal distance travelled since take-off, metres. */
   airTravel: number;
+  /** Vertical distance travelled since take-off (up and down), metres. */
+  airRise: number;
   /** Clip rate multiplier (the character's speed multiplier; set from its stats every step). */
   clipRate: number;
   /** Locomotion state (LOCO_*; 0 standing) and its clip's frame (clip locomotion, LOCO_CLIPS). */
@@ -58,6 +61,7 @@ export interface AirState {
   velX: number;
   velZ: number;
   travel: number;
+  rise?: number;
 }
 
 const HALF_HEIGHT = PLAYER_HEIGHT / 2;
@@ -83,6 +87,7 @@ export function createCharacter(mw: MovementWorld, feet: Readonly<Vec3>): Charac
     airVelX: 0,
     airVelZ: 0,
     airTravel: 0,
+    airRise: 0,
     clipRate: 1,
     locoState: 0,
     locoFrame: 0,
@@ -101,6 +106,7 @@ export function setCharacterState(c: Character, feet: Readonly<Vec3>, velocityY:
   c.airVelX = c.airKind ? snapMm(air!.velX) : 0;
   c.airVelZ = c.airKind ? snapMm(air!.velZ) : 0;
   c.airTravel = c.airKind ? snapMm(air!.travel) : 0;
+  c.airRise = c.airKind ? snapMm(air!.rise ?? 0) : 0;
   c.rollDir = rollTicks > 0 ? rollDir : 0;
   c.rollTicks = c.rollDir ? rollTicks : 0;
   c.actionLength = actionTicks(c.rollDir, c.clipRate);
@@ -138,16 +144,18 @@ export function stepCharacter(
   let fwd = 0;
   let right = 0;
   // An attack whose clip carries the character starts its root motion (also over the stand
-  // after a hop or another attack's motion: combo steps restart it).
+  // after a hop or another attack's motion: combo steps restart it; and over a jump still
+  // standing before take-off: the jump selector 0x0042BD40 turns a click there into the leap).
   const motion = (f >> INPUT_ATTACK_SHIFT) & 0xf;
-  if (motion > 0 && motion <= ATTACK_CURVES.length && c.grounded && (c.rollTicks === 0 || c.rollDir === ACTION_HOP_PAUSE || isAttackAction(c.rollDir))) {
+  if (motion > 0 && motion <= ATTACK_CURVES.length && c.grounded && (c.rollTicks === 0 || c.rollDir === ACTION_HOP_PAUSE || isAttackAction(c.rollDir) || c.rollDir === ACTION_JUMP)) {
     startTimedAction(c, ACTION_ATTACK + motion - 1);
   }
-  // C + direction starts a roll (grounded, not attacking); it then runs its full length.
+  // C + direction rolls (grounded, not attacking) and the roll runs its full length; with both
+  // still held the next roll follows at once (the selector 0x0042AFC0 asks for it every frame).
   // Shield + a sideways key starts a side hop (the original moves sideways in hops when
   // blocking); each hop is followed by a short stand.
   if (c.rollTicks === 0 && c.grounded && !(f & INPUT.ROOTED)) {
-    const dir = f & INPUT.ROLL ? rollDirection(f) : 0;
+    const dir = f & (INPUT.ROLL | INPUT.DUCK) ? rollDirection(f) : 0;
     const side = movementAxes(f)[1];
     if (dir) {
       c.rollDir = dir;
@@ -155,6 +163,13 @@ export function stepCharacter(
     } else if (f & INPUT.BLOCK && f & INPUT.JUMP) {
       // Shield + jump: the shield rush (ASM_RAM_SHOULDER, PL01's root motion) instead of a jump.
       startTimedAction(c, ACTION_BASH);
+    } else if (f & INPUT.JUMP && !(f & INPUT.DUCK) && stats.jumpVelocity > 0) {
+      // Jump: the kind's clip stands until its JUMP event, then the impulse (below).
+      c.airKind = jumpKind(f);
+      c.rollDir = ACTION_JUMP;
+      // The stand, then the take-off step itself.
+      c.rollTicks = c.actionLength = jumpTakeoffTicks(c.airKind, rate) + 1;
+      c.airVelX = c.airVelZ = c.airTravel = c.airRise = 0;
     } else if (f & INPUT.BLOCK && side !== 0 && (!stats.clipLocomotion || stats.diagonalMoves)) {
       // Constant-speed / feature locomotion: discrete hops as timed actions (clip locomotion
       // loops the hop clip as a locomotion state instead, below).
@@ -163,6 +178,9 @@ export function stepCharacter(
     }
   }
   const rolling = c.rollTicks > 0;
+  // A jump stands until its last tick, the take-off step (its kind is in airKind).
+  const windup = rolling && c.rollDir === ACTION_JUMP;
+  const takeoff = windup && c.rollTicks === 1 && c.grounded;
   // Attacking plants the feet (INPUT.ROOTED), so does ducking (C held); gravity still applies.
   if (!rolling && !(f & (INPUT.ROOTED | INPUT.DUCK))) {
     [fwd, right] = movementAxes(f);
@@ -189,10 +207,14 @@ export function stepCharacter(
     }
     // Rolls follow their clip's root-motion profile too (lengthwise forward/back, sideways left/right).
     let roll = 0;
+    // A roll's ticks span its state's whole loop (ORIGINAL_ROLLS frames), so rolls held back to
+    // back cover the clip's distance per loop whatever the tick rounding.
     if (c.rollDir >= 1 && c.rollDir <= 4) {
       const curve = ROLL_CURVES[c.rollDir - 1]!;
-      const done = rollLength(c.rollDir, rate) - c.rollTicks;
-      roll = (curveAtTick(curve, done + 1, rate) - curveAtTick(curve, done, rate)) / dt;
+      const ticks = rollLength(c.rollDir, rate);
+      const done = ticks - c.rollTicks;
+      const at = (t: number) => curveAtFrame(curve, (t / ticks) * ORIGINAL_ROLLS[c.rollDir - 1]!.frames);
+      roll = (at(done + 1) - at(done)) / dt;
     }
     // Attacks move along the facing by their clip's forward root displacement.
     // Attacks, the knock-down (thrown back, PI02) and creature lunges / bashes follow their
@@ -264,49 +286,57 @@ export function stepCharacter(
     vz = -co * along - s * side;
   }
 
-  // Original vertical physics: take-off impulse, gravity, extra lift while jump is held in
-  // the air, and quadratic drag while rising.
+  // Original vertical physics (0x00492B70 / 0x004923E0): take-off impulse, gravity, extra lift
+  // while jump is held in the air, and drag k x v x |v| against the whole speed of the step before.
+  const air: AirState = { kind: c.airKind, velX: c.airVelX, velZ: c.airVelZ, travel: c.airTravel, rise: c.airRise };
+  const flying = air.kind !== 0 && !rolling;
+  const limits = flying ? jumpLimits(air.kind) : null;
+  const riseSpent = limits !== null && air.rise! > limits.vertical;
+  const speed = Math.hypot(c.velocityY, flying ? c.airVelX : 0, flying ? c.airVelZ : 0);
   let vy = c.velocityY;
   let ay = GRAVITY;
-  const air: AirState = { kind: c.airKind, velX: c.airVelX, velZ: c.airVelZ, travel: c.airTravel };
-  const jumping = c.grounded && (f & INPUT.JUMP) !== 0 && !rolling && !(f & INPUT.DUCK) && stats.jumpVelocity > 0;
-  if (jumping) {
-    vy = stats.jumpVelocity + ay * dt;
-    // Take-off: no horizontal speed carries over; holding forward makes a running jump.
-    air.kind = f & INPUT.FORWARD && !(f & INPUT.BACK) ? 2 : 1;
-    air.velX = air.velZ = air.travel = 0;
+  if (takeoff) {
+    // The impulse adds to the grounded -5 ft/s; no horizontal speed carries over.
+    vy = stats.jumpVelocity + GROUND_HOLD_SPEED;
+    air.velX = air.velZ = air.travel = air.rise = 0;
   } else if (c.grounded) {
     // On the ground the original holds a constant downward stick speed instead of
     // accumulating gravity; a small one keeps the controller glued to slopes and steps.
     vy = GROUND_STICK;
   } else {
-    if (f & INPUT.JUMP) ay += JUMP_HOLD_LIFT;
+    // Past the vertical limit the lift stops (the acceleration is reset to gravity).
+    if (f & INPUT.JUMP && !riseSpent) ay += JUMP_HOLD_LIFT;
     vy += ay * dt;
   }
-  if (vy > 0) {
-    const drag = RISE_DRAG * vy * vy * dt;
-    vy = drag > vy ? 0 : vy - drag;
+  if (c.velocityY > 0) {
+    const k = riseSpent ? RISE_DRAG_SPENT : RISE_DRAG;
+    const drag = k * vy * speed * dt;
+    vy = Math.abs(drag) > Math.abs(vy) ? 0 : vy - drag;
   }
 
-  if (air.kind && !rolling) {
+  if (flying) {
     // Jump: horizontal physics (air control, drag, distance limit) replaces ground motion.
     const yaw = dequantizeAngle(input.yaw);
     const s = Math.sin(yaw);
     const co = Math.cos(yaw);
-    const spent = air.travel > (air.kind === 2 ? AIR_LIMIT_RUNNING : AIR_LIMIT);
+    const spent = air.travel > limits!.horizontal;
     let along = 0;
     let side = 0;
     if (!spent && !(f & INPUT.ROOTED)) {
-      along = ((f & INPUT.FORWARD ? 1 : 0) - (f & INPUT.BACK ? 1 : 0) + (air.kind === 2 ? 1 : 0)) * AIR_ACCEL;
-      side = ((f & INPUT.RIGHT ? 1 : 0) - (f & INPUT.LEFT ? 1 : 0)) * AIR_ACCEL;
+      // Back wins over forward, left over right (0x00492B70); forward / back jumps push on their own.
+      const [keyFwd, keyRight] = movementAxes(f);
+      along = (keyFwd + jumpAutoPush(air.kind)) * AIR_ACCEL;
+      side = keyRight * AIR_ACCEL;
     }
     air.velX += (-s * along + co * side) * dt;
     air.velZ += (-co * along - s * side) * dt;
     const k = spent ? AIR_DRAG_SPENT : AIR_DRAG;
-    const dragX = k * air.velX * Math.abs(air.velX) * dt;
-    const dragZ = k * air.velZ * Math.abs(air.velZ) * dt;
+    const dragX = k * air.velX * speed * dt;
+    const dragZ = k * air.velZ * speed * dt;
     air.velX = Math.abs(dragX) > Math.abs(air.velX) ? 0 : air.velX - dragX;
     air.velZ = Math.abs(dragZ) > Math.abs(air.velZ) ? 0 : air.velZ - dragZ;
+    // Without a push, speeds under 2.5 ft/s stop.
+    if (spent && Math.hypot(air.velX, air.velZ) < 2.5 * FT_M) air.velX = air.velZ = 0;
     vx = air.velX;
     vz = air.velZ;
   }
@@ -314,7 +344,7 @@ export function stepCharacter(
   // Standing still on the ground (no input motion, timed action or jump): nothing moves, so the
   // controller's collision query is skipped - it is most of a crowded zone's tick. The ground
   // stick would only re-confirm the contact.
-  const still = c.grounded && vx === 0 && vz === 0 && !jumping && !rolling && !air.kind && locoNext.state === 0;
+  const still = c.grounded && vx === 0 && vz === 0 && !takeoff && !rolling && !air.kind && locoNext.state === 0;
   if (still && c.settled) return;
 
   desired.x = vx * dt;
@@ -338,10 +368,25 @@ export function stepCharacter(
     rollDir = ACTION_HOP_PAUSE;
     rollTicks = SHIELD_HOP_PAUSE_TICKS;
   }
-  if (air.kind) {
+  // A roll ending with C and a direction still held runs straight into the next one.
+  const nextRoll = f & (INPUT.ROLL | INPUT.DUCK) && !(f & INPUT.ROOTED) ? rollDirection(f) : 0;
+  if (rolling && rollTicks === 0 && rollDir >= 1 && rollDir <= 4 && nextRoll && grounded) {
+    rollDir = nextRoll;
+    rollTicks = rollLength(nextRoll, rate);
+  }
+  // The take-off step's motion counts towards the jump's travel already.
+  if (air.kind && (!windup || takeoff)) {
     air.travel += Math.hypot(moved.x, moved.z);
-    // Landing ends the jump (but not on the take-off step itself).
-    if (grounded && !jumping) air.kind = 0;
+    air.rise! += Math.abs(moved.y);
+    // Landing ends the jump (but not on the take-off step itself). Still holding jump after a
+    // vertical or forward jump plays the soft landing first (0x0042BD40: ASM_LAND_SOFT).
+    if (grounded && !takeoff) {
+      if (f & INPUT.JUMP && (air.kind === JUMP_V || air.kind === JUMP_F || air.kind === JUMP_RUN) && rollTicks === 0) {
+        rollDir = ACTION_LAND;
+        rollTicks = landSoftTicks(rate);
+      }
+      air.kind = 0;
+    }
   }
   setCharacterState(
     c,
@@ -392,6 +437,8 @@ function actionTicks(action: number, rate = 1): number {
 
 /** Starts a timed action (attack motion, hit reaction, creature lunge / bash), replacing any other. */
 export function startTimedAction(c: Character, action: number): void {
+  // On the ground a jump can only be standing before its take-off: the action replaces it.
+  if (c.grounded) c.airKind = 0;
   c.rollDir = action;
   c.rollTicks = actionTicks(action, c.clipRate);
   c.actionLength = c.rollTicks;
@@ -412,6 +459,19 @@ export function rollDirection(flags: number): number {
   if (flags & INPUT.LEFT) return 3;
   if (flags & INPUT.RIGHT) return 4;
   return 0;
+}
+
+/**
+ * Jump kind for held keys, as the jump selector (0x0042BD40) picks the state: right, else left,
+ * overrides forward / back; forward is the running jump, with Shift the standing forward one.
+ */
+export function jumpKind(flags: number): number {
+  if (flags & INPUT.RIGHT) return JUMP_R;
+  if (flags & INPUT.LEFT) return JUMP_L;
+  const fwd = movementAxes(flags)[0];
+  if (fwd > 0) return flags & INPUT.WALK ? JUMP_F : JUMP_RUN;
+  if (fwd < 0) return JUMP_B;
+  return JUMP_V;
 }
 
 /**

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ANIM, INPUT, TICK_DT, SIDE_SWING_CHAIN_SECONDS, SIDE_SWING_RECHAIN_TICKS, gameplayFeatures, type GameplayFeatures, attackAnim, attackMotion, isHitAction, isLayeredSwing, dequantizeAngle, movementAnim, looksGrounded, movementFacingOffset, type AttackKind, attackTiming, type Character, type InputFrame, type Vec3, setCharacterState } from '@crusaders/shared';
+import { ANIM, INPUT, TICK_DT, SIDE_SWING_CHAIN_SECONDS, SIDE_SWING_RECHAIN_TICKS, gameplayFeatures, type GameplayFeatures, attackAnim, attackMotion, isHitAction, isLayeredSwing, dequantizeAngle, movementAnim, looksGrounded, movementFacingOffset, type AttackKind, attackTiming, COMBO_QUEUE_FRACTION, COMBO_MULTIPLIERS, type Character, type InputFrame, type Vec3, setCharacterState } from '@crusaders/shared';
 import type { Avatar } from './avatar.ts';
 
 /**
@@ -43,6 +43,10 @@ export class LocalPlayer {
   /** Root motion of the swing just started, sent with the next input (0 = none). */
   private pendingMotion = 0;
   private kind: AttackKind = 'normal';
+  /** The next combo step is queued: it starts when this swing ends. */
+  private queued = false;
+  /** A queued combo step just started (its sound and wall check are the caller's). */
+  onQueuedSwing: (kind: AttackKind) => void = () => {};
   private swingCount = 0;
   private sinceSwing = 99;
   private blocking = false;
@@ -84,6 +88,7 @@ export class LocalPlayer {
     // A hit reaction (impact, stun, knock-down) interrupts the own swing.
     if (isHitAction(this.character.rollDir)) {
       this.swingLeft = 0;
+      this.queued = false;
       this.pendingMotion = 0;
       this.castLeft = 0;
     }
@@ -92,7 +97,7 @@ export class LocalPlayer {
     if (moving) this.targetFacing = dequantizeAngle(input.yaw) + movementFacingOffset(input.flags, this.features.diagonalMoves);
     this.blocking = !this.dead && (input.flags & INPUT.BLOCK) !== 0;
     if (this.blocking) this.targetFacing = dequantizeAngle(input.yaw);
-    this.moveAnim = this.dead ? ANIM.IDLE : movementAnim(input.flags, looksGrounded(this.character), this.character.rollDir, this.features.diagonalMoves);
+    this.moveAnim = this.dead ? ANIM.IDLE : movementAnim(input.flags, looksGrounded(this.character), this.character.rollDir, this.features.diagonalMoves, this.character.airKind);
   }
 
   setWeaponSpeed(speed: number): void {
@@ -101,26 +106,40 @@ export class LocalPlayer {
 
   /**
    * Local swing feedback; mirrors the server's combo rule closely enough for presentation.
-   * Returns the attack actually started (side swings alternate), or null.
+   * Returns the attack actually started (side swings alternate), 'queued' when the click queued
+   * the next combo step (the server queues it too), or null.
    */
-  swing(cameraYaw: number, kind: AttackKind = 'normal'): AttackKind | null {
+  swing(cameraYaw: number, kind: AttackKind = 'normal'): AttackKind | 'queued' | null {
     if (this.dead || this.castLeft > 0 || isHitAction(this.character.rollDir)) return null;
     const side = (k: AttackKind) => k === 'left' || k === 'right';
     if (this.swingLeft > 0) {
+      // The combo routine (0x0042CA20): once 10 % of a combo swing has played, a request queues
+      // the next step (a tick later than the server's threshold, so the server always agrees).
+      const ticks = Math.round(this.swingTime / TICK_DT);
+      const queueAt = (Math.ceil(ticks * COMBO_QUEUE_FRACTION) + 1) * TICK_DT;
+      if (!this.queued && kind !== 'thrust' && this.kind === 'normal' && this.combo < COMBO_MULTIPLIERS.length && this.swingTime - this.swingLeft >= queueAt) {
+        this.queued = true;
+        return 'queued';
+      }
       // One swing at a time; feature sideSwingRetrigger: a side swing re-triggers 0.3 s in.
       if (!this.features.sideSwingRetrigger || !(side(kind) && side(this.kind) && this.swingTime - this.swingLeft >= SIDE_SWING_RECHAIN_TICKS * TICK_DT)) return null;
     }
     // Feature sideSwingRetrigger: consecutive side swings alternate sides.
     if (this.features.sideSwingRetrigger && side(kind) && side(this.kind) && (this.swingLeft > 0 || this.sinceSwing < SIDE_SWING_CHAIN_SECONDS)) kind = this.kind === 'left' ? 'right' : 'left';
-    // Directional attacks are single hits; plain clicks chain the combo.
-    this.combo = kind === 'normal' && this.kind === 'normal' && this.sinceSwing < 0.3 && this.combo < 5 ? this.combo + 1 : 1;
+    // A click after a swing has ended starts the combo again; directional attacks are single hits.
+    this.begin(kind, 1, cameraYaw);
+    return kind;
+  }
+
+  private begin(kind: AttackKind, combo: number, cameraYaw: number): void {
+    this.combo = combo;
+    this.queued = false;
     this.kind = kind;
     this.swingCount++;
     this.swingTime = swingSeconds(kind, this.combo, this.weaponSpeed, this.clipRate);
     this.pendingMotion = attackMotion(kind, this.combo);
     this.swingLeft = this.swingTime;
     if (!isLayeredSwing(kind)) this.targetFacing = cameraYaw;
-    return kind;
   }
 
   /** Latest view heading (mouse / keys), set every rendered frame. */
@@ -184,6 +203,11 @@ export class LocalPlayer {
     if (this.swingLeft > 0) {
       this.swingLeft -= dt;
       this.sinceSwing = 0;
+      // The queued combo step starts as the swing ends.
+      if (this.swingLeft <= 0 && this.queued && !this.dead) {
+        this.begin('normal', this.combo + 1, this.targetHeading);
+        this.onQueuedSwing('normal');
+      }
     } else {
       this.sinceSwing += dt;
     }

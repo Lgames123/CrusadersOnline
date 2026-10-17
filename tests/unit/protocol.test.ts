@@ -98,10 +98,11 @@ describe('SC_WORLD_SNAPSHOT codec', () => {
     selfGrounded: true,
     selfRollDir: 11, // an attack's root motion (ACTION_ATTACK + 3)
     selfRollTicks: 12,
-    selfAirKind: 2,
+    selfAirKind: 10, // a running jump (ASM_RUNNING_JUMP_F)
     selfAirVelX: -4321,
     selfAirVelZ: 1234,
     selfAirTravel: 2500,
+    selfAirRise: 1800,
     selfLocoState: 5,
     selfLocoFrame: 12.25,
   });

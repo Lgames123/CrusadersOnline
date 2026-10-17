@@ -1,5 +1,6 @@
 # Context notes
 
+- 2026-10-17 [Drake's rolls, jumps and combo as the original](2026-10-17-drake-rolls-jumps-combo.md) — C + direction held rolls back to back; jumps stand to the clip's JUMP event (6–12 frames), drag on the 3-D speed, vertical limit, soft landing: running jump 19.7 ft (was 27); swings hold to clip end, combo queues from 10 % while the button is held, weapon rate 1 + 1.5 (Speed − 1) (Claude Code)
 - 2026-10-17 [Character statistics screen (F1)](2026-10-17-character-statistics-screen.md) — 0x454CA0 decoded: statsA/B/C frame over glass, name/level/XP/attributes, damage multiplier/mana/health, Type/Resist/Damage table; PLAYER_STATS carries the sheet; F1/F2 swap (Claude Code)
 - 2026-10-17 [Placed objects in their own node frame](2026-10-17-placed-objects-node-frame.md) — the .cap matrix places the raw model: the baked node transform is undone (baskets upright, crates on the floor, bushes/fences/light volumes back in place); prop hit sparks at the contact point, 0.7 ft along the sweep; out-of-cell objects left as placed (Claude Code)
 - 2026-10-17 [Drake's shield clanks like a creature's](2026-10-17-drake-block-sounds.md) — Frida: Drake is type 142 (row: flesh impact, metal block), so his blocks play the metal row by attacker edge (339/340/341 off swords) and hits on him the flesh row (Claude Code)

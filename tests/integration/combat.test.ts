@@ -69,7 +69,8 @@ describe.each(backends)('vertical-slice combat over the network on $name (M08)',
     // Lower the shield: the change must survive the reconnect (inventory_items).
     const shield = s.inventory!.items.find((i) => i.type === 'shield')!;
     s.equip(shield.slot, false);
-    await sleep(200);
+    // A swing still playing (the last queued combo step holds up to ~0.9 s) defers the change.
+    await sleep(1200);
     expect(s.inventory!.items.find((i) => i.slot === shield.slot)!.equipped).toBe(false);
     const items = s.inventory!.items.map((i) => [i.itemId, i.slot, i.equipped]);
     s.close();

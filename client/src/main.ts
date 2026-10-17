@@ -30,6 +30,7 @@ import {
   inStoryVolume,
   type StoryMessage,
   attackKindFor,
+  type AttackKind,
   TICK_DT,
   TICK_MS,
   createCharacter,
@@ -819,6 +820,13 @@ async function main(): Promise<void> {
     e.preventDefault();
     settings.update({ cameraZoom: Math.round((settings.current.cameraZoom + Math.sign(e.deltaY) * 0.1) * 100) / 100 });
   }, { passive: false });
+  /** A swing starting locally: a wall check at its impact frame (sparks off the stone) and its sound. */
+  const swingStarted = (kind: AttackKind, yaw: number) => {
+    const timing = attackTiming(kind, 1, 1, local.clipRate);
+    wallChecks.push({ t: (timing.startup + timing.active / 2) * TICK_DT, yaw });
+    sounds?.play(pick(SFX.swing), local.object.position, { volume: 0.7 });
+  };
+  local.onQueuedSwing = (kind) => swingStarted(kind, input.yaw);
   input.onAttack = () => {
     if (cutscene) return;
     // The movement key held with the click picks the attack (original controls).
@@ -829,12 +837,10 @@ async function main(): Promise<void> {
     const feet = local.character.position;
     if (kind === 'normal' && wallAhead(session?.mw ?? mw, feet, input.yaw, THRUST_WALL_DISTANCE, THRUST_WALL_HEIGHT)) kind = 'thrust';
     const started = local.swing(input.yaw, kind);
-    if (started) {
-      // Check for a wall at the swing's impact frame (sparks off the stone).
-      const timing = attackTiming(started, 1, 1, local.clipRate);
-      wallChecks.push({ t: (timing.startup + timing.active / 2) * TICK_DT, yaw: input.yaw });
+    if (started === 'queued') session?.attack(kind);
+    else if (started) {
       session?.attack(started);
-      sounds?.play(pick(SFX.swing), local.object.position, { volume: 0.7 });
+      swingStarted(started, input.yaw);
     }
   };
 
@@ -1272,6 +1278,9 @@ async function main(): Promise<void> {
     last = now;
     acc += frameMs;
     while (acc >= TICK_MS) {
+      // The original reads the attack button as held every frame (0x0042CA20): holding it swings
+      // again as soon as it can, and chains the combo.
+      if (input.attackHeld) input.onAttack();
       input.sample(frame, ++tick);
       // During a scripted sequence the character stands still (the server ignores the keys too).
       if (cutscene) frame.flags = 0;

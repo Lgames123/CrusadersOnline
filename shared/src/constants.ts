@@ -12,17 +12,58 @@ export const GRAVITY = -78.4 * 0.3048;
 export const RISE_DRAG = 0.01 / 0.3048;
 /**
  * Jumps carry no run speed (running is root motion, not physics): in the air, each held
- * direction accelerates 156.8 × 1.3 × 0.16 = 32.6 ft/s² along that body axis (twice
- * forward in a running jump), against a horizontal drag of 0.02 per foot. Once the
- * horizontal distance travelled in the air passes the jump's limit (5.2 ft; 13 ft for a
- * running jump) the push stops and the drag rises to 0.05 per foot (executable-analysis §13).
+ * direction accelerates 156.8 × 1.3 × 0.16 = 32.6 ft/s² along that body axis, and the
+ * forward jumps (kinds 9 / 10) push forward, the back jump (20) backwards, as much again
+ * without a key. Drag is k × v × |v| per axis where |v| is the whole 3-D speed (0x004923E0):
+ * k = 0.02 horizontally, 0.01 vertically while rising. Once the horizontal distance travelled
+ * since take-off passes the kind's limit the push stops and k rises to 0.05; once the vertical
+ * distance passes its limit the hold lift stops and the rising k is 0.1 (executable-analysis §13).
  */
 export const AIR_ACCEL = 156.8 * 1.3 * 0.16 * 0.3048; // the per-frame 0.033 and 1/0.033 cancel: 32.6 ft/s²
 export const AIR_DRAG = 0.02 / 0.3048;
 export const AIR_DRAG_SPENT = 0.05 / 0.3048;
-export const AIR_LIMIT = 5.2 * 0.3048;
-export const AIR_LIMIT_RUNNING = 13 * 0.3048;
+export const RISE_DRAG_SPENT = 0.1 / 0.3048;
 export const JUMP_HOLD_LIFT = (78.4 * 0.033 * 1.3 * 0.06 / 0.0333) * 0.3048;
+/** Grounded vertical speed the original holds (−5 ft/s); the take-off impulse adds to it. */
+export const GROUND_HOLD_SPEED = -5 * 0.3048;
+/**
+ * Jump kinds: the ASM state the jump selector (0x0042BD40) picks from the held keys (a sideways
+ * key overrides forward / back): 8 STANDING_JUMP_V (none), 9 STANDING_JUMP_F (Shift + forward),
+ * 10 RUNNING_JUMP_F (forward), 11 / 12 STANDING_JUMP_L / R, 20 STANDING_JUMP_B (back).
+ */
+export const JUMP_V = 8;
+export const JUMP_F = 9;
+export const JUMP_RUN = 10;
+export const JUMP_L = 11;
+export const JUMP_R = 12;
+export const JUMP_B = 20;
+export const JUMP_KINDS: readonly number[] = [JUMP_V, JUMP_F, JUMP_RUN, JUMP_L, JUMP_R, JUMP_B];
+/**
+ * The impulse leaves on the clip's JUMP LEAVEGROUND event (0x00457CA0 sets physics flag
+ * 0x8000): PC01 / PC02 frame 10, PC03 frame 6, PC04 / PC05 / PC06 frame 12. Until then the
+ * jump state stands (its clip's root hardly moves).
+ */
+const JUMP_TAKEOFF_FRAMES: Readonly<Record<number, number>> = { [JUMP_V]: 10, [JUMP_F]: 10, [JUMP_RUN]: 6, [JUMP_L]: 12, [JUMP_R]: 12, [JUMP_B]: 12 };
+/** Ticks a jump stands before it leaves the ground, at clip rate `rate`. */
+export function jumpTakeoffTicks(kind: number, rate = 1): number {
+  return Math.max(1, Math.round(((JUMP_TAKEOFF_FRAMES[kind] ?? 10) / (ENGINE_CLIP_FPS * rate)) * TICK_RATE));
+}
+/** Travel limits of a jump in metres (0x00492B70: 1.3 × 4 ft per axis; ×2.5 / ×1.5 horizontally for kinds 10 / 9, ×2.3 vertically for 8). */
+export function jumpLimits(kind: number): { horizontal: number; vertical: number } {
+  const base = 1.3 * 4 * 0.3048;
+  return { horizontal: base * (kind === JUMP_RUN ? 2.5 : kind === JUMP_F ? 1.5 : 1), vertical: base * (kind === JUMP_V ? 2.3 : 1) };
+}
+/** Forward push a jump kind adds without a key (+1 forward, −1 back). */
+export function jumpAutoPush(kind: number): number {
+  return kind === JUMP_F || kind === JUMP_RUN ? 1 : kind === JUMP_B ? -1 : 0;
+}
+/**
+ * Landing from a vertical or forward jump with jump still held plays ASM_LAND_SOFT: the first
+ * 30 % of PD03 (34-frame header; 0x00429BF0), standing, before the next jump.
+ */
+export function landSoftTicks(rate = 1): number {
+  return Math.max(1, Math.round(((0.3 * 34 - 1) / (ENGINE_CLIP_FPS * rate)) * TICK_RATE));
+}
 
 /** Player capsule (gameplay-specification.md §3.1). Height includes both hemispheres. */
 export const PLAYER_RADIUS = 0.4;
@@ -109,13 +150,16 @@ export const DEFAULT_MOVEMENT_STATS: Readonly<MovementStats> = {
 /**
  * Drake's rolls (C + direction): root displacement and length of ASM_ROLL_F/B/L/R
  * (PE03 / PE06 / PE04 / PE05), in feet and frames (played at 1000/30 frames per second) (executable-analysis.md §11).
+ * The roll states loop their clip (0x00429BF0) and end, like every state, once the clip time
+ * passes header +0x14 − 1 frames (PE03 24, the others 26); while C and a direction stay held
+ * the selector (0x0042AFC0) asks for the roll again, so the rolls run on back to back.
  * Index = roll direction - 1: forward, back, left, right.
  */
 export const ORIGINAL_ROLLS: readonly { distanceFt: number; frames: number }[] = [
-  { distanceFt: 10.73, frames: 25 },
-  { distanceFt: 10.96, frames: 25 },
-  { distanceFt: 10.8, frames: 27 },
-  { distanceFt: 9.99, frames: 25 },
+  { distanceFt: 10.73, frames: 24 },
+  { distanceFt: 10.96, frames: 26 },
+  { distanceFt: 10.8, frames: 26 },
+  { distanceFt: 9.99, frames: 26 },
 ];
 
 /** Roll length in simulation ticks and speed in metres per second, per direction - 1. */
@@ -268,7 +312,10 @@ export function isHitAction(action: number): boolean {
 
 /** Root displacement (metres) of a curve sampled per clip frame, at `ticks` into the action. */
 export function curveAtTick(curve: readonly number[], ticks: number, rate = 1): number {
-  const frame = (ticks / TICK_RATE) * 30 * CLIP_RATE * rate;
+  return curveAtFrame(curve, (ticks / TICK_RATE) * 30 * CLIP_RATE * rate);
+}
+/** Root displacement (metres) of a curve sampled per clip frame, at clip frame `frame`. */
+export function curveAtFrame(curve: readonly number[], frame: number): number {
   const i = Math.min(curve.length - 1, Math.max(0, Math.floor(frame)));
   const j = Math.min(curve.length - 1, i + 1);
   const t = Math.min(1, Math.max(0, frame - i));
@@ -278,6 +325,9 @@ export function curveAtTick(curve: readonly number[], ticks: number, rate = 1): 
 export const ACTION_HOP_LEFT = 5;
 export const ACTION_HOP_RIGHT = 6;
 export const ACTION_HOP_PAUSE = 7;
+/** A jump standing before take-off (its kind in Character.airKind), and ASM_LAND_SOFT. */
+export const ACTION_JUMP = 24;
+export const ACTION_LAND = 25;
 
 /**
  * The player's locomotion as the original moves it. Each frame the state's clip advances (at the

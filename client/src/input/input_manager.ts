@@ -33,6 +33,8 @@ export class InputManager {
   onLockChange: (locked: boolean) => void = () => {};
   /** Primary mouse button while the pointer is locked. The secondary button holds BLOCK. */
   onAttack: () => void = () => {};
+  /** The attack button (or key) is held: the original keeps attacking while it is. */
+  attackHeld = false;
   /** One-shot action keys (interact, potion...) while the pointer is locked. */
   onAction: (action: Action) => void = () => {};
   private readonly view = new Set<string>();
@@ -60,7 +62,10 @@ export class InputManager {
       const action = this.compiled.actionFor(e.code);
       if (action) {
         e.preventDefault();
-        if (action === 'attack' && !e.repeat) this.onAttack();
+        if (action === 'attack' && !e.repeat) {
+          this.attackHeld = true;
+          this.onAttack();
+        }
         else if (action === 'block') this.held |= INPUT.BLOCK;
         else if (!e.repeat) this.onAction(action);
       }
@@ -72,10 +77,12 @@ export class InputManager {
       this.view.delete(e.code);
       const action = this.compiled.actionFor(e.code);
       if (action === 'block') this.held &= ~INPUT.BLOCK;
+      if (action === 'attack') this.attackHeld = false;
     });
 
     window.addEventListener('blur', () => {
       this.held = 0;
+      this.attackHeld = false;
       this.view.clear();
     });
 
@@ -90,6 +97,7 @@ export class InputManager {
       if (!this.locked) return;
       const mouseCode = `Mouse${e.button}`;
       if (this.compiled.isAction('attack', mouseCode) || (e.button === 0 && !this.compiled.actionFor('Mouse0'))) {
+        this.attackHeld = true;
         this.onAttack();
       }
       if (this.compiled.isAction('block', mouseCode) || (e.button === 2 && !this.compiled.actionFor('Mouse2'))) {
@@ -99,6 +107,7 @@ export class InputManager {
 
     document.addEventListener('mouseup', (e) => {
       const mouseCode = `Mouse${e.button}`;
+      if (this.compiled.isAction('attack', mouseCode) || (e.button === 0 && !this.compiled.actionFor('Mouse0'))) this.attackHeld = false;
       if (this.compiled.isAction('block', mouseCode) || (e.button === 2 && !this.compiled.actionFor('Mouse2'))) {
         this.held &= ~INPUT.BLOCK;
       }
@@ -112,6 +121,7 @@ export class InputManager {
       this.locked = document.pointerLockElement === this.element;
       if (!this.locked) {
         this.held = 0;
+        this.attackHeld = false;
         this.view.clear();
       }
       this.onLockChange(this.locked);

@@ -24,6 +24,7 @@ import {
   DEFAULT_MOVEMENT_STATS,
   ORIGINAL_CLIP_FPS,
   attackTiming,
+  weaponClipRate,
   INPUT,
   TICK_RATE,
   INPUT_PACKET_MAX_BYTES,
@@ -110,6 +111,42 @@ describe('original swing timing', () => {
     // A faster weapon shortens the swing.
     const fast = attackTiming('normal', 1, 2);
     expect(fast.startup + fast.active + fast.recovery).toBeLessThan(first.startup + first.active + first.recovery);
+  });
+});
+
+describe('combo queue and swing length (0x0042CA20, 0x00429BF0)', () => {
+  it('holds each swing to its clip end; the weapon Speed scales the clip rate by 1.5', () => {
+    // PN02 (combo step 2): IMPACT 8, RECOVERY 13, header 25 -> the state holds to frame 24.
+    const second = attackTiming('normal', 2);
+    expect(second.startup + second.active + second.recovery).toBe(Math.round((24 / ORIGINAL_CLIP_FPS) * TICK_RATE));
+    expect(weaponClipRate(1.1)).toBeCloseTo(1.15, 5);
+    expect(weaponClipRate(0.95)).toBeCloseTo(0.925, 5);
+  });
+
+  it('queues the next step from 10 % of a swing; a click after it has ended starts over', () => {
+    const t = setup();
+    t.run(5);
+    const swingTicks = () => {
+      let n = 0;
+      while (t.me().anim !== ANIM.IDLE && n < 60) {
+        t.run(1);
+        n++;
+      }
+      return n;
+    };
+    t.zone.attack(1);
+    t.zone.attack(1); // too early (under 10 % of the swing): dropped
+    t.run(1);
+    expect(t.me().anim).toBe(ANIM.ATTACK);
+    const first = swingTicks() + 1;
+    expect(t.me().anim).toBe(ANIM.IDLE);
+    t.zone.attack(1); // the swing is over: the combo starts again
+    t.run(1);
+    expect(t.me().anim).toBe(ANIM.ATTACK);
+    t.run(Math.ceil(first / 2));
+    t.zone.attack(1); // half-way: queued
+    for (let i = 0; i < first && t.me().anim === ANIM.ATTACK; i++) t.run(1);
+    expect(t.me().anim).toBe(ANIM.ATTACK + 1);
   });
 });
 
@@ -626,7 +663,8 @@ describe('the shove of a blow (0x0044D290, one frame of impulse)', () => {
     for (let i = 0; i < 600 && shoves.length < 3 && t.mob().alive; i++) {
       const before = t.mob();
       const n = t.events().length;
-      t.run(1, 0, 0, () => i % 7 === 0 && t.zone.attack(1));
+      // Holding the attack button: the combo chains (requests from 10 % of each swing queue the next).
+      t.run(1, 0, 0, () => t.zone.attack(1));
       const hit = t.events().slice(n).some((e) => e.target === before.id && e.damage > 0 && !e.killed);
       // Ticks where the skeleton stood in its pause (no movement of its own) when the blow landed.
       if (hit && before.brain === 'pause') shoves.push(Math.hypot(t.mob().x - before.x, t.mob().z - before.z));

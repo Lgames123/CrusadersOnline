@@ -51,6 +51,14 @@ import {
   type InputFrame,
   type MovementWorld,
   type Rapier,
+  ACTION_LAND,
+  JUMP_B,
+  JUMP_F,
+  JUMP_L,
+  JUMP_R,
+  JUMP_RUN,
+  JUMP_V,
+  jumpTakeoffTicks,
 } from '@crusaders/shared';
 
 let rapier: Rapier;
@@ -212,6 +220,19 @@ describe('shared character controller', () => {
     expect(start.z - c.position.z).toBeCloseTo(10.73 * 0.3048, 1);
   });
 
+  it('rolls back to back while C and a direction stay held (the selector asks every frame)', () => {
+    const { mw, c } = setup();
+    run(mw, c, 0, 0, 10);
+    const start = { ...c.position };
+    // C pressed first, then the direction: rolls all the same.
+    run(mw, c, INPUT.DUCK, 0, 3);
+    for (let i = 0; i < ROLLS[0]!.ticks * 2; i++) {
+      run(mw, c, INPUT.DUCK | INPUT.FORWARD, 0, 1);
+      expect(c.rollDir).toBe(1);
+    }
+    expect(start.z - c.position.z).toBeCloseTo(2 * 10.73 * 0.3048, 1);
+  });
+
   it('attacks whose clip moves the root carry the character forward by that distance', () => {
     // Combo step 1 (PN25, +3.85 ft) and the jump attack (PN05, +6.26 ft); the feet stay planted otherwise.
     for (const [kind, combo, feet] of [['normal', 1, 3.85], ['normal', 3, 3.43], ['normal', 5, 2.16], ['jump', 1, 6.26]] as const) {
@@ -286,33 +307,54 @@ describe('shared character controller', () => {
     expect(b.c.position).toEqual(a.c.position);
   });
 
-  it('ducks in place while C is held', () => {
+  it('ducks in place while C is held alone', () => {
     const { mw, c } = setup();
     run(mw, c, 0, 0, 10);
     const start = { ...c.position };
-    run(mw, c, INPUT.FORWARD | INPUT.DUCK, 0, 10);
+    run(mw, c, INPUT.DUCK, 0, 10);
     expect(Math.hypot(c.position.x - start.x, c.position.z - start.z)).toBeLessThan(1e-3);
+    expect(c.rollDir).toBe(0);
   });
 
   it('jumps carry no run speed; held directions push in the air (original air control)', () => {
-    // Reference distances from the original's rules stepped at 20 Hz (executable-analysis §13):
-    // running jump (forward held) 25.3 ft, side jump 13.9 ft, standing jump 0.
-    const jumpDistance = (flags: number) => {
+    // Reference distances from the original's physics (0x00492B70 / 0x004923E0: drag against the
+    // whole 3-D speed, travel limits per jump kind) stepped at 30 fps: running jump (forward
+    // held) 19.7 ft, Shift + forward 16.2 ft, side jump 9.9 ft (12.0 with forward held too: a side
+    // key picks the side jump, the forward key still pushes), back 14.6 ft, standing 0.
+    const jumpDistance = (flags: number, kind: number) => {
       const { mw, c } = setup();
       run(mw, c, 0, 0, 10);
       const start = { ...c.position };
       run(mw, c, flags | INPUT.JUMP, 0, 1);
-      expect(c.airKind).toBeGreaterThan(0);
+      expect(c.airKind).toBe(kind);
       for (let i = 0; i < 40 && !(c.grounded && c.airKind === 0); i++) run(mw, c, flags, 0, 1);
       return Math.hypot(c.position.x - start.x, c.position.z - start.z) / 0.3048;
     };
-    const running = jumpDistance(INPUT.FORWARD);
-    expect(running).toBeGreaterThan(25.3 * 0.85);
-    expect(running).toBeLessThan(25.3 * 1.15);
-    const side = jumpDistance(INPUT.RIGHT);
-    expect(side).toBeGreaterThan(13.9 * 0.85);
-    expect(side).toBeLessThan(13.9 * 1.15);
-    expect(jumpDistance(0)).toBeLessThan(0.05);
+    for (const [flags, kind, feet] of [[INPUT.FORWARD, JUMP_RUN, 19.7], [INPUT.FORWARD | INPUT.WALK, JUMP_F, 16.2], [INPUT.RIGHT, JUMP_R, 9.9], [INPUT.FORWARD | INPUT.LEFT, JUMP_L, 12.0], [INPUT.BACK, JUMP_B, 14.6]] as const) {
+      const d = jumpDistance(flags, kind);
+      expect(d).toBeGreaterThan(feet * 0.93);
+      expect(d).toBeLessThan(feet * 1.07);
+    }
+    expect(jumpDistance(0, JUMP_V)).toBeLessThan(0.05);
+  });
+
+  it('stands until the jump clip leaves the ground, rooted, and lands soft with jump held', () => {
+    for (const [flags, kind, frame] of [[0, JUMP_V, 10], [INPUT.FORWARD, JUMP_RUN, 6], [INPUT.BACK, JUMP_B, 12]] as const) {
+      const { mw, c } = setup();
+      run(mw, c, 0, 0, 10);
+      const start = { ...c.position };
+      let leftAt = -1;
+      for (let i = 0; i < 20 && leftAt < 0; i++) {
+        run(mw, c, flags | INPUT.JUMP, 0, 1);
+        if (!c.grounded) leftAt = i;
+        else expect(Math.hypot(c.position.x - start.x, c.position.z - start.z)).toBeLessThan(1e-3);
+      }
+      // The JUMP LEAVEGROUND event's frame at 1000/30 fps.
+      expect(leftAt).toBe(jumpTakeoffTicks(kind));
+      expect(Math.round((frame / (1000 / 30)) * 20)).toBe(leftAt);
+      for (let i = 0; i < 40 && !c.grounded; i++) run(mw, c, flags | INPUT.JUMP, 0, 1);
+      expect(c.rollDir).toBe(kind === JUMP_B ? 0 : ACTION_LAND);
+    }
   });
 
   it('moves like the original with the shield up: walk, retreat, looping side hops', () => {
@@ -452,7 +494,7 @@ describe('determinism & reconciliation', () => {
     // The snapshot carries the full movement state (position, vertical speed, roll, jump).
     const take = (c: typeof server.c) => ({
       pos: { ...c.position }, vy: c.velocityY, grounded: c.grounded, rollDir: c.rollDir, rollTicks: c.rollTicks,
-      air: { kind: c.airKind, velX: c.airVelX, velZ: c.airVelZ, travel: c.airTravel },
+      air: { kind: c.airKind, velX: c.airVelX, velZ: c.airVelZ, travel: c.airTravel, rise: c.airRise },
     });
     let snap = take(server.c);
     inputs.forEach((inp, i) => {

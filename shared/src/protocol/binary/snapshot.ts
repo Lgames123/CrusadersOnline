@@ -1,3 +1,4 @@
+import { JUMP_KINDS } from '../../constants.ts';
 import { SC } from '../opcodes.ts';
 
 /** Wire-level entity state; every field is an integer exactly as transmitted. */
@@ -36,17 +37,19 @@ export interface SnapshotHeader {
   /** Receiver's roll in progress (0 = none): direction 1-4 (ROLL_DIRS + 1) and ticks left. */
   selfRollDir: number;
   selfRollTicks: number;
-  /** Receiver's jump: kind (0 none, 1 normal, 2 running), horizontal velocity (mm/s), distance (mm). */
+  /** Receiver's jump: kind (0 none, else its ASM state JUMP_*), horizontal velocity (mm/s), distance (mm). */
   selfAirKind: number;
   selfAirVelX: number;
   selfAirVelZ: number;
   selfAirTravel: number;
+  /** Receiver's jump: vertical distance travelled since take-off (mm). */
+  selfAirRise: number;
   /** Receiver's locomotion clip: state (LOCO_*, 0 standing) and frame (quarter frames on the wire). */
   selfLocoState: number;
   selfLocoFrame: number;
 }
 
-const HEADER_BYTES = 34;
+const HEADER_BYTES = 36;
 const ENTITY_COUNT_AT = 30;
 const ENTITY_MAX_BYTES = 4 + 1 + 12 + 2 + 2 + 2 + 1;
 
@@ -93,6 +96,7 @@ export function encodeSnapshot(
   view.setUint8(29, header.selfAirKind & 0xff);
   view.setUint8(32, header.selfLocoState & 0xff);
   view.setUint8(33, Math.min(255, Math.max(0, Math.round(header.selfLocoFrame * 4))));
+  view.setUint16(34, Math.min(0xffff, Math.max(0, header.selfAirRise | 0)), true);
   let o = HEADER_BYTES;
   let count = 0;
   for (const e of current.values()) {
@@ -155,8 +159,9 @@ export function decodeSnapshot(
     selfAirKind: view.getUint8(29),
     selfLocoState: view.getUint8(32),
     selfLocoFrame: view.getUint8(33) / 4,
+    selfAirRise: view.getUint16(34, true),
   };
-  if (header.selfAirKind > 2) return null;
+  if (header.selfAirKind !== 0 && !JUMP_KINDS.includes(header.selfAirKind)) return null;
   if ((view.getUint8(17) & ~0b111111) !== 0) return null;
   const base = header.baselineTick === 0 ? null : baseline;
   if (header.baselineTick !== 0 && !base) return null;

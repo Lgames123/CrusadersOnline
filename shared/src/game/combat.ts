@@ -39,7 +39,12 @@ export function swingForWeaponSpeed(speed: number, base: Readonly<SwingTiming> =
  * RECOVERY events (executable-analysis.md §14). Frame numbers of Drake's clips:
  */
 export const ORIGINAL_CLIP_FPS = 1000 / 30;
-export interface ClipEvents { swing: number; impact: number; recovery: number }
+/**
+ * A clip's SWING / IMPACT / RECOVERY frames and, for the player's swings, its header +0x14:
+ * the attack state holds until the clip time passes end - 1 (controller flag 4, 0x00429257;
+ * 0x00429BF0 keeps every swing state until then), well after RECOVERY for most clips.
+ */
+export interface ClipEvents { swing: number; impact: number; recovery: number; end?: number }
 /**
  * Plain clicks chain five swings (combo routine 0x0042CA20: states 24 → 23 → 25 → 103 → 104).
  * With a one-handed weapon they play models.ctx's "COMBO" clips in file order — the damage
@@ -47,20 +52,31 @@ export interface ClipEvents { swing: number; impact: number; recovery: number }
  * PN15_1_chn_atk_a, PN16_1_chn_atk_b, PN17_1_pwr_atk.
  */
 const COMBO_CLIPS: readonly ClipEvents[] = [
-  { swing: 11, impact: 13, recovery: 18 },
-  { swing: 7, impact: 8, recovery: 13 },
-  { swing: 7, impact: 9, recovery: 15 },
-  { swing: 5, impact: 10, recovery: 17 },
-  { swing: 11, impact: 12, recovery: 23 },
+  { swing: 11, impact: 13, recovery: 18, end: 18 },
+  { swing: 7, impact: 8, recovery: 13, end: 25 },
+  { swing: 7, impact: 9, recovery: 15, end: 23 },
+  { swing: 5, impact: 10, recovery: 17, end: 28 },
+  { swing: 11, impact: 12, recovery: 23, end: 31 },
 ];
 /** Movement key + click (original controls): overhead PN03, side swings PN09/PN10, low PN01, jump PN05. */
 const DIRECTIONAL_CLIPS: Readonly<Record<'overhead' | 'left' | 'right' | 'low' | 'jump', ClipEvents>> = {
-  overhead: { swing: 10, impact: 12, recovery: 16 },
+  overhead: { swing: 10, impact: 12, recovery: 16, end: 40 },
   left: { swing: 5, impact: 8, recovery: 14 },
   right: { swing: 8, impact: 9, recovery: 14 },
-  low: { swing: 14, impact: 16, recovery: 19 },
-  jump: { swing: 17, impact: 20, recovery: 24 },
+  low: { swing: 14, impact: 16, recovery: 19, end: 39 },
+  jump: { swing: 17, impact: 20, recovery: 24, end: 43 },
 };
+/** Drake's jab (PP02, header 25) and shield rush (PL01, header 24): the same events as the creatures'. */
+const PLAYER_THRUST: ClipEvents = { swing: 6, impact: 9, recovery: 17, end: 25 };
+const PLAYER_BASH: ClipEvents = { swing: 4, impact: 9, recovery: 24, end: 24 };
+/**
+ * Swing clips play at the clip rate x (1 + 1.5 x (weapon Speed - 1)) (0x00429BF0, for the swing,
+ * jab and leap states; the shield rush at the clip rate alone).
+ */
+export function weaponClipRate(weaponSpeed: number): number {
+  const s = weaponSpeed > 0 ? weaponSpeed : 1;
+  return Math.max(0.1, 1 + 1.5 * (s - 1));
+}
 /**
  * Side swings and the air swing play SWING_LEVEL (PN02, ASM state 23) on the upper-body layer
  * (player controller 0x429BF0, layer state 2) over the legs' movement. A new layer swing starts
@@ -93,9 +109,9 @@ const CHAIN_SLACK_FRAMES = 3;
  * character's clip rate (its speed multiplier, stats +0x24C: every clip plays at 1000/30 x it).
  */
 export function attackTiming(kind: 'normal' | 'overhead' | 'left' | 'right' | 'low' | 'jump' | 'thrust' | 'bash' | 'air', combo: number, weaponSpeed = 1, clipRate = 1): SwingTiming {
-  const rate = weaponSpeed * clipRate;
-  if (kind === 'thrust') return clipSwingTiming(MOB_THRUST.clip, rate);
-  if (kind === 'bash') return clipSwingTiming(MOB_BASH.clip, rate);
+  const rate = weaponClipRate(weaponSpeed) * clipRate;
+  if (kind === 'thrust') return clipSwingTiming(PLAYER_THRUST, rate);
+  if (kind === 'bash') return clipSwingTiming(PLAYER_BASH, clipRate);
   // Side and air swings: SWING_LEVEL (PN02) on the upper-body layer, held until the layer frees
   // (the clip at the clip rate, not the weapon's; then the layer's 1/12 s fade).
   if (kind === 'air' || kind === 'left' || kind === 'right') {
@@ -254,7 +270,9 @@ export function clipSwingTiming(c: Readonly<ClipEvents>, weaponSpeed = 1): Swing
   const at = (frame: number) => Math.round((frame / ORIGINAL_CLIP_FPS / s) * TICK_RATE);
   const startup = Math.max(1, at(c.swing));
   const active = Math.max(1, at(c.impact) - startup + 1);
-  const recovery = Math.max(1, at(c.recovery + CHAIN_SLACK_FRAMES) - startup - active);
+  // The player's swings hold to the clip's end; creatures' (whose behaviour templates time
+  // their attacks) a few frames past RECOVERY.
+  const recovery = Math.max(1, at(c.end !== undefined ? c.end - 1 : c.recovery + CHAIN_SLACK_FRAMES) - startup - active);
   return { startup, active, recovery };
 }
 
@@ -287,8 +305,12 @@ export function hitShove(h: number, blocked: boolean): number {
   return factor > 0 ? 2 * c * impulse * factor * dt * 0.3048 : 0;
 }
 
-/** Inputs arriving during recovery (or this many ticks after it) continue the combo. */
-export const COMBO_WINDOW_TICKS = ticks(300);
+/**
+ * The combo routine (0x0042CA20, run every frame the attack button is held): once 10 % of a
+ * combo swing's clip has played, the request queues the next step (none after the fifth), which
+ * starts when the swing ends; a request after the swing has ended starts the combo again.
+ */
+export const COMBO_QUEUE_FRACTION = 0.1;
 /** Five-hit combo; every step uses the normal attack mode (the 1.25 mode is a difficulty setting). */
 export const COMBO_MULTIPLIERS = [1, 1, 1, 1, 1].map(() => ATTACK_MODE_SCALE.normal);
 /**
