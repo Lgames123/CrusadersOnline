@@ -45,6 +45,7 @@ import {
   PORTAL_USE_REACH,
   DYNAMIC_OBJECT_BASE,
   exitArrival,
+  respawnPoint,
   type ExitCrossing,
   GOLD_ITEM,
   itemSlug,
@@ -450,6 +451,8 @@ interface Player extends ActorBase {
   moveStats: MovementStats;
   connId: number;
   characterId: string | null;
+  /** Where he comes back after dying: the beginning of the area he entered by (respawnPoint). */
+  respawnSpot: { x: number; y: number; z: number };
   queue: InputQueue;
   lastProcessedInput: number;
   ackTick: number;
@@ -609,6 +612,8 @@ export class WorldZone {
   private readonly states = new Map<number, EntityState>();
   private nextEntityId = 1;
   private spawnIndex = 0;
+  /** Respawn points by way in (respawnFor). */
+  private respawns = new Map<string, { x: number; y: number; z: number }>();
   private encodeBuf = new DataView(new ArrayBuffer(16 * 1024));
   private readonly scratchIds: number[] = [];
   private readonly scratchFrames: InputFrame[] = Array.from({ length: MAX_INPUT_FRAMES }, createInputFrame);
@@ -760,6 +765,7 @@ export class WorldZone {
       connId,
       entityId: this.nextEntityId++,
       characterId: opts.characterId,
+      respawnSpot: this.respawnFor(opts.arrivingFrom, opts.arrivingVia),
       name: opts.name,
       character: createCharacter(this.mw, spawn),
       moveStats: { ...this.playerStats, clipRate: originalSpeedMultiplier(rules.attributes, level) },
@@ -1401,6 +1407,18 @@ export class WorldZone {
     let best = this.arena.spawnPoints[0] ?? { x: 0, y: 1, z: 0 };
     for (const s of this.arena.spawnPoints) if (Math.hypot(s.x - pos.x, s.z - pos.z) < Math.hypot(best.x - pos.x, best.z - pos.z)) best = s;
     setCharacterState(p.character, best, 0, false);
+  }
+
+  /** respawnPoint, cached per way in (its arrival search sweeps the mesh). */
+  private respawnFor(fromArena: string | undefined, via: ExitCrossing | undefined): { x: number; y: number; z: number } {
+    const key = `${fromArena ?? ''}|${via ? `${via.exit}${via.toStart ? 's' : ''}` : ''}`;
+    let at = this.respawns.get(key);
+    if (!at) {
+      const r = respawnPoint(this.arena, fromArena, via);
+      at = { x: r.x, y: r.y, z: r.z };
+      this.respawns.set(key, at);
+    }
+    return at;
   }
 
   private nextSpawnPoint(): { x: number; y: number; z: number } {
@@ -2796,7 +2814,9 @@ export class WorldZone {
       a.yaw = a.spawnYaw;
       setCharacterState(a.character, a.spawn, 0, false);
     } else {
-      setCharacterState(a.character, this.nextSpawnPoint(), 0, false);
+      setCharacterState(a.character, a.respawnSpot, 0, false);
+      a.inPortal.clear();
+      for (const portal of this.arena.portals ?? []) if (inPortal(portal, a.respawnSpot, 0.5)) a.inPortal.add(portal.id);
       a.hitUntil = 0;
       a.statsDirty = true;
     }

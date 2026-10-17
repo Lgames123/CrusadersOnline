@@ -205,6 +205,10 @@ describe('authoritative melee', () => {
     expect(t.events().filter((e) => e.target === t.entityId).every((e) => e.damage === 9)).toBe(true);
     t.run(PLAYER_RESPAWN_TICKS + 1);
     expect(t.me()).toMatchObject({ alive: true, hp: 65 }); // 50 + 0.6 x Endurance 25 x level 1
+    // Back at the arena's beginning (no starts, no exits: its first spawn point), every death.
+    const back = createSyntheticArena().spawnPoints[0]!;
+    expect(t.me().x).toBeCloseTo(back.x, 1);
+    expect(t.me().z).toBeCloseTo(back.z, 1);
   });
 
   it('levels up at the original threshold; the max-HP gain is added to current HP', () => {

@@ -9,6 +9,7 @@ import {
   exitArrival,
   floorAt,
   inPortal,
+  respawnPoint,
   type LevelPlacements,
   type PortalDef,
 } from '@crusaders/shared';
@@ -214,5 +215,31 @@ describe('Citadel and Corantha portal network', () => {
       }
     }
     expect(tested).toBeGreaterThanOrEqual(20);
+  });
+  it('respawns a few metres past the trigger the player came in by, else at the level start', () => {
+    if (!fs.existsSync(levelsDir)) return;
+    let tested = 0;
+    const report: string[] = [];
+    const bad: string[] = [];
+    for (const f of fs.readdirSync(levelsDir).filter((n) => n.endsWith('.placements.json'))) {
+      const act = f.replace('.placements.json', '');
+      if (!fs.existsSync(path.join(levelsDir, `${placementsOf(act).mesh}.collision.bin`))) continue;
+      const A = arenaOf(act);
+      const ways: [string | undefined, { exit: number; offset: { x: number; y: number; z: number } } | undefined][] = [[undefined, undefined]];
+      for (const p of A.portals ?? []) if (p.entry !== undefined) ways.push([p.target, { exit: p.entry, offset: { x: 0, y: 0, z: 0 } }]);
+      for (const [from, via] of ways) {
+        const r = respawnPoint(A, from, via);
+        const floor = floorAt(A, r.x, r.z, r.y, 0.5);
+        const inside = (A.portals ?? []).filter((p) => !p.scripted && !p.use && inPortal(p, r));
+        const way = `${act} <- ${from ?? 'start'}`;
+        report.push(`${way}: ${r.x.toFixed(1)},${r.y.toFixed(1)},${r.z.toFixed(1)}`);
+        if (floor === null) bad.push(`${way}: off the floor`);
+        if (from && inside.length) bad.push(`${way}: inside ${inside.map((p) => p.target).join(',')}`);
+        tested++;
+      }
+    }
+    if (process.env.RESPAWN_REPORT) console.log(report.join('\n'));
+    expect(bad).toEqual([]);
+    expect(tested).toBeGreaterThan(80);
   });
 });

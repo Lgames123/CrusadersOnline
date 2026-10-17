@@ -256,6 +256,45 @@ export function exitArrival(
   return arrivalPoint(arena, fromArena);
 }
 
+/**
+ * Where a player who dies in this level comes back (not original: the original reloads a save).
+ * The beginning of the area he is in: a few metres past the trigger that put him in this level
+ * (the entry exitArrival uses, or the exit back to `fromArena`), on the side facing the level's
+ * interior and outside every trigger (arrivalNear). Arriving at a start point, or without an
+ * exit (new game, login), it is that start point: the level's start 0 by default, else (no floor
+ * under it: Du*b's hangs 7.5 m up, Ws4a's is under the floor) past its lowest-numbered entry.
+ */
+export function respawnPoint(
+  arena: ArenaDef,
+  fromArena?: string,
+  via?: ExitCrossing,
+): { x: number; y: number; z: number; yaw: number } {
+  const startAt = (n: number) => {
+    const s = arena.starts?.[n];
+    const y = s ? floorAt(arena, s.x, s.z, s.y, 4) : null;
+    return s && y !== null ? { x: s.x, y: y + 0.1, z: s.z, yaw: s.yaw } : null;
+  };
+  const firstEntry = () => {
+    const entries = (arena.portals ?? []).filter((p) => p.entry !== undefined && !p.scripted && !p.use).sort((p, q) => p.entry! - q.entry!);
+    for (const p of entries) {
+      const at = arrivalNear(arena, p);
+      if (at) return at;
+    }
+    return null;
+  };
+  let entry: PortalDef | undefined;
+  if (via && !via.toStart) {
+    const entries = (arena.portals ?? []).filter((p) => p.entry === (via.exit & 0xff));
+    entry = entries.find((p) => p.target === fromArena) ?? entries[0];
+  } else if (!via && fromArena) {
+    entry = arena.portals?.find((p) => p.target === fromArena);
+  }
+  const placed = (entry && arrivalNear(arena, entry)) || (via?.toStart ? startAt(via.exit & 0xff) : null) || startAt(0) || firstEntry();
+  if (placed) return placed;
+  const s = arena.spawnPoints[0] ?? { x: 0, y: 1, z: 0 };
+  return { x: s.x, y: s.y, z: s.z, yaw: 0 };
+}
+
 /** How far (metres) the original's entry point may be from the floor it lands on. */
 const ARRIVAL_SNAP = 1.5;
 
@@ -310,7 +349,7 @@ function arrivalNear(arena: ArenaDef, portal: PortalDef): { x: number; y: number
       const ux = bx - ax, uy = v[b + 1]! - v[a + 1]!, uz = bz - az;
       const vx = cx - ax, vy = v[c + 1]! - v[a + 1]!, vz = cz - az;
       const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-      out.push({ y, floor: Math.abs(ny) / (Math.hypot(nx, ny, nz) || 1) > 0.7 });
+      out.push({ y, floor: ny / (Math.hypot(nx, ny, nz) || 1) > 0.7 });
     }
     return out;
   };
