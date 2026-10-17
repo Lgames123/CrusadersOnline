@@ -41,7 +41,11 @@ export const SC = {
   CUTSCENE: 0x4c,
   /** The player's quest book. */
   QUEST_LOG: 0x4d,
+  /** A message trigger fired for this player (a relay or a death): show its text. */
+  STORY_MESSAGE: 0x4e,
   ERROR: 0x4f,
+  /** A sound a relay's sound trigger plays (0x461490), heard by everyone in the zone. */
+  STORY_SOUND: 0x50,
 } as const;
 
 /** Input flag bits carried in CS_PLAYER_INPUT. */

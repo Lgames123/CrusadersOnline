@@ -509,6 +509,15 @@ async function main(): Promise<void> {
             for (const [id, state] of live.objectStates) levelView?.setObjectState(id, state, live.swings.get(id)?.motion ?? null, live.movers.get(id)?.motion ?? null);
           },
           cutscene: (d) => playCutscene(d.sequence, d.actors),
+          // A message trigger a relay or a death fired for this player (signs and hints are local).
+          storyMessage: (id) => {
+            const m = levelView?.arena.story?.messages?.find((x) => x.id === id);
+            if (m) showMessage(m);
+          },
+          // A relay's sound trigger (gates opened by a lever, Ursan's cell door).
+          storySound: (d) => {
+            for (const [x, y, z] of d.positions) sounds?.play(d.sound, new THREE.Vector3(x, y, z), { volume: d.volume });
+          },
           quests: (d) => {
             questBook.update(d.log);
             if (!d.news || !player) return;

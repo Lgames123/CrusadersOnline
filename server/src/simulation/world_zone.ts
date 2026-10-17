@@ -13,6 +13,7 @@ import {
   storyFlag,
   type StorySequence,
   type StoryState,
+  type StoryCreatureOp,
   type StoryTrigger,
   TICK_MS,
   setDoorPose,
@@ -536,6 +537,11 @@ interface Mob extends ActorBase {
   stats: MovementStats;
   /** Original levels: index in the act's placements (scripted sequences name actors by it). */
   placement?: number;
+  /**
+   * Told by a relay to fight the nearest enemy (op 0x0D, brain flag 0x400, 0x40DC90): it notices
+   * players in sight at any range and any angle. Cleared when it respawns.
+   */
+  fightsNearest?: boolean;
 }
 
 type Actor = Player | Mob;
@@ -570,6 +576,8 @@ export class WorldZone {
   private readonly items: ItemCatalog;
   private readonly grid = new SpatialHashGrid(32);
   private readonly players = new Map<number, Player>(); // by connId
+  /** Relays touched by a player whose timer (StoryTrigger.delay) is running: fire at `due`. */
+  private pendingRelays: { connId: number; trigger: StoryTrigger; due: number; played: boolean }[] = [];
   private readonly actors = new Map<number, Actor>(); // by entityId
   private readonly states = new Map<number, EntityState>();
   private nextEntityId = 1;
@@ -805,6 +813,7 @@ export class WorldZone {
       if (portal?.use && alive(p) && inPortal(portal, p.character.position, PORTAL_USE_REACH)) this.outbox.portal?.(p.connId, portal.target, undefined, this.crossing(portal, p));
       return;
     }
+    if (p && alive(p) && !p.cutscene) this.useStory(p);
     const o = this.objects.get(id);
     // A swinging door may be opened again while it swings shut.
     // A parked mover is used again to send it back (0x48EC10).
@@ -1443,7 +1452,7 @@ export class WorldZone {
 
   /**
    * Triggers walked into (activation bit 0) fire once per character: a flag trigger starts the
-   * sequence bound to it, a quest trigger updates the quest book.
+   * sequence bound to it, a quest trigger updates the quest book, a relay starts its timer.
    */
   private checkStory(p: Player): void {
     const story = this.arena.story;
@@ -1454,8 +1463,9 @@ export class WorldZone {
     for (const t of story.triggers) {
       if (!(t.activation & 1) || !t.volume || p.storyFlags.has(storyFlag(act, t.id))) continue;
       if (!inStoryVolume(t.volume, x, y, z)) continue;
-      this.fireTrigger(p, t);
-      if (p.cutscene) return;
+      // Every trigger touched in this check fires (Cs4b's crossing starts Seq13 and the relay's
+      // timer together: "Got Talisman of True Sight" shows during the scene).
+      this.fireTrigger(p, t, 0, false, true);
     }
   }
 
@@ -1464,8 +1474,10 @@ export class WorldZone {
    * brushes). `played`: fired from a finished sequence. Its brushes moved in that player's
    * sequence only (their client showed it): the world's stay as they are, so the next player's
    * sequence finds Ursan's cell door shut as the story has it (the sequence leaves Drake outside).
+   * `touched`: walked into or set by a sequence (slots 2 / 4), which runs a relay's timer first
+   * (0x463A90 / 0x463C70); a relay's own targets and a death fire at once (slot 5, 0x463CC0).
    */
-  private fireTrigger(p: Player, t: StoryTrigger, depth = 0, played = false): void {
+  private fireTrigger(p: Player, t: StoryTrigger, depth = 0, played = false, touched = false): void {
     const act = this.act;
     if (!act || depth > 8) return;
     const flag = storyFlag(act, t.id);
@@ -1474,11 +1486,8 @@ export class WorldZone {
     p.story.flags.push(flag);
     if (t.kind === 'quest' && t.quest) this.applyQuest(p, t);
     if (t.kind === 'relay') {
-      for (const ref of t.targets ?? []) {
-        const next = 'trigger' in ref ? this.arena.story?.triggers.find((u) => u.id === ref.trigger) : undefined;
-        if (next) this.fireTrigger(p, next, depth + 1, played);
-      }
-      if (!played) for (const name of t.brushes ?? []) this.useBrush(name, p.entityId);
+      if (touched && t.delay) this.pendingRelays.push({ connId: p.connId, trigger: t, due: this.tick + Math.ceil(t.delay / TICK_MS), played });
+      else this.runRelay(p, t, depth, played);
     }
     if (t.kind === 'flag' && !p.cutscene) {
       const seq = this.arena.story?.sequences.find((q) => q.trigger === t.id);
@@ -1486,6 +1495,107 @@ export class WorldZone {
     }
     const record = this.persistRecord(p);
     if (record) this.outbox.persist?.([record], 'progress');
+  }
+
+  /**
+   * A relay's ops (0x463CC0), in the original's order: op 8 fires each target directly (message
+   * triggers show their text to this player, 0x4632B0; an exit takes him to its level, 0x462890),
+   * mover triggers move their brushes (0x461B10), sound triggers play (0x461490), and creature
+   * ops tell creatures whom to fight. Ops 0-3 (flagOps) change a bit nothing is known to read.
+   */
+  private runRelay(p: Player, t: StoryTrigger, depth: number, played: boolean): void {
+    let exit: { exit: string; exitNumber: number } | null = null;
+    for (const ref of t.targets ?? []) {
+      if ('message' in ref) {
+        this.sendJson(p.connId, { op: SC.STORY_MESSAGE, d: { message: ref.message } });
+        continue;
+      }
+      if ('exit' in ref) {
+        exit = ref;
+        continue;
+      }
+      const next = 'trigger' in ref ? this.arena.story?.triggers.find((u) => u.id === ref.trigger) : undefined;
+      if (next) this.fireTrigger(p, next, depth + 1, played);
+    }
+    if (!played) for (const name of t.brushes ?? []) this.useBrush(name, p.entityId);
+    for (const sound of t.sounds ?? []) {
+      const s = LEVEL_UNIT_METRES;
+      const positions = sound.positions.map(([x, y, z]) => [x * s, y * s, z * s] as [number, number, number]);
+      for (const q of this.players.values()) this.sendJson(q.connId, { op: SC.STORY_SOUND, d: { sound: sound.id, positions, volume: sound.volume } });
+    }
+    for (const op of t.creatureOps ?? []) this.applyCreatureOp(p, op);
+    // The level change comes last: the original only flags it (the act loads after the frame).
+    if (exit) this.takeScriptedExit(p, exit);
+  }
+
+  /**
+   * A relay's creature op. Only the ones whose target can be a player apply here: server
+   * creatures do not fight each other, so preferTarget / attackTarget (another creature) and
+   * disposition4 (meaning not decoded) do nothing yet.
+   */
+  private applyCreatureOp(p: Player, op: StoryCreatureOp): void {
+    for (const m of this.actors.values()) {
+      if (m.kind !== 'mob' || m.placement !== op.creature || !alive(m) || m.archetype.passive) continue;
+      if (op.op === 'targetPlayer') {
+        // Event 0x18: a hostile creature takes the player at once, seen or not (0x40D910).
+        m.threat.set(p.entityId, (m.threat.get(p.entityId) ?? 0) + 1);
+        if (m.state !== 'chase') {
+          m.state = 'chase';
+          m.brain = 'decide';
+          m.lastPick = null;
+        }
+      } else if (op.op === 'fightNearest') m.fightsNearest = true;
+    }
+  }
+
+  /** An exit fired by a script (0x462890): to its level, arriving as through that exit. */
+  private takeScriptedExit(p: Player, ref: { exit: string; exitNumber: number }): void {
+    const name = ref.exit.toLowerCase();
+    if (name === 'end') return; // the game's ending (state 5): nothing to load
+    const target = `${LEVEL_PREFIX}${name}`;
+    const portal = this.arena.portals?.find((q) => q.target === target && q.exit === ref.exitNumber);
+    this.outbox.portal?.(p.connId, target, undefined, portal ? this.crossing(portal, p) : undefined);
+  }
+
+  /**
+   * The use key (0x460320, activation bit 3: the player pressing use): story triggers whose
+   * volume the player stands in fire (Ws1a / 5a / 9a's lever relays: the gates, their sound and
+   * Ws5a's fight).
+   */
+  private useStory(p: Player): void {
+    const story = this.arena.story;
+    const act = this.act;
+    if (!story || !act) return;
+    const pos = p.character.position;
+    const x = pos.x / LEVEL_UNIT_METRES, y = pos.y / LEVEL_UNIT_METRES, z = pos.z / LEVEL_UNIT_METRES;
+    for (const t of story.triggers) {
+      if (!(t.activation & 8) || !t.volume || p.storyFlags.has(storyFlag(act, t.id))) continue;
+      if (inStoryVolume(t.volume, x, y, z)) this.fireTrigger(p, t, 0, false, true);
+    }
+  }
+
+  /** Relays whose timer ran out fire for the player who touched them (if still here). */
+  private runPendingRelays(): void {
+    if (!this.pendingRelays.length) return;
+    const due = this.pendingRelays.filter((r) => r.due <= this.tick);
+    if (!due.length) return;
+    this.pendingRelays = this.pendingRelays.filter((r) => r.due > this.tick);
+    for (const r of due) {
+      const p = this.players.get(r.connId);
+      if (p) this.runRelay(p, r.trigger, 0, r.played);
+    }
+  }
+
+  /** A creature's death fires its trigger for the killer (0x44CA00: health +0x1F0). */
+  private fireDeathTrigger(killer: Player, placement: number | undefined): void {
+    const story = this.arena.story;
+    if (placement === undefined || !story?.deaths) return;
+    for (const d of story.deaths) {
+      if (d.creature !== placement) continue;
+      const t = story.triggers.find((u) => u.id === d.trigger);
+      if (t) this.fireTrigger(killer, t);
+      else if (story.messages?.some((m) => m.id === d.trigger)) this.sendJson(killer.connId, { op: SC.STORY_MESSAGE, d: { message: d.trigger } });
+    }
   }
 
   /** Sets a brush's mover going (a relay's target, 0x48EC10). */
@@ -1564,7 +1674,7 @@ export class WorldZone {
         const flag = step.args['flag'];
         if (step.action === 'TriggerFlag' && flag && typeof flag === 'object' && 'trigger' in flag) {
           const t = story?.triggers.find((u) => u.id === flag.trigger);
-          if (t) this.fireTrigger(p, t, 0, true);
+          if (t) this.fireTrigger(p, t, 0, true, true);
         }
         const level = step.args['loadlevel'];
         if (step.action === 'ScriptedSequenceDone' && level && typeof level === 'object' && 'exit' in level) load = level.exit.toLowerCase();
@@ -1699,6 +1809,7 @@ export class WorldZone {
         if (tick >= p.cutscene.until) this.finishCutscene(p);
       } else if (alive(p)) this.checkStory(p);
     }
+    this.runPendingRelays();
 
     // 2. Mobs think and move.
     for (const a of this.actors.values()) if (a.kind === 'mob' && alive(a)) this.updateMob(a);
@@ -1983,7 +2094,9 @@ export class WorldZone {
       if (Math.abs(q.y - pos.y) > AGGRO_HEIGHT) continue;
       const d = Math.hypot(q.x - pos.x, q.z - pos.z);
       const off = Math.abs(angleDiff(yawTowards(pos.x, pos.z, q.x, q.z), heading));
-      if (d >= (off < MOB_SIGHT_HALF_ANGLE ? MOB_SIGHT_RANGE : MOB_NEAR_SENSE_RANGE) || d >= bestDist) continue;
+      // Told to fight the nearest enemy (0x40DC90): any range, any angle, in sight.
+      const range = m.fightsNearest ? Infinity : off < MOB_SIGHT_HALF_ANGLE ? MOB_SIGHT_RANGE : MOB_NEAR_SENSE_RANGE;
+      if (d >= range || d >= bestDist) continue;
       if (!lineOfSight(this.mw, pos, q, EYE_HEIGHT)) continue;
       best = p;
       bestDist = d;
@@ -2393,7 +2506,10 @@ export class WorldZone {
       if (target.kind === 'mob') {
         target.deadUntil = this.tick + target.archetype.respawnTicks;
         target.threat.clear();
-        if (attacker.kind === 'player') reward = this.grantReward(attacker, target.archetype);
+        if (attacker.kind === 'player') {
+          reward = this.grantReward(attacker, target.archetype);
+          this.fireDeathTrigger(attacker, target.placement);
+        }
       } else {
         target.deadUntil = this.tick + PLAYER_RESPAWN_TICKS;
         target.pendingEquip = null;
@@ -2454,6 +2570,7 @@ export class WorldZone {
       a.blockUntil = 0;
       a.hitUntil = 0;
       a.threat.clear();
+      delete a.fightsNearest;
       this.calmDown(a);
       a.yaw = a.spawnYaw;
       setCharacterState(a.character, a.spawn, 0, false);

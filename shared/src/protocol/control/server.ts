@@ -150,6 +150,21 @@ export interface QuestLogMsg {
   d: { log: QuestLog; news?: { assigned: number[]; completed: number[]; journal: number[] } };
 }
 
+/**
+ * A message trigger of the player's level fired for them (0x4632B0): `message` is its id in the
+ * act's story.messages; the client shows its text for MESSAGE_MS.
+ */
+export interface StoryMessageMsg {
+  op: typeof SC.STORY_MESSAGE;
+  d: { message: number };
+}
+
+/** A sound trigger fired by a relay (0x461490): Sound.ctx id at each position (metres). */
+export interface StorySoundMsg {
+  op: typeof SC.STORY_SOUND;
+  d: { sound: number; positions: [number, number, number][]; volume: number };
+}
+
 export interface EntityDespawnMsg {
   op: typeof SC.ENTITY_DESPAWN;
   d: { id: number };
@@ -178,7 +193,9 @@ export type ServerControlMsg =
   | ObjectStateMsg
   | ZoneChangeMsg
   | CutsceneMsg
-  | QuestLogMsg;
+  | QuestLogMsg
+  | StoryMessageMsg
+  | StorySoundMsg;
 
 /** Animation state ids carried in snapshot `anim`. */
 export const ANIM = {

@@ -51,6 +51,8 @@ export type StoryRef =
   | { camera: number }
   | { exit: string; exitNumber: number }
   | { sequence: string }
+  /** A message trigger (LevelStory.messages): firing it shows its text. */
+  | { message: number }
   | { object: number };
 
 export type StoryArg = number | [number, number, number] | StoryRef;
@@ -73,8 +75,37 @@ export interface StoryTrigger {
   volume?: StoryVolume;
   quest?: StoryQuestAction;
   targets?: StoryRef[];
-  /** Relays: the brushes (by name) they set moving, as a lever does. */
+  /** Relays: ms between being touched and firing (0x463A90); a fire from a script or a death is at once. */
+  delay?: number;
+  /** Relays: the brushes (by name) they set moving (op 8 on a mover trigger, 0x461B10). */
   brushes?: string[];
+  /** Relays: the sounds they play (op 8 on a sound trigger, 0x461490). */
+  sounds?: StorySound[];
+  /** Relays: what they tell creatures (ops 0x0A-0x0E), in order. */
+  creatureOps?: StoryCreatureOp[];
+  /** Relays: ops 0-3 (set / clear the target's +0x0D bit 0, its slots 6 / 7): kept as data, no reader decoded. */
+  flagOps?: { op: 0 | 1 | 2 | 3; target: StoryRef }[];
+}
+
+/** A sound a relay plays: Sound.ctx id at each position (feet, converted frame), volume 0..1. */
+export interface StorySound {
+  id: number;
+  positions: [number, number, number][];
+  volume: number;
+}
+
+/**
+ * A relay's creature op (`creature` / `other`: indices in the act's creatures). targetPlayer
+ * (0x0A, brain event 0x18): a hostile creature takes the player as its target at once (0x40D910).
+ * preferTarget (0x0B, event 0x17): a hostile one picks `other`. attackTarget (0x0C, event 0x19):
+ * an idle one attacks `other` now (0x40C370). fightNearest (0x0D, brain flag 0x400): it targets
+ * the nearest opposing creature or player in sight, at any range (0x40DC90). disposition4 (0x0E):
+ * its disposition becomes 4 (0x40CCD0; meaning not decoded).
+ */
+export interface StoryCreatureOp {
+  op: 'targetPlayer' | 'preferTarget' | 'attackTarget' | 'fightNearest' | 'disposition4';
+  creature: number;
+  other?: number;
 }
 
 export interface StoryCameraPath {
@@ -135,10 +166,19 @@ export interface StoryMessage {
 
 export const MESSAGE_MS = 2000;
 
+/** A creature whose death fires a trigger for its killer (0x44CA00: health +0x1F0). */
+export interface StoryDeath {
+  /** Index in the act's creatures. */
+  creature: number;
+  trigger: number;
+}
+
 export interface LevelStory {
   triggers: StoryTrigger[];
   /** Absent in levels converted before message triggers were read. */
   messages?: StoryMessage[];
+  /** Absent in levels converted before death triggers were read. */
+  deaths?: StoryDeath[];
   cameras: StoryCamera[];
   sequences: StorySequence[];
 }

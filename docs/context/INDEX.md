@@ -1,5 +1,7 @@
 # Context notes
 
+- 2026-10-16 [Relay ops decoded](2026-10-16-relay-ops.md) — exits fired by relays (0x462890), mover (0x1E) / sound (0x0B) triggers replace the brush guess, Ws5a creature ops (brain events), use-key lever relays, SC.STORY_SOUND (Claude Code)
+- 2026-10-16 [Script-fired message triggers](2026-10-16-script-fired-messages.md) — type 0x2B is vtable 0x4E1E84 (op list +0x3C/+0x40, timer +0x38); creature death triggers (0x44CA00); SC.STORY_MESSAGE; Du2a ogre and Cs4b talisman texts (Claude Code)
 - 2026-10-16 [Signs and tutorial hints show their text](2026-10-16-sign-messages.md) — cap type 0x1A message triggers + script/messages.ctx; Tab reads signs, walk-in hints in train; script-fired ones not wired (Claude Code)
 - 2026-10-16 [Fancy Chair UV fix on by default](2026-10-16-fancy-chair-fix-default-on.md) — fixedPropUvs defaults on (explicit off keeps the original); localhost.har kept out of git (embeds converted data) (Claude Code)
 - 2026-10-16 [Optional fix for the Fancy Chair's mismatched UVs](2026-10-16-fancy-chair-uv-fix.md) — fixedPropUvs setting refits FCHAIR2's UV islands onto FancyChair.tga's panel and frame columns, client-side and live (Claude Code)

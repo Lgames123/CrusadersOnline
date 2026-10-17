@@ -8,6 +8,7 @@ import {
   QUEST_ACTION,
   QUEST_STATE,
   SC,
+  TICK_MS,
   createSyntheticArena,
   encodeInput,
   initPhysics,
@@ -151,5 +152,154 @@ describe('story triggers and sequences (server)', () => {
     const log = again.messages.filter((m) => m.op === SC.QUEST_LOG).at(-1)!.d as { log: { main: number[]; journal: number[] } };
     expect(log.log.main[1]).toBe(QUEST_STATE.ACTIVE);
     expect(log.log.journal).toEqual([MAIN_QUESTS[1]!.journalStart]);
+  });
+});
+
+describe('script-fired message triggers (relays, deaths)', () => {
+  /** A hostile at placement 4 whose death fires relay 500; a walk-in relay 600 with a timer. */
+  function messageZone() {
+    const arena = createSyntheticArena();
+    arena.name = 'level:t1a';
+    arena.mobSpawns = [{ archetype: 'ogre_outlaw', x: 6, y: 0.5, z: 6, hp: 10, placement: 4 }];
+    const square = (z0: number, z1: number): [number, number][] => [[-3 * FT, z0 * FT], [3 * FT, z0 * FT], [3 * FT, z1 * FT], [-3 * FT, z1 * FT]];
+    arena.story = {
+      triggers: [
+        // Du2a's OgreOutlaw7: quest progress and "Got Dain's Scepter…", with a 100 ms timer that a death skips.
+        { id: 500, kind: 'relay', activation: 0x12, delay: 100, targets: [{ trigger: 510 }, { message: 520 }, { exit: 'du9a', exitNumber: 111 }] },
+        { id: 510, kind: 'quest', activation: 0x10, quest: { index: 1, main: true, actions: QUEST_ACTION.ASSIGN, bit: 0 } },
+        // Cs4b: walking over the line shows "Got Talisman of True Sight" 7 s later, once.
+        { id: 600, kind: 'relay', activation: 0x201, volume: { polygon: square(-1, 1), yMin: -10, yMax: 20 * FT }, delay: 7000, targets: [{ message: 620 }] },
+      ],
+      messages: [
+        { id: 520, activation: 0x12, message: 18, text: "Got Dain's Scepter and Dasher Necklace" },
+        { id: 620, activation: 1, message: 25, text: 'Got Talisman of True Sight' },
+      ],
+      deaths: [{ creature: 4, trigger: 500 }],
+      cameras: [],
+      sequences: [],
+    };
+    const messages: ServerControlMsg[] = [];
+    const zone = new WorldZone(rapier, arena.name, arena, {
+      send: (_c, data) => { if (typeof data === 'string') messages.push(JSON.parse(data) as ServerControlMsg); },
+      portal: () => { },
+      persist: () => { },
+    }, { random: () => 0.5 });
+    zone.join(1, { name: 'Tester', characterId: 'c1', position: { x: 0, y: 0.5, z: 20 } });
+    const internals = zone as unknown as {
+      players: Map<number, unknown>;
+      actors: Map<number, { kind: string; placement?: number; hp: number }>;
+      applyDamage(a: unknown, t: unknown, v: number[]): void;
+    };
+    const shown = () => messages.flatMap((m) => (m.op === SC.STORY_MESSAGE ? [m.d.message] : []));
+    return { zone, internals, messages, shown };
+  }
+
+  it("a creature's death fires its relay at once: the killer sees the message and gets the quest", () => {
+    const t = messageZone();
+    const ogre = [...t.internals.actors.values()].find((a) => a.kind === 'mob' && a.placement === 4)!;
+    t.internals.applyDamage(t.internals.players.get(1), ogre, new Array(11).fill(1000));
+    expect(ogre.hp).toBe(0);
+    expect(t.shown()).toEqual([520]);
+    expect(t.messages.some((m) => m.op === SC.QUEST_LOG && m.d.news?.assigned.includes(1))).toBe(true);
+  });
+
+  it("a walked-into relay shows its message after its timer, once per character", () => {
+    const t = messageZone();
+    t.zone.leave(1);
+    t.zone.join(2, { name: 'Tester', characterId: 'c1', position: { x: 0, y: 0.5, z: 0 } });
+    t.zone.step();
+    expect(t.shown()).toEqual([]);
+    for (let i = 0; i < Math.ceil(7000 / TICK_MS) + 1; i++) t.zone.step();
+    expect(t.shown()).toEqual([620]);
+    for (let i = 0; i < Math.ceil(8000 / TICK_MS); i++) t.zone.step();
+    expect(t.shown()).toEqual([620]);
+  });
+});
+
+describe('relay ops (0x463CC0)', () => {
+  /**
+   * A hostile at placement 3 behind the player's back and 30 m away (unnoticed); relays: a
+   * death-style one with a sound and an exit, Ws5a's creature ops, and a use-key one (bit 3)
+   * whose volume is around the player.
+   */
+  function opsZone() {
+    const arena = createSyntheticArena();
+    arena.name = 'level:t1a';
+    arena.mobSpawns = [{ archetype: 'skeleton_warrior', x: 0, y: 0.5, z: -15, placement: 3 }];
+    arena.portals = [{ id: 0, target: 'level:du9a', x: 2, y: 0.5, z: 10, exit: 111, scripted: true }];
+    const square = (z0: number, z1: number): [number, number][] => [[-3 * FT, z0 * FT], [3 * FT, z0 * FT], [3 * FT, z1 * FT], [-3 * FT, z1 * FT]];
+    arena.story = {
+      triggers: [
+        { id: 700, kind: 'relay', activation: 0x12, targets: [{ exit: 'Du9a', exitNumber: 111 }], sounds: [{ id: 517, positions: [[10 * FT, 0, -20 * FT]], volume: 1 }] },
+        { id: 710, kind: 'relay', activation: 0x301, targets: [], creatureOps: [{ op: 'targetPlayer', creature: 3 }] },
+        { id: 720, kind: 'relay', activation: 0x301, targets: [], creatureOps: [{ op: 'fightNearest', creature: 3 }, { op: 'attackTarget', creature: 3, other: 9 }] },
+        { id: 730, kind: 'relay', activation: 8, volume: { polygon: square(14, 16), yMin: -10, yMax: 20 * FT }, targets: [], sounds: [{ id: 513, positions: [[0, 0, 0]], volume: 0.5 }] },
+      ],
+      cameras: [],
+      sequences: [],
+    };
+    const messages: { conn: number; msg: ServerControlMsg }[] = [];
+    const portals: { target: string; crossing?: unknown }[] = [];
+    const zone = new WorldZone(rapier, arena.name, arena, {
+      send: (c, data) => { if (typeof data === 'string') messages.push({ conn: c, msg: JSON.parse(data) as ServerControlMsg }); },
+      portal: (_c, target, _keep, crossing) => portals.push({ target, ...(crossing ? { crossing } : {}) }),
+      persist: () => { },
+    }, { random: () => 0.5 });
+    zone.join(1, { name: 'Tester', characterId: 'c1', position: { x: 0, y: 0.5, z: 15 } });
+    const internals = zone as unknown as {
+      players: Map<number, unknown>;
+      actors: Map<number, { kind: string; placement?: number; state?: string; threat?: Map<number, number>; entityId: number }>;
+      fireTrigger(p: unknown, t: unknown): void;
+    };
+    const fire = (id: number, conn = 1) => internals.fireTrigger(internals.players.get(conn), arena.story!.triggers.find((t) => t.id === id));
+    const mob = () => [...internals.actors.values()].find((a) => a.kind === 'mob' && a.placement === 3)!;
+    const sounds = (conn: number) => messages.flatMap((m) => (m.conn === conn && m.msg.op === SC.STORY_SOUND ? [m.msg.d] : []));
+    return { zone, fire, mob, sounds, portals, internals };
+  }
+
+  it('an exit target takes the player to its level, through the matching exit, after the other ops', () => {
+    const t = opsZone();
+    t.zone.join(2, { name: 'Other', characterId: 'c2', position: { x: 4, y: 0.5, z: 15 } });
+    t.fire(700);
+    expect(t.portals).toEqual([{ target: 'level:du9a', crossing: expect.objectContaining({ exit: 111 }) }]);
+    // Its sound trigger plays for everyone in the zone, at its position in metres.
+    for (const conn of [1, 2]) {
+      expect(t.sounds(conn)).toHaveLength(1);
+      expect(t.sounds(conn)[0]).toMatchObject({ sound: 517, volume: 1 });
+      expect(t.sounds(conn)[0]!.positions[0]![0]).toBeCloseTo(10, 3);
+      expect(t.sounds(conn)[0]!.positions[0]![2]).toBeCloseTo(-20, 3);
+    }
+  });
+
+  it('targetPlayer sends a hostile creature after the player at once, unseen', () => {
+    const t = opsZone();
+    for (let i = 0; i < 20; i++) t.zone.step();
+    expect(t.mob().state).toBe('idle');
+    t.fire(710);
+    expect(t.mob().state).toBe('chase');
+    expect(t.mob().threat!.has([...t.internals.actors.values()].find((a) => a.kind === 'player')!.entityId)).toBe(true);
+  });
+
+  it('fightNearest makes a hostile creature notice a player in sight at any range and angle', () => {
+    const t = opsZone();
+    for (let i = 0; i < 20; i++) t.zone.step();
+    expect(t.mob().state).toBe('idle');
+    t.fire(720); // attackTarget names another creature: not applied (creatures do not fight each other)
+    t.zone.step();
+    expect(t.mob().state).toBe('chase');
+  });
+
+  it('a use-key relay fires when the player presses use inside its volume, not by walking in', () => {
+    const t = opsZone();
+    for (let i = 0; i < 5; i++) t.zone.step();
+    expect(t.sounds(1)).toEqual([]);
+    t.zone.interact(1, 123456); // whatever the use key aims at
+    expect(t.sounds(1)).toEqual([{ sound: 513, positions: [[0, 0, 0]], volume: 0.5 }]);
+    // Outside the volume the use key does nothing.
+    const away = opsZone();
+    away.zone.leave(1);
+    away.zone.join(1, { name: 'Tester', characterId: 'c1', position: { x: 0, y: 0.5, z: 5 } });
+    away.zone.interact(1, 123456);
+    expect(away.sounds(1)).toEqual([]);
   });
 });

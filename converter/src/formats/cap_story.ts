@@ -13,7 +13,22 @@
  *   0x1D  quest trigger: +4 volume, +8 activation, +0x0E action mask, +0x34 quest index,
  *         +0x36 player bit (fired by 0x4641F0)
  *   0x28  camera: +0x34 eye path (type 0x55), +0x38 look-at path (type 0x53)
- *   0x2B  relay trigger: fires its targets (+0x36 count, +0x38 pointer array; 0x462B90)
+ *   0x0B  sound trigger (vtable 0x4E1D58): fired (0x461490) it plays Sound.ctx id +0x34 at each
+ *         of +0x3E points (list at +0x40, 12 bytes each), volume +0x44 (0x4B13C0)
+ *   0x1E  mover trigger (vtable 0x4E1CE0): fired (0x461B10) it uses the mover of the brush whose
+ *         runtime object is at +0x38 (record = object + 0x18, name pointer at record + 0x14)
+ *   0x2B  relay trigger (vtable 0x4E1E84): touching it (0x463A90) arms a timer of u16 +0x38 ms;
+ *         its fire (slot 5, 0x463CC0) runs +0x3C ops of 16 bytes at +0x40: [op u8, ?, +4 pointer
+ *         to a second argument [type u8, value +4], arg type u32 +8, value +0x0C]. Arg type 0x14
+ *         (an object): op 8 fires its slot 5 directly (a message shows its text, an exit changes
+ *         level 0x462890, a mover trigger moves its brush, a sound trigger plays), ops 0 / 1 set /
+ *         clear its +0x0D bit 0, 2 / 3 call its slots 6 / 7. Arg type 1 (a creature object; op 8
+ *         becomes 0x0A): 0x0A / 0x0B / 0x0C queue brain events 0x18 / 0x17 / 0x19 (0x4102D0;
+ *         0x0B and 0x0C name a second creature), 0x0D sets brain +0x14 bit 0x400, 0x0E sets the
+ *         creature's disposition to 4 (0x405520, 0x40CCD0)
+ *   0x5E  a creature's health (inside its record; +4 the creature object, +8 hit points): when
+ *         they run out (0x44CA00) the creature dies and, if +0x1F4 has 0x8000000, the trigger at
+ *         +0x1F0 fires (slot 5, the player as activator): Du2a's OgreOutlaw7 -> relay 401805
  *   0x40  action definition: +8 name, +0x3C argument names (0x33 bytes each), +4..+7 header
  *   0x4D  sequence binding: +0x10 typed reference to the flag trigger that starts it, +0x18 the
  *         sequence's camera, +0x20 the sequence definition, +0x28 actor count, +0x2C actor table
@@ -42,13 +57,38 @@ export interface CapStoryTrigger {
   volume?: CapTriggerVolume;
   /** Quest triggers: quest index, main story or side quest, action mask, player bit. */
   quest?: { index: number; main: boolean; actions: number; bit: number };
-  /** Relays: what firing it fires. */
+  /** Relays: what firing it fires (op 8 on triggers, messages and exits). */
   targets?: CapRef[];
-  /**
-   * Relays: the brush it sets moving (the mover's use, as a lever's): the runtime object pointed
-   * to just before the relay's record (Ws9a 159982 -> bCellDoor, 159370 -> bOuterGates).
-   */
+  /** Relays: ms between being touched and firing (u16 +0x38). */
+  delay?: number;
+  /** Relays: the brushes it sets moving (op 8 on a mover trigger, 0x461B10: the mover's use). */
   brushes?: string[];
+  /** Relays: the sounds it plays (op 8 on a sound trigger, 0x461490). */
+  sounds?: CapSound[];
+  /** Relays: creature ops 0x0A-0x0E, in order. */
+  creatureOps?: CapCreatureOp[];
+  /** Relays: ops 0-3 on an object (set / clear its +0x0D bit 0, its slots 6 / 7); no reader decoded. */
+  flagOps?: { op: 0 | 1 | 2 | 3; target: CapRef }[];
+}
+
+/** A sound trigger's sound (type 0x0B): Sound.ctx id, positions (feet), volume. */
+export interface CapSound {
+  id: number;
+  positions: [number, number, number][];
+  volume: number;
+}
+
+/**
+ * A relay's creature op (0x463CC0; `creature` / `other` are indices in the act's creatures):
+ * targetPlayer 0x0A (brain event 0x18: a hostile one takes the player as its target, 0x40D910),
+ * preferTarget 0x0B (event 0x17: a hostile one picks `other`), attackTarget 0x0C (event 0x19:
+ * an idle one attacks `other` now, 0x40C370), fightNearest 0x0D (brain flag 0x400: it targets the
+ * nearest opposing creature or player in sight, at any range, 0x40DC90), disposition4 0x0E.
+ */
+export interface CapCreatureOp {
+  op: 'targetPlayer' | 'preferTarget' | 'attackTarget' | 'fightNearest' | 'disposition4';
+  creature: number;
+  other?: number;
 }
 
 /** A camera path (types 0x53 / 0x55): piecewise cubic Bezier, progress advanced per millisecond. */
@@ -83,6 +123,7 @@ export type CapRef =
   | { camera: number }
   | { exit: string; exitNumber: number }
   | { sequence: string }
+  | { message: number }
   | { object: number };
 
 export type CapArg = number | [number, number, number] | CapRef;
@@ -117,9 +158,17 @@ export interface CapMessage {
   message: number;
 }
 
+/** A creature whose death fires a trigger (type 0x5E +0x1F0, flag 0x8000000 at +0x1F4). */
+export interface CapDeathTrigger {
+  /** Index in the act's creatures. */
+  creature: number;
+  trigger: number;
+}
+
 export interface CapStory {
   triggers: CapStoryTrigger[];
   messages: CapMessage[];
+  deaths: CapDeathTrigger[];
   cameras: CapCamera[];
   sequences: CapSequence[];
 }
@@ -133,13 +182,16 @@ export interface StoryContext {
   parseVolume(at: number): CapTriggerVolume | null;
 }
 
+const T_SOUND = 0x0b;
 const T_EXIT = 0x13;
 const T_FLAG = 0x14;
 const T_MESSAGE = 0x1a;
 const T_QUEST = 0x1d;
+const T_MOVER = 0x1e;
 const T_CAMERA = 0x28;
 const T_RELAY = 0x2b;
 const T_ACTION = 0x40;
+const T_HEALTH = 0x5e;
 const T_BINDING = 0x4d;
 const TYPE_COUNT = 0xe1;
 /** Creature objects start 0x18 before their class-0x2D record (vtable patched in at load). */
@@ -199,7 +251,7 @@ export function parseStory(data: Uint8Array, dv: DataView, types: ReadonlyMap<nu
   }
 
   // --- Cameras
-  const path =(o: number): CapCameraPath | null => {
+  const path = (o: number): CapCameraPath | null => {
     if (!inRange(o, 0x40)) return null;
     const n = data[o + 0x10]!;
     const segments = data[o + 0x11]!;
@@ -246,6 +298,7 @@ export function parseStory(data: Uint8Array, dv: DataView, types: ReadonlyMap<nu
     const creature = ctx.creatureAt.get(o + CREATURE_OBJECT_OFFSET);
     if (creature !== undefined) return { creature };
     if (is(o, T_FLAG) || is(o, T_QUEST) || is(o, T_RELAY)) return { trigger: o };
+    if (is(o, T_MESSAGE)) return { message: o };
     if (cameraIds.has(o)) return { camera: o };
     if (is(o, T_EXIT) && inRange(o, 0x38)) {
       const exit = ctx.exitAt.get(o + 0x34);
@@ -255,19 +308,81 @@ export function parseStory(data: Uint8Array, dv: DataView, types: ReadonlyMap<nu
     return { object: o };
   };
 
+  /** A brush's name from its runtime object (record = object + 0x18: class 0x31, name pointer at +0x14). */
+  const brushName = (obj: number): string => {
+    const rec = obj + 0x18;
+    if (!inRange(rec + 0x14, 4) || dv.getUint32(rec, true) !== 0x31) return '';
+    const name = ptr(rec + 0x14);
+    return inRange(name, 1) ? ascii(data, name) : '';
+  };
+  const creatureOf = (value: number): number | undefined => (value ? ctx.creatureAt.get(value - CAP_BASE + CREATURE_OBJECT_OFFSET) : undefined);
+  const CREATURE_OPS = { 0x0a: 'targetPlayer', 0x0b: 'preferTarget', 0x0c: 'attackTarget', 0x0d: 'fightNearest', 0x0e: 'disposition4' } as const;
   for (const o of types.get(T_RELAY) ?? []) {
-    if (!inRange(o, 0x3c)) continue;
-    const n = dv.getInt16(o + 0x36, true);
-    const list = ptr(o + 0x38);
+    if (!inRange(o, 0x44)) continue;
+    const n = dv.getInt32(o + 0x3c, true);
+    const list = ptr(o + 0x40);
     const vol = ptr(o + 4);
     const volume = vol > 0 && inRange(vol, 0x40) ? ctx.parseVolume(vol) : null;
-    const targets = n > 0 && n < 64 && inRange(list, 4 * n) ? Array.from({ length: n }, (_, i) => resolveRef(dv.getUint32(list + 4 * i, true))) : [];
-    // A brush (class 0x31) runtime object starts 0x18 before its record; its name pointer is at record +0x14.
-    const owner = o >= 4 ? ptr(o - 4) : -1;
-    const namePtr = owner >= 0 && inRange(owner + 0x18 + 0x14, 4) ? ptr(owner + 0x18 + 0x14) : -1;
-    const brush = namePtr >= 0 && inRange(namePtr, 1) ? ascii(data, namePtr) : '';
-    const brushes = /^b[A-Za-z]\w*$/.test(brush) && dv.getUint32(owner + 0x18, true) === 0x31 ? [brush] : [];
-    triggers.push({ id: o, kind: 'relay', activation: dv.getUint32(o + 8, true), ...(volume ? { volume } : {}), targets, ...(brushes.length ? { brushes } : {}) });
+    const targets: CapRef[] = [];
+    const brushes: string[] = [];
+    const sounds: CapSound[] = [];
+    const creatureOps: CapCreatureOp[] = [];
+    const flagOps: { op: 0 | 1 | 2 | 3; target: CapRef }[] = [];
+    for (let i = 0; n > 0 && n < 64 && i < n && inRange(list + 16 * i, 16); i++) {
+      const e = list + 16 * i;
+      const argType = dv.getUint32(e + 8, true);
+      const value = dv.getUint32(e + 12, true);
+      const op = data[e] === 8 && argType === 1 ? 0x0a : data[e]!;
+      if (argType === T_FLAG && value) {
+        // An object (arg type 0x14 names any trigger-like object, not only flag triggers).
+        const at = value - CAP_BASE;
+        if (op === 8 && is(at, T_MOVER) && inRange(at, 0x3c)) {
+          const name = brushName(ptr(at + 0x38));
+          if (name) brushes.push(name);
+        } else if (op === 8 && is(at, T_SOUND) && inRange(at, 0x48)) {
+          const count = dv.getUint16(at + 0x3e, true);
+          const pts = ptr(at + 0x40);
+          const positions: [number, number, number][] = [];
+          for (let k = 0; k < count && k < 16 && inRange(pts + 12 * k, 12); k++) positions.push([f32(pts + 12 * k), f32(pts + 12 * k + 4), f32(pts + 12 * k + 8)]);
+          sounds.push({ id: dv.getInt16(at + 0x34, true), positions, volume: f32(at + 0x44) });
+        } else if (op === 8) targets.push(resolveRef(value));
+        else if (op <= 3) flagOps.push({ op: op as 0 | 1 | 2 | 3, target: resolveRef(value) });
+      } else if (argType === 1 && op in CREATURE_OPS) {
+        const creature = creatureOf(value);
+        if (creature === undefined) continue;
+        const entry: CapCreatureOp = { op: CREATURE_OPS[op as keyof typeof CREATURE_OPS], creature };
+        // 0x0B / 0x0C act only when their second argument is a creature [type 1, object].
+        if (op === 0x0b || op === 0x0c) {
+          const sub = dv.getUint32(e + 4, true) - CAP_BASE;
+          const other = inRange(sub, 8) && data[sub] === 1 ? creatureOf(dv.getUint32(sub + 4, true)) : undefined;
+          if (other === undefined) continue;
+          entry.other = other;
+        }
+        creatureOps.push(entry);
+      }
+    }
+    const delay = dv.getUint16(o + 0x38, true);
+    triggers.push({
+      id: o,
+      kind: 'relay',
+      activation: dv.getUint32(o + 8, true),
+      ...(volume ? { volume } : {}),
+      targets,
+      ...(delay ? { delay } : {}),
+      ...(brushes.length ? { brushes } : {}),
+      ...(sounds.length ? { sounds } : {}),
+      ...(creatureOps.length ? { creatureOps } : {}),
+      ...(flagOps.length ? { flagOps } : {}),
+    });
+  }
+
+  // --- Death triggers: a creature's health object (inside its record) names the trigger its death fires.
+  const deaths: CapDeathTrigger[] = [];
+  for (const o of types.get(T_HEALTH) ?? []) {
+    if (!inRange(o, 0x1f8) || !(dv.getUint32(o + 0x1f4, true) & 0x8000000)) continue;
+    const creature = ctx.creatureAt.get(ptr(o + 4) + CREATURE_OBJECT_OFFSET);
+    const trigger = ptr(o + 0x1f0);
+    if (creature !== undefined && trigger > 0) deaths.push({ creature, trigger });
   }
 
   const sequences: CapSequence[] = [];
@@ -350,5 +465,5 @@ export function parseStory(data: Uint8Array, dv: DataView, types: ReadonlyMap<nu
       steps,
     });
   }
-  return { triggers, messages, cameras, sequences };
+  return { triggers, messages, deaths, cameras, sequences };
 }
