@@ -76,7 +76,7 @@ export interface CombatEventMsg {
     killed: boolean;
     /** The target's raised shield stopped the hit (damage 0). */
     blocked?: boolean;
-    /** Blocked: the attacker's weapon is sharp (slash above bash), which picks the clank (0x44D290). */
+    /** A weapon blow (landed or stopped): the attacker's weapon is sharp (slash above bash); picks the impact row. */
     sharp?: boolean;
     /** Blocked: the attacker's blade sweep, world x / z (unit); the sparks line up along it. */
     sweep?: [number, number];

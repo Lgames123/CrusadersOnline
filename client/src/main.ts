@@ -457,17 +457,16 @@ async function main(): Promise<void> {
             // Original impact / cry sounds (executable sound tables, Sound.ctx ids).
             if (sounds) {
               if (e.blocked) {
-                // 0x44D290, at the attacker: a player's shield one fixed sound, a creature's the
-                // metal row by the attacker's edge.
-                const at = from?.position ?? headPos;
-                const player = isMe || (target !== undefined && target.info.kind === 'player');
-                sounds.play(player ? SFX.blockPlayer : impactSound(SFX.impact.metal[e.sharp ? 'sharp' : 'blunt']), at);
+                // 0x44D290, at the attacker: the metal row by the attacker's edge, Drake's shield
+                // too (he is type 142, block material 2; captured 339 / 340 / 341 off long swords).
+                sounds.play(impactSound(SFX.impact.metal[e.sharp ? 'sharp' : 'blunt']), from?.position ?? headPos);
               } else if (isMe) {
-                sounds.play(SFX.hitOther, headPos);
+                // Drake's own impact material is flesh (row 142), by the attacker's edge.
+                sounds.play(impactSound(SFX.impact.flesh[e.sharp ? 'sharp' : 'blunt']), headPos);
                 sounds.play(pick(e.killed ? SFX.drakeDeath : SFX.drakeDamage), headPos);
               } else if (target) {
                 const sfx = CREATURE_SFX[target.info.archetype ?? ''];
-                sounds.play(impactSound(SFX.impact[sfx?.material ?? 'flesh'][mine ? myEdge : 'sharp']), headPos);
+                sounds.play(impactSound(SFX.impact[sfx?.material ?? 'flesh'][e.sharp ?? (mine ? myEdge === 'sharp' : true) ? 'sharp' : 'blunt']), headPos);
                 if (sfx) sounds.play(e.killed ? sfx.death : sfx.damage, headPos);
               }
             }

@@ -580,6 +580,8 @@ type Actor = Player | Mob;
 
 const alive = (a: Actor) => a.deadUntil === 0;
 /** Unarmed peaceful creatures (citizens, merchants): no flinch, no fighting back - they run. */
+/** The edge picking a blow's impact sound (0x44CEF0 / 0x44D290): outgoing SLASH above BASH. */
+const sharpEdge = (a: { weapon: { damage?: readonly number[] } }) => !!a.weapon.damage && a.weapon.damage[1]! < a.weapon.damage[0]!;
 const isCitizen = (m: Mob) => m.archetype.passive && m.weapon.id === UNARMED.id;
 /** Minimum distance between two characters' centres (two capsule radii). */
 const CHARACTER_SPACING = 2 * PLAYER_RADIUS;
@@ -2626,11 +2628,10 @@ export class WorldZone {
             if (target.brain === 'post') target.brainUntil = this.tick;
           }
           // 0x44D290: the stopped blow's sound by the attacker's edge, its sparks along the blade's sweep.
-          const dmg = a.weapon.damage;
           const sweep = this.worldSweep(a, s);
           this.broadcastNear(target, {
             op: SC.COMBAT_EVENT,
-            d: { attacker: a.entityId, target: target.entityId, damage: 0, hp: Math.ceil(target.hp), killed: false, blocked: true, sharp: !!dmg && dmg[1]! < dmg[0]!, ...(sweep ? { sweep } : {}) },
+            d: { attacker: a.entityId, target: target.entityId, damage: 0, hp: Math.ceil(target.hp), killed: false, blocked: true, sharp: sharpEdge(a), ...(sweep ? { sweep } : {}) },
           });
           this.shove(a, target, s, true);
           continue;
@@ -2814,7 +2815,7 @@ export class WorldZone {
 
     this.broadcastNear(target, {
       op: SC.COMBAT_EVENT,
-      d: { attacker: attacker.entityId, target: target.entityId, damage, hp: Math.ceil(target.hp), killed, ...(rush ? { rush } : {}), ...(impact ? { impact } : {}), ...(reward ? { reward } : {}) },
+      d: { attacker: attacker.entityId, target: target.entityId, damage, hp: Math.ceil(target.hp), killed, ...(rush ? { rush } : { sharp: sharpEdge(attacker) }), ...(impact ? { impact } : {}), ...(reward ? { reward } : {}) },
     });
   }
 

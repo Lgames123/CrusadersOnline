@@ -145,8 +145,6 @@ export const SFX = {
   click: 401,
   /** Turning a quest book page (UITurnPage). */
   turnPage: 412,
-  /** A blow stopped by the player's shield (0x44D290: no creature type, 0x157 HitStone02). */
-  blockPlayer: 343,
   /** A shield rush's contact roll, at the rusher (0x493F20: DDam01, then HitMetal01). */
   rushContact: [0, 338],
   chestOpen: 520,
@@ -155,8 +153,8 @@ export const SFX = {
   fireLoop: 533,
   /**
    * Impact by material x weapon edge (sharp: slash above bash), five each (executable table
-   * 0x004EEDA8; pick with impactSound). Landed blows use the creature's material, blows its
-   * shield stops the metal row (sound table +4: 2 for every shielded creature).
+   * 0x004EEDA8; pick with impactSound). Landed blows use the victim's material, blows its
+   * shield stops the metal row (sound table +4: 2 for every shielded type, Drake's 142 too).
    */
   impact: {
     bone: { sharp: [308, 308, 308, 308, 308], blunt: [302, 302, 302, 302, 302] },
@@ -164,7 +162,7 @@ export const SFX = {
     metal: { sharp: [339, 339, 340, 341, 357], blunt: [338, 338, 346, 346, 355] },
     ice: { sharp: [356, 356, 356, 356, 356], blunt: [354, 354, 354, 354, 354] },
   },
-  /** A landed blow on what has no creature type: the player, a breakable prop (0x44CEF0: 0x132). */
+  /** A landed blow on what has no creature type, e.g. a breakable prop (0x44CEF0: 0x132). Drake is type 142. */
   hitOther: 306,
 } as const;
 
