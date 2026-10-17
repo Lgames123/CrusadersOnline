@@ -82,6 +82,12 @@ function html<T extends HTMLElement = HTMLElement>(markup: string): T {
 }
 
 /**
+ * The Citadel hall's track (CD track 14) is near-silent for its first ~3.4 s; the title screen
+ * starts past that so the music is heard as soon as it loads.
+ */
+const TITLE_MUSIC_START = 3.5;
+
+/**
  * Login, server selection and character selection over the title scene. Resolves when the
  * player enters the world (or plays offline / as a guest); the screens are removed then.
  */
@@ -105,7 +111,7 @@ export async function runFrontEnd(ctx: FrontEndContext): Promise<FrontEndChoice>
   };
   window.addEventListener('pointerdown', unlock);
   window.addEventListener('keydown', unlock);
-  void ctx.music.play(ctx.title.music);
+  void ctx.music.play(ctx.title.music, TITLE_MUSIC_START);
   const onKey = (e: KeyboardEvent) => {
     if (!dialogOpen) keys?.(e);
   };

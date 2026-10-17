@@ -27,8 +27,11 @@ export class MusicPlayer {
     return file ? `/generated/${file}` : null;
   }
 
-  /** Switches to a level's track (0 / undefined = silence); the same track keeps playing. */
-  async play(track: number | undefined): Promise<void> {
+  /**
+   * Switches to a level's track (0 / undefined = silence); the same track keeps playing.
+   * `startAt` (seconds) skips into the first pass only; the loop still wraps to 0.
+   */
+  async play(track: number | undefined, startAt = 0): Promise<void> {
     const next = track ?? 0;
     if (next === this.track) return;
     this.track = next;
@@ -39,6 +42,12 @@ export class MusicPlayer {
     const url = await this.resolve(next);
     if (!url || this.track !== next) return;
     this.audio.src = url;
+    if (startAt > 0) {
+      const seek = () => {
+        if (this.track === next) this.audio.currentTime = startAt;
+      };
+      this.audio.addEventListener('loadedmetadata', seek, { once: true });
+    }
     if (this.unlocked) void this.audio.play().catch(() => {});
   }
 
