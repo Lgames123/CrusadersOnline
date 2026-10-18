@@ -90,6 +90,7 @@ import {
   UNHOLY_TYPES,
   MANA_REGEN_TICKS,
   MAX_SPELL_LEVEL,
+  STARTING_SPELLS,
   SPELL_CONJURE_TICKS,
   SPELL_INFO,
   SPELL_RULES,
@@ -945,6 +946,8 @@ export class WorldZone {
     const eq = equipmentOf(inventory, this.items);
     const maxMana = originalMaxMana(rules.attributes, level);
     const spells = (opts.spells ?? []).map((s) => ({ ...s }));
+    // Known from the start (0x004BC980); characters saved without it get it too.
+    for (const s of [...STARTING_SPELLS].reverse()) if (!spells.some((k) => k.spell === s.spell)) spells.unshift({ ...s });
     const selectedSpell = opts.selectedSpell && spells.some((s) => s.spell === opts.selectedSpell) ? opts.selectedSpell : spells[0]?.spell ?? null;
     const p: Player = {
       kind: 'player',

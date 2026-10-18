@@ -92,6 +92,12 @@ export function spellTableFromRules(spells: Readonly<Record<string, readonly (re
 /** Every spell is castable (all eleven are implemented). */
 export const CASTABLE_SPELLS: ReadonlySet<SpellId> = new Set<SpellId>(SPELLS);
 
+/**
+ * What every Drake knows from the start: a new game (0x004BC980) resets each spell object to
+ * level 1 and sets the known mask to 1, so Torch Light is known and selected.
+ */
+export const STARTING_SPELLS: readonly KnownSpell[] = [{ spell: 'torch_light', level: 1 }];
+
 /** Highest spell level (0x004BCD10 caps the level index at 2). */
 export const MAX_SPELL_LEVEL = 3;
 

@@ -47,13 +47,10 @@ function setup() {
 }
 
 describe('spells', () => {
-  it('a spell book teaches its spell when picked up; Torch Light conjures 1.54 s, costs mana and lights', () => {
+  it('Drake starts with Torch Light at level 1; it conjures 1.54 s, costs mana and lights', () => {
     const t = setup();
     t.run(10); // land on the floor
-    expect(t.stats().spells).toEqual([]);
-    t.zone.interact(1, 0);
-    t.run(1);
-    expect(t.stats().spells).toEqual([{ spell: 'torch_light', level: 1 }]);
+    expect(t.stats().spells).toEqual([{ spell: 'torch_light', level: 1 }]); // 0x004BC980
     expect(t.stats().spell).toBe('torch_light');
     const mana = t.stats().mana;
     expect(mana).toBe(t.stats().maxMana);
@@ -74,6 +71,19 @@ describe('spells', () => {
     // One mana point comes back 5 s after it was spent (0x004BCFC0).
     t.run(MANA_REGEN_TICKS);
     expect(t.stats().mana).toBe(mana);
+  });
+
+  it('a Torch Light book raises the known spell to level 2, which costs 2 mana and lights 30 ft', () => {
+    const t = setup();
+    t.run(10);
+    t.zone.interact(1, 0);
+    t.run(1);
+    expect(t.stats().spells).toEqual([{ spell: 'torch_light', level: 2 }]); // 0x004BCD10
+    const mana = t.stats().mana;
+    t.zone.castSpell(1);
+    t.run(SPELL_CONJURE_TICKS + 8);
+    expect(t.stats().mana).toBe(mana - 2); // S0 level 2 costs 2
+    expect(t.stats().light).toBeCloseTo(30 * 0.3048, 3);
   });
 
   it('reads the spell table and spell books from the converted rules, and stores known spells', () => {
