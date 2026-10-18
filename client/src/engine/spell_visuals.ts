@@ -368,7 +368,7 @@ export class SpellVisuals {
     if (b.spell === 'holy_wrath') dynamicLights.flash(at, 0xfff0c0, 2.5, b.radius, b.seconds + 0.3);
     void Promise.all([this.ring(), this.texture(texName)]).then(([geo, tex]) => {
       if (!geo || !tex) return;
-      const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
+      const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.copy(at);
       mesh.scale.setScalar(0.0001);
@@ -412,7 +412,7 @@ export class SpellVisuals {
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     geo.setIndex(index);
-    const mat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
+    const mat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide });
     const strip = new THREE.Mesh(geo, mat);
     strip.frustumCulled = false;
     // Faces the camera: each node's edge across the strip and the view.
@@ -433,7 +433,7 @@ export class SpellVisuals {
     group.add(strip);
     const caps: THREE.SpriteMaterial[] = [];
     for (const p of [nodes[0]!, nodes[n - 1]!]) {
-      const cm = new THREE.SpriteMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+      const cm = new THREE.SpriteMaterial({ transparent: true, depthWrite: false });
       const cap = new THREE.Sprite(cm);
       cap.position.copy(p);
       cap.scale.setScalar(BOLT_WIDTH);

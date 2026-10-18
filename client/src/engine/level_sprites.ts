@@ -18,9 +18,9 @@ import { FireTexture } from './fire_texture.ts';
  */
 const GLOW_DEPTH_PULL = 50 / 54.6;
 
-/** A glow sprite: additive, its depth pulled `pull` (view units, metres) towards the camera. */
+/** A glow sprite: alpha blended (gfx_d3d.dll has no additive blend), its depth pulled `pull` (view units, metres) towards the camera. */
 function glowMaterial(map: THREE.Texture, pull: number): THREE.SpriteMaterial {
-  const material = new THREE.SpriteMaterial({ map, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
+  const material = new THREE.SpriteMaterial({ map, blending: THREE.NormalBlending, depthWrite: false, transparent: true });
   material.onBeforeCompile = (shader) => {
     shader.uniforms['uDepthPull'] = { value: pull };
     shader.vertexShader = 'uniform float uDepthPull;\n' + shader.vertexShader.replace(
