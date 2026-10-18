@@ -80,6 +80,18 @@ describe('original level arenas', () => {
     expect((buildLevelArena('level:test', floorCollision(), placements).objects ?? []).map((o) => o.id)).toEqual([0, 2]);
   });
 
+  it('keeps ground items exactly where placed, in the air or off the mesh (the original never drops them)', () => {
+    const item = (name: string, position: [number, number, number]) => ({ kind: 'item' as const, name, modelId: 1, position, rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1], hp: 0, item: { name, quantity: 1 } });
+    // Ca1c's Broad Sword 48 ft over the floor; Cs3a's potions beyond the mesh.
+    const placements: LevelPlacements = { mesh: 'test', creatures: [], objects: [item('Broad Sword', [20, 148, -20]), item('Greater Healing Potion', [200, 100, -200])] };
+    const arena = buildLevelArena('level:test', floorCollision(), placements);
+    expect(floorAt(arena, 20 * LEVEL_UNIT_METRES, -20 * LEVEL_UNIT_METRES, 148 * LEVEL_UNIT_METRES, 20)).toBeCloseTo(100 * LEVEL_UNIT_METRES);
+    expect((arena.objects ?? []).map((o) => [o.id, o.x / LEVEL_UNIT_METRES, o.y / LEVEL_UNIT_METRES, o.z / LEVEL_UNIT_METRES])).toEqual([
+      [0, expect.closeTo(20), expect.closeTo(148), expect.closeTo(-20)],
+      [1, expect.closeTo(200), expect.closeTo(100), expect.closeTo(-200)],
+    ]);
+  });
+
   it("gives placements their own held items, talk line, gesture and idle path (converter 1.24)", () => {
     const placements: LevelPlacements = {
       mesh: 'test',

@@ -663,3 +663,13 @@ The stock differs per act, so it changes as the story goes on: Citadel (Ci1b / 2
 **Clips.** All humanoid casters bind PK02 (fire ball, SPELL frame 12), PK04 (holy wrath, soul drinker, 27), PK05 (lightning, 19), PK01 (torch, 9). The Deceiver and IceElemental.mdl have no spell clips: fire ball falls back to ASM_THROW_ITEM (M37P02_thw_at.ani, 29 frames; icewalk.ani, 33), whose clips carry no SPELL event, so their casts never take effect.
 
 Implemented: `CREATURE_SPELLS` / `CREATURE_SPELL_MASKS` / `CREATURE_CAST` (`shared/src/game/spells.ts`), the brain in `world_zone.ts` (`spellChoice`, `mobSpell`), the effects through `SpellRuntime.release` with a target. Not implemented: Necros's values and Force Globe (Necros is no level archetype), the swing fallback of template 6, difficulty.
+
+## 21. Ground Items Stay Where Placed (decompiled, 2026-10-18)
+
+The level load (0x00476F20) relocates the cap image through per-type fixup lists (count + pointers; switch at 0x0047852B, byte table 0x00479958, jump table 0x0047984C). Item objects are list 0x35; their components: slot 0 transform 0x5A, slot 1 0x66, slot 2 0x67, slot 3 0x63, slot 4 item 0x57, slot 5 render 0x60. Props carry the same 0x66 / 0x67 / 0x63 components; creatures carry 0x5B / 0x5C / 0x5D. Types get their vtables from prototypes built at 0x004CA740 and copied by 0x004CB450.
+
+- 0x63 (prototype 0x00639504, 0x78 bytes, vtable 0x004DFCD8): the static physics component. Its step (+0x34) is an empty stub (0x00402840), its velocity getters (+0x70…+0x84) return zero, and +0x3C / +0x40 return 0. The creature component (0x5D, vtable 0x004E24FC) puts its integrator at +0x34 (0x0048DD50: velocity, then moving the transform).
+- 0x66 (vtable 0x004E1174, 0x14 bytes) draws the model (0x00466BF0). 0x67 (vtable 0x004DEAC4, 0x10 bytes) holds only a sound/animation holder, and every other method is a stub.
+- After loading, each item gets 0x00458350 (component init) and 0x00483800 (links it into its SpaceMap cell at its stored position), then the difficulty filter. Nothing snaps it to the floor or lets it fall.
+
+So a ground item stays exactly where the .cap put it. Floating or off-mesh items (Ca1c/Ca2c/Ca3c Broad Sword, Cs3b potion, Cs3a's five, the gold outside Ca1b/Ca1c/Ca2a/Ca3d) are like that in the original.

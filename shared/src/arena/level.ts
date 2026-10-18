@@ -663,6 +663,8 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
       }
       solids.push({ points: new Float32Array(pts), ...(o.hp > 0 ? { object: id } : {}) });
     }
+    // Exactly where placed, even in the air or off the mesh: the original never moves a ground
+    // item (its physics component, cap type 0x63, steps nothing: vtable 0x4DFCD8 +0x34).
     const at = { x: o.position[0] * s, y: o.position[1] * s, z: o.position[2] * s };
     if (o.kind === 'item' && o.item) objects.push({ id, kind: 'item', ...at, item: o.item });
     else if (o.kind === 'chest') objects.push({ id, kind: 'chest', ...at, contents: o.contents ?? [] });
