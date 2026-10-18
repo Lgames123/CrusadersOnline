@@ -138,6 +138,44 @@
       .inv-drag-glyph { grid-area: 1 / 1; color: #e7c66e; font: 30px/1 Georgia, serif; text-shadow: 0 2px 6px #000; }
       .inv-drag-preview.inv-drag-has-model .inv-drag-glyph { display: none; }
       .inv-drag-preview:not(.inv-drag-has-model) canvas { visibility: hidden; }
+      /* Hotbar (not original): two rows of nine, bottom centre; row 2 above row 1. No transform here: it would hold the fixed tooltip and drag ghost. */
+      #hotbar { --slot: clamp(34px, min(5.2vh, 4.6vw), 48px); position: fixed; left: 0; right: 0; bottom: 10px; display: flex; justify-content: center; z-index: 9; pointer-events: none; font: 11px/1 system-ui, sans-serif; color: #e8dcc0; user-select: none; }
+      #hotbar[hidden] { display: none; }
+      #hotbar .hb-bar { position: relative; display: flex; flex-direction: column; gap: 3px; padding: 4px; border: 1px solid #6e5a35; background: linear-gradient(180deg, rgba(28,23,16,.86), rgba(10,9,7,.9)); box-shadow: 0 4px 14px rgba(0,0,0,.6), inset 0 0 0 1px rgba(0,0,0,.6); pointer-events: auto; }
+      #hotbar.hb-collapsed .hb-bar { padding: 0; border: 0; background: none; box-shadow: none; }
+      #hotbar .hb-row { display: flex; gap: 3px; }
+      #hotbar .hb-slot { position: relative; width: var(--slot); height: var(--slot); overflow: hidden; border: 1px solid #4a3d26; background: radial-gradient(circle at 50% 42%, rgba(110,92,58,.28), transparent 72%), linear-gradient(180deg, #1d1810, #0c0a07); box-shadow: inset 0 0 8px #000; cursor: pointer; touch-action: none; }
+      #hotbar .hb-slot:not(.hb-empty):hover { border-color: #d9b45a; }
+      #hotbar .hb-empty { cursor: default; }
+      #hotbar .hb-icon { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+      /* The original's round spell icons, cropped into the square slot (ring trimmed). */
+      #hotbar .hb-spell-icon { object-fit: cover; transform: scale(1.16); }
+      #hotbar .hb-glyph { position: absolute; inset: 0; display: grid; place-items: center; color: #c9a95a; font: 20px/1 Georgia, serif; }
+      #hotbar .hb-key { position: absolute; left: 2px; top: 1px; color: #e9d7a6; font-size: 10px; font-weight: 600; text-shadow: 0 0 2px #000, 0 1px 2px #000; pointer-events: none; }
+      #hotbar .hb-count { position: absolute; right: 2px; bottom: 1px; color: #fff; font-size: 11px; font-weight: 700; text-shadow: 0 0 2px #000, 0 1px 2px #000; pointer-events: none; }
+      #hotbar .hb-active { border-color: #d9b45a; box-shadow: inset 0 0 8px #000, 0 0 0 1px rgba(255,214,110,.45); }
+      #hotbar .hb-missing .hb-icon, #hotbar .hb-missing .hb-glyph { filter: grayscale(1) brightness(.45); }
+      #hotbar .hb-missing .hb-count { color: #c0392b; }
+      #hotbar .hb-nomana .hb-icon { filter: saturate(.35) brightness(.55); }
+      #hotbar .hb-nomana::after { content: ''; position: absolute; inset: 0; background: rgba(30,60,140,.32); pointer-events: none; }
+      #hotbar .hb-pressed::before { content: ''; position: absolute; inset: 0; z-index: 1; background: rgba(255,230,160,.55); animation: hb-flash .22s ease-out forwards; pointer-events: none; }
+      @keyframes hb-flash { to { opacity: 0; } }
+      #hotbar .hb-drop { border-color: #ffe08a; box-shadow: inset 0 0 12px rgba(255,214,110,.5); }
+      #hotbar .hb-dragging { opacity: .35; }
+      #hotbar.hb-is-dragging .hb-slot { cursor: grabbing; }
+      #hotbar .hb-controls { position: absolute; right: -22px; bottom: 0; display: flex; flex-direction: column; gap: 2px; }
+      #hotbar.hb-collapsed .hb-controls { position: static; }
+      #hotbar .hb-controls button { width: 18px; height: 18px; padding: 0; border: 1px solid #6e5a35; background: linear-gradient(180deg, #2a2216, #120f0a); color: #e9d7a6; font: 700 13px/1 system-ui, sans-serif; cursor: pointer; }
+      #hotbar .hb-controls button:hover { border-color: #d9b45a; color: #fff; }
+      #hotbar .hb-tooltip { position: fixed; left: 0; top: 0; z-index: 31; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 10px; border: 1px solid #6e5a35; background: rgba(4,4,3,.94); box-shadow: 0 6px 18px rgba(0,0,0,.7); white-space: nowrap; pointer-events: none; }
+      #hotbar .hb-tooltip[hidden] { display: none; }
+      #hotbar .hb-tooltip strong { color: #ffe08a; font: 600 13px/1.2 "Palatino Linotype", Georgia, serif; }
+      #hotbar .hb-tooltip small { color: #8f846d; font-size: 10.5px; }
+      #hotbar .hb-ghost { position: fixed; left: 0; top: 0; z-index: 40; width: 44px; height: 44px; pointer-events: none; filter: drop-shadow(0 6px 10px rgba(0,0,0,.85)); }
+      #hotbar .hb-ghost[hidden] { display: none; }
+      #inventory .inv-spells[hidden] { display: none; }
+      #inventory .inv-spell { cursor: grab; }
+      #inventory .inv-spell-selected { border-color: #d9b45a; }
       /* Merchant shop (merchantShops feature): beside the inventory, like the ground window. */
       #inventory .inv-shop { width: 250px; margin-right: 8px; order: -1; display: flex; flex-direction: column; padding: 10px 12px; box-sizing: border-box; }
       #inventory .inv-shop[hidden] { display: none; }
@@ -389,6 +427,7 @@
     <div id="hud"></div>
     <div id="player-panel" hidden></div>
     <div id="inventory" hidden></div>
+    <div id="hotbar" hidden></div>
     <div id="prompt" hidden></div>
     <div id="subtitle" hidden></div>
     <div id="cutscene" hidden><div class="bar top"></div><div class="bar bottom"></div></div>

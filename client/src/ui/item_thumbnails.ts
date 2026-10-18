@@ -68,6 +68,50 @@ export function poseItem(pivot: THREE.Group, mesh: THREE.Object3D, model: number
   return box.getSize(new THREE.Vector3());
 }
 
+/**
+ * Hotbar framing of a long item laid on the diagonal (its long axis along (1, 1)): the end that
+ * spreads wider across the axis (a sword's guard and hilt, an axe or mace head) and the part of
+ * the shaft next to it, so the slot shows what tells the item apart rather than a thin line.
+ */
+function iconFocus(root: THREE.Object3D): { center: THREE.Vector3; side: number } | null {
+  const along: number[] = [], across: number[] = [];
+  const v = new THREE.Vector3();
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    const pos = mesh.isMesh ? mesh.geometry.getAttribute('position') : undefined;
+    if (!pos) return;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+      along.push((v.x + v.y) * Math.SQRT1_2);
+      across.push((v.y - v.x) * Math.SQRT1_2);
+    }
+  });
+  if (along.length < 3) return null;
+  let lo = Infinity, hi = -Infinity;
+  for (const t of along) { lo = Math.min(lo, t); hi = Math.max(hi, t); }
+  const length = hi - lo;
+  if (length <= 0) return null;
+  // Spread across the axis within the outer 30 % at each end.
+  const spread = (fromLow: boolean) => {
+    let a = Infinity, b = -Infinity;
+    along.forEach((t, i) => {
+      if (fromLow ? t <= lo + 0.3 * length : t >= hi - 0.3 * length) { a = Math.min(a, across[i]!); b = Math.max(b, across[i]!); }
+    });
+    return { width: b > a ? b - a : 0, mid: b > a ? (a + b) / 2 : 0 };
+  };
+  const low = spread(true), high = spread(false);
+  const end = low.width > high.width ? low : high;
+  // Show 60 % of the length from that end (the end itself just inside the corner).
+  const shown = 0.6 * length;
+  const t = low.width > high.width ? lo + shown / 2 - 0.04 * length : hi - shown / 2 + 0.04 * length;
+  const side = Math.max((shown * Math.SQRT1_2) * 1.05, end.width * 1.1);
+  // Back from (along, across) to x / y.
+  const center = new THREE.Vector3((t - end.mid) * Math.SQRT1_2, (t + end.mid) * Math.SQRT1_2, 0);
+  const box = new THREE.Box3().setFromObject(root);
+  center.z = (box.min.z + box.max.z) / 2;
+  return { center, side };
+}
+
 /** Puts the camera on +Z so a posed item of `size` fills a viewport of `aspect` (`margin` > 1 leaves room). */
 export function fitItemCamera(camera: THREE.PerspectiveCamera, size: THREE.Vector3, aspect: number, margin: number): void {
   camera.aspect = aspect;
@@ -129,6 +173,39 @@ export class ItemThumbnails {
   }
 
   /**
+   * A square hotbar icon: long items lie on the diagonal, zoomed in so their ends crop and the
+   * middle (blade, hilt, head) reads at slot size. Same listeners and `data-thumb-key` scheme.
+   */
+  static iconKey(model: number, width: number, height: number, texture?: number): string {
+    return `icon_${ItemThumbnails.key(model, width, height, texture)}`;
+  }
+
+  getIcon(model: number | undefined, width = 1, height = 1, texture?: number): string | null {
+    if (model === undefined) return null;
+    const key = ItemThumbnails.iconKey(model, width, height, texture);
+    const cached = this.cache.get(key);
+    if (cached) return cached;
+    if (!this.pending.has(key)) {
+      this.pending.add(key);
+      void this.renderThumbnail(model, width, height, key, texture, true);
+    }
+    return null;
+  }
+
+  /** URL of a converted texture by its manifest name (lower-case file name without extension), or null. */
+  async textureUrl(name: string): Promise<string | null> {
+    const url = (await this.loadManifest()).textures[name];
+    return url ? `/generated/${url}` : null;
+  }
+
+  private loadManifest(): Promise<{ models: Record<string, string>; textures: Record<string, string> }> {
+    return (this.manifest ??= fetch('/generated/manifest.json')
+      .then(async (r) => (r.ok ? ((await r.json()) as { models?: Record<string, string>; textures?: Record<string, string> }) : {}))
+      .then((m) => ({ models: m.models ?? {}, textures: m.textures ?? {} }))
+      .catch(() => ({ models: {}, textures: {} })));
+  }
+
+  /**
    * The item's model (shared: clone before adding it to a scene), drawn with its items.ctx
    * texture variant when the model has several (potion colours, book covers...).
    */
@@ -140,11 +217,7 @@ export class ItemThumbnails {
       entry = (async () => {
         const fileKey = itemPreviewModelFile(model);
         if (!fileKey) return null;
-        this.manifest ??= fetch('/generated/manifest.json')
-          .then(async (r) => (r.ok ? ((await r.json()) as { models?: Record<string, string>; textures?: Record<string, string> }) : {}))
-          .then((m) => ({ models: m.models ?? {}, textures: m.textures ?? {} }))
-          .catch(() => ({ models: {}, textures: {} }));
-        const manifest = await this.manifest;
+        const manifest = await this.loadManifest();
         const url = manifest.models[fileKey];
         if (!url) return null;
         const gltf = await this.loader.loadAsync(`/generated/${url}`).catch(() => null);
@@ -181,7 +254,7 @@ export class ItemThumbnails {
     return entry;
   }
 
-  private async renderThumbnail(model: number, width: number, height: number, key: string, texture?: number): Promise<void> {
+  private async renderThumbnail(model: number, width: number, height: number, key: string, texture?: number, icon = false): Promise<void> {
     const source = await this.loadModel(model, texture);
     if (!source) {
       this.pending.delete(key);
@@ -196,17 +269,36 @@ export class ItemThumbnails {
         return;
       }
     }
-    const renderWidth = Math.max(64, width * 54);
-    const renderHeight = Math.max(64, height * 54);
+    const renderWidth = icon ? 96 : Math.max(64, width * 54);
+    const renderHeight = icon ? 96 : Math.max(64, height * 54);
     this.renderer.setSize(renderWidth, renderHeight, false);
 
     const pivot = new THREE.Group();
-    const size = poseItem(pivot, clone(source), model, width, height);
-    this.scene.add(pivot);
-    fitItemCamera(this.camera, size, renderWidth / renderHeight, 1.06);
+    let size = poseItem(pivot, clone(source), model, width, height);
+    const root = new THREE.Group();
+    root.add(pivot);
+    let margin = 1.06;
+    if (icon) {
+      const long = Math.max(width, height) / Math.min(width, height);
+      if (long > 1) pivot.rotation.z = height > width ? -Math.PI / 4 : Math.PI / 4;
+      root.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(root);
+      const focus = long >= 2 ? iconFocus(root) : null;
+      if (focus) {
+        pivot.position.sub(focus.center);
+        size = new THREE.Vector3(focus.side, focus.side, box.max.z - box.min.z);
+        margin = 1;
+      } else {
+        pivot.position.sub(box.getCenter(new THREE.Vector3()));
+        size = box.getSize(new THREE.Vector3());
+        margin = long > 1 ? 0.88 : 0.98;
+      }
+    }
+    this.scene.add(root);
+    fitItemCamera(this.camera, size, renderWidth / renderHeight, margin);
 
     this.renderer.render(this.scene, this.camera);
-    pivot.removeFromParent();
+    root.removeFromParent();
 
     const dataUrl = this.canvas.toDataURL('image/png');
     this.cache.set(key, dataUrl);

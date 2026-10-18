@@ -1,6 +1,7 @@
 import type { Settings, SettingsStore } from '../settings.ts';
 import {
   BINDING_DEFINITIONS,
+  comboCode,
   formatKeyCode,
   getDefaultKeybindings,
   type BindingCategory,
@@ -129,6 +130,7 @@ export class SettingsPanel {
           { id: 'combat', label: 'Combat' },
           { id: 'actions', label: 'Actions' },
           { id: 'view', label: 'Camera' },
+          { id: 'hotbar', label: 'Hotbar' },
         ];
 
         const filtered = BINDING_DEFINITIONS.filter(
@@ -435,7 +437,10 @@ export class SettingsPanel {
         return;
       }
 
-      this.assignKey(defId, slotIndex, e.code);
+      // Hotbar slots take Shift combos (row 2 is Shift+1-9); other bindings the plain key.
+      const isHotbar = BINDING_DEFINITIONS.find((d) => d.id === defId)?.hotbar !== undefined;
+      if (isHotbar && e.code.startsWith('Shift')) return; // Shift alone: wait for the key it modifies
+      this.assignKey(defId, slotIndex, isHotbar ? comboCode(e) : e.code);
       this.stopListening();
       this.render();
     };

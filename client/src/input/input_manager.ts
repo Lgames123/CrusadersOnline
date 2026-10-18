@@ -1,5 +1,5 @@
 import { INPUT, quantizeAngle, quantizePitch, type InputFrame } from '@crusaders/shared';
-import { compileBindings, type Action, type CompiledBindings } from './keybindings.ts';
+import { comboCode, compileBindings, type Action, type CompiledBindings } from './keybindings.ts';
 
 const MOUSE_SENSITIVITY = 0.0022;
 /**
@@ -37,6 +37,8 @@ export class InputManager {
   attackHeld = false;
   /** One-shot action keys (interact, potion...) while the pointer is locked. */
   onAction: (action: Action) => void = () => {};
+  /** A hotbar key (also with the cursor free, outside text fields); the slot index. */
+  onHotbar: (slot: number) => void = () => {};
   private readonly view = new Set<string>();
 
   private readonly element: HTMLElement;
@@ -46,6 +48,15 @@ export class InputManager {
     this.setBindings(initialKeybindings);
 
     window.addEventListener('keydown', (e) => {
+      const slot = this.hotbarSlot(e);
+      if (slot !== null) {
+        const t = e.target as HTMLElement | null;
+        const typing = t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || !!t?.isContentEditable;
+        if (!typing) {
+          if (this.locked) e.preventDefault();
+          if (!e.repeat) this.onHotbar(slot);
+        }
+      }
       if (!this.locked) return;
       const flag = this.compiled.bindings[e.code];
       if (flag !== undefined) {
@@ -130,6 +141,16 @@ export class InputManager {
     this.viewCodes = new Set<string>(Object.values(this.compiled.viewKeys).flat());
   }
 
+  /** The hotbar slot of a key event: its Shift combo first, else the plain key (1 still works while walking). */
+  hotbarSlot(e: { code: string; shiftKey: boolean }): number | null {
+    return this.compiled.hotbarFor(comboCode(e)) ?? this.compiled.hotbarFor(e.code);
+  }
+
+  /** Each hotbar slot's first key code. */
+  get hotbarKeys(): readonly string[] {
+    return this.compiled.hotbarKeys;
+  }
+
   /** Check if a key code triggers a specific action (used for menus outside pointer lock). */
   isKeyForAction(action: Action, code: string): boolean {
     return this.compiled.isAction(action, code);
@@ -137,7 +158,7 @@ export class InputManager {
 
   /** The key is bound to a movement flag, a view key or an action. */
   isBound(code: string): boolean {
-    return this.compiled.bindings[code] !== undefined || this.viewCodes.has(code) || this.compiled.actionFor(code) !== null;
+    return this.compiled.bindings[code] !== undefined || this.viewCodes.has(code) || this.compiled.actionFor(code) !== null || this.compiled.hotbarFor(code) !== null;
   }
 
   /** Asks for pointer lock; the browser may refuse (no user gesture, just left with Esc): a click retries. */

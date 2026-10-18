@@ -48,6 +48,7 @@ import {
   type DoorMotion,
   type MoverMotion,
   type InventoryItemView,
+  type SpellId,
   type CharacterLook,
   type WorldObjectDef,
   type Difficulty,
@@ -84,6 +85,7 @@ import { connectToWorld } from './network/connect.ts';
 import { CombatUi } from './ui/combat_ui.ts';
 import { Hud } from './ui/hud.ts';
 import { InventoryPanels, type InventoryPanelKind } from './ui/inventory_panels.ts';
+import { Hotbar, hotbarItemEntry, type HotbarEntry } from './ui/hotbar.ts';
 import { logout } from './frontend/api.ts';
 import { CHARACTER_SCREEN_FLAG, runFrontEnd } from './frontend/front_end.ts';
 import { TitleScene } from './frontend/title_scene.ts';
@@ -182,6 +184,8 @@ async function main(): Promise<void> {
   const combatUi = new CombatUi(document.getElementById('world-ui')!);
   const hud = new Hud(document.getElementById('hud')!, document.getElementById('player-panel')!, document.getElementById('death')!);
   const inventoryPanel = new InventoryPanels(document.getElementById('inventory')!);
+  const hotbar = new Hotbar(document.getElementById('hotbar')!);
+  inventoryPanel.hotbar = hotbar;
   const questBook = new QuestBook(document.getElementById('quest-book')!, assetManifest?.textures ?? {});
   questBook.setStrings(gameStrings);
   const charSheet = new CharacterSheet(document.getElementById('char-sheet')!, assetManifest?.textures ?? {});
@@ -410,6 +414,8 @@ async function main(): Promise<void> {
             charSheet.update(s);
             if (live) spellVisuals.syncStatuses(live.entityId, (s.statuses ?? []).map((x) => x.tag));
             inventoryPanel.setGold(s.gold);
+            inventoryPanel.setSpells(s);
+            hotbar.setStats(s);
             myTorch.distance = s.light;
             myTorch.visible = s.light > 0;
             if (!myTorch.visible) dynamicLights.remove(MY_TORCH_KEY);
@@ -556,6 +562,7 @@ async function main(): Promise<void> {
           },
           inventory: (inv) => {
             inventoryPanel.update(inv);
+            hotbar.setInventory(inv.items);
             player?.setWeaponSpeed(inv.weaponSpeed);
             const w = inv.items.find((i) => i.type === 'weapon' && i.equipped);
             myEdge = w?.damage && w.damage[0]! > w.damage[1]! ? 'sharp' : 'blunt';
@@ -686,11 +693,14 @@ async function main(): Promise<void> {
     }
     if (session.playerStats) {
       hud.stats(session.playerStats);
+      inventoryPanel.setSpells(session.playerStats);
+      hotbar.setStats(session.playerStats);
       lastStats = { level: session.playerStats.level, dead: session.playerStats.dead };
     }
     for (const [id, state] of session.objectStates) levelView?.setObjectState(id, state, session.swings.get(id)?.motion ?? null, session.movers.get(id)?.motion ?? null);
     if (session.inventory) {
       inventoryPanel.update(session.inventory);
+      hotbar.setInventory(session.inventory.items);
       player.setWeaponSpeed(session.inventory.weaponSpeed);
     }
     for (const [id, info] of session.entities) remotes.spawn(id, info);
@@ -746,6 +756,7 @@ async function main(): Promise<void> {
     closeInventoryPanels();
     setQuestBookOpen(false);
     setCharSheetOpen(false);
+    hotbar.visible = false;
     cutsceneUi.hidden = false;
     prompt.hidden = true;
     clickHint.hidden = true;
@@ -786,6 +797,7 @@ async function main(): Promise<void> {
     c.dispose();
     remotes.scripted.clear();
     cutsceneUi.hidden = true;
+    hotbar.visible = !!session;
     session?.cutsceneDone(c.sequence.name);
     // Drake stays in this act (no level load): the view flies from the sequence's last camera
     // to its place behind him, facing where the stand-in faces.
@@ -838,6 +850,7 @@ async function main(): Promise<void> {
     input.sensitivity = s.mouseSensitivity;
     input.invertY = s.invertMouseY;
     input.setBindings(s.keybindings);
+    hotbar.setKeys(input.hotbarKeys);
   };
   applySettings();
   settings.onChange(applySettings);
@@ -1081,6 +1094,49 @@ async function main(): Promise<void> {
     messagesInside.clear();
     for (const id of inside) messagesInside.add(id);
   };
+  /**
+   * R (or a hotbar spell): cast `spell` (the server checks mana and state). Self spells conjure
+   * first with the feet planted; fire ball, slow, lightning and soul drinker go at once. A spell
+   * other than the selected one is selected first (the server casts the selected spell).
+   */
+  const castSpell = (spell: SpellId) => {
+    const st = session?.playerStats;
+    const known = st?.spells.find((k) => k.spell === spell);
+    const cost = known ? BUILTIN_SPELLS[spell]?.[known.level - 1]?.mana ?? 0 : 0;
+    if (!st || !known || !CASTABLE_SPELLS.has(spell) || st.mana < cost) return;
+    const info = SPELL_INFO[spell];
+    const plan = {
+      conjure: info.conjure ? (SPELL_CONJURE_TICKS / local.clipRate) * TICK_DT : 0,
+      clip: spellClipSeconds(spell, local.clipRate).end,
+      anim: ANIM.SPELL_CAST + SPELLS.indexOf(spell),
+      state: info.asm,
+    };
+    if (!local.startCast(plan)) return;
+    if (st.spell !== spell) session?.selectSpell(spell);
+    session?.castSpell();
+  };
+  /** A hotbar slot used: cast its spell, drink its potion, or wear its gear (quick swap). */
+  const useHotbar = (entry: HotbarEntry) => {
+    if (cutscene || optionsOpen || !session) return;
+    if (entry.kind === 'spell') {
+      castSpell(entry.spell);
+      return;
+    }
+    const owned = (session.inventory?.items ?? []).filter((i) => i.itemId === entry.itemId);
+    if (entry.type === 'potion') {
+      // The smallest stack first, so stacks run out one at a time.
+      const potion = owned.sort((a, b) => (a.quantity ?? 1) - (b.quantity ?? 1))[0];
+      if (potion) session.useItem(potion.slot);
+    } else {
+      const spare = owned.find((i) => !i.equipped);
+      if (spare && !owned.some((i) => i.equipped)) session.equip(spare.slot, true, spare.itemId);
+    }
+  };
+  hotbar.onActivate = useHotbar;
+  input.onHotbar = (slot) => {
+    if (cutscene || optionsOpen) return;
+    hotbar.activate(slot);
+  };
   input.onAction = (action) => {
     if (cutscene) return;
     if (action === 'interact') {
@@ -1103,21 +1159,8 @@ async function main(): Promise<void> {
         if (potion) session?.useItem(potion.slot);
       }
     } else if (action === 'castSpell') {
-      // R: cast the selected spell (the server checks mana and state). Self spells conjure first
-      // with the feet planted; fire ball, slow, lightning and soul drinker go at once.
-      const st = session?.playerStats;
-      const known = st?.spells.find((k) => k.spell === st.spell);
-      const cost = known && st?.spell ? BUILTIN_SPELLS[st.spell]?.[known.level - 1]?.mana ?? 0 : 0;
-      if (st?.spell && CASTABLE_SPELLS.has(st.spell) && st.mana >= cost) {
-        const info = SPELL_INFO[st.spell];
-        const plan = {
-          conjure: info.conjure ? (SPELL_CONJURE_TICKS / local.clipRate) * TICK_DT : 0,
-          clip: spellClipSeconds(st.spell, local.clipRate).end,
-          anim: ANIM.SPELL_CAST + SPELLS.indexOf(st.spell),
-          state: info.asm,
-        };
-        if (local.startCast(plan)) session?.castSpell();
-      }
+      const spell = session?.playerStats?.spell;
+      if (spell) castSpell(spell);
     } else if (action === 'nextSpell') {
       // T: the next known spell.
       const st = session?.playerStats;
@@ -1133,6 +1176,8 @@ async function main(): Promise<void> {
     }
   };
   inWorld = true;
+  hotbar.setCharacter(auth.kind === 'account' ? auth.characterId : null);
+  hotbar.visible = !!session;
   gameFiles.visible = false;
   updateHint();
   play();
@@ -1239,6 +1284,9 @@ async function main(): Promise<void> {
   inventoryPanel.onSell = (shop, slot, itemId) => session?.shopSell(shop, slot, itemId);
   inventoryPanel.onShopClosed = () => (shopAt = null);
   inventoryPanel.onPickup = (object) => session?.interact(object);
+  inventoryPanel.onHotbar = (slot, item) => hotbar.set(slot, hotbarItemEntry(item));
+  inventoryPanel.onSpellDrag = (spell, e) => hotbar.dragFrom({ kind: 'spell', spell }, e);
+  inventoryPanel.onSelectSpell = (spell) => session?.selectSpell(spell);
   inventoryPanel.onToggle = (kind, open) => setInventoryPanelOpen(kind, open);
   inventoryPanel.onNotice = (message) => {
     if (!player) return;

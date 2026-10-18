@@ -60,7 +60,7 @@ export const ACTION_KEYS = {
 
 export type Action = keyof typeof ACTION_KEYS;
 
-export type BindingCategory = 'movement' | 'combat' | 'actions' | 'view';
+export type BindingCategory = 'movement' | 'combat' | 'actions' | 'view' | 'hotbar';
 
 export interface BindingDefinition {
   id: string;
@@ -70,7 +70,27 @@ export interface BindingDefinition {
   flag?: number;
   action?: Action;
   view?: ViewKeyAction;
+  /** Hotbar slot (0-8 the first row, 9-17 the second). */
+  hotbar?: number;
 }
+
+/** Slots per hotbar row, and rows. */
+export const HOTBAR_COLUMNS = 9;
+export const HOTBAR_ROWS = 2;
+
+/** A key pressed with Shift held is bound as `Shift+<code>` (hotbar row 2 defaults). */
+export const SHIFT_PREFIX = 'Shift+';
+
+/** The code a key event binds as: `Shift+Digit1` with Shift held (Shift itself stays plain). */
+export function comboCode(e: { code: string; shiftKey: boolean }): string {
+  return e.shiftKey && !e.code.startsWith('Shift') ? SHIFT_PREFIX + e.code : e.code;
+}
+
+/** Not original (the original has no hotbar): row 1 on 1-9, row 2 on Shift+1-9. */
+const HOTBAR_DEFINITIONS: BindingDefinition[] = Array.from({ length: HOTBAR_COLUMNS * HOTBAR_ROWS }, (_, i) => {
+  const row = Math.floor(i / HOTBAR_COLUMNS), col = i % HOTBAR_COLUMNS;
+  return { id: `hotbar${i + 1}`, label: `Hotbar ${row + 1} · Slot ${col + 1}`, category: 'hotbar', defaultKeys: [`${row ? SHIFT_PREFIX : ''}Digit${col + 1}`], hotbar: i };
+});
 
 export const BINDING_DEFINITIONS: readonly BindingDefinition[] = [
   // Movement
@@ -102,6 +122,9 @@ export const BINDING_DEFINITIONS: readonly BindingDefinition[] = [
   { id: 'lookUp', label: 'Look Up', category: 'view', defaultKeys: ['Numpad9'], view: 'lookUp' },
   { id: 'lookDown', label: 'Look Down', category: 'view', defaultKeys: ['Numpad7'], view: 'lookDown' },
   { id: 'lookCentre', label: 'Center View', category: 'view', defaultKeys: ['Numpad5'], view: 'lookCentre' },
+
+  // Hotbar
+  ...HOTBAR_DEFINITIONS,
 ];
 
 export function getDefaultKeybindings(): Record<string, string[]> {
@@ -112,6 +135,7 @@ export function getDefaultKeybindings(): Record<string, string[]> {
 
 export function formatKeyCode(code: string): string {
   if (!code) return '—';
+  if (code.startsWith(SHIFT_PREFIX)) return `Shift+${formatKeyCode(code.slice(SHIFT_PREFIX.length))}`;
   if (code.startsWith('Key')) return code.slice(3).toUpperCase();
   if (code.startsWith('Digit')) return code.slice(5);
   if (code.startsWith('Numpad')) return 'Num ' + code.slice(6);
@@ -145,6 +169,10 @@ export interface CompiledBindings {
   viewKeys: Record<ViewKeyAction, string[]>;
   actionFor: (code: string) => Action | null;
   isAction: (action: Action, code: string) => boolean;
+  /** The hotbar slot a (combo) code uses, or null. */
+  hotbarFor: (code: string) => number | null;
+  /** Each hotbar slot's first key, for the slot labels. */
+  hotbarKeys: string[];
 }
 
 export function compileBindings(custom?: Record<string, string[]>): CompiledBindings {
@@ -159,6 +187,8 @@ export function compileBindings(custom?: Record<string, string[]>): CompiledBind
   };
   const actionToCodes = new Map<Action, string[]>();
   const codeToAction = new Map<string, Action>();
+  const codeToHotbar = new Map<string, number>();
+  const hotbarKeys: string[] = [];
 
   for (const def of BINDING_DEFINITIONS) {
     const keys = current[def.id] ?? def.defaultKeys;
@@ -174,6 +204,10 @@ export function compileBindings(custom?: Record<string, string[]>): CompiledBind
       actionToCodes.set(def.action, [...keys]);
       for (const k of keys) codeToAction.set(k, def.action);
     }
+    if (def.hotbar !== undefined) {
+      hotbarKeys[def.hotbar] = keys[0] ?? '';
+      for (const k of keys) codeToHotbar.set(k, def.hotbar);
+    }
   }
 
   return {
@@ -181,6 +215,8 @@ export function compileBindings(custom?: Record<string, string[]>): CompiledBind
     viewKeys,
     actionFor: (code: string) => codeToAction.get(code) ?? null,
     isAction: (action: Action, code: string) => actionToCodes.get(action)?.includes(code) ?? false,
+    hotbarFor: (code: string) => codeToHotbar.get(code) ?? null,
+    hotbarKeys,
   };
 }
 
@@ -194,4 +230,4 @@ export function actionFor(code: string): Action | null {
 /** Help line shown on the "click to play" screen. */
 export const CONTROLS_HELP =
   'WASD move · Mouse look · Wheel camera distance · Space jump · Click attack · Right click block · ' +
-  'R cast spell · T next spell · Tab interact / open · Z use item · H potion · I inventory · F1 statistics · F2 quest log · Esc options';
+  'R cast spell · T next spell · Tab interact / open · Z use item · H potion · I inventory · 1-9 / Shift+1-9 hotbar · F1 statistics · F2 quest log · Esc options';

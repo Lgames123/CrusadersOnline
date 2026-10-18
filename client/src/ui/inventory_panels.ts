@@ -1,7 +1,9 @@
-import { canPlaceGrid, DAMAGE_TYPES, firstFreeGridPosition, INVENTORY_GRID, layoutItemViews, type GridPlacement, type Inventory, type InventoryItemView, type ShopItemView } from '@crusaders/shared';
+import { BUILTIN_SPELLS, canPlaceGrid, DAMAGE_TYPES, firstFreeGridPosition, INVENTORY_GRID, layoutItemViews, SPELL_NAMES, type GridPlacement, type Inventory, type InventoryItemView, type PlayerStats, type ShopItemView, type SpellId } from '@crusaders/shared';
 import { HeldItemPreview } from './held_item_preview.ts';
 import { ItemThumbnails } from './item_thumbnails.ts';
 import { itemPreviewModelFile } from '../assets/item_models.ts';
+import { HOTBAR_ITEM_TYPES } from './hotbar.ts';
+import { spellIconUrl } from './spell_icons.ts';
 
 /** The inventory window (character equipment over the bag) and the ground window beside it. */
 export type InventoryPanelKind = 'inventory' | 'ground';
@@ -41,8 +43,11 @@ const EQUIP_SLOTS: { kind: EquipKind | 'head' | 'ring1' | 'ring2' | 'amulet' | '
   { kind: 'boots', label: 'Boots', area: '5 / 7 / span 2 / span 2' },
 ];
 
-/** Bag page or Key Items page (the original's "Quest Items" page, 0x472C20) under the equipment. */
-type InventoryPage = 'bag' | 'keys';
+/**
+ * Bag page, Key Items page (the original's "Quest Items" page, 0x472C20) or the known spells
+ * (not original: where spells are dragged to the hotbar from) under the equipment.
+ */
+type InventoryPage = 'bag' | 'keys' | 'spells';
 /** Key items are drawn larger than their 1Ã—1 footprint: this many cells a side, four to a row. */
 const KEY_TILE = 2;
 
@@ -71,7 +76,14 @@ type DropAction =
   | { kind: 'move'; x: number; y: number; valid: boolean }
   | { kind: 'merge'; toSlot: number }
   | { kind: 'equip'; slot: number; valid: boolean }
-  | { kind: 'unequip'; x: number; y: number; valid: boolean };
+  | { kind: 'unequip'; x: number; y: number; valid: boolean }
+  | { kind: 'hotbar'; slot: number };
+
+/** Where items dragged out of the bag can be put on the hotbar. */
+export interface HotbarDropTarget {
+  slotAt(x: number, y: number): number | null;
+  highlight(slot: number | null): void;
+}
 
 interface Drag {
   item: InventoryItemView;
@@ -101,6 +113,10 @@ export class InventoryPanels {
   private readonly equipment: HTMLElement;
   private readonly grid: HTMLElement;
   private readonly keys: HTMLElement;
+  private readonly spells: HTMLElement;
+  private spellStats: Pick<PlayerStats, 'spells' | 'spell'> | null = null;
+  /** Where a spell tile was pressed: a click that ends a drag does not select it. */
+  private spellPress: { x: number; y: number } | null = null;
   private page: InventoryPage = 'bag';
   private readonly groundList: HTMLElement;
   private readonly goldValue: HTMLElement;
@@ -137,6 +153,11 @@ export class InventoryPanels {
   /** The player asked to open or close a window (button, ×). */
   onToggle: (kind: InventoryPanelKind, open: boolean) => void = () => {};
   onNotice?: (message: string) => void;
+  /** Hotbar: drops of potions and gear onto it, spells dragged from the Spells page, a spell clicked (selected for R). */
+  hotbar: HotbarDropTarget | null = null;
+  onHotbar: (slot: number, item: InventoryItemView) => void = () => {};
+  onSpellDrag: (spell: SpellId, e: PointerEvent) => void = () => {};
+  onSelectSpell: (spell: SpellId) => void = () => {};
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -147,9 +168,11 @@ export class InventoryPanels {
         <nav class="inv-pages" role="tablist" aria-label="Inventory pages">
           <button type="button" role="tab" data-page="bag" aria-selected="true">Bag</button>
           <button type="button" role="tab" data-page="keys" aria-selected="false">Key Items <span class="inv-page-count"></span></button>
+          <button type="button" role="tab" data-page="spells" aria-selected="false">Spells</button>
         </nav>
         <div class="inv-grid" style="--inv-columns:${INVENTORY_GRID.columns};--inv-rows:${INVENTORY_GRID.rows}" aria-label="Bag"></div>
         <div class="inv-keys" style="--inv-columns:${INVENTORY_GRID.columns};--inv-rows:${INVENTORY_GRID.rows}" aria-label="Key items" hidden></div>
+        <div class="inv-keys inv-spells" style="--inv-columns:${INVENTORY_GRID.columns};--inv-rows:${INVENTORY_GRID.rows}" aria-label="Spells" hidden></div>
         <footer class="inv-footer">
           <span class="inv-gold" title="Gold"><i aria-hidden="true"></i><b>0</b></span>
           <span class="inv-count"></span>
@@ -174,6 +197,7 @@ export class InventoryPanels {
     this.equipment = root.querySelector('.inv-equipment')!;
     this.grid = root.querySelector('.inv-grid')!;
     this.keys = root.querySelector('.inv-keys')!;
+    this.spells = root.querySelector('.inv-spells')!;
     this.groundList = root.querySelector('.ground-list')!;
     this.goldValue = root.querySelector('.inv-gold b')!;
     this.countValue = root.querySelector('.inv-count')!;
@@ -191,7 +215,7 @@ export class InventoryPanels {
     root.addEventListener('contextmenu', (e) => this.contextMenu(e));
     root.addEventListener('pointerover', (e) => this.hover(e));
     root.addEventListener('pointerout', (e) => {
-      if (!(e.relatedTarget as HTMLElement | null)?.closest?.('.inv-item')) this.hideTooltip();
+      if (!(e.relatedTarget as HTMLElement | null)?.closest?.('.inv-item, [data-spell]')) this.hideTooltip();
     });
     ItemThumbnails.get().onChange((key, url) => {
       for (const img of root.querySelectorAll<HTMLImageElement>(`img[data-thumb-key="${key}"]`)) {
@@ -240,6 +264,13 @@ export class InventoryPanels {
     this.inventory = inv;
     this.awaitingUntil = 0;
     if (this.shown.inventory) this.render();
+  }
+
+  /** Known spells and the selected one (PLAYER_STATS), for the Spells page. */
+  setSpells(stats: Pick<PlayerStats, 'spells' | 'spell'>): void {
+    const changed = stats.spell !== this.spellStats?.spell || JSON.stringify(stats.spells) !== JSON.stringify(this.spellStats?.spells);
+    this.spellStats = { spells: stats.spells, spell: stats.spell };
+    if (changed && this.shown.inventory && this.page === 'spells') this.render();
   }
 
   setGold(gold: number): void {
@@ -332,6 +363,18 @@ export class InventoryPanels {
     </button>`;
   }
 
+  /** A known spell on the Spells page: a 2×2 tile with the original's icon, its name and level. */
+  private spellCard(spell: SpellId, level: number, index: number): string {
+    const across = INVENTORY_GRID.columns / KEY_TILE;
+    const x = (index % across) * KEY_TILE, y = Math.floor(index / across) * KEY_TILE;
+    const url = spellIconUrl(spell, () => this.shown.inventory && this.page === 'spells' && this.render());
+    const selected = this.spellStats?.spell === spell;
+    return `<button type="button" class="inv-item inv-key-item inv-spell${selected ? ' inv-spell-selected' : ''}" data-spell="${spell}" style="grid-column:${x + 1} / span ${KEY_TILE};grid-row:${y + 1} / span ${KEY_TILE}" aria-label="${escape(SPELL_NAMES[spell])}">
+      ${url ? `<img class="inv-item-thumb" src="${url}" alt="" draggable="false" />` : '<span class="inv-mark" aria-hidden="true">✦</span>'}
+      <span class="inv-item-name">${escape(SPELL_NAMES[spell])} ${level}</span>
+    </button>`;
+  }
+
   private setPage(page: InventoryPage): void {
     if (page === this.page) return;
     this.page = page;
@@ -363,8 +406,11 @@ export class InventoryPanels {
     this.keys.innerHTML = keys.map((item, i) => this.keyCard(item, i)).join('') || '<p class="inv-empty">No keys.</p>';
     this.root.querySelector('.inv-page-count')!.textContent = keys.length ? String(keys.length) : '';
     for (const tab of this.root.querySelectorAll<HTMLElement>('[data-page]')) tab.setAttribute('aria-selected', String(tab.dataset['page'] === this.page));
+    const known = this.spellStats?.spells ?? [];
+    this.spells.innerHTML = known.map((k, i) => this.spellCard(k.spell, k.level, i)).join('') || '<p class="inv-empty">No spells known.</p>';
     this.grid.hidden = this.page !== 'bag';
     this.keys.hidden = this.page !== 'keys';
+    this.spells.hidden = this.page !== 'spells';
     const hidden = bag.length - placed.size;
     this.countValue.textContent = hidden > 0 ? `${hidden} item${hidden > 1 ? 's' : ''} do not fit` : '';
     this.countValue.classList.toggle('inv-warning', hidden > 0);
@@ -407,6 +453,21 @@ export class InventoryPanels {
 
   private hover(e: PointerEvent): void {
     if (this.drag || this.press) return;
+    const spellEl = (e.target as HTMLElement).closest<HTMLElement>('[data-spell]');
+    if (spellEl) {
+      const spell = spellEl.dataset['spell'] as SpellId;
+      const level = this.spellStats?.spells.find((k) => k.spell === spell)?.level ?? 1;
+      this.tooltip.innerHTML = `<strong class="tt-name tt-spellbook">${escape(SPELL_NAMES[spell])}</strong>
+        <span class="tt-type">Spell · level ${level}</span>
+        <span>Mana: ${BUILTIN_SPELLS[spell]?.[level - 1]?.mana ?? 0}</span>
+        <small>Click to select for casting · Drag to the hotbar</small>`;
+      this.tooltip.hidden = false;
+      const r = spellEl.getBoundingClientRect();
+      const t = this.tooltip.getBoundingClientRect();
+      const left = r.left - t.width - 8 >= 8 ? r.left - t.width - 8 : Math.min(innerWidth - t.width - 8, r.right + 8);
+      this.tooltip.style.transform = `translate(${Math.round(left)}px, ${Math.round(Math.max(8, Math.min(innerHeight - t.height - 8, r.top)))}px)`;
+      return;
+    }
     const row = (e.target as HTMLElement).closest<HTMLElement>('[data-stock]');
     const stocked = row && this.shop?.stock[Number(row.dataset['stock'])];
     const el = row ?? (e.target as HTMLElement).closest<HTMLElement>('.inv-item');
@@ -488,6 +549,13 @@ export class InventoryPanels {
       this.onToggle('ground', !this.shown.ground);
       return;
     }
+    const spell = target.closest<HTMLElement>('[data-spell]');
+    if (spell) {
+      const press = this.spellPress;
+      this.spellPress = null;
+      if (!press || Math.hypot(e.clientX - press.x, e.clientY - press.y) < DRAG_THRESHOLD) this.onSelectSpell(spell.dataset['spell'] as SpellId);
+      return;
+    }
     const object = target.closest<HTMLElement>('[data-object]');
     if (object) {
       this.request(() => this.onPickup(Number(object.dataset['object'])));
@@ -531,6 +599,14 @@ export class InventoryPanels {
 
   private pointerDown(e: PointerEvent): void {
     if (e.button !== 0 || this.drag) return;
+    const spell = (e.target as HTMLElement).closest<HTMLElement>('[data-spell]');
+    if (spell) {
+      e.preventDefault();
+      this.hideTooltip();
+      this.spellPress = { x: e.clientX, y: e.clientY };
+      this.onSpellDrag(spell.dataset['spell'] as SpellId, e);
+      return;
+    }
     const el = (e.target as HTMLElement).closest<HTMLElement>('.inv-item');
     const item = el && this.itemBySlot(Number(el.dataset['slot']));
     if (!el || !item || item.keyItem) return; // key items stay on their page
@@ -596,6 +672,7 @@ export class InventoryPanels {
     drag.source.classList.remove('inv-dragging');
     this.root.classList.remove('inv-is-dragging');
     this.root.querySelectorAll('.drop-hover, .drop-invalid, .equip-accepts').forEach((el) => el.classList.remove('drop-hover', 'drop-invalid', 'equip-accepts'));
+    this.hotbar?.highlight(null);
     this.preview.hide();
     if (this.renderPending) this.render();
   }
@@ -615,6 +692,9 @@ export class InventoryPanels {
     if (!drag) return { kind: 'none' };
     const item = drag.item;
     const under = document.elementFromPoint(x, y) as HTMLElement | null;
+    const hotbarSlot = HOTBAR_ITEM_TYPES.has(item.type) ? this.hotbar?.slotAt(x, y) ?? null : null;
+    if (hotbarSlot !== null) return { kind: 'hotbar', slot: hotbarSlot };
+    if (under?.closest('#hotbar')) return { kind: 'none' }; // between slots, or not a hotbar item: never dropped
     if (this.shop && under?.closest('.inv-shop')) return { kind: 'sell' };
     if (!under?.closest('.inv-main')) return { kind: 'drop' }; // the ground window, or anywhere outside
     const shape = shapeOf(item);
@@ -652,6 +732,7 @@ export class InventoryPanels {
       target.classList.toggle('valid', action.valid);
       target.classList.toggle('invalid', !action.valid);
     }
+    this.hotbar?.highlight(action.kind === 'hotbar' ? action.slot : null);
     const ground = this.root.querySelector('.inv-ground');
     ground?.classList.toggle('drop-hover', action.kind === 'drop' && this.shown.ground);
     this.shopWindow.classList.toggle('drop-hover', action.kind === 'sell');
@@ -687,6 +768,9 @@ export class InventoryPanels {
         if (action.valid && (at?.x !== action.x || at?.y !== action.y)) this.request(() => this.onMove(item.slot, item.itemId, action.x, action.y));
         return;
       }
+      case 'hotbar':
+        this.onHotbar(action.slot, item);
+        return;
       case 'unequip':
         if (action.valid) this.request(() => this.onEquip(item.slot, item.itemId, false, { x: action.x, y: action.y }));
         return;
