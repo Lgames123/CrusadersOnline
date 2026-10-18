@@ -75,7 +75,22 @@
       /* Bag grid. */
       #inventory .inv-grid { display: grid; grid-template-columns: repeat(var(--inv-columns), var(--cell)); grid-template-rows: repeat(var(--inv-rows), var(--cell)); gap: 2px; width: max-content; padding: 3px; border: 1px solid #3d321f; background: linear-gradient(180deg, #19150f, #0d0b08); box-shadow: inset 0 0 16px #000; }
       #inventory .inv-grid::before { content: ''; grid-column: 1 / -1; grid-row: 1 / -1; pointer-events: none; background: repeating-linear-gradient(90deg, rgba(255,235,190,.05) 0 1px, transparent 1px var(--cell), #030302 var(--cell) calc(var(--cell) + 2px)), repeating-linear-gradient(180deg, rgba(255,235,190,.05) 0 1px, transparent 1px var(--cell), #030302 var(--cell) calc(var(--cell) + 2px)); }
-      #inventory .inv-drag-target { z-index: 3; pointer-events: none; border: 1px solid; box-sizing: border-box; }
+      /* Bag / Key Items pages (the original's Quest Items page): tabs over the grid. */
+      #inventory .inv-equipment { margin-bottom: 6px; }
+      #inventory .inv-pages { display: flex; gap: 2px; margin-bottom: -1px; }
+      #inventory .inv-pages button { position: relative; padding: 4px 12px 5px; border: 1px solid #3d321f; border-bottom: 0; background: linear-gradient(180deg, #1c1710, #0e0c09); color: #8f8268; font: 600 11px/1 "Palatino Linotype", Georgia, serif; letter-spacing: .08em; text-transform: uppercase; }
+      #inventory .inv-pages button:hover { color: #d9c79c; }
+      #inventory .inv-pages button[aria-selected="true"] { z-index: 1; background: #19150f; color: var(--gold-hi); border-color: #6e5a35; }
+      #inventory .inv-page-count:not(:empty) { margin-left: 4px; color: #c9b88f; font-weight: 400; }
+      #inventory .inv-page-count:not(:empty)::before { content: '('; } #inventory .inv-page-count:not(:empty)::after { content: ')'; }
+      #inventory .inv-grid[hidden], #inventory .inv-keys[hidden] { display: none; }
+      #inventory .inv-keys { display: grid; grid-template-columns: repeat(var(--inv-columns), var(--cell)); grid-template-rows: repeat(var(--inv-rows), var(--cell)); gap: 2px; width: max-content; padding: 3px; border: 1px solid #3d321f; background: radial-gradient(70% 60% at 50% 40%, rgba(60,70,95,.22), transparent 75%), linear-gradient(180deg, #19150f, #0d0b08); box-shadow: inset 0 0 16px #000; }
+      #inventory .inv-keys .inv-empty { grid-column: 1 / -1; grid-row: 1 / -1; align-self: center; text-align: center; }
+      #inventory .inv-key-item { cursor: default; border-color: rgba(120,140,180,.4); background: radial-gradient(circle at 50% 42%, rgba(110,125,160,.28), transparent 70%), linear-gradient(180deg, rgba(40,46,62,.55), rgba(12,13,18,.9)); }
+      #inventory .inv-key-item .inv-item-thumb { inset: 4px 4px 14px; height: calc(100% - 18px); width: calc(100% - 8px); }
+      #inventory .inv-key-item .inv-item-name { bottom: 2px; font-size: 9.5px; color: #e4d6b2; }
+      #inventory .inv-drag-target { z-index: 3;
+ pointer-events: none; border: 1px solid; box-sizing: border-box; }
       #inventory .inv-drag-target.valid { border-color: #76d08f; background: rgba(91,190,119,.22); }
       #inventory .inv-drag-target.invalid { border-color: #e25a4d; background: rgba(226,90,77,.24); }
       #inventory .inv-item { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0; min-height: 0; padding: 0; overflow: hidden; border: 1px solid rgba(150,124,70,.45); background: linear-gradient(180deg, rgba(64,52,32,.55), rgba(20,17,12,.85)); color: #eee2c9; text-shadow: 0 1px 2px #000; font: 10px/1.05 system-ui, sans-serif; cursor: grab; z-index: 1; touch-action: none; user-select: none; }

@@ -159,7 +159,27 @@ describe('inventory authority in the zone', () => {
     expect(chest()).toEqual([expect.objectContaining({ state: 'open', loot: ['Long Sword', '5 Gold Pieces'] })]);
   });
 
+  it('a door key goes to the key items even with a full bag, and cannot be dropped', () => {
+    const items = new Map(BUILTIN_ITEMS);
+    const key: ItemDef = { id: 'room_2_key', name: 'Room 2 Key', type: 'key', width: 1, height: 1, price: 0, model: 110, keyItem: true };
+    items.set(key.id, key).set(key.name, key);
+    const t = zone(items);
+    t.internal.objects.get(CHEST)!.def = { id: CHEST, kind: 'chest', x: 0, y: 0, z: -0.5, contents: [{ name: 'Room 2 Key', quantity: 1 }] } as never;
+    const p = t.join(1, FULL_BAG);
+    t.z.interact(1, CHEST);
+    expect(t.errors(1)).toHaveLength(0);
+    const entry = p.inventory.find((e) => e.itemId === 'room_2_key')!;
+    expect(entry.x).toBeUndefined();
+    const view = t.sent(1).filter((m) => m.op === SC.INVENTORY_UPDATE).at(-1)!.d.items.find((i) => i.itemId === 'room_2_key');
+    expect(view).toMatchObject({ keyItem: true });
+    expect(view!.x).toBeUndefined();
+    t.z.dropInventoryItem(1, entry.slot, 'room_2_key');
+    expect(count(p.inventory, 'room_2_key')).toBe(1);
+    expect(t.dynamic()).toHaveLength(0);
+  });
+
   it("a kill's gold goes to the purse; its items lie at the corpse for the killer alone, 2 minutes", () => {
+
     const t = zone(new Map(BUILTIN_ITEMS), [{ name: 'Gold Pieces', quantity: 7 }, { name: 'Long Sword', quantity: 1 }, { name: 'Wooden Shield', quantity: 1 }]);
     const p = t.join(1);
     const other = t.join(2);

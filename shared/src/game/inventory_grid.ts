@@ -58,7 +58,7 @@ export function layoutInventoryGrid(inv: readonly InventoryEntry[], catalog: Ite
   // Pass 1: Keep authoritative saved coordinates first
   for (const entry of bag) {
     const def = catalog.get(entry.itemId);
-    if (!def) continue;
+    if (!def || def.keyItem) continue; // key items live on their own page, not in the bag
     const saved = entry.x === undefined || entry.y === undefined ? null : { x: entry.x, y: entry.y, width: def.width, height: def.height };
     if (saved && canPlaceGrid(size, saved, occupied)) {
       occupied.push(saved);
@@ -85,6 +85,7 @@ export interface ItemViewLike {
   width?: number;
   height?: number;
   equipped?: boolean;
+  keyItem?: boolean;
   x?: number;
   y?: number;
 }
@@ -94,7 +95,8 @@ export function layoutItemViews<T extends ItemViewLike>(items: readonly T[], siz
   const out = new Map<number, GridPlacement>();
   const occupied: GridPlacement[] = [];
   const unplaced: { item: T; width: number; height: number }[] = [];
-  const bag = [...items].filter((item) => !item.equipped).sort((a, b) => a.slot - b.slot);
+  const bag = [...items].filter((item) => !item.equipped && !item.keyItem).sort((a, b) => a.slot - b.slot);
+
 
   for (const item of bag) {
     const width = Math.max(1, item.width ?? 1), height = Math.max(1, item.height ?? 1);

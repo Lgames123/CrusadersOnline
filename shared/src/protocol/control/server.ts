@@ -161,8 +161,11 @@ export interface InventoryItemView {
   x?: number;
   y?: number;
   equipped: boolean;
+  /** A door key: shown on the Key Items page, takes no bag cell, cannot be dropped. */
+  keyItem?: boolean;
   quantity?: number;
   heal?: number;
+
   damage?: number[];
   speed?: number;
   protection?: number[];

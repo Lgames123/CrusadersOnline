@@ -41,6 +41,11 @@ const EQUIP_SLOTS: { kind: EquipKind | 'head' | 'ring1' | 'ring2' | 'amulet' | '
   { kind: 'boots', label: 'Boots', area: '5 / 7 / span 2 / span 2' },
 ];
 
+/** Bag page or Key Items page (the original's "Quest Items" page, 0x472C20) under the equipment. */
+type InventoryPage = 'bag' | 'keys';
+/** Key items are drawn larger than their 1Ã—1 footprint: this many cells a side, four to a row. */
+const KEY_TILE = 2;
+
 /** How far (CSS px) the pointer travels before a press on an item becomes a drag. */
 const DRAG_THRESHOLD = 5;
 /** A sent request blocks further item actions until the server answers (or this long). */
@@ -95,6 +100,8 @@ export class InventoryPanels {
   private readonly dock: HTMLElement;
   private readonly equipment: HTMLElement;
   private readonly grid: HTMLElement;
+  private readonly keys: HTMLElement;
+  private page: InventoryPage = 'bag';
   private readonly groundList: HTMLElement;
   private readonly goldValue: HTMLElement;
   private readonly countValue: HTMLElement;
@@ -137,7 +144,12 @@ export class InventoryPanels {
       <section class="inv-window inv-main" aria-label="Inventory">
         <header class="inv-title"><h2>Inventory</h2><button type="button" class="inv-x" data-close="inventory" aria-label="Close inventory">×</button></header>
         <div class="inv-equipment" aria-label="Equipment"></div>
+        <nav class="inv-pages" role="tablist" aria-label="Inventory pages">
+          <button type="button" role="tab" data-page="bag" aria-selected="true">Bag</button>
+          <button type="button" role="tab" data-page="keys" aria-selected="false">Key Items <span class="inv-page-count"></span></button>
+        </nav>
         <div class="inv-grid" style="--inv-columns:${INVENTORY_GRID.columns};--inv-rows:${INVENTORY_GRID.rows}" aria-label="Bag"></div>
+        <div class="inv-keys" style="--inv-columns:${INVENTORY_GRID.columns};--inv-rows:${INVENTORY_GRID.rows}" aria-label="Key items" hidden></div>
         <footer class="inv-footer">
           <span class="inv-gold" title="Gold"><i aria-hidden="true"></i><b>0</b></span>
           <span class="inv-count"></span>
@@ -161,6 +173,7 @@ export class InventoryPanels {
     this.dock = root.querySelector('.inv-dock')!;
     this.equipment = root.querySelector('.inv-equipment')!;
     this.grid = root.querySelector('.inv-grid')!;
+    this.keys = root.querySelector('.inv-keys')!;
     this.groundList = root.querySelector('.ground-list')!;
     this.goldValue = root.querySelector('.inv-gold b')!;
     this.countValue = root.querySelector('.inv-count')!;
@@ -307,6 +320,25 @@ export class InventoryPanels {
     </button>`;
   }
 
+  /** A key item on the Key Items page: a 2Ã—2-cell tile with its 3D model and its name. */
+  private keyCard(item: InventoryItemView, index: number): string {
+    const across = INVENTORY_GRID.columns / KEY_TILE;
+    const x = (index % across) * KEY_TILE, y = Math.floor(index / across) * KEY_TILE;
+    const thumbKey = item.model !== undefined ? ItemThumbnails.key(item.model, KEY_TILE, KEY_TILE, item.texture) : '';
+    const thumbUrl = item.model !== undefined ? ItemThumbnails.get().getThumbnail(item.model, KEY_TILE, KEY_TILE, item.texture) : null;
+    return `<button type="button" class="inv-item inv-key-item${item.model !== undefined ? ' inv-has-model' : ''}" data-slot="${item.slot}" style="grid-column:${x + 1} / span ${KEY_TILE};grid-row:${y + 1} / span ${KEY_TILE}" aria-label="${escape(item.name)}">
+      ${item.model !== undefined ? `<img class="inv-item-thumb" data-thumb-key="${thumbKey}" src="${thumbUrl ?? ''}" alt="" ${thumbUrl ? '' : 'hidden'} />` : `<span class="inv-mark" aria-hidden="true">${ITEM_MARK[item.type]}</span>`}
+      <span class="inv-item-name">${escape(item.name)}</span>
+    </button>`;
+  }
+
+  private setPage(page: InventoryPage): void {
+    if (page === this.page) return;
+    this.page = page;
+    this.hideTooltip();
+    this.render();
+  }
+
   private render(): void {
     if (this.drag) {
       this.renderPending = true;
@@ -321,12 +353,18 @@ export class InventoryPanels {
       const future = !isEquipKind(kind as InventoryItemView['type']);
       return `<div class="equip-slot${item ? ' occupied' : ''}${future ? ' future' : ''}" data-equip="${kind}" style="grid-area:${area}" ${future ? 'title="Not in this ruleset yet"' : ''}>${item ? this.itemCard(item) : `<span class="equip-label">${label}</span>`}</div>`;
     }).join('') + '<div class="equip-figure" aria-hidden="true"></div>';
-    const bag = items.filter((i) => !i.equipped);
+    const bag = items.filter((i) => !i.equipped && !i.keyItem);
     const placed = layoutItemViews(items);
     this.grid.innerHTML = bag.flatMap((item) => {
       const p = placed.get(item.slot);
       return p ? [this.itemCard(item, p)] : [];
     }).join('');
+    const keys = items.filter((i) => i.keyItem);
+    this.keys.innerHTML = keys.map((item, i) => this.keyCard(item, i)).join('') || '<p class="inv-empty">No keys.</p>';
+    this.root.querySelector('.inv-page-count')!.textContent = keys.length ? String(keys.length) : '';
+    for (const tab of this.root.querySelectorAll<HTMLElement>('[data-page]')) tab.setAttribute('aria-selected', String(tab.dataset['page'] === this.page));
+    this.grid.hidden = this.page !== 'bag';
+    this.keys.hidden = this.page !== 'keys';
     const hidden = bag.length - placed.size;
     this.countValue.textContent = hidden > 0 ? `${hidden} item${hidden > 1 ? 's' : ''} do not fit` : '';
     this.countValue.classList.toggle('inv-warning', hidden > 0);
@@ -341,6 +379,12 @@ export class InventoryPanels {
   // --- Tooltip
 
   private tooltipHtml(item: InventoryItemView): string {
+    if (item.keyItem) {
+      return `<strong class="tt-name tt-${item.type}">${escape(item.name)}</strong>
+        <span class="tt-type">Key item</span>
+        <span>Opens a locked door</span>
+        <small>Cannot be dropped</small>`;
+    }
     const { width, height } = shapeOf(item);
     const lines: string[] = [];
     item.damage?.forEach((v, i) => v > 0 && lines.push(`${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} damage: ${v}`));
@@ -435,6 +479,11 @@ export class InventoryPanels {
       else this.request(() => this.onBuy(shop.shop, index, item.itemId));
       return;
     }
+    const page = target.closest<HTMLElement>('[data-page]');
+    if (page) {
+      this.setPage(page.dataset['page'] as InventoryPage);
+      return;
+    }
     if (target.closest('[data-toggle="ground"]')) {
       this.onToggle('ground', !this.shown.ground);
       return;
@@ -484,8 +533,9 @@ export class InventoryPanels {
     if (e.button !== 0 || this.drag) return;
     const el = (e.target as HTMLElement).closest<HTMLElement>('.inv-item');
     const item = el && this.itemBySlot(Number(el.dataset['slot']));
-    if (!el || !item) return;
+    if (!el || !item || item.keyItem) return; // key items stay on their page
     this.press = { item, source: el, pointerId: e.pointerId, x: e.clientX, y: e.clientY };
+
     e.preventDefault(); // no text selection or native image drag
   }
 

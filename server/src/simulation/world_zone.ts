@@ -1571,14 +1571,14 @@ export class WorldZone {
 
   /**
    * Server-authoritative item drop (carried or worn): removes it from the inventory and spawns a
-   * dynamic ground item that is picked up as the same catalog item.
+   * dynamic ground item that is picked up as the same catalog item. Key items cannot be dropped.
    */
   dropInventoryItem(connId: number, slot: number, itemId?: string): void {
     const p = this.players.get(connId);
     if (!p) return;
     const entry = this.inventoryBusy(p) ? undefined : this.inventoryEntry(p, slot, itemId);
     const def = entry && this.items.get(entry.itemId);
-    if (!entry || !def) {
+    if (!entry || !def || def.keyItem) {
       this.sendInventory(p);
       return;
     }
@@ -1676,7 +1676,9 @@ export class WorldZone {
         itemId: e.itemId,
         slot: e.slot,
         equipped: e.equipped,
-        ...(!e.equipped && e.x !== undefined && e.y !== undefined ? { x: e.x, y: e.y } : {}),
+        ...(def.keyItem ? { keyItem: true } : {}),
+        ...(!def.keyItem && !e.equipped && e.x !== undefined && e.y !== undefined ? { x: e.x, y: e.y } : {}),
+
         ...(e.quantity && e.quantity > 1 ? { quantity: e.quantity } : {}),
         ...(value ? { value } : {}),
       });

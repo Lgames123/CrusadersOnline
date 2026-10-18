@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addItem, BUILTIN_ITEMS, canPlaceGrid, catalogFromItemRules, firstFreeGridPosition, fitsGrid, INVENTORY_GRID, layoutInventoryGrid, layoutItemViews, layoutLegacyGrid, mergeInventoryStacks, moveInventoryGridItem, overlapsGrid, setEquipped, splitInventoryStack } from '@crusaders/shared';
+import { addItem, BUILTIN_ITEMS, canPlaceGrid, catalogFromItemRules, firstFreeGridPosition, fitsGrid, INVENTORY_GRID, layoutInventoryGrid, layoutItemViews, layoutLegacyGrid, mergeInventoryStacks, moveInventoryGridItem, overlapsGrid, sanitizeInventory, setEquipped, splitInventoryStack, type InventoryEntry } from '@crusaders/shared';
 
 describe('inventory grid geometry', () => {
   it('uses the original dimensions, including inherited fields from item rules', () => {
@@ -22,7 +22,26 @@ describe('inventory grid geometry', () => {
     expect(catalog.get('invisibility_potion')!.texture).toBeUndefined();
   });
 
+  it('door keys are key items: no bag cell, kept even when the bag is full', () => {
+    const catalog = catalogFromItemRules({ items: [
+      { name: 'Room 2 Key', fields: { Type: 'USEABLE', Model: 110, Width: 1, Height: 1 }, damage: {}, protection: {} },
+      { name: 'Rune', fields: { Type: 'QUEST', Model: 105, Width: 1, Height: 1, Permanent: 'true' }, damage: {}, protection: {} },
+    ] });
+    expect(catalog.get('room_2_key')).toMatchObject({ type: 'key', keyItem: true, model: 110 });
+    expect(catalog.get('rune')!.keyItem).toBeUndefined();
+    const inv: InventoryEntry[] = Array.from({ length: 8 }, (_, i) => ({ slot: i, itemId: 'scale_armor', equipped: false, x: (i % 4) * 2, y: i < 4 ? 0 : 3 }));
+    expect(addItem(inv, 'rune', 1, catalog)).toBeNull();
+    const slot = addItem(inv, 'room_2_key', 1, catalog)!;
+    expect(slot).toBe(8);
+    expect(inv.find((e) => e.slot === slot)).toEqual({ slot, itemId: 'room_2_key', equipped: false });
+    expect(layoutInventoryGrid(inv, catalog).has(slot)).toBe(false);
+    expect(moveInventoryGridItem(inv, slot, 0, 0, catalog)).toBe(false);
+    expect(sanitizeInventory([{ slot: 0, itemId: 'room_2_key', equipped: false, x: 3, y: 3 }], catalog)).toEqual([{ slot: 0, itemId: 'room_2_key', equipped: false }]);
+    expect(layoutItemViews([{ slot: 0, keyItem: true, x: 0, y: 0 }, { slot: 1, x: 0, y: 0 }])).toEqual(new Map([[1, { x: 0, y: 0, width: 1, height: 1 }]]));
+  });
+
   it('recognises the original sword, shield and armour shapes at the grid edges', () => {
+
     expect(fitsGrid(INVENTORY_GRID, { x: 7, y: 1, width: 1, height: 3 })).toBe(true); // sword 1×3
     expect(fitsGrid(INVENTORY_GRID, { x: 6, y: 4, width: 2, height: 2 })).toBe(true); // shield 2×2
     expect(fitsGrid(INVENTORY_GRID, { x: 6, y: 3, width: 2, height: 3 })).toBe(true); // armour 2×3

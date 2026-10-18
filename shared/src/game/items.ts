@@ -37,6 +37,11 @@ export interface ItemDef {
   spell?: SpellId;
   /** Several of the same item share one inventory slot. */
   stackable?: boolean;
+  /**
+   * Door keys: kept on the inventory's Key Items page (the original's "Quest Items" page,
+   * 0x472C20), not in the bag. They take no bag cell and cannot be dropped, moved or sold.
+   */
+  keyItem?: boolean;
   price: number;
 }
 
@@ -56,8 +61,8 @@ const potion = (name: string, heal: number, price: number, model?: number, mana?
   ({ id: itemSlug(name), name, type: 'potion', width: 1, height: 1, ...(heal ? { heal } : {}), ...(mana ? { mana } : {}), stackable: true, price, ...(model !== undefined ? { model } : {}) });
 const spellBook = (name: string, spell: SpellId, price: number, model?: number): ItemDef =>
   ({ id: itemSlug(name), name, type: 'spellbook', width: 1, height: 1, spell, price, ...(model !== undefined ? { model } : {}) });
-const key = (name: string, price: number, model?: number): ItemDef =>
-  ({ id: itemSlug(name), name, type: 'key', width: 1, height: 1, price, ...(model !== undefined ? { model } : {}) });
+const key = (name: string, price: number, model?: number, keyItem = false): ItemDef =>
+  ({ id: itemSlug(name), name, type: 'key', width: 1, height: 1, price, ...(model !== undefined ? { model } : {}), ...(keyItem ? { keyItem } : {}) });
 
 export const BUILTIN_ITEMS: ItemCatalog = new Map(
   [
@@ -137,7 +142,9 @@ export function catalogFromItemRules(rules: { items: readonly ItemRule[] }): Ite
       const use = r.fields['Use'];
       const amount = Number(r.calls?.find((c) => c.name === 'UseParameters')?.args[0] ?? 0);
       def = potion(r.name, use === 'HEAL' ? amount : 0, price, undefined, use === 'RESTORE_MANA' ? amount : undefined);
-    } else if ((type === 'USEABLE' && / Key$/.test(r.name)) || type === 'QUEST' || type === 'RING') {
+    } else if (type === 'USEABLE' && / Key$/.test(r.name)) {
+      def = key(r.name, price, undefined, true);
+    } else if (type === 'QUEST' || type === 'RING') {
       def = key(r.name, price);
     }
     if (def && def.id) {
@@ -226,7 +233,7 @@ export function addItem(inv: InventoryEntry[], itemId: string, quantity = 1, cat
     }
   }
   let at: { x: number; y: number } | null = null;
-  if (catalog && def) {
+  if (catalog && def && !def.keyItem) {
     const occupied = [...layoutInventoryGrid(inv, catalog)].map(([, placement]) => placement);
     at = firstFreeGridPosition(INVENTORY_GRID, def, occupied);
     if (!at) return null;
@@ -337,7 +344,8 @@ export function sanitizeInventory(inv: readonly InventoryEntry[], catalog: ItemC
     const eq = e.equipped && def.type !== 'potion' && def.type !== 'spellbook' && def.type !== 'key' && !equipped.has(def.type);
     if (eq) equipped.add(def.type);
     const q = Math.floor(e.quantity ?? 1);
-    const grid = !eq && Number.isInteger(e.x) && Number.isInteger(e.y) && e.x! >= 0 && e.y! >= 0 ? { x: e.x!, y: e.y! } : {};
+    const grid = !eq && !def.keyItem && Number.isInteger(e.x)
+ && Number.isInteger(e.y) && e.x! >= 0 && e.y! >= 0 ? { x: e.x!, y: e.y! } : {};
     out.push(def.stackable && q > 1 ? { slot: e.slot, itemId: e.itemId, equipped: eq, quantity: Math.min(MAX_STACK, q), ...grid } : { slot: e.slot, itemId: e.itemId, equipped: eq, ...grid });
   }
   return out;
