@@ -104,6 +104,23 @@ export class LevelLight {
     return bestY;
   }
 
+  /**
+   * Each level triangle in the grid cells within `r` of `pos` (x / z), once: `fn(tris, o)` with
+   * the triangle at `tris[o..o + 15]` (corners a b c, then their lightmap uvs).
+   */
+  forEachNear(pos: THREE.Vector3, r: number, fn: (tris: Float32Array, o: number) => void): void {
+    const seen = new Set<number>();
+    for (let cx = Math.floor((pos.x - r) / CELL); cx <= Math.floor((pos.x + r) / CELL); cx++) {
+      for (let cz = Math.floor((pos.z - r) / CELL); cz <= Math.floor((pos.z + r) / CELL); cz++) {
+        for (const i of this.grid.get(key(cx, cz)) ?? []) {
+          if (seen.has(i)) continue;
+          seen.add(i);
+          fn(this.tris, i * 15);
+        }
+      }
+    }
+  }
+
   /** The lightmap at (u, v): sRGB texel to linear, times the level's gain. */
   texel(u: number, v: number, color: THREE.Color): void {
     const x = Math.min(this.width - 1, Math.max(0, Math.floor(u * this.width)));

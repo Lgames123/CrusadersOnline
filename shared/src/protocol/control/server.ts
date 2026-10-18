@@ -4,6 +4,7 @@ import type { WorldObjectDef } from '../../arena/types.ts';
 import { JUMP_KINDS } from '../../constants.ts';
 import { INPUT, SC } from '../opcodes.ts';
 import type { SpellId, StatusTag } from '../../game/spells.ts';
+import type { DecalKind } from '../../game/decals.ts';
 import type { ItemType } from '../../game/items.ts';
 import type { GameplayFeatures } from '../../game/features.ts';
 import type { QuestLog } from '../../game/story.ts';
@@ -142,6 +143,8 @@ export interface SpellEventMsg {
     status?: { target: number; tag: StatusTag; on: boolean; seconds?: number; level?: number }[];
     /** A short light (r, g, b 0-255) fading over `seconds`. */
     light?: { at: V3; color: V3; radius: number; seconds: number };
+    /** Marks stamped on the level's faces round `at` (scorch, lightning, frost). */
+    decals?: { kind: DecalKind; at: V3 }[];
   };
 }
 

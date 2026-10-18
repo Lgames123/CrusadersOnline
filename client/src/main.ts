@@ -52,10 +52,11 @@ import {
   isManaCrystals,
   type SpellId,
   type CharacterLook,
+  type DecalKind,
   type WorldObjectDef,
   type Difficulty,
 } from '@crusaders/shared';
-import { outfitFor, lookFromInventory } from './assets/item_models.ts';
+import { outfitFor, lookFromInventory, weaponDecal } from './assets/item_models.ts';
 import { createRenderContext } from './engine/renderer.ts';
 import { CameraRig } from './engine/camera_rig.ts';
 import { classicVerticalFov } from './engine/classic_camera.ts';
@@ -75,6 +76,7 @@ import { InputManager } from './input/input_manager.ts';
 import { installBrowserGuards } from './input/browser_guards.ts';
 import { MusicPlayer } from './audio/music.ts';
 import { EFFECTS_SCALE, Effects, SMALL_EFFECTS_SCALE } from './engine/effects.ts';
+import { Decals } from './engine/decals.ts';
 import { SpellVisuals } from './engine/spell_visuals.ts';
 import { Debris } from './engine/debris.ts';
 import { SwingTrails } from './engine/swing_trail.ts';
@@ -281,6 +283,12 @@ async function main(): Promise<void> {
   // Characters, props and items lit by the floor under them, with blob shadows.
   const lighting = new ModelLighting(scene);
   const lightingKeys = new Set<unknown>();
+  /** Marks on the level's faces: weapons striking walls, scorches, frost (the original's decals). */
+  let decals: Decals | null = null;
+  void Decals.load(scene).then((d) => {
+    decals = d;
+    d?.setLevel(levelView?.light ?? null);
+  });
   const PROP_KEY = 'prop:';
   /** Placed objects at least this tall cast object shadows (metres; a barrel is about 1). */
   const SHADOW_CASTER_HEIGHT = 0.5;
@@ -372,6 +380,7 @@ async function main(): Promise<void> {
     messagesDone.clear();
     messagesInside.clear();
     lighting.setLevel(view?.light ?? null);
+    decals?.setLevel(view?.light ?? null);
     // Enhanced lighting: the level's wall torches light the stone around them.
     dynamicLights.removePrefix(LEVEL_TORCH_KEY);
     view?.torches.forEach((p, i) => dynamicLights.set(`${LEVEL_TORCH_KEY}${i}`, p, LEVEL_TORCH_COLOR, LEVEL_TORCH_INTENSITY, LEVEL_TORCH_RADIUS, 0.15));
@@ -410,6 +419,11 @@ async function main(): Promise<void> {
   const fxPos = new THREE.Vector3();
   /** Pending wall-spark checks of the local swings (seconds to the impact frame, heading). */
   const wallChecks: { t: number; yaw: number }[] = [];
+  /** The local blade's tip this frame and the last (its sweep orients a wall mark). */
+  const bladeTip = new THREE.Vector3();
+  const bladeTipBefore = new THREE.Vector3();
+  const bladeBase = new THREE.Vector3();
+  let bladeSeen = false;
   const fxDir = new THREE.Vector3();
   /** Spawns `count` copies of an effect along a short line from `at` (the engine spaces them ~0.2 m apart). */
   const fxBurst = (name: string, count: number, at: THREE.Vector3, step: THREE.Vector3, dir: THREE.Vector3 | null = null) => {
@@ -436,6 +450,8 @@ async function main(): Promise<void> {
   scene.add(myTorch);
   /** Edge of the local player's weapon, for impact sounds (stronger of slash / bash). */
   let myEdge: 'sharp' | 'blunt' = 'blunt';
+  /** The mark the local player's weapon leaves on a wall (items.ctx `Decal`). */
+  let myDecal: DecalKind | null = null;
   /** Set as soon as the session exists: zone / enter events fire before connectToWorld resolves. */
   let live: ClientSession | null = null;
   /** Heading of the latest world entry, applied to the view once the input exists. */
@@ -450,7 +466,10 @@ async function main(): Promise<void> {
             if (e) lighting.track(id, e.avatar.object, PLAYER_RADIUS * 1.3, false, true);
             if (info.statuses?.length) spellVisuals.syncStatuses(id, info.statuses);
           },
-          spell: (d) => spellVisuals.handle(d),
+          spell: (d) => {
+            spellVisuals.handle(d);
+            for (const k of d.decals ?? []) decals?.stamp(k.kind, new THREE.Vector3(...k.at));
+          },
           despawn: (id) => {
             spellVisuals.forget(id);
             remotes.despawn(id);
@@ -615,6 +634,7 @@ async function main(): Promise<void> {
             player?.setWeaponSpeed(inv.weaponSpeed);
             const w = inv.items.find((i) => i.type === 'weapon' && i.equipped);
             myEdge = w?.damage && w.damage[0]! > w.damage[1]! ? 'sharp' : 'blunt';
+            void weaponDecal(w?.itemId).then((k) => (myDecal = k));
             void updatePlayerOutfit(inv.items);
           },
           zone: (name, difficulty) => {
@@ -696,6 +716,7 @@ async function main(): Promise<void> {
     : auth.kind === 'account' && auth.look
       ? auth.look
       : { weapon: 'long_sword', shield: 'wooden_shield' };
+  void weaponDecal(currentLook.weapon).then((k) => (myDecal ??= k));
   let dressToken = 0;
   let pendingOutfitItems: readonly InventoryItemView[] | null = null;
   const updatePlayerOutfit = async (items: readonly InventoryItemView[]) => {
@@ -1437,7 +1458,7 @@ async function main(): Promise<void> {
 
   if (import.meta.env.DEV) {
     // Debug/E2E hook: lets tests drive input without pointer lock.
-    (window as unknown as { __co: unknown }).__co = { input, player: local, mw, session, remotes, inventory: inventoryPanel, scene, get camera() { return chase.camera; }, cameras: { classic: chase.classic, modern: chase.modern }, rig: chase, settings, renderer, level: levelView, get effects() { return effects; }, get foliage() { return foliage; }, propShadows, render: () => postFx.render(chase.camera, 0) };
+    (window as unknown as { __co: unknown }).__co = { input, player: local, mw, session, remotes, inventory: inventoryPanel, scene, get camera() { return chase.camera; }, cameras: { classic: chase.classic, modern: chase.modern }, rig: chase, settings, renderer, level: levelView, get effects() { return effects; }, get decals() { return decals; }, get foliage() { return foliage; }, propShadows, render: () => postFx.render(chase.camera, 0) };
   }
 
   // Fixed-step simulation (same 20 Hz step as the server), interpolated rendering.
@@ -1480,12 +1501,15 @@ async function main(): Promise<void> {
     if (session) remotes.update(session, dt);
     for (const p of scenePuppets.values()) p.avatar.update(dt);
     effects?.update(dt);
+    decals?.update(dt);
     spellVisuals.update(dt);
     debris?.update(dt);
     lighting.update(dt, now / 1000);
     // Players' sword trails (every swing but the ducking chop).
     trails.update(dt);
     trails.track('me', (a, b) => local.avatar.blade?.(a, b) ?? null, dt);
+    bladeTipBefore.copy(bladeTip);
+    bladeSeen = !!local.avatar.blade?.(bladeBase, bladeTip);
     for (const [id, e] of remotes.byId) if (e.info.kind !== 'mob') trails.track(id, (a, b) => (e.visible ? e.avatar.blade?.(a, b) ?? null : null), dt);
     // A swing that reaches a wall throws sparks off it at its impact frame (SWORD_DAMAGE + SWORD_METAL x3).
     for (let i = wallChecks.length - 1; i >= 0; i--) {
@@ -1501,6 +1525,11 @@ async function main(): Promise<void> {
       dynamicLights.flash(at, SPARK_LIGHT_COLOR, SPARK_LIGHT_INTENSITY, SPARK_LIGHT_RADIUS, SPARK_LIGHT_SECONDS);
       fxBurst('SWORD_DAMAGE', 3, at, normal.clone().multiplyScalar(0.2), normal);
       fxBurst('SWORD_METAL', 3, at, normal.clone().multiplyScalar(0.2), normal);
+      // 0x0048CAB0: a clank (HitMetal01-04 or HitStone01: 338 + round(rand x 4)) at the striker and
+      // the weapon's mark on the wall, laid along the blade's sweep.
+      sounds?.play(SFX.wallHit + Math.round(Math.random() * 4), local.object.position);
+      const sweep = bladeSeen ? bladeTip.clone().sub(bladeTipBefore) : null;
+      if (myDecal) decals?.stamp(myDecal, at, sweep && sweep.lengthSq() > 1e-8 ? sweep : new THREE.Vector3(fwd.z, 0, -fwd.x));
     }
     input.updateView(dt);
     const movingNow = Math.hypot(local.object.position.x - target.x, local.object.position.z - target.z) > 1e-4;

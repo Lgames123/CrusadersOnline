@@ -18,6 +18,7 @@ import {
   type SpellLevel,
   type StatusTag,
   type Attributes,
+  type DecalKind,
 } from '@crusaders/shared';
 
 /**
@@ -357,6 +358,8 @@ export class SpellRuntime {
     if (p.spell === 'fireball') {
       // FIREBALL_TARGET on a character, FIREBALL_EXPLODE on the level (tables 0x004E31EC / 0x004E31FC); then the explosion.
       this.fx(at, [{ name: target ? 'FIREBALL_TARGET' : 'FIREBALL_EXPLODE', level: p.level, at: tuple(at) }], [{ id: SPELL_RULES.explosionSound, at: tuple(at), rate: randomRate() }], { at: tuple(at), color: [150, 150, 50], radius: 6, seconds: 0.3 });
+      // Its impact (0x004BE790) scorches the faces round the point, on a character or the level.
+      this.decal('SCORCH', at);
       this.explode(p.owner, 'fireball', p.level, p.values, at);
       return;
     }
@@ -373,7 +376,11 @@ export class SpellRuntime {
     }
     // Snap freeze: the ice storm at the creature it met; on the level it fizzles.
     if (target) this.iceStorm(p.owner, p.level, p.values, mid(target));
-    else this.fx(at, [{ name: 'SNAPFREEZE_FIZZLE', level: p.level, at: tuple(at) }]);
+    else {
+      // 0x004C12E0: SNAPFREEZE_FIZZLE and frost on the faces it met.
+      this.fx(at, [{ name: 'SNAPFREEZE_FIZZLE', level: p.level, at: tuple(at) }]);
+      this.decal('FROST', at);
+    }
   }
 
   /** The explosion object (class 1 / 6): a sphere growing 30 / 50 / 80 ft/s for 0.25 s, each character once. */
@@ -474,6 +481,8 @@ export class SpellRuntime {
         const m = mid(c);
         if (Math.hypot(m.x - s.at.x, m.y - s.at.y, m.z - s.at.z) > s.radius + PLAYER_RADIUS) continue;
         s.hit.add(c.entityId);
+        // Frost on the floor under each one caught (0x004C1490), immune or not.
+        this.decal('FROST', c.character.position);
         // Frozen for duration x its WATER resist; immune at 0.25 or less.
         const water = this.host.resist(c, WATER);
         if (water <= R_FREEZE_IMMUNE) continue;
@@ -515,6 +524,8 @@ export class SpellRuntime {
       const wall = rayDistance(this.host.mw, hand, aim, R.lightningMiss);
       const to = add(hand, aim, wall ?? R.lightningMiss);
       this.fx(to, [{ name: 'LIGHTNING_TARGET', level, at: tuple(to) }], [{ id: R.lightningSound, at: tuple(to), rate: randomRate() }], { at: tuple(to), color: [180, 200, 255], radius: 8, seconds: 0.3 }, [{ from: tuple(hand), to: tuple(to) }]);
+      // A bolt that meets the level burns its mark there (0x004BEE90).
+      if (wall !== null) this.decal('LIGHTNING', to);
       return;
     }
     this.strike(chain, first);
@@ -789,6 +800,10 @@ export class SpellRuntime {
 
   private fx(at: V3, fx: NonNullable<SpellEventMsg['d']['fx']>, sounds?: NonNullable<SpellEventMsg['d']['sounds']>, light?: SpellEventMsg['d']['light'], bolts?: SpellEventMsg['d']['bolts']): void {
     this.host.emit(at, { ...(fx.length ? { fx } : {}), ...(sounds?.length ? { sounds } : {}), ...(light ? { light } : {}), ...(bolts?.length ? { bolts } : {}) });
+  }
+
+  private decal(kind: DecalKind, at: V3): void {
+    this.host.emit(at, { decals: [{ kind, at: tuple(at) }] });
   }
 }
 

@@ -1,4 +1,4 @@
-import { itemSlug, type CharacterLook } from '@crusaders/shared';
+import { decalKind, itemSlug, type CharacterLook, type DecalKind } from '@crusaders/shared';
 
 /**
  * What Drake's model wears for his equipped items. items.ctx gives each item a `Model` id
@@ -71,15 +71,34 @@ export interface DrakeOutfit {
   body?: { model: string; texture: string };
 }
 
+type ItemRows = { name: string; fields: Record<string, string | number> }[];
+let itemRows: Promise<ItemRows> | null = null;
 let itemModels: Promise<Map<string, number>> | null = null;
+let itemDecals: Promise<Map<string, DecalKind>> | null = null;
+
+/** The converted items.ctx rows (empty without the game files). */
+function loadItemRows(): Promise<ItemRows> {
+  itemRows ??= fetch('/generated/rules/items.json')
+    .then((r) => (r.ok ? (r.json() as Promise<{ items: ItemRows }>) : { items: [] }))
+    .then(({ items }) => items)
+    .catch(() => []);
+  return itemRows;
+}
 
 /** Item id -> items.ctx Model id, from the converted rules (empty without the game files). */
 function loadItemModels(): Promise<Map<string, number>> {
-  itemModels ??= fetch('/generated/rules/items.json')
-    .then((r) => (r.ok ? (r.json() as Promise<{ items: { name: string; fields: Record<string, string | number> }[] }>) : { items: [] }))
-    .then(({ items }) => new Map(items.filter((i) => typeof i.fields['Model'] === 'number').map((i) => [itemSlug(i.name), i.fields['Model'] as number])))
-    .catch(() => new Map());
+  itemModels ??= loadItemRows().then((items) => new Map(items.filter((i) => typeof i.fields['Model'] === 'number').map((i) => [itemSlug(i.name), i.fields['Model'] as number])));
   return itemModels;
+}
+
+/** The mark a weapon leaves where it strikes a wall (items.ctx `Decal`), or null. */
+export async function weaponDecal(itemId: string | undefined): Promise<DecalKind | null> {
+  if (!itemId) return null;
+  itemDecals ??= loadItemRows().then((items) => new Map(items.flatMap((i) => {
+    const k = decalKind(i.fields['Decal']);
+    return k ? [[itemSlug(i.name), k] as const] : [];
+  })));
+  return (await itemDecals).get(itemId) ?? null;
 }
 
 /** The models for a character's equipped items. */

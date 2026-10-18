@@ -162,6 +162,8 @@ export const SFX = {
   /** A shield rush's contact roll, at the rusher (0x493F20: DDam01, then HitMetal01). */
   rushContact: [0, 338],
   chestOpen: 520,
+  /** A blade striking a wall: this + round(rand x 4), HitMetal01-04 or HitStone01 (0x0048CAB0). */
+  wallHit: 338,
   /** A debris piece landing (HitMetal02; logged ~0.3 s after a barrel broke). */
   debrisLand: 339,
   fireLoop: 533,

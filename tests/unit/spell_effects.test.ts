@@ -67,6 +67,8 @@ describe('spell effects', () => {
     // 10 FIRE x the skeleton's FIRE resist 1.
     expect(t.skeleton().hp).toBe(15);
     expect(t.spellEvents().some((e) => e.burst?.spell === 'fireball')).toBe(true);
+    // Its impact scorches the faces round it (0x004BE790).
+    expect(t.spellEvents().flatMap((e) => e.decals ?? []).map((d) => d.kind)).toEqual(['SCORCH']);
   });
 
   it('lightning strikes the creature in the aim for AIR value1', () => {
@@ -77,6 +79,8 @@ describe('spell effects', () => {
     expect(t.spellEvents().some((e) => e.bolts?.length)).toBe(true);
     // 25 AIR kills the 25 HP skeleton.
     expect(t.skeleton().alive).toBe(false);
+    // A bolt that reaches its creature marks no face.
+    expect(t.spellEvents().some((e) => e.decals?.length)).toBe(false);
   });
 
   it('fantastic freeze holds the creature in the aim (duration x WATER resist), then it thaws', () => {
@@ -85,6 +89,10 @@ describe('spell effects', () => {
     cast(t, 0);
     const frozen = t.spellEvents().flatMap((e) => e.status ?? []).find((s) => s.tag === 'FRZE' && s.on);
     expect(frozen?.seconds).toBeCloseTo(10, 0);
+    // Frost on the floor under the one caught (0x004C1490).
+    const frost = t.spellEvents().flatMap((e) => e.decals ?? []);
+    expect(frost.map((d) => d.kind)).toEqual(['FROST']);
+    expect(frost[0]!.at[2]).toBeCloseTo(t.skeleton().z, 1);
     const at = { x: t.skeleton().x, z: t.skeleton().z };
     t.run(40);
     expect(t.skeleton().x).toBeCloseTo(at.x, 3);

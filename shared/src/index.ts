@@ -24,6 +24,7 @@ export * from './game/items.ts';
 export * from './game/shops.ts';
 export * from './game/inventory_grid.ts';
 export * from './game/spells.ts';
+export * from './game/decals.ts';
 export * from './game/features.ts';
 export * from './game/story.ts';
 export * from './game/sequence.ts';
