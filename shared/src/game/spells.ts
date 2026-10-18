@@ -190,6 +190,12 @@ export const SPELL_RULES = {
   /** Thaw (0x0047E9B0): a 0.8 s stun, glass sound 523, ice shards. */
   thawStun: 0.8,
   thawSound: 523,
+  /**
+   * Entering ASM_SPELL_CONJURE (state 0x39, the player's state -> clip case 0x0042A2C4) plays
+   * Sound.ctx 327 (SplSRCast01) at the caster, rate 1: every conjured spell starts with it,
+   * under its own cast sound.
+   */
+  conjureSound: 327,
   /** A snap freeze with no target flies 2 s and fizzles (0x004C1070 / 0x004C10D0). */
   freezeBoltLife: 2,
   /** Lightning (0x004BB910, 0x004BD320): the nearest creature within cos 0.8 of the aim and 64 ft; else 50 ft ahead. */

@@ -1287,16 +1287,22 @@ export class WorldZone {
     };
     p.blocking = false;
     p.queuedAttack = false;
-    // The wind-up and the cast sound at the hand (+0x24; fire ball and lightning sound on release).
+    // The wind-up and the cast sound at the hand (+0x24; fire ball and lightning sound on release),
+    // and for self spells the conjure state's own sound at the caster (0x0042A2C4).
     const hand = this.magic.hand(p);
     const at: [number, number, number] = [hand.x, hand.y, hand.z];
     const quiet = spell === 'fireball' || spell === 'lightning';
+    const feet = p.character.position;
+    const sounds = [
+      ...(info.conjure ? [{ id: SPELL_RULES.conjureSound, at: [feet.x, feet.y, feet.z] as [number, number, number] }] : []),
+      ...(quiet ? [] : [{ id: info.sounds[known.level - 1]!, at }]),
+    ];
     this.broadcastAt(hand, {
       op: SC.SPELL_EVENT,
       d: {
         cast: { caster: p.entityId, spell, level: known.level, phase: 'begin', ...(upper ? { upper } : {}) },
         fx: [{ name: info.windup, level: known.level, at: [0, hand.y - p.character.position.y, 0], entity: p.entityId }],
-        ...(quiet ? {} : { sounds: [{ id: info.sounds[known.level - 1]!, at }] }),
+        ...(sounds.length ? { sounds } : {}),
       },
     });
   }
