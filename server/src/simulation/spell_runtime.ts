@@ -175,6 +175,8 @@ function segmentDistance(p: V3, a: V3, b: V3): number {
   return Math.hypot(a.x + ab.x * t - p.x, a.y + ab.y * t - p.y, a.z + ab.z * t - p.z);
 }
 const ticks = (seconds: number) => Math.round(seconds * TICK_RATE);
+/** The bolt's and the explosion's sounds play at a random rate (0x004BF480, 0x004BE980: 0.8 + 0.4 x rand). */
+const randomRate = () => round(0.8 + 0.4 * Math.random());
 
 export class SpellRuntime {
   private readonly projectiles: Projectile[] = [];
@@ -200,7 +202,9 @@ export class SpellRuntime {
    */
   release(caster: SpellTarget, spell: SpellId, level: number, values: SpellLevel, hand: V3, aim: V3, creature?: CreatureCast): void {
     const info = SPELL_INFO[spell];
-    if (info.cast && spell !== 'fireball' && spell !== 'slow' && spell !== 'holy_wrath') this.fx(hand, [{ name: info.cast, level, at: tuple(hand) }]);
+    // Torch Light's LIGHT_CAST shows 6 ft above the caster's feet (0x004BADE0), the others' at the hand.
+    const castAt = spell === 'torch_light' ? { x: caster.character.position.x, y: caster.character.position.y + 6 * FT, z: caster.character.position.z } : hand;
+    if (info.cast && spell !== 'fireball' && spell !== 'slow' && spell !== 'holy_wrath') this.fx(castAt, [{ name: info.cast, level, at: tuple(castAt) }]);
     switch (spell) {
       case 'fireball':
         return this.fireball(caster, level, values, hand, aim, !!creature);
@@ -352,7 +356,7 @@ export class SpellRuntime {
     const at = p.pos;
     if (p.spell === 'fireball') {
       // FIREBALL_TARGET on a character, FIREBALL_EXPLODE on the level (tables 0x004E31EC / 0x004E31FC); then the explosion.
-      this.fx(at, [{ name: target ? 'FIREBALL_TARGET' : 'FIREBALL_EXPLODE', level: p.level, at: tuple(at) }], [{ id: SPELL_RULES.explosionSound, at: tuple(at) }], { at: tuple(at), color: [150, 150, 50], radius: 6, seconds: 0.3 });
+      this.fx(at, [{ name: target ? 'FIREBALL_TARGET' : 'FIREBALL_EXPLODE', level: p.level, at: tuple(at) }], [{ id: SPELL_RULES.explosionSound, at: tuple(at), rate: randomRate() }], { at: tuple(at), color: [150, 150, 50], radius: 6, seconds: 0.3 });
       this.explode(p.owner, 'fireball', p.level, p.values, at);
       return;
     }
@@ -510,7 +514,7 @@ export class SpellRuntime {
       // No target: the bolt strikes 50 ft ahead (or the wall in between).
       const wall = rayDistance(this.host.mw, hand, aim, R.lightningMiss);
       const to = add(hand, aim, wall ?? R.lightningMiss);
-      this.fx(to, [{ name: 'LIGHTNING_TARGET', level, at: tuple(to) }], [{ id: R.lightningSound, at: tuple(to) }], { at: tuple(to), color: [180, 200, 255], radius: 8, seconds: 0.3 }, [{ from: tuple(hand), to: tuple(to) }]);
+      this.fx(to, [{ name: 'LIGHTNING_TARGET', level, at: tuple(to) }], [{ id: R.lightningSound, at: tuple(to), rate: randomRate() }], { at: tuple(to), color: [180, 200, 255], radius: 8, seconds: 0.3 }, [{ from: tuple(hand), to: tuple(to) }]);
       return;
     }
     this.strike(chain, first);
@@ -525,7 +529,7 @@ export class SpellRuntime {
     chain.next = this.host.tick() + ticks(R.lightningChainDelay);
     const from = this.hand(chain.owner);
     const to = mid(target);
-    this.fx(to, [{ name: 'LIGHTNING_TARGET', level: chain.level, at: [0, BODY_MID, 0], entity: target.entityId }], [{ id: R.lightningSound, at: tuple(to) }], { at: tuple(to), color: [180, 200, 255], radius: 8, seconds: 0.3 }, [{ from: tuple(from), to: tuple(to) }]);
+    this.fx(to, [{ name: 'LIGHTNING_TARGET', level: chain.level, at: [0, BODY_MID, 0], entity: target.entityId }], [{ id: R.lightningSound, at: tuple(to), rate: randomRate() }], { at: tuple(to), color: [180, 200, 255], radius: 8, seconds: 0.3 }, [{ from: tuple(from), to: tuple(to) }]);
     // AIR value1 (the bolt's +0x24, the spell's value1 by level).
     const v = new Array<number>(DAMAGE_TYPES.length).fill(0);
     v[AIR] = chain.values.value1;
@@ -609,8 +613,8 @@ export class SpellRuntime {
   // ---- Revelation (0x004BC1F0 -> 0x00440D70) ----
 
   private revelation(caster: SpellTarget, level: number, values: SpellLevel): void {
-    const at = mid(caster);
-    // A pulse to value2 ft (50) over 0.1 s that shows the hidden (class 0xCB objects, ALLY_APPEAR level 3 on each).
+    // A pulse to value2 ft (50) over 0.1 s that shows the hidden (class 0xCB objects, ALLY_APPEAR level 3 on each); its ring stands at the caster's feet.
+    const at = caster.character.position;
     this.host.emit(at, { burst: { spell: 'revelation', level, at: tuple(at), radius: values.value2 * FT, seconds: SPELL_RULES.revelationLife } });
   }
 
@@ -624,7 +628,8 @@ export class SpellRuntime {
     this.fx(at, [{ name: unholy ? 'UNHOLY_WRATH_CAST' : 'HOLY_WRATH_CAST', level: unholy ? 1 : level, at: tuple(p) }]);
     const radius = values.value2 * FT;
     this.bursts.push({ spell: 'holy_wrath', level, owner: caster, values, at, radius: 0, rate: radius / R.holyWrathLife, life: R.holyWrathLife, hit: new Set(), ...(unholy ? { unholy } : {}) });
-    this.host.emit(at, { burst: { spell: 'holy_wrath', level, at: tuple(at), radius, seconds: R.holyWrathLife, ...(unholy ? { dark: true } : {}) } });
+    // The ring (ring.mdl) stands at the caster's feet (0x0043FD30 places the object at the caster).
+    this.host.emit(at, { burst: { spell: 'holy_wrath', level, at: tuple(p), radius, seconds: R.holyWrathLife, ...(unholy ? { dark: true } : {}) } });
   }
 
   // ---- Soul drinker (0x004BC4A0 -> 0x0043F950; 0x004C17D0 / 0x004C18B0 / 0x004C19B0) ----

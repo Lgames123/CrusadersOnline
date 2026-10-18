@@ -127,11 +127,12 @@ export interface SpellEventMsg {
     cast?: { caster: number; spell: SpellId; level: number; phase: 'begin' | 'release'; upper?: boolean };
     /** effects.stg effects; `entity`: follows that character, `at` relative to its feet. */
     fx?: { name: string; level: number; at: V3; dir?: V3; entity?: number }[];
-    sounds?: { id: number; at: V3 }[];
+    /** Sound.ctx sounds; `rate`: playback rate (the bolt's and the explosion's 0.8-1.2, 0x004BF480 / 0x004BE980). */
+    sounds?: { id: number; at: V3; rate?: number }[];
     /** A flying spell (fire ball, slow, snap freeze): its state; `end` when it is gone. */
     /** `look`: the effect it carries when not its spell's own (a creature's FIREBALL_PROJ_EVIL). */
     projectile?: { id: number; spell: SpellId; level: number; pos: V3; vel: V3; look?: string; end?: boolean };
-    /** A growing sphere (explosions, holy wrath, revelation): to `radius` over `seconds`; `dark`: a creature's unholy wrath. */
+    /** A growing area (explosions, holy wrath, revelation): to `radius` over `seconds`; `dark`: a creature's unholy wrath. */
     burst?: { spell: SpellId; level: number; at: V3; radius: number; seconds: number; dark?: boolean };
     /** Lightning bolts. */
     bolts?: { from: V3; to: V3 }[];

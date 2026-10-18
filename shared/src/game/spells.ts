@@ -130,23 +130,28 @@ export interface SpellInfo {
   sounds: readonly [number, number, number];
   /** Played with the cast sound at the hand (+0x24). */
   windup: string;
+  /**
+   * The attachment dummies the wind-up hangs on, following them (+0x24: the model's dummy by
+   * index, 0x00422030; Drake: 0 the left forearm, 1 the right hand).
+   */
+  windupNodes: readonly number[];
   /** At the hand / caster as it takes effect. */
   cast?: string;
 }
 
 export const SPELL_INFO: Readonly<Record<SpellId, SpellInfo>> = {
-  torch_light: { asm: 'ASM_SPELL_TORCH_LIGHT', conjure: true, eventFrame: 9, clipFrames: 28, sounds: [313, 314, 315], windup: 'LIGHT_WINDUP', cast: 'LIGHT_CAST' },
-  fireball: { asm: 'ASM_SPELL_FIRE_BALL', conjure: false, eventFrame: 12, clipFrames: 29, sounds: [316, 317, 318], windup: 'FIREBALL_WINDUP', cast: 'FIREBALL_CAST' },
-  slow: { asm: 'ASM_SPELL_SLOW', conjure: false, eventFrame: 12, clipFrames: 29, sounds: [322, 322, 322], windup: 'SLOW_WINDUP', cast: 'SLOW_CAST' },
-  freeze: { asm: 'ASM_SPELL_FANTASTIC_FREEZE', conjure: true, eventFrame: 9, clipFrames: 28, sounds: [325, 325, 325], windup: 'SNAPFREEZE_WINDUP', cast: 'SNAPFREEZE_CAST' },
-  stoneskin: { asm: 'ASM_SPELL_STONE_SKIN', conjure: true, eventFrame: 12, clipFrames: 29, sounds: [324, 324, 324], windup: 'STONESKIN_WINDUP', cast: 'STONESKIN_CAST' },
-  lightning: { asm: 'ASM_SPELL_LIGHTNING', conjure: false, eventFrame: 19, clipFrames: 33, sounds: [335, 522, 522], windup: 'LIGHTNING_WINDUP' },
-  heroism: { asm: 'ASM_SPELL_HEROISM', conjure: true, eventFrame: 27, clipFrames: 48, sounds: [319, 319, 351], windup: 'HEROISM_WINDUP', cast: 'HEROISM_CAST' },
-  spectral_ally: { asm: 'ASM_SPELL_SPECTRAL_ALLY', conjure: true, eventFrame: 27, clipFrames: 48, sounds: [323, 323, 323], windup: 'ALLY_WINDUP' },
+  torch_light: { asm: 'ASM_SPELL_TORCH_LIGHT', conjure: true, eventFrame: 9, clipFrames: 28, sounds: [313, 314, 315], windup: 'LIGHT_WINDUP', windupNodes: [1], cast: 'LIGHT_CAST' },
+  fireball: { asm: 'ASM_SPELL_FIRE_BALL', conjure: false, eventFrame: 12, clipFrames: 29, sounds: [316, 317, 318], windup: 'FIREBALL_WINDUP', windupNodes: [0], cast: 'FIREBALL_CAST' },
+  slow: { asm: 'ASM_SPELL_SLOW', conjure: false, eventFrame: 12, clipFrames: 29, sounds: [322, 322, 322], windup: 'SLOW_WINDUP', windupNodes: [1], cast: 'SLOW_CAST' },
+  freeze: { asm: 'ASM_SPELL_FANTASTIC_FREEZE', conjure: true, eventFrame: 9, clipFrames: 28, sounds: [325, 325, 325], windup: 'SNAPFREEZE_WINDUP', windupNodes: [1], cast: 'SNAPFREEZE_CAST' },
+  stoneskin: { asm: 'ASM_SPELL_STONE_SKIN', conjure: true, eventFrame: 12, clipFrames: 29, sounds: [324, 324, 324], windup: 'STONESKIN_WINDUP', windupNodes: [1], cast: 'STONESKIN_CAST' },
+  lightning: { asm: 'ASM_SPELL_LIGHTNING', conjure: false, eventFrame: 19, clipFrames: 33, sounds: [335, 522, 522], windup: 'LIGHTNING_WINDUP', windupNodes: [1] },
+  heroism: { asm: 'ASM_SPELL_HEROISM', conjure: true, eventFrame: 27, clipFrames: 48, sounds: [319, 319, 351], windup: 'HEROISM_WINDUP', windupNodes: [0, 1], cast: 'HEROISM_CAST' },
+  spectral_ally: { asm: 'ASM_SPELL_SPECTRAL_ALLY', conjure: true, eventFrame: 27, clipFrames: 48, sounds: [323, 323, 323], windup: 'ALLY_WINDUP', windupNodes: [0, 1] },
   // Revelation plays the ally's state (0x36 for slots 7 and 8).
-  revelation: { asm: 'ASM_SPELL_SPECTRAL_ALLY', conjure: true, eventFrame: 27, clipFrames: 48, sounds: [327, 327, 327], windup: 'SOLIDIFY_WINDUP' },
-  holy_wrath: { asm: 'ASM_SPELL_HOLY_WRATH', conjure: true, eventFrame: 27, clipFrames: 48, sounds: [326, 326, 326], windup: 'HOLY_WRATH_WINDUP', cast: 'HOLY_WRATH_CAST' },
-  soul_drinker: { asm: 'ASM_SPELL_SOUL_DRINKER', conjure: false, eventFrame: 27, clipFrames: 48, sounds: [321, 321, 321], windup: 'SOULDRINKER_WINDUP', cast: 'SOULDRINKER_CAST' },
+  revelation: { asm: 'ASM_SPELL_SPECTRAL_ALLY', conjure: true, eventFrame: 27, clipFrames: 48, sounds: [327, 327, 327], windup: 'SOLIDIFY_WINDUP', windupNodes: [1] },
+  holy_wrath: { asm: 'ASM_SPELL_HOLY_WRATH', conjure: true, eventFrame: 27, clipFrames: 48, sounds: [326, 326, 326], windup: 'HOLY_WRATH_WINDUP', windupNodes: [0, 1], cast: 'HOLY_WRATH_CAST' },
+  soul_drinker: { asm: 'ASM_SPELL_SOUL_DRINKER', conjure: false, eventFrame: 27, clipFrames: 48, sounds: [321, 321, 321], windup: 'SOULDRINKER_WINDUP', windupNodes: [0, 1], cast: 'SOULDRINKER_CAST' },
 };
 
 /** One foot, metres (the engine's unit). */

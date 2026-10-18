@@ -249,6 +249,27 @@ class OriginalAvatar implements Avatar {
     return { key: this.upperSwing ? `u${this.upperSwingKey}` : `${a}:${this.swingId}`, seconds: this.swingSeconds > 0 ? this.swingSeconds : 0.7 };
   }
 
+  /** The model's attachment dummies (MDL DMY XFRM, in order) on their bones; undefined: not looked up yet. */
+  private points: { bone: THREE.Bone; at: THREE.Vector3 }[] | undefined;
+
+  attachPoint(index: number, out: THREE.Vector3): boolean {
+    if (!this.points) {
+      const model = this.object.children[0];
+      let dummies: { name: string; node: number; values: number[] }[] | undefined;
+      model?.traverse((o) => (dummies ??= (o.userData as { transforms?: { name: string; node: number; values: number[] }[] }).transforms));
+      const bones: THREE.Bone[] = [];
+      model?.traverse((o) => {
+        if ((o as THREE.SkinnedMesh).isSkinnedMesh && bones.length === 0) bones.push(...(o as THREE.SkinnedMesh).skeleton.bones);
+      });
+      // The same frame attachEquipment mounts the held items in (glTF space: Z mirrored).
+      this.points = (dummies ?? []).flatMap((d) => (bones[d.node] && d.values.length >= 7 ? [{ bone: bones[d.node]!, at: new THREE.Vector3(d.values[4], d.values[5], -d.values[6]!) }] : []));
+    }
+    const p = this.points[index];
+    if (!p) return false;
+    out.copy(p.at).applyMatrix4(p.bone.matrixWorld);
+    return true;
+  }
+
   constructor(source: GLTF, map: ClipMap, texture?: THREE.Texture, equipment?: { right?: THREE.Object3D; left?: THREE.Object3D }) {
     const model = cloneSkinned(source.scene);
     model.scale.setScalar(UNIT_SCALE);

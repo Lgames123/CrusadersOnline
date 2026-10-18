@@ -18,6 +18,8 @@ export class SoundBank {
   private readonly listener = new THREE.Vector3();
   private readonly right = new THREE.Vector3(1, 0, 0);
   private readonly files: Map<number, string>;
+  /** Sound.ctx priority letter by id (A loudest). */
+  private readonly priorities = new Map<number, string>();
   private readonly urls: Record<string, string>;
   /** Master volume 0..1. */
   volume = 0.8;
@@ -50,9 +52,10 @@ export class SoundBank {
       const manifest = (await (await fetch('/generated/manifest.json')).json()) as Manifest;
       const rules = manifest.rules?.['sounds'];
       if (!rules || !manifest.audio) return null;
-      const { sounds } = (await (await fetch(`/generated/${rules}`)).json()) as { sounds: { id: number; file: string; dialog?: boolean; description?: string; lengthMs?: number }[] };
+      const { sounds } = (await (await fetch(`/generated/${rules}`)).json()) as { sounds: { id: number; file: string; dialog?: boolean; description?: string; lengthMs?: number; priority?: string }[] };
       const files = new Map(sounds.map((s) => [s.id, s.file.toLowerCase()]));
       const bank = new SoundBank(files, manifest.audio);
+      for (const s of sounds) if (s.priority) bank.priorities.set(s.id, s.priority.toUpperCase());
       for (const s of sounds) if (s.dialog) bank.lines.set(s.id, { file: s.file.toLowerCase(), text: s.description ?? '', ms: s.lengthMs ?? 3000 });
       return bank;
     } catch {
@@ -85,10 +88,20 @@ export class SoundBank {
   }
 
   /**
-   * Plays a sound (Sound.ctx id, or file name like "swswing01.wav") at a world position (or
-   * non-positional). Returns a stop function for loops.
+   * How far a sound carries, metres: the positional player (0x004B0FC0) drops a sound beyond its
+   * priority's distance (table 0x004F61D8, squared feet: A 40000, B 22500, C 12544, D 3600).
    */
-  play(ref: number | string, at?: THREE.Vector3 | null, opts: { volume?: number; loop?: boolean; maxDistance?: number } = {}): () => void {
+  reach(id: number): number {
+    const ft = { A: 200, B: 150, C: 112, D: 60 }[this.priorities.get(id) ?? ''] ?? 112;
+    return ft * 0.3048;
+  }
+
+  /**
+   * Plays a sound (Sound.ctx id, or file name like "swswing01.wav") at a world position (or
+   * non-positional). `rate` is the playback rate (pitch and speed, AIL playback rate x rate).
+   * Returns a stop function for loops.
+   */
+  play(ref: number | string, at?: THREE.Vector3 | null, opts: { volume?: number; loop?: boolean; maxDistance?: number; rate?: number } = {}): () => void {
     const ctx = this.ctx;
     const file = typeof ref === 'number' ? this.files.get(ref) : ref.toLowerCase();
     if (!ctx || !file) return () => {};
@@ -109,6 +122,7 @@ export class SoundBank {
       source = ctx.createBufferSource();
       source.buffer = buf;
       source.loop = !!opts.loop;
+      if (opts.rate && opts.rate > 0) source.playbackRate.value = opts.rate;
       const gain = ctx.createGain();
       gain.gain.value = gainValue;
       const panner = ctx.createStereoPanner();

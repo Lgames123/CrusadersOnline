@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { PLAYER_HEIGHT, SPELL_INFO, type SpellEventMsg, type SpellId, type StatusTag } from '@crusaders/shared';
 import type { EffectHandle, Effects } from './effects.ts';
 import type { SoundBank } from '../audio/sound_bank.ts';
@@ -8,13 +9,14 @@ import type { Avatar } from '../entities/avatar.ts';
 /**
  * What the spells look and sound like (SC.SPELL_EVENT): the original's effects.stg effects at
  * the hand, on the projectiles and where they land (names from 0x004F35F8, variant = level - 1),
- * Sound.ctx sounds, short lights, lightning bolts, soul drinker's flow, growing bursts and the
- * look of timed effects on characters.
+ * the wind-ups hung on the hand dummies, Sound.ctx sounds, short lights, the lightning bolt's
+ * texture strip, soul drinker's flow, holy wrath's and revelation's ring (ring.mdl) and the look
+ * of timed effects on characters. Explosions, slow bursts and ice storms have no model in the
+ * original (their objects carry none): only their effects show.
  *
- * Stand-ins (not decoded): the bolts are drawn as jagged lines (the original's lightning
- * texture strips, 0x004BF680), bursts as fading shells, and the timed effects as a tinted shell
- * round the body (the original swaps the model's look: frozen flag 4 + model +0x54, stone skin
- * texture variants 6 / 8 / 10).
+ * Stand-ins (not decoded): soul drinker's line, snap freeze's flying glow, and the timed effects
+ * as a tinted shell round the body (the original swaps the model's look: frozen flag 4 + model
+ * +0x54, stone skin texture variants 6 / 8 / 10).
  */
 
 type V3 = [number, number, number];
@@ -35,7 +37,8 @@ interface ProjectileView {
   level: number;
   pos: THREE.Vector3;
   vel: THREE.Vector3;
-  sprite: THREE.Sprite;
+  /** A glow for the projectiles whose look is not decoded (snap freeze). */
+  sprite: THREE.Sprite | null;
   /** The projectile's own effect (effects.stg *_PROJ), carried along. */
   carried: EffectHandle | null;
   key: string;
@@ -52,21 +55,43 @@ interface Timed {
  * Projectile looks: the effect it carries (effects.stg, table 0x004E2D38 for the fire ball; its
  * flashes last as long as the projectile and leave trails), a core glow and its light colour.
  */
-const PROJECTILE_LOOK: Partial<Record<SpellId, { carried: string | null; core: number; light: number }>> = {
-  fireball: { carried: 'FIREBALL_PROJ', core: 0xffa040, light: 0xff8a30 },
-  slow: { carried: 'SLOW_PROJ', core: 0xb080ff, light: 0x9060ff },
+const PROJECTILE_LOOK: Partial<Record<SpellId, { carried: string | null; core: number | null; light: number }>> = {
+  // The fire ball and slow objects draw nothing of their own: their carried effect is the look.
+  fireball: { carried: 'FIREBALL_PROJ', core: null, light: 0xff8a30 },
+  slow: { carried: 'SLOW_PROJ', core: null, light: 0x9060ff },
+  // Stand-in: snap freeze's flying look is not decoded (its object has component 0x004C1000).
   freeze: { carried: null, core: 0xa8e0ff, light: 0x80c8ff },
 };
 
-/** Burst shells (holy wrath, revelation, the explosions): colour and blending. */
-const BURST_LOOK: Partial<Record<SpellId, { color: number; opacity: number }>> = {
-  holy_wrath: { color: 0xfff0b0, opacity: 0.35 },
-  revelation: { color: 0xe8f0ff, opacity: 0.3 },
-  fireball: { color: 0xff9040, opacity: 0.25 },
-  slow: { color: 0xa070ff, opacity: 0.25 },
-};
+/**
+ * The rings (classes 8 HolyWrath and 14, factories 0x0043FA90 / 0x00440AE0): models.ctx model 4,
+ * ring.mdl, textures ringfire4 (holy wrath), unholyfire (a creature's unholy wrath; 0x0043FD30
+ * picks texture holy == 0) and revelation (0x00440D70 picks 2).
+ */
+const RING_TEXTURE: Partial<Record<SpellId, string>> = { holy_wrath: 'ringfire4', revelation: 'revelation' };
+const UNHOLY_RING_TEXTURE = 'unholyfire';
 
-const UNHOLY_BURST_LOOK = { color: 0x301040, opacity: 0.3 };
+/**
+ * The lightning bolt (render class 0x004E3340): a camera-facing strip through seven jittered
+ * control points (0x004BFBB0; per point: side, height, along, and their random ranges; side is a
+ * fraction of the bolt's horizontal length, height x 20 ft, along a fraction of the length), 15
+ * nodes, texture lightning (lightningcap at the ends), alpha 255 falling 0.34 a millisecond
+ * (0x004BF700): gone in 0.75 s. Width 40 per node (0x004C8FC0), read as effect size units
+ * (0.05 ft) like the sprites: 2 ft.
+ */
+const BOLT_PROFILE: readonly (readonly [number, number, number, number, number, number])[] = [
+  [0, 0, 0, 0, 0, 0],
+  [0, 0, 1 / 6, 0, 0, 0],
+  [0.08, 0, 1 / 3, 0.08, 0.05, 0],
+  [0, 0, 0.5, 0.08, 0.1, 0],
+  [-0.06, 0, 2 / 3, 0.08, 0.05, 0],
+  [0, 0, 5 / 6, 0, 0.05, 0],
+  [0, 0, 1, 0, 0.05, 0],
+];
+const BOLT_NODES = 15;
+const BOLT_LIFE = 255 / 0.34 / 1000;
+const BOLT_WIDTH = 40 * 0.05 * 0.3048;
+const FOOT = 0.3048;
 
 /** Timed-effect shells: colour, opacity, additive. */
 const STATUS_LOOK: Partial<Record<StatusTag, { color: number; opacity: number; additive: boolean }>> = {
@@ -105,6 +130,12 @@ export class SpellVisuals {
   private readonly statusOf = new Map<number, Set<StatusTag>>();
   private upperCasts = 0;
   private readonly tmp = new THREE.Vector3();
+  /** Wind-ups following a character's dummies (+0x24 hangs them on the node, 0x00482150). */
+  private readonly windups: { entity: number; node: number; handle: EffectHandle; left: number }[] = [];
+  /** Converted textures and models by name (manifest), loaded once. */
+  private manifest: Promise<{ textures: Record<string, string>; models: Record<string, string> } | null> | null = null;
+  private readonly textures = new Map<string, Promise<THREE.Texture | null>>();
+  private ringGeometry: Promise<THREE.BufferGeometry | null> | null = null;
 
   constructor(scene: THREE.Scene, host: SpellVisualHost) {
     this.scene = scene;
@@ -121,12 +152,14 @@ export class SpellVisuals {
       if (c.phase === 'begin' && c.upper && c.caster !== this.host.self()) this.host.entity(c.caster)?.avatar.setUpperClip?.(SPELL_INFO[c.spell].asm, ++this.upperCasts);
     }
     for (const f of d.fx ?? []) {
+      if (f.entity !== undefined && this.windup(f.name, f.entity, Math.max(0, f.level - 1))) continue;
       const pos = this.at(f.at, f.entity);
       if (!pos) continue;
       const dir = f.dir ? new THREE.Vector3(...f.dir) : null;
       fx?.spawn(f.name, pos, dir, Math.max(0, f.level - 1));
     }
-    for (const s of d.sounds ?? []) sounds?.play(s.id, new THREE.Vector3(...s.at));
+    // Spell sounds carry to their Sound.ctx priority's distance (0x004B0FC0), some at a random rate.
+    for (const s of d.sounds ?? []) sounds?.play(s.id, new THREE.Vector3(...s.at), { maxDistance: sounds.reach(s.id), ...(s.rate ? { rate: s.rate } : {}) });
     if (d.light) dynamicLights.flash(new THREE.Vector3(...d.light.at), new THREE.Color(d.light.color[0] / 255, d.light.color[1] / 255, d.light.color[2] / 255), 2.2, d.light.radius, d.light.seconds);
     for (const b of d.bolts ?? []) this.bolt(new THREE.Vector3(...b.from), new THREE.Vector3(...b.to));
     if (d.projectile) this.projectile(d.projectile);
@@ -150,8 +183,10 @@ export class SpellVisuals {
   /** Everything goes (zone change). */
   clear(): void {
     for (const id of [...this.statusOf.keys()]) this.forget(id);
+    for (const w of this.windups) w.handle.stop();
+    this.windups.length = 0;
     for (const [id, p] of this.projectiles) {
-      this.scene.remove(p.sprite);
+      if (p.sprite) this.scene.remove(p.sprite);
       p.carried?.stop();
       dynamicLights.remove(p.key);
       this.projectiles.delete(id);
@@ -168,9 +203,18 @@ export class SpellVisuals {
     const fx = this.host.effects();
     for (const p of this.projectiles.values()) {
       p.pos.addScaledVector(p.vel, dt);
-      p.sprite.position.copy(p.pos);
+      p.sprite?.position.copy(p.pos);
       p.carried?.pos.copy(p.pos);
       dynamicLights.set(p.key, p.pos, PROJECTILE_LOOK[p.spell]?.light ?? 0xffffff, 1.6, 5, 0.1);
+    }
+    for (let i = this.windups.length - 1; i >= 0; i--) {
+      const w = this.windups[i]!;
+      const e = this.host.entity(w.entity);
+      if ((w.left -= dt) <= 0 || !e) {
+        this.windups.splice(i, 1);
+        continue;
+      }
+      e.avatar.attachPoint?.(w.node, w.handle.pos);
     }
     for (let i = this.timed.length - 1; i >= 0; i--) {
       const t = this.timed[i]!;
@@ -220,8 +264,10 @@ export class SpellVisuals {
     let v = this.projectiles.get(p.id);
     if (p.end) {
       if (v) {
-        this.scene.remove(v.sprite);
-        (v.sprite.material as THREE.Material).dispose();
+        if (v.sprite) {
+          this.scene.remove(v.sprite);
+          v.sprite.material.dispose();
+        }
         v.carried?.stop();
         dynamicLights.remove(v.key);
         this.projectiles.delete(p.id);
@@ -230,9 +276,12 @@ export class SpellVisuals {
     }
     if (!v) {
       const look = PROJECTILE_LOOK[p.spell];
-      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: look?.core ?? 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-      sprite.scale.setScalar(p.spell === 'fireball' ? 0.7 + 0.15 * p.level : 0.55);
-      this.scene.add(sprite);
+      let sprite: THREE.Sprite | null = null;
+      if (look?.core != null) {
+        sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: look.core, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+        sprite.scale.setScalar(0.55);
+        this.scene.add(sprite);
+      }
       const at = new THREE.Vector3(...p.pos);
       const carriedName = p.look ?? look?.carried;
       const carried = carriedName ? this.host.effects()?.attach(carriedName, at, new THREE.Vector3(...p.vel).normalize(), p.level - 1) ?? null : null;
@@ -241,72 +290,177 @@ export class SpellVisuals {
     }
     v.pos.set(...p.pos);
     v.vel.set(...p.vel);
-    v.sprite.position.copy(v.pos);
+    v.sprite?.position.copy(v.pos);
   }
 
-  private burst(b: NonNullable<SpellEventMsg['d']['burst']>): void {
-    // A creature's unholy wrath: a dark shell (stand-in look, like the others).
-    const look = b.dark ? UNHOLY_BURST_LOOK : BURST_LOOK[b.spell];
-    if (!look) return;
-    const mat = new THREE.MeshBasicMaterial({ color: look.color, transparent: true, opacity: look.opacity, depthWrite: false, side: THREE.DoubleSide, blending: b.dark ? THREE.NormalBlending : THREE.AdditiveBlending });
-    const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 16), mat);
-    mesh.position.set(...b.at);
-    mesh.scale.setScalar(0.01);
-    this.scene.add(mesh);
-    const grow = Math.max(0.05, b.seconds);
-    this.timed.push({
-      object: mesh,
-      age: 0,
-      life: grow + 0.35,
-      tick: (k) => {
-        const age = k * (grow + 0.35);
-        mesh.scale.setScalar(Math.max(0.01, b.radius * Math.min(1, age / grow)));
-        mat.opacity = look.opacity * (age <= grow ? 1 : Math.max(0, 1 - (age - grow) / 0.35));
-      },
-    });
-    if (b.spell === 'holy_wrath') dynamicLights.flash(new THREE.Vector3(...b.at), 0xfff0c0, 2.5, b.radius, grow + 0.3);
-  }
-
-  /** A jagged bolt, re-jagged a few times over its 0.25 s. */
-  private bolt(from: THREE.Vector3, to: THREE.Vector3): void {
-    const group = new THREE.Group();
-    const lines: THREE.Line[] = [];
-    for (let k = 0; k < 3; k++) {
-      const geo = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(3 * 14), 3));
-      const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: k === 0 ? 0xffffff : 0x9cc4ff, transparent: true, opacity: k === 0 ? 1 : 0.6, blending: THREE.AdditiveBlending, depthWrite: false }));
-      lines.push(line);
-      group.add(line);
+  /**
+   * A spell's wind-up (fx with an entity): hung on the caster's dummies (SpellInfo.windupNodes)
+   * and following them while it lasts. False when `name` is no wind-up or the model has no
+   * dummies (then it shows at the sent point).
+   */
+  private windup(name: string, entity: number, variant: number): boolean {
+    const info = Object.values(SPELL_INFO).find((i) => i.windup === name);
+    const e = info && this.host.entity(entity);
+    const fx = this.host.effects();
+    if (!info || !e || !fx || !e.avatar.attachPoint) return false;
+    let any = false;
+    for (const node of info.windupNodes) {
+      const at = new THREE.Vector3();
+      if (!e.avatar.attachPoint(node, at)) continue;
+      // The flashes follow the node; their trails stay in the world as usual.
+      this.windups.push({ entity, node, handle: fx.attach(name, at, null, variant), left: 3 });
+      any = true;
     }
-    const jag = () => {
-      const dir = to.clone().sub(from);
-      const length = dir.length();
-      const side = new THREE.Vector3(-dir.z, 0, dir.x).normalize();
-      const up = new THREE.Vector3(0, 1, 0);
-      for (const line of lines) {
-        const pos = line.geometry.getAttribute('position') as THREE.BufferAttribute;
-        const n = pos.count;
-        for (let i = 0; i < n; i++) {
-          const t = i / (n - 1);
-          const wobble = i === 0 || i === n - 1 ? 0 : (Math.random() - 0.5) * Math.min(1.2, length * 0.08);
-          const p = from.clone().lerp(to, t).addScaledVector(side, wobble).addScaledVector(up, (Math.random() - 0.5) * Math.min(0.8, length * 0.05));
-          pos.setXYZ(i, p.x, p.y, p.z);
-        }
-        pos.needsUpdate = true;
+    return any;
+  }
+
+  private loadManifest(): Promise<{ textures: Record<string, string>; models: Record<string, string> } | null> {
+    return (this.manifest ??= fetch('/generated/manifest.json')
+      .then((r) => (r.ok ? (r.json() as Promise<{ textures: Record<string, string>; models: Record<string, string> }>) : null))
+      .catch(() => null));
+  }
+
+  /** A converted texture, D3D v (flipY false, as the models' glTF UVs). */
+  private texture(name: string): Promise<THREE.Texture | null> {
+    let t = this.textures.get(name);
+    if (!t) {
+      t = this.loadManifest().then((m) => {
+        const file = m?.textures[name];
+        if (!file) return null;
+        return new THREE.TextureLoader()
+          .loadAsync(`/generated/${file}`)
+          .then((tex) => {
+            tex.flipY = false;
+            tex.colorSpace = THREE.SRGBColorSpace;
+            tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+            return tex;
+          })
+          .catch(() => null);
+      });
+      this.textures.set(name, t);
+    }
+    return t;
+  }
+
+  /** ring.mdl's mesh (models.ctx model 4), in feet. */
+  private ring(): Promise<THREE.BufferGeometry | null> {
+    return (this.ringGeometry ??= this.loadManifest().then(async (m) => {
+      const file = m?.models['ring'];
+      if (!file) return null;
+      const gltf = await new GLTFLoader().loadAsync(`/generated/${file}`).catch(() => null);
+      let geo: THREE.BufferGeometry | null = null;
+      gltf?.scene.updateMatrixWorld(true);
+      gltf?.scene.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!geo && mesh.isMesh) geo = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
+      });
+      return geo;
+    }));
+  }
+
+  /**
+   * Holy wrath's and revelation's ring (0x004C1A80 / 0x004C1B60): ring.mdl scaled by the growing
+   * radius r (ft) across and min(r, 10) up, turned 30 x r about the vertical (read as degrees),
+   * gone when the object ends. The explosions' and slow bursts' objects have no model: nothing
+   * is drawn for them.
+   */
+  private burst(b: NonNullable<SpellEventMsg['d']['burst']>): void {
+    const texName = b.dark ? UNHOLY_RING_TEXTURE : RING_TEXTURE[b.spell];
+    if (!texName) return;
+    const at = new THREE.Vector3(...b.at);
+    if (b.spell === 'holy_wrath') dynamicLights.flash(at, 0xfff0c0, 2.5, b.radius, b.seconds + 0.3);
+    void Promise.all([this.ring(), this.texture(texName)]).then(([geo, tex]) => {
+      if (!geo || !tex) return;
+      const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.copy(at);
+      mesh.scale.setScalar(0.0001);
+      this.scene.add(mesh);
+      const radiusFt = b.radius / FOOT;
+      this.timed.push({
+        object: mesh,
+        age: 0,
+        life: Math.max(0.05, b.seconds),
+        tick: (k) => {
+          const r = Math.max(0.01, radiusFt * k);
+          mesh.scale.set(r * FOOT, Math.min(r, 10) * FOOT, r * FOOT);
+          mesh.rotation.y = THREE.MathUtils.degToRad(30 * r);
+        },
+      });
+    });
+  }
+
+  /** The lightning bolt's strip (see BOLT_PROFILE), fixed once drawn, fading out. */
+  private bolt(from: THREE.Vector3, to: THREE.Vector3): void {
+    const d = to.clone().sub(from);
+    // Control points: along x d, side x (-dz, dx) (horizontal, the length's own size), height x 20 ft.
+    const jitter = (base: number, range: number) => base + (Math.random() * 2 - 1) * range;
+    const ctrl = BOLT_PROFILE.map(([x, y, z, rx, ry, rz]) => {
+      const along = jitter(z, rz);
+      const side = jitter(x, rx);
+      const up = jitter(y, ry) * 20 * FOOT;
+      return new THREE.Vector3(from.x + along * d.x - side * d.z, from.y + along * d.y + up, from.z + along * d.z + side * d.x);
+    });
+    const nodes = new THREE.CatmullRomCurve3(ctrl).getPoints(BOLT_NODES - 1);
+    const n = nodes.length;
+    const pos = new Float32Array(n * 2 * 3);
+    const uv = new Float32Array(n * 2 * 2);
+    const index: number[] = [];
+    for (let i = 0; i < n; i++) {
+      const v = i / (n - 1);
+      uv.set([0, v, 1, v], i * 4);
+      if (i < n - 1) index.push(2 * i, 2 * i + 1, 2 * i + 2, 2 * i + 1, 2 * i + 3, 2 * i + 2);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    geo.setIndex(index);
+    const mat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
+    const strip = new THREE.Mesh(geo, mat);
+    strip.frustumCulled = false;
+    // Faces the camera: each node's edge across the strip and the view.
+    const side = new THREE.Vector3();
+    const tangent = new THREE.Vector3();
+    const view = new THREE.Vector3();
+    strip.onBeforeRender = (_r, _s, camera) => {
+      for (let i = 0; i < n; i++) {
+        const p = nodes[i]!;
+        tangent.copy(nodes[Math.min(n - 1, i + 1)]!).sub(nodes[Math.max(0, i - 1)]!);
+        view.copy(camera.position).sub(p);
+        side.crossVectors(tangent, view).normalize().multiplyScalar(BOLT_WIDTH / 2);
+        pos.set([p.x - side.x, p.y - side.y, p.z - side.z, p.x + side.x, p.y + side.y, p.z + side.z], i * 6);
       }
+      (geo.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
     };
-    jag();
+    const group = new THREE.Group();
+    group.add(strip);
+    const caps: THREE.SpriteMaterial[] = [];
+    for (const p of [nodes[0]!, nodes[n - 1]!]) {
+      const cm = new THREE.SpriteMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+      const cap = new THREE.Sprite(cm);
+      cap.position.copy(p);
+      cap.scale.setScalar(BOLT_WIDTH);
+      caps.push(cm);
+      group.add(cap);
+    }
+    void this.texture('lightning').then((t) => {
+      mat.map = t;
+      mat.needsUpdate = true;
+    });
+    void this.texture('lightningcap').then((t) => {
+      for (const cm of caps) {
+        cm.map = t;
+        cm.needsUpdate = true;
+      }
+    });
     this.scene.add(group);
-    let next = 0.06;
     this.timed.push({
       object: group,
       age: 0,
-      life: 0.28,
-      tick: (k, dt) => {
-        if ((next -= dt) <= 0) {
-          next = 0.06;
-          jag();
-        }
-        for (const l of lines) (l.material as THREE.LineBasicMaterial).opacity = (1 - k) * (l === lines[0] ? 1 : 0.6);
+      life: BOLT_LIFE,
+      tick: (k) => {
+        mat.opacity = 1 - k;
+        for (const cm of caps) cm.opacity = 1 - k;
       },
     });
   }

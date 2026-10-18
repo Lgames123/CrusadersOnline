@@ -143,7 +143,10 @@ export class Effects {
    */
   spawn(name: string, pos: THREE.Vector3, dir?: THREE.Vector3 | null, variant = 0, anchor?: Anchor): void {
     const variants = this.table.multis[name];
-    const list = variants?.[variant] ?? variants?.[0];
+    // A level without its own variant takes the nearest lower one (0x00482150 steps down by level).
+    let v = Math.min(variant, 3);
+    while (v > 0 && !variants?.[v]) v--;
+    const list = variants?.[v];
     if (!list) return;
     const basis = new THREE.Matrix4();
     if (dir && dir.lengthSq() > 1e-6) {
