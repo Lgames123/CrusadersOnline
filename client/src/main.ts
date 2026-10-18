@@ -69,6 +69,7 @@ import { CREATURE_SFX, SFX, SoundBank, impactSound, pick } from './audio/sound_b
 import { registerAssetServiceWorker } from './assets/game_files.ts';
 import { GameFilesPanel } from './ui/game_files_panel.ts';
 import { InputManager } from './input/input_manager.ts';
+import { installBrowserGuards } from './input/browser_guards.ts';
 import { MusicPlayer } from './audio/music.ts';
 import { EFFECTS_SCALE, Effects, SMALL_EFFECTS_SCALE } from './engine/effects.ts';
 import { SpellVisuals } from './engine/spell_visuals.ts';
@@ -128,6 +129,7 @@ function impactSide(target: THREE.Object3D, from: THREE.Object3D): number {
 async function main(): Promise<void> {
   const container = document.getElementById('app')!;
   const overlay = document.getElementById('overlay')!;
+  installBrowserGuards();
 
   // Original assets: imported in this browser (service worker over Cache Storage) or dev server.
   await registerAssetServiceWorker();

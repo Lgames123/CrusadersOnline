@@ -113,10 +113,6 @@ export class InputManager {
       }
     });
 
-    document.addEventListener('contextmenu', (e) => {
-      if (this.locked) e.preventDefault();
-    });
-
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.element;
       if (!this.locked) {
