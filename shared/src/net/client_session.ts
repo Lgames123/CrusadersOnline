@@ -7,6 +7,7 @@ import { INPUT_PACKET_MAX_BYTES, MAX_INPUT_FRAMES, createInputFrame, encodeInput
 import { decodeSnapshot, type EntityState } from '../protocol/binary/snapshot.ts';
 import type { AttackKind, CombatEventMsg, CutsceneMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PlayerStatsMsg, QuestLogMsg, ServerControlMsg, ShopMsg, SpellEventMsg, StorySoundMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
 import type { ArenaDef } from '../arena/types.ts';
+import type { Difficulty } from '../game/ruleset.ts';
 import { createMovementWorld, disposeMovementWorld, setBrushPose, setDoorOpen, setDoorPose, type MovementWorld, type Rapier } from '../movement/physics.ts';
 import { stepDoorMotion, swingPose, type DoorMotion, type DoorSwing } from '../arena/door_swing.ts';
 import { MOVER_BACK, MOVER_FORWARD, moverPose, shutMover, stepMover, type MoverDef, type MoverMotion } from '../arena/mover.ts';
@@ -49,9 +50,10 @@ export interface ClientSessionEvents {
   despawn?(id: number): void;
   /**
    * The server moves the player to `arena` (login or portal). Load it, call setArena() with its
-   * definition, then zoneReady(). Not called when the session was created with that arena.
+   * definition (with the server's `difficulty`), then zoneReady(). Not called when the session
+   * was created with that arena.
    */
-  zone?(arena: string): void;
+  zone?(arena: string, difficulty: Difficulty): void;
   /** World entry in the current zone (first login and after every zone change). */
   enter?(d: WorldEnterMsg['d']): void;
   /** Local prediction was corrected by (dx, dy, dz) metres. */
@@ -252,7 +254,7 @@ export class ClientSession {
           if (this.arenaName !== msg.d.arena || this.character) this.setArena(this.autoArena);
           this.zoneReady(msg.d.arena);
         } else {
-          this.events.zone?.(msg.d.arena);
+          this.events.zone?.(msg.d.arena, msg.d.difficulty ?? 'medium');
         }
         break;
       case SC.WORLD_ENTER:

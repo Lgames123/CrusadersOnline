@@ -5,6 +5,7 @@ import { itemSlug } from '../game/items.ts';
 import type { ArenaDef, BrushDef, PortalDef, TriMeshDef, WorldObjectDef } from './types.ts';
 import { SEQUENCE_ACTOR_BASE, type LevelStory } from '../game/story.ts';
 import { PLAYER_HEIGHT, PLAYER_RADIUS } from '../constants.ts';
+import type { Difficulty } from '../game/ruleset.ts';
 
 /**
  * Arenas built from an original level converted from the user's own installation
@@ -37,6 +38,8 @@ export interface LevelCreature {
   held?: { weapon?: string; shield?: string };
   /** Everything it carries (converter 1.24+). */
   items?: { name: string; quantity: number }[];
+  /** The difficulties it is placed in (inDifficulty); absent: all of them (converter 1.27+). */
+  difficulty?: number;
   /** Its talk line (Sound.ctx id, stats +0x1E4): the use key plays it; none = it says nothing. */
   talk?: number;
   /** ASM state it plays through its line (idle behaviour +0x3C). */
@@ -67,6 +70,16 @@ export interface LevelObject {
   texture?: string;
   /** The model's bounding box in its own frame (original units, Z mirrored): min x y z, max x y z. */
   box?: number[];
+  /** The difficulties it is placed in (inDifficulty); absent: all of them (converter 1.27+). */
+  difficulty?: number;
+}
+
+/** Difficulty bits of a placement's mask (cap record +8; the loader drops the rest, 0x476DC0). */
+const DIFFICULTY_BIT: Readonly<Record<Difficulty, number>> = { easy: 0x04, medium: 0x08, hard: 0x10 };
+
+/** Whether a level placement is there at this difficulty. */
+export function inDifficulty(p: { difficulty?: number }, difficulty: Difficulty): boolean {
+  return p.difficulty === undefined || (p.difficulty & DIFFICULTY_BIT[difficulty]) !== 0;
 }
 
 export interface LevelPortal {
@@ -563,16 +576,17 @@ function placementExtras(c: LevelCreature, s: number): Partial<ArenaDef['mobSpaw
   return out;
 }
 
-export function buildLevelArena(name: string, collision: Uint8Array, placements: LevelPlacements): ArenaDef {
+export function buildLevelArena(name: string, collision: Uint8Array, placements: LevelPlacements, difficulty: Difficulty = 'medium'): ArenaDef {
   const mesh = parseLevelCollision(collision);
   const s = LEVEL_UNIT_METRES;
   const hostiles = placements.creatures
-    .filter((c) => c.disposition === HOSTILE)
+    .filter((c) => c.disposition === HOSTILE && inDifficulty(c, difficulty))
     .map((c) => ({ x: c.position[0] * s, y: c.position[1] * s, z: c.position[2] * s }));
   const mobSpawns: ArenaDef['mobSpawns'] = [];
   const scripted = scriptedDeaths(placements.story);
   const puppets: NonNullable<ArenaDef['puppets']> = [];
   placements.creatures.forEach((c, placement) => {
+    if (!inDifficulty(c, difficulty)) return;
     // Killed by a sequence (Ws9a's two cell guards): the triggering player's client plays them.
     if (scripted.has(placement)) {
       const archetype = LEVEL_ARCHETYPES[c.type] ?? (CREATURE_TEMPLATES[c.type] ? npcArchetypeId(c.type) : null);
@@ -621,6 +635,7 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
   const objects: WorldObjectDef[] = [];
   const solids: { points: Float32Array; object?: number }[] = [];
   (placements.objects ?? []).forEach((o, id) => {
+    if (!inDifficulty(o, difficulty)) return;
     // Props block movement with their model's box, but foliage, bottles and anything under a
     // foot high (tools, fire pits) - the original's prop records carry no collision volume.
     if (o.kind === 'prop' && o.box && !NON_SOLID_PROP.test(`${o.name} ${o.model ?? ''}`) && o.box[4]! - o.box[1]! >= 1) {

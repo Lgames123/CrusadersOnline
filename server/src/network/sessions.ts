@@ -1,5 +1,5 @@
 import type { Logger } from 'pino';
-import { CS, LEVEL_PREFIX, SC, SPELLS, decodeSpells, encodeSpells, parseClientControl, type ExitCrossing, type KnownSpell, type ServerControlMsg } from '@crusaders/shared';
+import { CS, LEVEL_PREFIX, SC, SPELLS, decodeSpells, encodeSpells, parseClientControl, type Difficulty, type ExitCrossing, type KnownSpell, type ServerControlMsg } from '@crusaders/shared';
 import type { Account, TicketStore } from '../auth/tickets.ts';
 import type { CharacterPersistRecord, CharacterRepository } from '../persistence/characters.ts';
 import type { JoinOptions, PersistRecord, TransferState } from '../simulation/world_zone.ts';
@@ -56,6 +56,8 @@ export class SessionManager implements TransportHandlers {
     log: Logger,
     opts: {
       defaultArena: string;
+      /** The server's difficulty: which level placements are there (the client builds the same). */
+      difficulty?: Difficulty;
       devGuestSpawn?: { x: number; y: number; z: number } | null;
       devGuestSpells?: string | null;
       devGuestXp?: number;
@@ -67,6 +69,7 @@ export class SessionManager implements TransportHandlers {
     this.characters = characters;
     this.log = log;
     this.defaultArena = opts.defaultArena;
+    this.difficulty = opts.difficulty ?? 'medium';
     this.persist = opts.persist;
     this.devGuestSpawn = opts.devGuestSpawn ?? null;
     const all = /^all:(\d)$/.exec(opts.devGuestSpells ?? '');
@@ -76,6 +79,7 @@ export class SessionManager implements TransportHandlers {
   }
 
   private readonly devGuestSpawn: { x: number; y: number; z: number } | null;
+  private readonly difficulty: Difficulty;
   /** Development only: what guests know and their experience (DEV_GUEST_SPELLS / DEV_GUEST_XP). */
   private readonly devGuestSpells: KnownSpell[];
   private readonly devGuestXp: number;
@@ -130,7 +134,7 @@ export class SessionManager implements TransportHandlers {
     s.zone = arena;
     s.pendingJoin = join;
     s.state = 'zoning';
-    this.send(s, { op: SC.ZONE_CHANGE, d: { arena } });
+    this.send(s, { op: SC.ZONE_CHANGE, d: { arena, difficulty: this.difficulty } });
   }
 
   /** Called by the zone host for every outbound frame. */

@@ -215,7 +215,7 @@ The creature's position (3 × float32, original units) is at XP block − 0x200.
 
 ### 6.2.1 Generic object records (all classes) `[CONFIRMED: 12,025 objects in 84 files]`
 
-Every placed object starts with `[class u32][CD CD CD CD][3F 00 00 00][02 00 00 00]`. The instance name is at +0x40. Six **component pointers** at +0x28…+0x3C hold absolute addresses in the cap image (base `0x08000000`); each component starts with a type tag:
+Every placed object starts with `[class u32][CD CD CD CD][difficulty mask u32][02 00 00 00]`. The mask (0x3F in most records) says at which difficulties the object is there: 0x04 easy, 0x08 medium, 0x10 hard. After loading, the game removes every creature, prop, item, sprite, chest and flag (and brush) without the bit of the current difficulty (settings +0x85 = 0 / 1 / 2; loops at 0x476DC0, 0x478973 and 0x478E24…0x4791E1, removal 0x4838D0). Records that are not 0x3F: 5 objects (Ca1a Thunderous Hammer 0x2F easy + medium, Ca1a HealingPotion7 and OldGuardCorpse02 0x33 hard only, Gl1b Greater Healing Potion 0x27 easy only and Greater Healing Potion2 0x2F), 57 creatures, 12 brushes (Ca*b `bWhiteMenCantJump1-4`, 0x27 easy only). The instance name is at +0x40. Six **component pointers** at +0x28…+0x3C hold absolute addresses in the cap image (base `0x08000000`); each component starts with a type tag:
 
 | Slot | Component | Fields |
 |---|---|---|

@@ -8,6 +8,7 @@ import type { ItemType } from '../../game/items.ts';
 import type { GameplayFeatures } from '../../game/features.ts';
 import type { QuestLog } from '../../game/story.ts';
 import type { Attributes } from '../../game/original_stats.ts';
+import type { Difficulty } from '../../game/ruleset.ts';
 
 /** JSON control messages sent by the server. Trusted direction, so plain types (no Zod). */
 
@@ -195,7 +196,8 @@ export interface ObjectStateMsg {
  */
 export interface ZoneChangeMsg {
   op: typeof SC.ZONE_CHANGE;
-  d: { arena: string };
+  /** `difficulty`: the server's, which level placements are there (absent: medium). */
+  d: { arena: string; difficulty?: Difficulty };
 }
 
 /**

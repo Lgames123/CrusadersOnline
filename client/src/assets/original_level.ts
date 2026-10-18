@@ -6,7 +6,7 @@ import { propFixes } from './prop_fixes.ts';
 import { nodeFrameInverse } from './original_models.ts';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, DYNAMIC_OBJECT_BASE, type ArenaDef, type LevelObject, type LevelBrush, type LevelPlacements, type WorldObjectDef, type WorldObjectState, type DoorMotion, type DoorSwing, stepDoorMotion, swingPose, type MoverDef, type MoverMotion, moverPose, shutMover, stepMover, useMover } from '@crusaders/shared';
+import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, inDifficulty, type Difficulty, DYNAMIC_OBJECT_BASE, type ArenaDef, type LevelObject, type LevelBrush, type LevelPlacements, type WorldObjectDef, type WorldObjectState, type DoorMotion, type DoorSwing, stepDoorMotion, swingPose, type MoverDef, type MoverMotion, moverPose, shutMover, stepMover, useMover } from '@crusaders/shared';
 
 /**
  * An original level converted from the player's own installation (imported in the browser, or
@@ -313,7 +313,8 @@ async function fetchOk(url: string): Promise<Response> {
   return res;
 }
 
-export async function loadOriginalLevel(arenaName: string): Promise<OriginalLevel> {
+/** `difficulty`: the server's; placements of other difficulties are left out (inDifficulty). */
+export async function loadOriginalLevel(arenaName: string, difficulty: Difficulty = 'medium'): Promise<OriginalLevel> {
   if (!arenaName.startsWith(LEVEL_PREFIX)) throw new Error(`not a level arena: ${arenaName}`);
   const act = arenaName.slice(LEVEL_PREFIX.length);
   const manifest = (await (await fetchOk('/generated/manifest.json')).json()) as Manifest;
@@ -323,7 +324,7 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
   const files = manifest.levels?.[placements.mesh];
   if (!files) throw new Error(`level mesh "${placements.mesh}" not converted`);
   const collision = new Uint8Array(await (await fetchOk(`/generated/${files.collision}`)).arrayBuffer());
-  const arena = buildLevelArena(arenaName, collision, placements);
+  const arena = buildLevelArena(arenaName, collision, placements, difficulty);
 
   const gltf = await new GLTFLoader().loadAsync(`/generated/${files.render}`);
   const lmName = (gltf.scenes[0]?.userData as { lightmap?: string } | undefined)?.lightmap;
@@ -440,6 +441,7 @@ export async function loadOriginalLevel(arenaName: string): Promise<OriginalLeve
   const flames: THREE.Sprite[] = [];
   const flameMat = new THREE.SpriteMaterial({ map: flameTexture(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
   await Promise.all((placements.objects ?? []).map(async (o, id) => {
+    if (!inDifficulty(o, difficulty)) return;
     if (o.kind === 'sprite') {
       if (o.effect !== 'TORCHFIRE') return;
       const flame = new THREE.Sprite(flameMat);

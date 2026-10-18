@@ -57,6 +57,22 @@ describe('original level arenas', () => {
     expect(buildLevelArena('level:test', floorCollision(), placements)).toEqual(arena);
   });
 
+  it("leaves out placements of other difficulties, keeping the others' ids (cap record +8)", () => {
+    const item = (name: string, difficulty?: number) => ({ kind: 'item' as const, name, modelId: 1, position: [20, 100, -20] as [number, number, number], rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1], hp: 0, item: { name, quantity: 1 }, ...(difficulty ? { difficulty } : {}) });
+    const placements: LevelPlacements = {
+      mesh: 'test',
+      creatures: [{ type: 145, name: 'HardOnly', position: [20, 100, -20], hp: 25, xp: 40, disposition: 3, resist: [], difficulty: 0x33 }],
+      // Ca1a: the Thunderous Hammer (easy and medium), a Healing Potion (hard only).
+      objects: [item('Gold Pieces'), item('Thunderous Hammer', 0x2f), item('Healing Potion', 0x33)],
+    };
+    const ids = (d: 'easy' | 'medium' | 'hard') => (buildLevelArena('level:test', floorCollision(), placements, d).objects ?? []).map((o) => o.id);
+    expect(ids('easy')).toEqual([0, 1]);
+    expect(ids('medium')).toEqual([0, 1]);
+    expect(ids('hard')).toEqual([0, 2]);
+    expect(buildLevelArena('level:test', floorCollision(), placements).mobSpawns).toHaveLength(0);
+    expect(buildLevelArena('level:test', floorCollision(), placements, 'hard').mobSpawns).toHaveLength(1);
+  });
+
   it("gives placements their own held items, talk line, gesture and idle path (converter 1.24)", () => {
     const placements: LevelPlacements = {
       mesh: 'test',

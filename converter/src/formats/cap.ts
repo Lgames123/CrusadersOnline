@@ -11,9 +11,17 @@ import { capTypeTable, parseStory, type CapStory } from './cap_story.ts';
  */
 export class CapError extends Error {}
 
+/**
+ * Record +8: the difficulties an object is placed in (0x04 easy, 0x08 medium, 0x10 hard; the
+ * loader removes the others, 0x476DC0 / 0x478E24 by the settings' +0x85). 0x3F = all of them.
+ */
+export const ALL_DIFFICULTIES = 0x3f;
+
 export interface CapCreature {
   type: number;
   name: string;
+  /** Difficulty mask (record +8), only when not every difficulty has it. */
+  difficulty?: number;
   /** Original units and axes (left-handed; mirror Z for glTF space). */
   position: [number, number, number];
   hp: number;
@@ -62,6 +70,8 @@ export interface CapObject {
   contents?: { name: string; quantity: number }[];
   /** Sprites: effect name, e.g. "TORCHFIRE". */
   effect?: string;
+  /** Difficulty mask (record +8), only when not every difficulty has it. */
+  difficulty?: number;
 }
 
 /**
@@ -264,10 +274,12 @@ export function parseCap(bytes: Uint8Array, itemNames: ReadonlySet<string> = new
     const facing: [number, number] = [f32(x - 0x200 - 0xc), f32(x - 0x200 - 0x4)];
     creatureAt.set(a, creatures.length);
     const npc = creatureExtras(data, dv, x);
+    const mask = dv.getUint32(a + 8, true);
     creatures.push({
       ...npc,
       type,
       name,
+      ...(mask !== ALL_DIFFICULTIES ? { difficulty: mask } : {}),
       position,
       hp: f32(x - 0x1b8),
       xp: dv.getInt32(x + 4, true),
@@ -502,7 +514,8 @@ function parseObjects(data: Uint8Array, dv: DataView, itemNames: ReadonlySet<str
   };
   for (let a = 0; a + 0x80 < data.length; a++) {
     const kind = OBJECT_CLASSES[data[a]!];
-    if (!kind || data[a + 1] !== 0 || dv.getUint32(a + 4, true) !== 0xcdcdcdcd || dv.getUint32(a + 8, true) !== 0x3f || dv.getUint32(a + 12, true) !== 2) continue;
+    const mask = dv.getUint32(a + 8, true);
+    if (!kind || data[a + 1] !== 0 || dv.getUint32(a + 4, true) !== 0xcdcdcdcd || !mask || mask & ~ALL_DIFFICULTIES || dv.getUint32(a + 12, true) !== 2) continue;
     const slots = [0, 1, 2, 3, 4, 5].map((i) => dv.getUint32(a + 0x28 + 4 * i, true));
     const tf = at(slots[0]!, 0x34);
     const render = at(slots[5]!, 0x1c);
@@ -511,7 +524,7 @@ function parseObjects(data: Uint8Array, dv: DataView, itemNames: ReadonlySet<str
     for (let i = 0; i < 9; i++) rotation.push(Math.round(dv.getFloat32(tf + 4 + 4 * i, true) * 1e5) / 1e5);
     const position: [number, number, number] = [dv.getFloat32(tf + 0x28, true), dv.getFloat32(tf + 0x2c, true), dv.getFloat32(tf + 0x30, true)];
     if (!position.every(Number.isFinite) || !rotation.every(Number.isFinite)) continue;
-    const obj: CapObject = { kind, name: ascii(data, a + 0x40), modelId: dv.getUint32(render + 0x18, true), position, rotation, hp: 0 };
+    const obj: CapObject = { kind, name: ascii(data, a + 0x40), modelId: dv.getUint32(render + 0x18, true), position, rotation, hp: 0, ...(mask !== ALL_DIFFICULTIES ? { difficulty: mask } : {}) };
     const comp = at(slots[4]!, 0x40);
     if (kind === 'prop' && comp >= 0) {
       const hp = dv.getFloat32(comp + 8, true);
@@ -543,5 +556,7 @@ function parseObjects(data: Uint8Array, dv: DataView, itemNames: ReadonlySet<str
     }
     if (obj.kind === 'chest') obj.contents ??= [];
   });
-  return out;
+  // Object ids are indices in this list (characters' taken flags name them): the objects of only
+  // some difficulties, read since converter 1.27, go last so the earlier ids stay as they were.
+  return [...out.filter((o) => o.difficulty === undefined), ...out.filter((o) => o.difficulty !== undefined)];
 }

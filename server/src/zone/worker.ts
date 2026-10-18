@@ -33,7 +33,7 @@ function loadArena(name: string): ArenaDef {
     if (!/^[a-z0-9_-]+$/.test(act)) throw new Error(`invalid level name ${name}`);
     const placements = JSON.parse(readFileSync(path.join(generatedDir, 'levels', `${act}.placements.json`), 'utf8')) as LevelPlacements;
     const collision = new Uint8Array(readFileSync(path.join(generatedDir, 'levels', `${placements.mesh}.collision.bin`)));
-    return buildLevelArena(name, collision, placements);
+    return buildLevelArena(name, collision, placements, difficulty);
   }
   throw new Error(`unknown arena ${name}`);
 }

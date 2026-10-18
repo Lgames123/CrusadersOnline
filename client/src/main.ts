@@ -50,6 +50,7 @@ import {
   type InventoryItemView,
   type CharacterLook,
   type WorldObjectDef,
+  type Difficulty,
 } from '@crusaders/shared';
 import { outfitFor, lookFromInventory } from './assets/item_models.ts';
 import { createRenderContext } from './engine/renderer.ts';
@@ -295,12 +296,12 @@ async function main(): Promise<void> {
     }
     await originals?.preload?.([...files]);
   };
-  const showArena = async (name: string): Promise<ArenaDef | null> => {
+  const showArena = async (name: string, difficulty: Difficulty = 'medium'): Promise<ArenaDef | null> => {
     let next: ArenaDef;
     let view: OriginalLevel | null = null;
     if (name.startsWith(LEVEL_PREFIX)) {
       try {
-        view = await loadOriginalLevel(name);
+        view = await loadOriginalLevel(name, difficulty);
       } catch (err) {
         console.warn('[assets] level unavailable:', err);
         errorBox.textContent = 'This world takes place in an original Crusaders of Might and Magic level. Import your game files (top right) to enter.';
@@ -558,14 +559,14 @@ async function main(): Promise<void> {
             myEdge = w?.damage && w.damage[0]! > w.damage[1]! ? 'sharp' : 'blunt';
             void updatePlayerOutfit(inv.items);
           },
-          zone: (name) => {
+          zone: (name, difficulty) => {
             // Portal transitions (and the first entry): swap the level, then tell the server.
             errorBox.textContent = `Entering ${name.replace(LEVEL_PREFIX, '').toUpperCase()}…`;
             for (const id of remotes.byId.keys()) (lighting.forget(id), trails.forget(id));
             spellVisuals.clear();
             remotes.clear();
             clearScenePuppets();
-            void showArena(name).then((next) => {
+            void showArena(name, difficulty).then((next) => {
               if (!next || !live) return;
               live.setArena(next);
               live.zoneReady(name);
