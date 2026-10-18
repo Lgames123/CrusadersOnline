@@ -58,7 +58,7 @@ import { outfitFor, lookFromInventory } from './assets/item_models.ts';
 import { createRenderContext } from './engine/renderer.ts';
 import { CameraRig } from './engine/camera_rig.ts';
 import { classicVerticalFov } from './engine/classic_camera.ts';
-import { SettingsStore } from './settings.ts';
+import { SettingsStore, type Settings } from './settings.ts';
 import { SettingsPanel } from './ui/settings_panel.ts';
 import { CONTROLS_HELP } from './input/keybindings.ts';
 import { buildArenaMeshes } from './entities/arena.ts';
@@ -79,6 +79,7 @@ import { Debris } from './engine/debris.ts';
 import { SwingTrails } from './engine/swing_trail.ts';
 import { ModelLighting } from './engine/model_light.ts';
 import { dynamicLights } from './engine/dynamic_lights.ts';
+import { Foliage } from './engine/foliage.ts';
 import { propFixes } from './assets/prop_fixes.ts';
 import { PostFx } from './engine/post_fx.ts';
 import { TORCH_LIGHT_COLOR, TORCH_LIGHT_HEIGHT, TORCH_LIGHT_INTENSITY, TORCH_DYNAMIC_INTENSITY } from './entities/torch_light.ts';
@@ -303,6 +304,30 @@ async function main(): Promise<void> {
     }
     await originals?.preload?.([...files]);
   };
+  const foliageAmounts = (s: Settings) => ({ grass: s.foliageGrass, bushes: s.foliageBushes, plants: s.foliagePlants });
+  /** Grass and bushes (the foliage setting), grown for the level shown. */
+  let foliage: Foliage | null = null;
+  let foliageFor: OriginalLevel | null = null;
+  const refreshFoliage = () => {
+    const want = settings.current.foliage ? levelView : null;
+    if (want === foliageFor) return;
+    foliage?.dispose();
+    foliage = null;
+    foliageFor = want;
+    if (!want) return;
+    void Foliage.build(want.foliageGround()).then((f) => {
+      if (foliageFor !== want) return void f?.dispose();
+      foliage = f;
+      f?.setDistance(settings.current.foliageDistance);
+      f?.setAmounts(foliageAmounts(settings.current));
+      if (f) want.object.add(f.object);
+    });
+  };
+  settings.onChange((s) => {
+    refreshFoliage();
+    foliage?.setDistance(s.foliageDistance);
+    foliage?.setAmounts(foliageAmounts(s));
+  });
   const showArena = async (name: string, difficulty: Difficulty = 'medium'): Promise<ArenaDef | null> => {
     let next: ArenaDef;
     let view: OriginalLevel | null = null;
@@ -324,6 +349,7 @@ async function main(): Promise<void> {
     scene.add(arenaObject);
     view?.applyAtmosphere(scene);
     levelView = view;
+    refreshFoliage();
     await loadPlacementLooks(next);
     messagesDone.clear();
     messagesInside.clear();
@@ -1471,6 +1497,7 @@ async function main(): Promise<void> {
       if (k >= 1) outro = null;
     }
     levelView?.update(viewCamera, dt);
+    foliage?.update(viewCamera, local.object.position, dt);
     if (sounds) {
       sounds.setListener(viewCamera);
       // Footsteps on stone while running on the ground (catacomb floors are ST materials).

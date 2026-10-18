@@ -24,6 +24,17 @@ export interface Settings {
   enhancedLighting: boolean;
   /** Hit effects at half the original's size (not original; a playtest preference). */
   smallEffects: boolean;
+  /**
+   * Grass and bushes on outdoor grass ground (not original), swaying in the wind near the player.
+   * Off: the levels' ground as the original draws it.
+   */
+  foliage: boolean;
+  /** How far grass is drawn, metres (bushes a little farther); FOLIAGE_DISTANCE's range. */
+  foliageDistance: number;
+  /** Foliage density per kind: grass blades, bushes (bush01), small plants (plant01); 1 = default, 0-3. */
+  foliageGrass: number;
+  foliageBushes: number;
+  foliagePlants: number;
   /** Props whose original UVs miss their texture refitted (not original, on by default): the Fancy Chair. */
   fixedPropUvs: boolean;
   /** Custom keybindings mapping action ID to array of key codes. */
@@ -32,11 +43,14 @@ export interface Settings {
   optionsVersion?: number;
 }
 
-export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false, musicVolume: 0.5, silhouetteShadows: false, enhancedLighting: false, smallEffects: false, fixedPropUvs: true };
+export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false, musicVolume: 0.5, silhouetteShadows: false, enhancedLighting: false, smallEffects: false, foliage: false, foliageDistance: 35, foliageGrass: 1, foliageBushes: 1, foliagePlants: 1, fixedPropUvs: true };
 
 const KEY = 'crusaders.settings';
 /** Bumped when a default moves back to the original, so earlier stored values reset once. */
 const OPTIONS_VERSION = 2;
+
+/** A foliage density setting: 0-3, 1 when unset. */
+const amount = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(3, Math.max(0, v)) : 1);
 
 function sanitize(raw: unknown): Settings {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<keyof Settings | 'camera', unknown>>;
@@ -58,6 +72,11 @@ function sanitize(raw: unknown): Settings {
     silhouetteShadows: r.silhouetteShadows === true && r.optionsVersion === OPTIONS_VERSION,
     enhancedLighting: r.enhancedLighting === true,
     smallEffects: r.smallEffects === true,
+    foliage: r.foliage === true,
+    foliageGrass: amount(r.foliageGrass),
+    foliageBushes: amount(r.foliageBushes),
+    foliagePlants: amount(r.foliagePlants),
+    foliageDistance: typeof r.foliageDistance === 'number' && Number.isFinite(r.foliageDistance) ? Math.min(90, Math.max(15, r.foliageDistance)) : CLASSIC_SETTINGS.foliageDistance,
     fixedPropUvs: r.fixedPropUvs !== false,
     keybindings,
     optionsVersion: OPTIONS_VERSION,

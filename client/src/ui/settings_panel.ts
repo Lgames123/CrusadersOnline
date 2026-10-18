@@ -219,6 +219,69 @@ export class SettingsPanel {
 
             <div class="opt-group opt-toggle-group">
               <label class="opt-toggle-label">
+                <input id="set-foliage" type="checkbox" ${s.foliage ? 'checked' : ''} />
+                <span class="opt-toggle-box"></span>
+                <span class="opt-toggle-text">
+                  <strong>Grass and Bushes</strong>
+                  <span class="opt-desc">Grows instanced grass and bushes on the levels' grass ground, drawn with the ground's own texture and baked light. Only foliage near you sways in the wind, and it thins out with distance to stay cheap.</span>
+                </span>
+              </label>
+            </div>
+
+            <div class="opt-group">
+              <div class="opt-group-header">
+                <h3>Grass Render Distance</h3>
+                <span class="opt-badge" id="badge-foliage-distance">${s.foliageDistance} m</span>
+              </div>
+              <div class="opt-slider-row">
+                <span class="opt-slider-label">15 m</span>
+                <input id="set-foliage-distance" type="range" min="15" max="90" step="5" value="${s.foliageDistance}" />
+                <span class="opt-slider-label">90 m</span>
+              </div>
+              <p class="opt-desc">How far grass is drawn (bushes reach a little farther). Shorter is cheaper.</p>
+            </div>
+
+            <div class="opt-group">
+              <div class="opt-group-header">
+                <h3>Grass Density</h3>
+                <span class="opt-badge" id="badge-foliageGrass">${Math.round(s.foliageGrass * 100)}%</span>
+              </div>
+              <div class="opt-slider-row">
+                <span class="opt-slider-label">0%</span>
+                <input id="set-foliageGrass" type="range" min="0" max="3" step="0.05" value="${s.foliageGrass}" />
+                <span class="opt-slider-label">300%</span>
+              </div>
+              <p class="opt-desc">How many grass blades grow. Lower is cheaper.</p>
+            </div>
+
+            <div class="opt-group">
+              <div class="opt-group-header">
+                <h3>Bush Density</h3>
+                <span class="opt-badge" id="badge-foliageBushes">${Math.round(s.foliageBushes * 100)}%</span>
+              </div>
+              <div class="opt-slider-row">
+                <span class="opt-slider-label">0%</span>
+                <input id="set-foliageBushes" type="range" min="0" max="3" step="0.05" value="${s.foliageBushes}" />
+                <span class="opt-slider-label">300%</span>
+              </div>
+              <p class="opt-desc">How many bushes grow among the grass.</p>
+            </div>
+
+            <div class="opt-group">
+              <div class="opt-group-header">
+                <h3>Plant Density</h3>
+                <span class="opt-badge" id="badge-foliagePlants">${Math.round(s.foliagePlants * 100)}%</span>
+              </div>
+              <div class="opt-slider-row">
+                <span class="opt-slider-label">0%</span>
+                <input id="set-foliagePlants" type="range" min="0" max="3" step="0.05" value="${s.foliagePlants}" />
+                <span class="opt-slider-label">300%</span>
+              </div>
+              <p class="opt-desc">How many small leafy plants grow among the grass.</p>
+            </div>
+
+            <div class="opt-group opt-toggle-group">
+              <label class="opt-toggle-label">
                 <input id="set-prop-uvs" type="checkbox" ${s.fixedPropUvs ? 'checked' : ''} />
                 <span class="opt-toggle-box"></span>
                 <span class="opt-toggle-text">
@@ -354,6 +417,33 @@ export class SettingsPanel {
       });
     }
 
+    const foliage = this.root.querySelector<HTMLInputElement>('#set-foliage');
+    if (foliage) {
+      foliage.addEventListener('change', () => {
+        this.store.update({ foliage: foliage.checked });
+      });
+    }
+
+    const foliageDistance = this.root.querySelector<HTMLInputElement>('#set-foliage-distance');
+    if (foliageDistance) {
+      foliageDistance.addEventListener('input', () => {
+        const val = Number(foliageDistance.value);
+        this.store.update({ foliageDistance: val });
+        const badge = this.root.querySelector('#badge-foliage-distance');
+        if (badge) badge.textContent = `${val} m`;
+      });
+    }
+
+    for (const key of ['foliageGrass', 'foliageBushes', 'foliagePlants'] as const) {
+      const input = this.root.querySelector<HTMLInputElement>(`#set-${key}`);
+      input?.addEventListener('input', () => {
+        const val = Number(input.value);
+        this.store.update({ [key]: val });
+        const badge = this.root.querySelector(`#badge-${key}`);
+        if (badge) badge.textContent = `${Math.round(val * 100)}%`;
+      });
+    }
+
     const propUvs = this.root.querySelector<HTMLInputElement>('#set-prop-uvs');
     if (propUvs) {
       propUvs.addEventListener('change', () => {
@@ -407,6 +497,11 @@ export class SettingsPanel {
           silhouetteShadows: false,
           enhancedLighting: false,
           smallEffects: false,
+          foliage: false,
+          foliageDistance: 35,
+          foliageGrass: 1,
+          foliageBushes: 1,
+          foliagePlants: 1,
           fixedPropUvs: true,
           keybindings: getDefaultKeybindings(),
         });

@@ -105,7 +105,7 @@ export class LevelLight {
   }
 
   /** The lightmap at (u, v): sRGB texel to linear, times the level's gain. */
-  private texel(u: number, v: number, color: THREE.Color): void {
+  texel(u: number, v: number, color: THREE.Color): void {
     const x = Math.min(this.width - 1, Math.max(0, Math.floor(u * this.width)));
     const y = Math.min(this.height - 1, Math.max(0, Math.floor(v * this.height)));
     const p = (y * this.width + x) * 4;

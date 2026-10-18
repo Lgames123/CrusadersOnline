@@ -5,6 +5,7 @@ import { dynamicLights } from '../engine/dynamic_lights.ts';
 import { propFixes } from './prop_fixes.ts';
 import { nodeFrameInverse } from './original_models.ts';
 import { ItemThumbnails } from '../ui/item_thumbnails.ts';
+import type { FoliageGround } from '../engine/foliage.ts';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, isPlaced, type Difficulty, DYNAMIC_OBJECT_BASE, type ArenaDef, type LevelObject, type LevelBrush, type LevelPlacements, type WorldObjectDef, type WorldObjectState, type DoorMotion, type DoorSwing, stepDoorMotion, swingPose, type MoverDef, type MoverMotion, moverPose, shutMover, stepMover, useMover } from '@crusaders/shared';
@@ -111,6 +112,8 @@ export interface OriginalLevel {
   useBrush(name: string): void;
   /** Surface under a point (metres), for footsteps; null off the level. */
   surfaceAt(pos: THREE.Vector3): Surface | null;
+  /** The ground the foliage setting grows grass on (it picks the grass textures itself). */
+  foliageGround(): FoliageGround;
   /** Music track of the level act (Music/<n>.mp3), if any. */
   music?: number;
   /** Dungeon atmosphere: dim ambient light, dark fog. */
@@ -579,6 +582,16 @@ export async function loadOriginalLevel(arenaName: string, difficulty: Difficult
       if (!s) surfaces.set(material, (s = surfaceOf(material.name, material.map)));
       lastSurface = s;
       return s;
+    },
+    foliageGround() {
+      level.updateWorldMatrix(true, true);
+      const meshes = level.children.filter((c): c is THREE.Mesh => (c as THREE.Mesh).isMesh);
+      const avoid = [...objects.values()].map((v) => v.position);
+      for (const d of doors.values()) {
+        const b = d.def.bounds;
+        if (b) avoid.push(new THREE.Vector3((b[0] + b[3]) / 2, b[1], (b[2] + b[5]) / 2));
+      }
+      return { meshes, light, avoid, seed: arenaName };
     },
     arena,
     light,
