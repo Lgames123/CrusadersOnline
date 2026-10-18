@@ -15,6 +15,7 @@ import {
   THRUST_WALL_HEIGHT,
   wallAhead,
   wallDistance,
+  rayDistance,
   PLAYER_REACH,
   attackTiming,
   LEVEL_PREFIX,
@@ -303,6 +304,18 @@ async function main(): Promise<void> {
       placementLooks.set(sp.placement, look);
     }
     await originals?.preload?.([...files]);
+  };
+  /** Line of sight through the level's collision mesh, for culling foliage hidden behind it. */
+  const foliageDir = { x: 0, y: 0, z: 0 };
+  const foliageBlocked = (from: THREE.Vector3, to: THREE.Vector3): boolean => {
+    const world = session?.mw ?? mw;
+    if (!world) return false;
+    const len = from.distanceTo(to);
+    if (len < 0.5) return false;
+    foliageDir.x = (to.x - from.x) / len;
+    foliageDir.y = (to.y - from.y) / len;
+    foliageDir.z = (to.z - from.z) / len;
+    return rayDistance(world, from, foliageDir, len - 0.35) !== null;
   };
   const foliageAmounts = (s: Settings) => ({ grass: s.foliageGrass, bushes: s.foliageBushes, plants: s.foliagePlants });
   /** Grass and bushes (the foliage setting), grown for the level shown. */
@@ -1411,7 +1424,7 @@ async function main(): Promise<void> {
 
   if (import.meta.env.DEV) {
     // Debug/E2E hook: lets tests drive input without pointer lock.
-    (window as unknown as { __co: unknown }).__co = { input, player: local, mw, session, remotes, inventory: inventoryPanel, scene, get camera() { return chase.camera; }, cameras: { classic: chase.classic, modern: chase.modern }, rig: chase, settings, renderer, level: levelView, get effects() { return effects; }, render: () => postFx.render(chase.camera, 0) };
+    (window as unknown as { __co: unknown }).__co = { input, player: local, mw, session, remotes, inventory: inventoryPanel, scene, get camera() { return chase.camera; }, cameras: { classic: chase.classic, modern: chase.modern }, rig: chase, settings, renderer, level: levelView, get effects() { return effects; }, get foliage() { return foliage; }, render: () => postFx.render(chase.camera, 0) };
   }
 
   // Fixed-step simulation (same 20 Hz step as the server), interpolated rendering.
@@ -1497,7 +1510,7 @@ async function main(): Promise<void> {
       if (k >= 1) outro = null;
     }
     levelView?.update(viewCamera, dt);
-    foliage?.update(viewCamera, local.object.position, dt);
+    foliage?.update(viewCamera, local.object.position, dt, foliageBlocked);
     if (sounds) {
       sounds.setListener(viewCamera);
       // Footsteps on stone while running on the ground (catacomb floors are ST materials).

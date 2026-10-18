@@ -23,6 +23,15 @@ import { nodeFrameInverse } from '../assets/original_models.ts';
  *   rank, so drawing the first N is an even thinning: the CPU draws only as many as the density
  *   at the cell's nearest point needs, and the vertex shader shrinks each one away smoothly as
  *   the density at its own distance passes its rank. A density change regrows the cells in reach.
+ * - Visibility per cell, before anything is drawn: a box-against-frustum test (tighter than the
+ *   bounding sphere for a flat 10 m cell), and occlusion by the level: rays from the camera to
+ *   sample points on the cell's grass against the collision mesh's BVH (walls, hills, houses,
+ *   shut doors). A cell is re-tested only when the camera has moved since its last test (a
+ *   still camera costs nothing; hidden cells after 0.25 m, so they come back at once), nearest
+ *   hidden ones first, within a time budget. Grass and bushes are tested at their
+ *   own heights (a bush shows over a wall that hides the grass).
+ * - Geometry LOD: past LOD_START of the render distance, tufts are one triangle per blade.
+ * - Drawn after the level (renderOrder), so early depth rejection drops blades behind walls.
  * - Wind (Perlin noise) only near the player: cells within reach of WIND_RANGE use a shader
  *   variant with the noise, the rest a variant with none; its sway fades to nothing before the
  *   edge, so switching never pops. Grass near the player's feet bends away from them.
@@ -36,6 +45,28 @@ const GRASS_DENSITY = 12;
 export const MAX_AMOUNT = 3;
 /** Milliseconds a frame spent growing cells (at least one cell a frame when any is due). */
 const GROW_BUDGET_MS = 3;
+/**
+ * Occlusion: cells this close are never culled; a cell is re-tested once the camera has moved
+ * this far from where it was last tested (hidden cells sooner: they must come back at once;
+ * occlusion depends on where the eye is, not where it looks); budget (ms).
+ */
+const OCC_NEAR = 8;
+const OCC_MOVE_HIDDEN = 0.25;
+const OCC_MOVE_SEEN = 1;
+const OCC_BUDGET_MS = 1;
+/** Ray targets above the ground: grass tops, bush tops (metres). */
+const OCC_GRASS_Y = 0.45;
+const OCC_BUSH_Y = 2.2;
+/** Fraction of the render distance past which tufts use the low-poly geometry. */
+const LOD_START = 0.45;
+/** Draw order: after the level and characters (early depth rejection). */
+const FOLIAGE_RENDER_ORDER = 1;
+
+/**
+ * Line of sight the level provides: true when level geometry lies between the two points
+ * (world metres). Used to cull cells hidden behind the level.
+ */
+export type Blocked = (from: THREE.Vector3, to: THREE.Vector3) => boolean;
 
 /** Density settings per kind (1 = the base density, 0 = none, up to MAX_AMOUNT). */
 export interface FoliageAmounts {
@@ -225,12 +256,27 @@ interface Cell {
   tris: number[];
   minY: number;
   maxY: number;
+  /** Bounds of the cell with its tallest foliage, for the frustum test. */
+  box: THREE.Box3;
+  /** Points on its grass ground (x, y, z triples), for the occlusion rays. */
+  samples: number[];
+  /** Horizontal distance from the camera to its nearest point, this frame. */
+  d: number;
+  /** In the frustum this frame. */
+  inView: boolean;
+  /** Hidden by the level: 0 no, 1 the grass (bushes still show over it), 2 all of it. */
+  occ: 0 | 1 | 2;
+  /** Frame of the last occlusion test, and where the camera was for it. */
+  tested: number;
+  testedFrom: THREE.Vector3;
 }
 
 /** One layer grown over one cell (mesh null when nothing grows there). */
 interface Chunk {
   mesh: THREE.Mesh | null;
   geo: THREE.InstancedBufferGeometry | null;
+  /** The same instances on the layer's low-poly geometry, made when first needed. */
+  geoLod: THREE.InstancedBufferGeometry | null;
   centre: THREE.Vector3;
   radius: number;
   /** Instance ranks, ascending (the order they are stored in). */
@@ -257,6 +303,8 @@ interface Layer {
   wind: THREE.ShaderMaterial;
   chunks: Map<string, Chunk>;
   base: THREE.BufferGeometry;
+  /** Low-poly base for far cells, if the kind has one. */
+  baseLod: THREE.BufferGeometry | null;
 }
 
 /** One scattered thing: world position, yaw, scale, linear colour, ground texture coordinate. */
@@ -293,7 +341,8 @@ function hashString(s: string): number {
 }
 
 /** Five tapered blades leaning out from a tuft's centre; unit height, aBend 0 at the root. */
-function tuftGeometry(): THREE.BufferGeometry {
+function tuftGeometry(lod = false): THREE.BufferGeometry {
+  if (lod) return tuftLodGeometry();
   const pos: number[] = [];
   const bend: number[] = [];
   const shade: number[] = [];
@@ -324,6 +373,28 @@ function tuftGeometry(): THREE.BufferGeometry {
   g.setAttribute('aBend', new THREE.Float32BufferAttribute(bend, 1));
   g.setAttribute('aShade', new THREE.Float32BufferAttribute(shade, 1));
   g.setIndex(idx);
+  return g;
+}
+
+/** The far tuft: three blades of one triangle each (9 vertices, 3 triangles, against 25 / 15). */
+function tuftLodGeometry(): THREE.BufferGeometry {
+  const pos: number[] = [];
+  const bend: number[] = [];
+  const shade: number[] = [];
+  const heights = [1, 0.8, 0.88];
+  for (let b = 0; b < heights.length; b++) {
+    const a = (b * Math.PI * 2) / heights.length + 0.4;
+    const dx = Math.cos(a), dz = Math.sin(a);
+    const tx = -dz, tz = dx;
+    const w = 0.08;
+    pos.push(dx * 0.03 - tx * w, 0, dz * 0.03 - tz * w, dx * 0.03 + tx * w, 0, dz * 0.03 + tz * w, dx * 0.2, heights[b]!, dz * 0.2);
+    bend.push(0, 0, 1);
+    shade.push(1, 1, 1.25);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('aBend', new THREE.Float32BufferAttribute(bend, 1));
+  g.setAttribute('aShade', new THREE.Float32BufferAttribute(shade, 1));
   return g;
 }
 
@@ -449,6 +520,14 @@ export class Foliage {
   private readonly seed: number;
   private readonly clearance: Clearance;
   private readonly light: LevelLight | null;
+  private readonly frustum = new THREE.Frustum();
+  private readonly viewProj = new THREE.Matrix4();
+  private readonly target = new THREE.Vector3();
+  private frame = 0;
+  /** Cull cells hidden behind the level (when update() is given a line-of-sight test). */
+  occlusion = true;
+  /** Low-poly tufts in the distance. */
+  lod = true;
 
   private constructor(ground: FoliageGround) {
     this.object.name = 'foliage';
@@ -514,7 +593,7 @@ export class Foliage {
             const key = `${cx},${cz}`;
             let cell = cells.get(key);
             if (!cell) {
-              cell = { cx, cz, key, tris: [], minY: Infinity, maxY: -Infinity };
+              cell = { cx, cz, key, tris: [], minY: Infinity, maxY: -Infinity, box: new THREE.Box3(), samples: [], d: 0, inView: false, occ: 0, tested: -Infinity, testedFrom: new THREE.Vector3(Infinity, 0, 0) };
               cells.set(key, cell);
               f.cells.push(cell);
             }
@@ -526,13 +605,14 @@ export class Foliage {
       }
     }
     if (!f.tris.length) return null;
-    for (const surface of surfaces) f.addLayer(tuftGeometry(), surface.map, 'grass', surface, GRASS_DENSITY, GRASS_FADE, GRASS_SWAY, true, GRASS_HEIGHT[1], [1, 1]);
+    for (const cell of f.cells) f.prepareCell(cell);
+    for (const surface of surfaces) f.addLayer(tuftGeometry(), tuftGeometry(true), surface.map, 'grass', surface, GRASS_DENSITY, GRASS_FADE, GRASS_SWAY, true, GRASS_HEIGHT[1], [1, 1]);
     const models = await Promise.all(BUSHES.map((k) => modelGeometry(k.model)));
     BUSHES.forEach((kind, k) => {
       const m = models[k];
       if (!m) return;
       m.geo.computeBoundingBox();
-      f.addLayer(m.geo, m.map, kind.amount, null, kind.density, kind.fade, kind.sway, false, m.geo.boundingBox!.max.y * kind.scale[1], kind.scale);
+      f.addLayer(m.geo, null, m.map, kind.amount, null, kind.density, kind.fade, kind.sway, false, m.geo.boundingBox!.max.y * kind.scale[1], kind.scale);
     });
     return f;
   }
@@ -548,7 +628,7 @@ export class Foliage {
     this.amounts = { ...amounts };
   }
 
-  private addLayer(base: THREE.BufferGeometry, map: THREE.Texture | null, amount: keyof FoliageAmounts, surface: Surface | null, density: number, fade: [number, number], sway: number, push: boolean, height: number, scale: [number, number]): void {
+  private addLayer(base: THREE.BufferGeometry, baseLod: THREE.BufferGeometry | null, map: THREE.Texture | null, amount: keyof FoliageAmounts, surface: Surface | null, density: number, fade: [number, number], sway: number, push: boolean, height: number, scale: [number, number]): void {
     const uFade = { value: new THREE.Vector2(fade[0] * this.distance, fade[1] * this.distance) };
     const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uSway: { value: sway } }]);
     // Not merged: merging clones textures, and uFade / the shared ones must stay the same objects.
@@ -561,7 +641,52 @@ export class Foliage {
       return new THREE.ShaderMaterial({ uniforms, defines, vertexShader: VERTEX, fragmentShader: FRAGMENT, fog: true, side: THREE.DoubleSide });
     };
     base.computeBoundingSphere();
-    this.layers.push({ id: this.layers.length, fade, uFade, amount, surface, density, scale, height, still: make(false), wind: make(true), chunks: new Map(), base });
+    this.layers.push({ id: this.layers.length, fade, uFade, amount, surface, density, scale, height, still: make(false), wind: make(true), chunks: new Map(), base, baseLod });
+  }
+
+  /**
+   * A cell's frustum box and occlusion samples: a 3 x 3 grid over it, each on the highest grass
+   * triangle under it; the centres of its triangles where the grid finds none (a cell only
+   * partly grass ground).
+   */
+  private prepareCell(cell: Cell): void {
+    const x0 = cell.cx * CHUNK, z0 = cell.cz * CHUNK;
+    cell.box.set(new THREE.Vector3(x0, cell.minY, z0), new THREE.Vector3(x0 + CHUNK, cell.maxY + OCC_BUSH_Y + 0.5, z0 + CHUNK)).expandByScalar(1);
+    for (let i = 0; i < 3; i++) {
+      for (let j = 0; j < 3; j++) {
+        const x = x0 + ((i * 2 + 1) * CHUNK) / 6, z = z0 + ((j * 2 + 1) * CHUNK) / 6;
+        let best = -Infinity;
+        for (const id of cell.tris) {
+          const p = this.tris[id]!.p;
+          const d = (p[5]! - p[8]!) * (p[0]! - p[6]!) + (p[6]! - p[3]!) * (p[2]! - p[8]!);
+          if (Math.abs(d) < 1e-9) continue;
+          const w0 = ((p[5]! - p[8]!) * (x - p[6]!) + (p[6]! - p[3]!) * (z - p[8]!)) / d;
+          const w1 = ((p[8]! - p[2]!) * (x - p[6]!) + (p[0]! - p[6]!) * (z - p[8]!)) / d;
+          const w2 = 1 - w0 - w1;
+          if (w0 < 0 || w1 < 0 || w2 < 0) continue;
+          best = Math.max(best, w0 * p[1]! + w1 * p[4]! + w2 * p[7]!);
+        }
+        if (best > -Infinity) cell.samples.push(x, best, z);
+      }
+    }
+    if (cell.samples.length >= 9) return;
+    for (const id of cell.tris.slice(0, 6)) {
+      const p = this.tris[id]!.p;
+      const cx = Math.min(x0 + CHUNK, Math.max(x0, (p[0]! + p[3]! + p[6]!) / 3));
+      const cz = Math.min(z0 + CHUNK, Math.max(z0, (p[2]! + p[5]! + p[8]!) / 3));
+      cell.samples.push(cx, (p[1]! + p[4]! + p[7]!) / 3, cz);
+    }
+  }
+
+  /** How much of a cell the level hides from `eye`: any sample in sight shows it. */
+  private occlusionOf(cell: Cell, eye: THREE.Vector3, blocked: Blocked): 0 | 1 | 2 {
+    const s = cell.samples;
+    for (const lift of [OCC_GRASS_Y, OCC_BUSH_Y]) {
+      for (let i = 0; i < s.length; i += 3) {
+        if (!blocked(eye, this.target.set(s[i]!, s[i + 1]! + lift, s[i + 2]!))) return lift === OCC_GRASS_Y ? 0 : 1;
+      }
+    }
+    return 2;
   }
 
   /** Scatters one layer over one cell at the current density. */
@@ -608,7 +733,7 @@ export class Foliage {
         list.push({ x, y: y - (grass ? 0.02 : 0.05), z, yaw: rand() * Math.PI * 2, scale, rank: rand(), r: light.r * k2, g: light.g * k2, b: light.b * k2, u, v });
       }
     }
-    if (!list.length) return { mesh: null, geo: null, centre: new THREE.Vector3(x0 + CHUNK / 2, 0, z0 + CHUNK / 2), radius: CHUNK * 0.71, ranks: new Float32Array(0), amount };
+    if (!list.length) return { mesh: null, geo: null, geoLod: null, centre: new THREE.Vector3(x0 + CHUNK / 2, 0, z0 + CHUNK / 2), radius: CHUNK * 0.71, ranks: new Float32Array(0), amount };
 
     list.sort((p, q) => p.rank - q.rank);
     const offset = new Float32Array(list.length * 4);
@@ -639,31 +764,84 @@ export class Foliage {
     const mesh = new THREE.Mesh(geo, layer.still);
     mesh.matrixAutoUpdate = false;
     mesh.castShadow = mesh.receiveShadow = false;
+    // Culled here per cell (frustum box, occlusion), not by three's bounding sphere.
+    mesh.frustumCulled = false;
+    mesh.renderOrder = FOLIAGE_RENDER_ORDER;
     this.object.add(mesh);
-    return { mesh, geo, centre: geo.boundingSphere.center.clone(), radius: geo.boundingSphere.radius, ranks, amount };
+    return { mesh, geo, geoLod: null, centre: geo.boundingSphere.center.clone(), radius: geo.boundingSphere.radius, ranks, amount };
   }
 
   private drop(chunk: Chunk): void {
     chunk.mesh?.removeFromParent();
     chunk.geo?.dispose();
+    chunk.geoLod?.dispose();
+  }
+
+  /** The chunk's instances on the layer's low-poly geometry. */
+  private lodGeometry(layer: Layer, ch: Chunk): THREE.InstancedBufferGeometry {
+    const geo = new THREE.InstancedBufferGeometry();
+    const base = layer.baseLod!;
+    if (base.index) geo.index = base.index;
+    for (const [name, attr] of Object.entries(base.attributes)) geo.setAttribute(name, attr);
+    for (const name of ['aOffset', 'aParams', 'aColor', 'aGroundUv']) {
+      const attr = ch.geo!.getAttribute(name);
+      if (attr) geo.setAttribute(name, attr);
+    }
+    geo.boundingBox = ch.geo!.boundingBox;
+    geo.boundingSphere = ch.geo!.boundingSphere;
+    return geo;
   }
 
   /**
-   * Call every frame: grows the cells coming within reach (nearest first, within a time budget)
-   * and frees those left far behind; thinning by distance from the camera; wind near `focus`
-   * (the player's feet).
+   * Call every frame: visibility per cell (frustum box; occlusion by the level when `blocked`
+   * is given), grows the cells coming within reach (nearest seen first, within a time budget)
+   * and frees those left far behind; thinning and LOD by distance from the camera; wind near
+   * `focus` (the player's feet).
    */
-  update(camera: THREE.Camera, focus: THREE.Vector3, dt: number): void {
+  update(camera: THREE.Camera, focus: THREE.Vector3, dt: number, blocked?: Blocked): void {
     if (this.disposed) return;
+    this.frame++;
     this.shared.uTime.value += dt;
     this.shared.uFocus.value.copy(focus);
     const cam = camera.position;
+    camera.updateMatrixWorld();
+    this.frustum.setFromProjectionMatrix(this.viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+
+    // Which cells can be seen.
+    let reach = 0;
+    for (const layer of this.layers) reach = Math.max(reach, layer.uFade.value.y);
+    const due: Cell[] = [];
+    const occlude = this.occlusion && blocked;
+    for (const cell of this.cells) {
+      cell.d = Math.max(0, Math.hypot((cell.cx + 0.5) * CHUNK - cam.x, (cell.cz + 0.5) * CHUNK - cam.z) - CHUNK * 0.71);
+      cell.inView = cell.d < reach && this.frustum.intersectsBox(cell.box);
+      if (!cell.inView) continue;
+      if (!occlude || cell.d < OCC_NEAR || !cell.samples.length) {
+        cell.occ = 0;
+        cell.testedFrom.x = Infinity; // untested: tested again when culling applies
+        continue;
+      }
+      if (cell.testedFrom.distanceToSquared(cam) >= (cell.occ ? OCC_MOVE_HIDDEN ** 2 : OCC_MOVE_SEEN ** 2)) due.push(cell);
+    }
+    if (occlude && due.length) {
+      // Hidden ones first (they must come back at once), then the longest unchecked.
+      due.sort((p, q) => q.occ - p.occ || p.tested - q.tested || p.d - q.d);
+      const start = performance.now();
+      for (const cell of due) {
+        cell.occ = this.occlusionOf(cell, cam, blocked);
+        cell.tested = this.frame;
+        cell.testedFrom.copy(cam);
+        if (performance.now() - start > OCC_BUDGET_MS) break;
+      }
+    }
+
     const wanted: { layer: Layer; cell: Cell; d: number }[] = [];
     for (const layer of this.layers) {
       const { x: f0, y: f1 } = layer.uFade.value;
       const amount = Math.min(MAX_AMOUNT, Math.max(0, this.amounts[layer.amount]));
+      const lodFrom = f1 * LOD_START;
       for (const cell of this.cells) {
-        const d = Math.max(0, Math.hypot((cell.cx + 0.5) * CHUNK - cam.x, (cell.cz + 0.5) * CHUNK - cam.z) - CHUNK * 0.71);
+        const d = cell.d;
         let ch = layer.chunks.get(cell.key);
         if (d >= f1) {
           // Out of reach: hidden, freed once well behind.
@@ -671,8 +849,13 @@ export class Foliage {
           if (ch && d > f1 + CHUNK * 2) (this.drop(ch), layer.chunks.delete(cell.key));
           continue;
         }
-        if (!ch || ch.amount !== amount) wanted.push({ layer, cell, d });
+        // Grown whether seen or not (turning round must not show bare ground), seen ones first.
+        if (!ch || ch.amount !== amount) wanted.push({ layer, cell, d: cell.inView ? d : d + 1000 });
         if (!ch?.mesh || !ch.geo) continue;
+        if (!cell.inView || cell.occ === 2 || (cell.occ === 1 && layer.surface)) {
+          ch.mesh.visible = false;
+          continue;
+        }
         // Draw only the instances the density at the cell's nearest point keeps (ranks below it).
         const t = Math.min(1, Math.max(0, (d - f0) / (f1 - f0)));
         const density = 1 - t * t * (3 - 2 * t);
@@ -682,7 +865,9 @@ export class Foliage {
           if (ch.ranks[mid]! < density) lo = mid + 1;
           else hi = mid;
         }
-        ch.geo.instanceCount = lo;
+        const geo = this.lod && layer.baseLod && d > lodFrom ? (ch.geoLod ??= this.lodGeometry(layer, ch)) : ch.geo;
+        geo.instanceCount = lo;
+        ch.mesh.geometry = geo;
         ch.mesh.visible = lo > 0;
         const dFocus = Math.hypot(ch.centre.x - focus.x, ch.centre.z - focus.z) - ch.radius;
         ch.mesh.material = dFocus < WIND_RANGE[1] ? layer.wind : layer.still;
@@ -703,6 +888,17 @@ export class Foliage {
     }
   }
 
+  /** What the last update() saw, for tuning: cells in reach, in the frustum, hidden by the level. */
+  stats(): { cells: number; inView: number; occluded: number } {
+    let inView = 0, occluded = 0;
+    for (const c of this.cells) {
+      if (!c.inView) continue;
+      inView++;
+      if (c.occ === 2) occluded++;
+    }
+    return { cells: this.cells.length, inView, occluded };
+  }
+
   dispose(): void {
     this.disposed = true;
     this.object.removeFromParent();
@@ -710,6 +906,7 @@ export class Foliage {
       for (const ch of layer.chunks.values()) this.drop(ch);
       layer.chunks.clear();
       layer.base.dispose();
+      layer.baseLod?.dispose();
       layer.still.dispose();
       layer.wind.dispose();
     }
