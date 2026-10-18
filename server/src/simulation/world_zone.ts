@@ -320,8 +320,10 @@ const OBJECT_HIT_KEY = 1_000_000;
 /** Dropped items: expire after 5 minutes (5 * 60 * 20 ticks), max 20 per player on ground. */
 export const DROPPED_ITEM_LIFETIME_TICKS = 20 * 60 * 5;
 export const MAX_DROPPED_ITEMS_PER_PLAYER = 20;
-/** A kill's items that do not fit the killer's bag wait on the ground for him alone, 2 minutes. */
-export const OVERFLOW_LOOT_LIFETIME_TICKS = 20 * 60 * 2;
+/** A kill's items lie around the corpse for the killer alone, 2 minutes. */
+export const KILL_LOOT_LIFETIME_TICKS = 20 * 60 * 2;
+/** How far from the corpse a kill's items lie (metres; they would all overlap at its feet). */
+const KILL_LOOT_SPREAD = 0.6;
 
 interface WorldObject {
   def: WorldObjectDef;
@@ -338,7 +340,7 @@ interface WorldObject {
   ownerKey?: string;
   /** Tick at which the dropped item expires (5 minutes from drop). */
   expiresAt?: number;
-  /** Seen and taken only by this player (playerKey): a kill's loot that did not fit his bag. */
+  /** Seen and taken only by this player (playerKey): a kill's loot. */
   onlyFor?: string;
 }
 
@@ -3316,11 +3318,10 @@ export class WorldZone {
 
   /**
    * A kill's reward: its XP, and what its corpse gives (the placement's inventory, 0x00471940;
-   * else the archetype's gold roll and loot table) straight into the killer's purse and bag.
-   * What does not fit waits at the corpse for him alone (OVERFLOW_LOOT_LIFETIME_TICKS); gold
-   * always goes in.
+   * else the archetype's gold roll and loot table). Gold goes to the purse; the items fall
+   * around the corpse, for the killer alone (dropKillLoot).
    */
-  private grantReward(p: Player, mob: Mob): { xp: number; gold: number; loot?: string[] } {
+  private grantReward(p: Player, mob: Mob): { xp: number; gold: number } {
     const arch = mob.archetype;
     this.addExperience(p, arch.xpReward);
     let grants: GroundGrant[];
@@ -3334,39 +3335,48 @@ export class WorldZone {
       }
     }
     let gold = 0;
-    const loot: string[] = [];
-    const left: { def: ItemDef; quantity: number }[] = [];
+    const loot: { def: ItemDef; quantity: number }[] = [];
     for (const g of grants) {
       const n = Math.max(1, g.quantity);
-      if (g.name === GOLD_ITEM) {
-        gold += this.grantItem(p, g.name, n);
-        continue;
+      if (g.name === GOLD_ITEM) gold += this.grantItem(p, g.name, n);
+      else {
+        const def = this.groundItemDef(g);
+        if (def) loot.push({ def, quantity: n });
       }
-      const def = this.groundItemDef(g);
-      if (!def) continue;
-      const got = this.grantItem(p, def.name, n, def.id);
-      if (got > 0) loot.push(got > 1 ? `${got} ${def.name}` : def.name);
-      if (got < n && def.type !== 'spellbook') left.push({ def, quantity: n - got });
     }
-    if (left.length) this.dropOverflow(p, mob.character.position, left);
+    if (loot.length) this.dropKillLoot(p, mob, loot);
     p.statsDirty = true;
     const record = this.persistRecord(p);
     if (record) this.outbox.persist?.([record], 'progress');
-    return { xp: arch.xpReward, gold, ...(loot.length > 0 ? { loot } : {}) };
+    return { xp: arch.xpReward, gold };
   }
 
-  /** A kill's items the bag could not take: ground items at the corpse, the killer's only. */
-  private dropOverflow(p: Player, at: { x: number; y: number; z: number }, left: { def: ItemDef; quantity: number }[]): void {
+  /**
+   * A kill's items on the ground around the corpse, each drawn as itself (`loose`), seen and
+   * taken by the killer only (`onlyFor`), gone after KILL_LOOT_LIFETIME_TICKS. Taken one by one
+   * like any ground item (Tab or the ground panel).
+   */
+  private dropKillLoot(p: Player, mob: Mob, loot: { def: ItemDef; quantity: number }[]): void {
     const onlyFor = this.playerKey(p);
+    const at = mob.character.position;
     const changes: ObjectChange[] = [];
-    for (const { def, quantity } of left) {
+    loot.forEach(({ def, quantity }, i) => {
       const id = this.nextDynamicObjectId++;
-      const objDef: WorldObjectDef = { id, kind: 'item', x: at.x, y: at.y, z: at.z, item: { name: def.name, quantity, itemId: def.id } };
-      this.objects.set(id, { def: objDef, state: 'present', hp: 0, respawnAt: 0, dynamic: true, onlyFor, expiresAt: this.tick + OVERFLOW_LOOT_LIFETIME_TICKS });
+      // Golden-angle steps from the creature's heading: a ring of items that never overlap.
+      const a = dequantizeAngle(mob.yaw) + i * 2.4;
+      const objDef: WorldObjectDef = {
+        id,
+        kind: 'item',
+        x: at.x + Math.sin(a) * KILL_LOOT_SPREAD,
+        y: at.y,
+        z: at.z + Math.cos(a) * KILL_LOOT_SPREAD,
+        loose: true,
+        item: { name: def.name, quantity, itemId: def.id, ...(def.model !== undefined ? { model: def.model } : {}), ...(def.texture !== undefined ? { texture: def.texture } : {}) },
+      };
+      this.objects.set(id, { def: objDef, state: 'present', hp: 0, respawnAt: 0, dynamic: true, onlyFor, expiresAt: this.tick + KILL_LOOT_LIFETIME_TICKS });
       changes.push({ id, state: 'present', def: objDef });
-    }
+    });
     this.sendObjects(p, changes);
-    this.sendJson(p.connId, { op: SC.ERROR, d: { code: 'bag_full', message: 'Inventory full. The rest waits in a chest for 2 minutes.' } });
   }
 
   /** Stats_AddExperience: the XP, and Stats_LevelUp for each level reached. */

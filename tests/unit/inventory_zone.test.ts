@@ -159,33 +159,31 @@ describe('inventory authority in the zone', () => {
     expect(chest()).toEqual([expect.objectContaining({ state: 'open', loot: ['Long Sword', '5 Gold Pieces'] })]);
   });
 
-  it("a kill gives the corpse's gold always; items the bag cannot take wait 2 minutes for the killer alone", () => {
+  it("a kill's gold goes to the purse; its items lie at the corpse for the killer alone, 2 minutes", () => {
     const t = zone(new Map(BUILTIN_ITEMS), [{ name: 'Gold Pieces', quantity: 7 }, { name: 'Long Sword', quantity: 1 }, { name: 'Wooden Shield', quantity: 1 }]);
-    const p = t.join(1, FULL_BAG);
-    t.join(2);
-    const internal = t.z as unknown as { actors: Map<number, { kind: string }>; grantReward(p: unknown, m: unknown): { gold: number; loot?: string[] } };
+    const p = t.join(1);
+    const other = t.join(2);
+    const internal = t.z as unknown as { actors: Map<number, { kind: string }>; grantReward(p: unknown, m: unknown): { gold: number } };
     const mob = [...internal.actors.values()].find((a) => a.kind === 'mob')!;
-    expect(internal.grantReward(p, mob)).toMatchObject({ gold: 7 });
+    const swords = count(p.inventory, 'long_sword');
+    expect(internal.grantReward(p, mob)).toEqual({ xp: expect.any(Number), gold: 7 });
     expect((p as unknown as { gold: number }).gold).toBe(7);
-    expect(count(p.inventory, 'long_sword')).toBe(0);
-    expect(t.errors(1).at(-1)).toMatchObject({ d: { code: 'bag_full' } });
+    expect(count(p.inventory, 'long_sword')).toBe(swords); // nothing goes into the bag
     const left = t.dynamic().map(([id]) => id);
     expect(left).toHaveLength(2);
-    const seen = (c: number) => t.sent(c).filter((m) => m.op === SC.OBJECT_STATE).flatMap((m) => m.d.objects).map((o) => o.id);
-    expect(seen(1)).toEqual(expect.arrayContaining(left));
-    expect(seen(2).filter((id) => left.includes(id))).toHaveLength(0);
-    // The other player stands right there and still cannot take it; nothing is queued for later.
+    const sent = (c: number) => t.sent(c).filter((m) => m.op === SC.OBJECT_STATE).flatMap((m) => m.d.objects);
+    expect(sent(1).filter((o) => left.includes(o.id)).map((o) => [o.def?.item?.name, o.def?.loose])).toEqual([['Long Sword', true], ['Wooden Shield', true]]);
+    expect(sent(2).filter((o) => left.includes(o.id))).toHaveLength(0);
+    // Both stand at the sword: the other player cannot take it, the killer can.
+    const at = (t.internal.objects.get(left[0]!) as unknown as { def: { x: number; y: number; z: number } }).def;
+    for (const q of [p, other]) Object.assign((q as unknown as { character: { position: object } }).character.position, { x: at.x, y: at.y, z: at.z });
     t.z.interact(2, left[0]!);
     expect(t.dynamic()).toHaveLength(2);
-    t.z.dropInventoryItem(1, 1, 'scale_armor');
-    const at = (t.internal.objects.get(left[0]!) as unknown as { def: { x: number; y: number; z: number } }).def;
-    Object.assign((p as unknown as { character: { position: object } }).character.position, { x: at.x, y: at.y, z: at.z });
     t.z.interact(1, left[0]!);
-    expect(count(p.inventory, 'long_sword')).toBe(1);
-    expect(t.dynamic().map(([id]) => id)).toContain(left[1]);
-    expect(t.dynamic().map(([id]) => id)).not.toContain(left[0]);
+    expect(count(p.inventory, 'long_sword')).toBe(swords + 1);
+    expect(t.dynamic().map(([id]) => id)).toEqual([left[1]]);
     for (let i = 0; i < 20 * 60 * 2 + 20; i++) t.z.step();
-    expect(t.dynamic().filter(([id]) => id === left[1])).toHaveLength(0);
-    expect(seen(1).filter((id) => id === left[1])).toHaveLength(2);
+    expect(t.dynamic()).toHaveLength(0);
+    expect(sent(1).filter((o) => o.id === left[1]).map((o) => o.state)).toEqual(['present', 'gone']);
   });
 });

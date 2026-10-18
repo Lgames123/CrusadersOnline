@@ -4,6 +4,7 @@ import { LevelLight } from '../engine/level_light.ts';
 import { dynamicLights } from '../engine/dynamic_lights.ts';
 import { propFixes } from './prop_fixes.ts';
 import { nodeFrameInverse } from './original_models.ts';
+import { ItemThumbnails } from '../ui/item_thumbnails.ts';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, inDifficulty, type Difficulty, DYNAMIC_OBJECT_BASE, type ArenaDef, type LevelObject, type LevelBrush, type LevelPlacements, type WorldObjectDef, type WorldObjectState, type DoorMotion, type DoorSwing, stepDoorMotion, swingPose, type MoverDef, type MoverMotion, moverPose, shutMover, stepMover, useMover } from '@crusaders/shared';
@@ -607,7 +608,7 @@ export async function loadOriginalLevel(arenaName: string, difficulty: Difficult
               const idx = droppedClusters.indexOf(cluster);
               if (idx !== -1) droppedClusters.splice(idx, 1);
             }
-          }
+          } else props.remove(v.object); // a loose item
         }
       } else {
         v.object.visible = state !== 'gone';
@@ -616,6 +617,55 @@ export async function loadOriginalLevel(arenaName: string, difficulty: Difficult
     spawnDynamicObject(def: WorldObjectDef) {
       if (objects.has(def.id)) return;
       const viewPos = new THREE.Vector3(def.x, def.y, def.z);
+      const view = (object: THREE.Object3D): LevelObjectView => ({
+        def: {
+          kind: 'item',
+          name: def.item?.name ?? 'Item',
+          modelId: def.item?.model ?? 96,
+          rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+          hp: 0,
+          position: [def.x / LEVEL_UNIT_METRES, def.y / LEVEL_UNIT_METRES, def.z / LEVEL_UNIT_METRES],
+          item: def.item ? { name: def.item.name, quantity: def.item.quantity } : undefined,
+        },
+        object,
+        position: viewPos,
+        state: 'present',
+      });
+      if (def.loose) {
+        // A kill's item: its own model lying at its place (in its node frame, as placed items),
+        // turned by its id so a corpse's items do not all face one way.
+        const group = new THREE.Group();
+        group.position.set(def.x / LEVEL_UNIT_METRES, def.y / LEVEL_UNIT_METRES, def.z / LEVEL_UNIT_METRES);
+        group.rotation.y = (def.id * 2.4) % (Math.PI * 2);
+        props.add(group);
+        const model = def.item?.model;
+        void (model === undefined ? Promise.resolve(null) : ItemThumbnails.get().loadModel(model, def.item?.texture)).then((src) => {
+          let mesh: THREE.Object3D;
+          if (src) {
+            mesh = cloneSkinned(src);
+            const undo = nodeFrameInverse(src);
+            if (undo) mesh.applyMatrix4(undo);
+            // Weapons stand on their pommel in their frame: one much taller than wide lies on
+            // its side; then it rests on the floor by its box, centred on its place (pivots sit
+            // anywhere: the long sword's is 2.5 ft off its blade).
+            const size = new THREE.Box3().setFromObject(mesh).getSize(new THREE.Vector3());
+            if (size.y > 2 * Math.max(size.x, size.z)) mesh.applyMatrix4(new THREE.Matrix4().makeRotationZ(Math.PI / 2));
+            const box = new THREE.Box3().setFromObject(mesh);
+            const centre = box.getCenter(new THREE.Vector3());
+            mesh.position.sub(new THREE.Vector3(centre.x, box.min.y, centre.z));
+          } else {
+            mesh = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.4, 0.8), new THREE.MeshStandardMaterial({ color: 0x8a7a50, roughness: 0.6 }));
+            mesh.position.y = 0.2;
+          }
+          mesh.traverse((m) => {
+            m.castShadow = false;
+            m.receiveShadow = false;
+          });
+          group.add(mesh);
+        });
+        objects.set(def.id, view(group));
+        return;
+      }
 
       let cluster = droppedClusters.find((c) => c.itemIds.size > 0 && c.position.distanceTo(viewPos) <= CHEST_CLUSTER_RADIUS);
       if (!cluster) {
@@ -651,20 +701,7 @@ export async function loadOriginalLevel(arenaName: string, difficulty: Difficult
         cluster.itemIds.add(def.id);
       }
 
-      objects.set(def.id, {
-        def: {
-          kind: 'item',
-          name: def.item?.name ?? 'Item',
-          modelId: 96,
-          rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1],
-          hp: 0,
-          position: [def.x / LEVEL_UNIT_METRES, def.y / LEVEL_UNIT_METRES, def.z / LEVEL_UNIT_METRES],
-          item: def.item ? { name: def.item.name, quantity: def.item.quantity } : undefined,
-        },
-        object: cluster.chest,
-        position: viewPos,
-        state: 'present',
-      });
+      objects.set(def.id, view(cluster.chest));
     },
     applyAtmosphere(scene) {
       scene.background = new THREE.Color(0x000000);

@@ -41,8 +41,13 @@ export interface WorldObjectDef {
   z: number;
   /** Breakables: hit points. */
   hp?: number;
-  /** Ground items (`itemId`: catalog id of an item a player dropped, so it is picked up as itself). */
-  item?: { name: string; quantity: number; itemId?: string };
+  /**
+   * Ground items (`itemId`: catalog id of a dropped item, so it is picked up as itself; `model` /
+   * `texture`: its items.ctx Model and Texture, to draw a `loose` one).
+   */
+  item?: { name: string; quantity: number; itemId?: string; model?: number; texture?: number };
+  /** Dynamic ground items drawn as themselves (a kill's loot), not in the chest of player drops. */
+  loose?: boolean;
   /** Chests. */
   contents?: { name: string; quantity: number }[];
   /** Doors: bounds (metres, [min x, y, z, max x, y, z]) and the key that unlocks it, if locked. */

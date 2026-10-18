@@ -204,16 +204,15 @@ describe('authoritative melee', () => {
     expect(hits.map((e) => e.damage).slice(0, 3)).toEqual([5.5, 5.5, 5.5]);
     expect(hits.findIndex((e) => e.killed)).toBe(4); // 25 HP skeleton dies on the 5th hit
     const kill = hits.find((e) => e.killed)!;
-    // random() = 0 makes every loot roll succeed.
-    expect(kill.reward).toEqual({ xp: SKELETON.xpReward, gold: SKELETON.goldMin, loot: ['Long Sword', 'Scale Armor'] });
+    // random() = 0 makes every loot roll succeed: the items lie at the corpse, not in the bag.
+    expect(kill.reward).toEqual({ xp: SKELETON.xpReward, gold: SKELETON.goldMin });
+    const dropped = t.messages.filter((m) => m.op === SC.OBJECT_STATE).flatMap((m) => (m.d as { objects: { def?: { item?: { name: string } } }[] }).objects);
+    expect(dropped.map((o) => o.def?.item?.name)).toEqual(['Long Sword', 'Scale Armor']);
     t.run(1);
     expect(t.stats().at(-1)).toMatchObject({ xp: SKELETON.xpReward, gold: SKELETON.goldMin });
     const saved = t.persisted.find((p) => p.reason === 'progress')?.records[0];
     expect(saved).toMatchObject({ experience: 40, gold: 5 });
-    expect(saved?.inventory?.map((e) => e.itemId)).toEqual(['axe', 'wooden_shield', 'long_sword', 'scale_armor']);
-    expect(t.inventories().at(-1)?.items.map((i) => [i.name, i.equipped])).toEqual([
-      ['Axe', true], ['Wooden Shield', true], ['Long Sword', false], ['Scale Armor', false],
-    ]);
+    expect(t.inventories().at(-1)?.items.map((i) => [i.name, i.equipped])).toEqual([['Axe', true], ['Wooden Shield', true]]);
   });
 
   it('ignores attack spam: at most one hit per swing lifecycle', () => {

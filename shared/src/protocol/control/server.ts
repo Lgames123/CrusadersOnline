@@ -109,8 +109,8 @@ export interface CombatEventMsg {
     reel?: boolean;
     /** A creature's long impact (its ASM state id, IMPACT_VARIANTS); absent: the directional one. */
     impact?: number;
-    /** Present when the attacker is a player who got rewarded for the kill (loot = item names added). */
-    reward?: { xp: number; gold: number; loot?: string[] };
+    /** Present when the attacker is a player who got rewarded for the kill (its items fall on the ground). */
+    reward?: { xp: number; gold: number };
   };
 }
 
