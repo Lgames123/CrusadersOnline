@@ -238,6 +238,7 @@ Implemented: every armed hostile type is a level archetype (Dasher Brute, Ogre O
 - The creature constructor (`CreatureStats_Ctor` 0x0044C130) defaults HP/max HP to 20. Saved creature state (`CreatureStats_Save/Load`) contains HP, max HP and the disposition pair (`+0x1D4/+0x1D8`, default 3 = hostile; the Spectral Ally spell sets 6). HP, XP value and resists of placed creatures come from the `.cap` object records (asset-format-discovery.md §6.2).
 - `Stats_LoseHp` (0x0044CA00): the flinch/stagger roll (§8.4) only runs when the victim is the player; a hit from creature type 150 (Necros) always forces the light flinch.
 - On death (`CreatureStats_OnDeath` 0x0044C6A0) the creature's XP value (`+0x1C4`) is passed to the player via `Stats_AddExperience`, the death sound for its type is played and spell effects are released.
+- A dead creature keeps its inventory on the corpse: the ground window (`0x00471940`, inventory screen mode 1) lists, for every dead creature within reach (+0x14 flag 0x40, not type 155, not the player), each inventory slot except items named `Large Club` / `Large Iron Club` (strings 0x4EFE88 / 0x4EFE78) and slots already taken (slot +0x14 flag 0x10000000, set when an item leaves the corpse, 0x47096D). So a corpse gives its gold, potions, books and the weapon and shield it held.
 
 ### 9.3 Experience curve — `Stats_AddExperience` (0x0044DE40) / `Stats_LevelUp` (0x0044DEE0)
 - New player: level 1, XP 0, next threshold **500** (`PlayerStats_InitDefaults` 0x0044DC60, which also sets base HP 50).

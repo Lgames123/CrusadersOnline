@@ -119,6 +119,11 @@ export interface ArenaDef {
     /** Original levels: the item ids it holds (null: nothing), replacing the archetype's loadout. */
     weapon?: string | null;
     shield?: string | null;
+    /**
+     * Original levels: what its corpse gives (gold, potions, its weapon and shield...: the
+     * placement's inventory, 0x00471940); absent: the archetype's gold roll and loot table.
+     */
+    carries?: { name: string; quantity: number }[];
     /** Original levels: its talk line (Sound.ctx id) and the ASM state it gestures with meanwhile. */
     talk?: number;
     gesture?: number;

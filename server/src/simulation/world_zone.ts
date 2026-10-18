@@ -320,6 +320,8 @@ const OBJECT_HIT_KEY = 1_000_000;
 /** Dropped items: expire after 5 minutes (5 * 60 * 20 ticks), max 20 per player on ground. */
 export const DROPPED_ITEM_LIFETIME_TICKS = 20 * 60 * 5;
 export const MAX_DROPPED_ITEMS_PER_PLAYER = 20;
+/** A kill's items that do not fit the killer's bag wait on the ground for him alone, 2 minutes. */
+export const OVERFLOW_LOOT_LIFETIME_TICKS = 20 * 60 * 2;
 
 interface WorldObject {
   def: WorldObjectDef;
@@ -336,6 +338,8 @@ interface WorldObject {
   ownerKey?: string;
   /** Tick at which the dropped item expires (5 minutes from drop). */
   expiresAt?: number;
+  /** Seen and taken only by this player (playerKey): a kill's loot that did not fit his bag. */
+  onlyFor?: string;
 }
 
 type GroundGrant = { name: string; quantity: number; itemId?: string };
@@ -545,6 +549,8 @@ interface Mob extends ActorBase {
   archetype: MobArchetype;
   weapon: ItemDef;
   shield: ItemDef | null;
+  /** Original levels: what its corpse gives (placement inventory); absent: the archetype's gold and loot. */
+  carries?: GroundGrant[];
   /** Tick until which the shield is raised (AI block); 0 = lowered. */
   blockUntil: number;
   nextBlockTick: number;
@@ -903,6 +909,7 @@ export class WorldZone {
       // Creatures share the humanoid rig's root-motion speeds (run, walk); no jumping.
       stats: { ...DEFAULT_MOVEMENT_STATS, jumpVelocity: 0 },
       ...(at.placement !== undefined ? { placement: at.placement } : {}),
+      ...(at.carries ? { carries: at.carries } : {}),
       statuses: new Map(),
       timeAcc: 0,
     };
@@ -1012,7 +1019,7 @@ export class WorldZone {
     this.sendJson(connId, { op: SC.QUEST_LOG, d: { log: p.story.quests } });
     if (this.objects.size) {
       const changed = [...this.objects.values()]
-        .filter((o) => this.stateFor(p, o) !== 'present' || o.dynamic)
+        .filter((o) => (this.stateFor(p, o) !== 'present' || o.dynamic) && this.sees(p, o))
         .map((o) => ({
           id: o.def.id,
           state: this.stateFor(p, o),
@@ -1042,7 +1049,7 @@ export class WorldZone {
     // A swinging door may be opened again while it swings shut.
     // A parked mover is used again to send it back (0x48EC10).
     const reopens = o?.swing?.motion?.phase === 'closing' || o?.mover?.motion.state === MOVER_PARKED;
-    if (!p || !o || !alive(p) || (this.stateFor(p, o) !== 'present' && !reopens) || o.def.kind === 'breakable') return;
+    if (!p || !o || !alive(p) || !this.sees(p, o) || (this.stateFor(p, o) !== 'present' && !reopens) || o.def.kind === 'breakable') return;
     if (o.def.kind === 'door' || o.def.kind === 'lever') {
       this.openDoor(p, o, key);
       return;
@@ -1067,7 +1074,7 @@ export class WorldZone {
       o.state = 'gone';
       this.objects.delete(id);
       this.forgetDropped(o, id);
-      this.broadcastObjects([{ id, state: 'gone', by: p.entityId, loot }]);
+      this.announceObject(o, [{ id, state: 'gone', by: p.entityId, loot }]);
     } else {
       // A level item or chest: gone for this character for good, still there for the others.
       const flag = this.takenFlag(id);
@@ -1321,6 +1328,20 @@ export class WorldZone {
     this.sendJson(p.connId, { op: SC.OBJECT_STATE, d: { objects } });
   }
 
+  /** Changes of one object, to whoever sees it (a private one: its player only). */
+  private announceObject(o: WorldObject, objects: ObjectChange[]): void {
+    for (const p of this.players.values()) if (this.sees(p, o)) this.sendObjects(p, objects);
+  }
+
+  /** Who a player is for objects that outlive a connection: the character, else the connection. */
+  private playerKey(p: Player): string {
+    return p.characterId ?? String(p.connId);
+  }
+
+  private sees(p: Player, o: WorldObject): boolean {
+    return !o.onlyFor || o.onlyFor === this.playerKey(p);
+  }
+
   /**
    * Level items and chests are per character: each one finds them all, and what it takes never
    * comes back for it, across restarts (story flag `<level>-took:<object>`).
@@ -1457,7 +1478,8 @@ export class WorldZone {
       if (!o.dynamic || !o.expiresAt || this.tick < o.expiresAt) continue;
       this.objects.delete(id);
       this.forgetDropped(o, id);
-      expired.push({ id, state: 'gone' });
+      if (o.onlyFor) this.announceObject(o, [{ id, state: 'gone' }]);
+      else expired.push({ id, state: 'gone' });
     }
     if (expired.length) this.broadcastObjects(expired);
   }
@@ -1564,7 +1586,7 @@ export class WorldZone {
     this.inventoryChanged(p);
 
     // Enforce 20-item ground limit per player: oldest item disappears immediately when dropping the 21st.
-    const ownerKey = p.characterId ?? String(connId);
+    const ownerKey = this.playerKey(p);
     const list = this.playerDroppedItems.get(ownerKey) ?? [];
     while (list.length >= MAX_DROPPED_ITEMS_PER_PLAYER) {
       const oldestId = list.shift()!;
@@ -3276,7 +3298,7 @@ export class WorldZone {
         // A spectral ally's kills are its owner's.
         const credit = attacker.kind === 'player' ? attacker : attacker.ally !== undefined ? this.actors.get(attacker.ally) : undefined;
         if (credit?.kind === 'player' && target.ally === undefined) {
-          reward = this.grantReward(credit, target.archetype);
+          reward = this.grantReward(credit, target);
           this.fireDeathTrigger(credit, target.placement);
         }
       } else {
@@ -3292,24 +3314,59 @@ export class WorldZone {
     });
   }
 
-  private grantReward(p: Player, arch: MobArchetype): { xp: number; gold: number; loot?: string[] } {
-    const gold = arch.goldMin + Math.floor(this.random() * (arch.goldMax - arch.goldMin + 1));
+  /**
+   * A kill's reward: its XP, and what its corpse gives (the placement's inventory, 0x00471940;
+   * else the archetype's gold roll and loot table) straight into the killer's purse and bag.
+   * What does not fit waits at the corpse for him alone (OVERFLOW_LOOT_LIFETIME_TICKS); gold
+   * always goes in.
+   */
+  private grantReward(p: Player, mob: Mob): { xp: number; gold: number; loot?: string[] } {
+    const arch = mob.archetype;
     this.addExperience(p, arch.xpReward);
-    p.gold += gold;
+    let grants: GroundGrant[];
+    if (mob.carries) grants = mob.carries;
+    else {
+      const gold = arch.goldMin + Math.floor(this.random() * (arch.goldMax - arch.goldMin + 1));
+      grants = [...(gold > 0 ? [{ name: GOLD_ITEM, quantity: gold }] : [])];
+      for (const drop of arch.loot) {
+        const def = this.random() < drop.chance ? this.items.get(drop.itemId) : undefined;
+        if (def) grants.push({ name: def.name, quantity: 1, itemId: def.id });
+      }
+    }
+    let gold = 0;
     const loot: string[] = [];
-    for (const drop of arch.loot) {
-      if (this.random() >= drop.chance) continue;
-      const def = this.items.get(drop.itemId);
-      if (def && addItem(p.inventory, def.id) !== null) loot.push(def.name);
+    const left: { def: ItemDef; quantity: number }[] = [];
+    for (const g of grants) {
+      const n = Math.max(1, g.quantity);
+      if (g.name === GOLD_ITEM) {
+        gold += this.grantItem(p, g.name, n);
+        continue;
+      }
+      const def = this.groundItemDef(g);
+      if (!def) continue;
+      const got = this.grantItem(p, def.name, n, def.id);
+      if (got > 0) loot.push(got > 1 ? `${got} ${def.name}` : def.name);
+      if (got < n && def.type !== 'spellbook') left.push({ def, quantity: n - got });
     }
-    if (loot.length > 0) {
-      p.inventoryDirty = true;
-      this.sendInventory(p);
-    }
+    if (left.length) this.dropOverflow(p, mob.character.position, left);
     p.statsDirty = true;
     const record = this.persistRecord(p);
     if (record) this.outbox.persist?.([record], 'progress');
     return { xp: arch.xpReward, gold, ...(loot.length > 0 ? { loot } : {}) };
+  }
+
+  /** A kill's items the bag could not take: ground items at the corpse, the killer's only. */
+  private dropOverflow(p: Player, at: { x: number; y: number; z: number }, left: { def: ItemDef; quantity: number }[]): void {
+    const onlyFor = this.playerKey(p);
+    const changes: ObjectChange[] = [];
+    for (const { def, quantity } of left) {
+      const id = this.nextDynamicObjectId++;
+      const objDef: WorldObjectDef = { id, kind: 'item', x: at.x, y: at.y, z: at.z, item: { name: def.name, quantity, itemId: def.id } };
+      this.objects.set(id, { def: objDef, state: 'present', hp: 0, respawnAt: 0, dynamic: true, onlyFor, expiresAt: this.tick + OVERFLOW_LOOT_LIFETIME_TICKS });
+      changes.push({ id, state: 'present', def: objDef });
+    }
+    this.sendObjects(p, changes);
+    this.sendJson(p.connId, { op: SC.ERROR, d: { code: 'bag_full', message: 'Inventory full. The rest waits in a chest for 2 minutes.' } });
   }
 
   /** Stats_AddExperience: the XP, and Stats_LevelUp for each level reached. */

@@ -539,6 +539,12 @@ function scriptedDeaths(story: LevelStory | undefined): Set<number> {
 }
 
 /**
+ * Items a corpse never offers (0x00471940 skips these names: the titans' and ogres' clubs). Every
+ * other inventory slot of a dead creature is listed in the ground window, each taken once.
+ */
+const NOT_ON_CORPSE = new Set(['Large Club', 'Large Iron Club']);
+
+/**
  * A placement's own loadout, talk line and idle walk (converter 1.24+): what it holds replaces
  * the archetype's template loadout; placements converted before keep the template.
  */
@@ -548,6 +554,7 @@ function placementExtras(c: LevelCreature, s: number): Partial<ArenaDef['mobSpaw
     out.weapon = c.held.weapon ? itemSlug(c.held.weapon) : null;
     out.shield = c.held.shield ? itemSlug(c.held.shield) : null;
   }
+  if (c.items) out.carries = c.items.filter((i) => !NOT_ON_CORPSE.has(i.name)).map((i) => ({ name: i.name, quantity: i.quantity }));
   if (c.talk !== undefined) out.talk = c.talk;
   if (c.gesture !== undefined) out.gesture = c.gesture;
   if (c.path && c.path.points.length > 1) {
