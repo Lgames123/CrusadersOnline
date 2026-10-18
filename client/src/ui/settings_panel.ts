@@ -197,6 +197,17 @@ export class SettingsPanel {
 
             <div class="opt-group opt-toggle-group">
               <label class="opt-toggle-label">
+                <input id="set-object-shadows" type="checkbox" ${s.objectShadows ? 'checked' : ''} />
+                <span class="opt-toggle-box"></span>
+                <span class="opt-toggle-text">
+                  <strong>Object Shadows</strong>
+                  <span class="opt-desc">Barrels, trees, crates and larger plants cast shadows on the ground and grass around you. When disabled, the ground shows only the original baked light.</span>
+                </span>
+              </label>
+            </div>
+
+            <div class="opt-group opt-toggle-group">
+              <label class="opt-toggle-label">
                 <input id="set-lighting" type="checkbox" ${s.enhancedLighting ? 'checked' : ''} />
                 <span class="opt-toggle-box"></span>
                 <span class="opt-toggle-text">
@@ -403,6 +414,13 @@ export class SettingsPanel {
       });
     }
 
+    const objectShadows = this.root.querySelector<HTMLInputElement>('#set-object-shadows');
+    if (objectShadows) {
+      objectShadows.addEventListener('change', () => {
+        this.store.update({ objectShadows: objectShadows.checked });
+      });
+    }
+
     const lighting = this.root.querySelector<HTMLInputElement>('#set-lighting');
     if (lighting) {
       lighting.addEventListener('change', () => {
@@ -495,6 +513,7 @@ export class SettingsPanel {
           invertMouseY: false,
           musicVolume: 0.5,
           silhouetteShadows: false,
+          objectShadows: false,
           enhancedLighting: false,
           smallEffects: false,
           foliage: false,

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LevelLight } from '../engine/level_light.ts';
 import { dynamicLights } from '../engine/dynamic_lights.ts';
+import { propShadows } from '../engine/prop_shadows.ts';
 import { propFixes } from './prop_fixes.ts';
 import { nodeFrameInverse } from './original_models.ts';
 import { ItemThumbnails } from '../ui/item_thumbnails.ts';
@@ -361,6 +362,7 @@ export async function loadOriginalLevel(arenaName: string, difficulty: Difficult
     }
     if (!isSky) applyTextureAlpha(material);
     if (!isSky) dynamicLights.enhance(material);
+    if (lightMap && !isSky) propShadows.receive(material, 'basic');
     old.dispose();
     mesh.material = material;
     mesh.removeFromParent();

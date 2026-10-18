@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LEVEL_UNIT_METRES } from '@crusaders/shared';
 import type { LevelLight } from './level_light.ts';
 import { nodeFrameInverse } from '../assets/original_models.ts';
+import { propShadows, type ShadowCasterSource } from './prop_shadows.ts';
 
 /**
  * Grass and bushes on a level's grass ground (not original; the "foliage" setting). Built for
@@ -167,10 +168,17 @@ uniform float uSway;
 uniform float uPush;
 ${PERLIN}
 #endif
+#ifdef FOLIAGE_SHADOW
+// Drawn into the object shadows' map: thinned as seen from the view camera, not the light.
+uniform vec3 uShadowEye;
+#define FOLIAGE_EYE uShadowEye
+#else
+#define FOLIAGE_EYE cameraPosition
+#endif
 #include <fog_pars_vertex>
 void main() {
   // Thinning with distance: shrinks away as the density here passes this one's rank.
-  float density = 1.0 - smoothstep( uFade.x, uFade.y, distance( cameraPosition.xz, aOffset.xz ) );
+  float density = 1.0 - smoothstep( uFade.x, uFade.y, distance( FOLIAGE_EYE.xz, aOffset.xz ) );
   float s = aParams.x * clamp( ( density - aParams.y ) * 10.0, 0.0, 1.0 );
   float c = cos( aOffset.w );
   float sn = sin( aOffset.w );
@@ -201,6 +209,7 @@ void main() {
   // The ground texture at the root, a few texels apart along each blade.
   vUv = aGroundUv + position.xz * 0.12;
 #endif
+  // PROP_SHADOW_VERTEX
   vec4 mvPosition = viewMatrix * vec4( world, 1.0 );
   gl_Position = projectionMatrix * mvPosition;
   #include <fog_vertex>
@@ -224,6 +233,7 @@ void main() {
 #ifdef FOLIAGE_GROUND
   col.rgb *= texture2D( map, vUv ).rgb;
 #endif
+  // PROP_SHADOW_FRAGMENT
   gl_FragColor = col;
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -301,6 +311,8 @@ interface Layer {
   height: number;
   still: THREE.ShaderMaterial;
   wind: THREE.ShaderMaterial;
+  /** Bushes: depth only, for the object shadows' casters pass. */
+  shadow: THREE.ShaderMaterial | null;
   chunks: Map<string, Chunk>;
   base: THREE.BufferGeometry;
   /** Low-poly base for far cells, if the kind has one. */
@@ -503,7 +515,7 @@ class Clearance {
   }
 }
 
-export class Foliage {
+export class Foliage implements ShadowCasterSource {
   readonly object = new THREE.Group();
   private readonly layers: Layer[] = [];
   private readonly cells: Cell[] = [];
@@ -524,6 +536,10 @@ export class Foliage {
   private readonly viewProj = new THREE.Matrix4();
   private readonly target = new THREE.Vector3();
   private frame = 0;
+  /** Object shadows: the view camera the bushes are thinned for in the shadow pass. */
+  private readonly shadowEye = { value: new THREE.Vector3() };
+  /** Bumped whenever bush cells are grown or freed (the object shadows draw again). */
+  shadowVersion = 0;
   /** Cull cells hidden behind the level (when update() is given a line-of-sight test). */
   occlusion = true;
   /** Low-poly tufts in the distance. */
@@ -641,7 +657,18 @@ export class Foliage {
       return new THREE.ShaderMaterial({ uniforms, defines, vertexShader: VERTEX, fragmentShader: FRAGMENT, fog: true, side: THREE.DoubleSide });
     };
     base.computeBoundingSphere();
-    this.layers.push({ id: this.layers.length, fade, uFade, amount, surface, density, scale, height, still: make(false), wind: make(true), chunks: new Map(), base, baseLod });
+    const still = make(false), wind = make(true);
+    let shadow: THREE.ShaderMaterial | null = null;
+    if (surface) {
+      // Grass takes the object shadows; bushes cast them.
+      propShadows.receive(still, 'foliage');
+      propShadows.receive(wind, 'foliage');
+    } else {
+      const defines: Record<string, string> = { FOLIAGE_SHADOW: '' };
+      if (map) defines['FOLIAGE_MAP'] = '';
+      shadow = new THREE.ShaderMaterial({ uniforms: { ...uniforms, uShadowEye: this.shadowEye }, defines, vertexShader: VERTEX, fragmentShader: FRAGMENT, side: THREE.DoubleSide, colorWrite: false });
+    }
+    this.layers.push({ id: this.layers.length, fade, uFade, amount, surface, density, scale, height, still, wind, shadow, chunks: new Map(), base, baseLod });
   }
 
   /**
@@ -846,7 +873,11 @@ export class Foliage {
         if (d >= f1) {
           // Out of reach: hidden, freed once well behind.
           if (ch?.mesh) ch.mesh.visible = false;
-          if (ch && d > f1 + CHUNK * 2) (this.drop(ch), layer.chunks.delete(cell.key));
+          if (ch && d > f1 + CHUNK * 2) {
+            if (ch.mesh && layer.shadow) this.shadowVersion++;
+            this.drop(ch);
+            layer.chunks.delete(cell.key);
+          }
           continue;
         }
         // Grown whether seen or not (turning round must not show bare ground), seen ones first.
@@ -883,8 +914,43 @@ export class Foliage {
       const ch = this.grow(w.layer, w.cell, amount);
       if (old) this.drop(old);
       if (ch.mesh) ch.mesh.visible = false; // shown by next frame's pass, with its count
+      if (w.layer.shadow && (ch.mesh || old?.mesh)) this.shadowVersion++;
       w.layer.chunks.set(w.cell.key, ch);
       if (performance.now() - start > GROW_BUDGET_MS) break;
+    }
+  }
+
+  /**
+   * The object shadows' casters (ShadowCasterSource): every grown bush cell inside `box`, seen or
+   * not (a bush behind the camera still shades the ground in view), all its instances, thinned
+   * by the shader as seen from `eye`.
+   */
+  castShadows(box: THREE.Box3, eye: THREE.Vector3, layer: number, draw: () => void): void {
+    this.shadowEye.value.copy(eye);
+    const saved: { ch: Chunk; visible: boolean; material: THREE.Material; geometry: THREE.BufferGeometry; count: number }[] = [];
+    for (const l of this.layers) {
+      if (!l.shadow) continue;
+      for (const ch of l.chunks.values()) {
+        if (!ch.mesh || !ch.geo || !box.intersectsBox(ch.geo.boundingBox!)) continue;
+        saved.push({ ch, visible: ch.mesh.visible, material: ch.mesh.material as THREE.Material, geometry: ch.mesh.geometry, count: ch.geo.instanceCount });
+        ch.mesh.visible = true;
+        ch.mesh.material = l.shadow;
+        ch.mesh.geometry = ch.geo;
+        ch.geo.instanceCount = ch.ranks.length;
+        ch.mesh.layers.enable(layer);
+      }
+    }
+    try {
+      draw();
+    } finally {
+      for (const s of saved) {
+        const mesh = s.ch.mesh!;
+        mesh.layers.disable(layer);
+        mesh.visible = s.visible;
+        mesh.material = s.material;
+        mesh.geometry = s.geometry;
+        s.ch.geo!.instanceCount = s.count;
+      }
     }
   }
 
@@ -909,6 +975,7 @@ export class Foliage {
       layer.baseLod?.dispose();
       layer.still.dispose();
       layer.wind.dispose();
+      layer.shadow?.dispose();
     }
     this.layers.length = 0;
   }

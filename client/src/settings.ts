@@ -18,6 +18,11 @@ export interface Settings {
    */
   silhouetteShadows: boolean;
   /**
+   * Object shadows (not original): barrels, trees, crates and the larger plants cast shadows on
+   * the level's ground and grass along the silhouettes' light. Off: the ground as baked.
+   */
+  objectShadows: boolean;
+  /**
    * Enhanced lighting (not original): torches, the Torch Light spell and sparks light the level
    * and characters around them. Off: the original's baked light only.
    */
@@ -43,7 +48,7 @@ export interface Settings {
   optionsVersion?: number;
 }
 
-export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false, musicVolume: 0.5, silhouetteShadows: false, enhancedLighting: false, smallEffects: false, foliage: false, foliageDistance: 35, foliageGrass: 1, foliageBushes: 1, foliagePlants: 1, fixedPropUvs: true };
+export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false, musicVolume: 0.5, silhouetteShadows: false, objectShadows: false, enhancedLighting: false, smallEffects: false, foliage: false, foliageDistance: 35, foliageGrass: 1, foliageBushes: 1, foliagePlants: 1, fixedPropUvs: true };
 
 const KEY = 'crusaders.settings';
 /** Bumped when a default moves back to the original, so earlier stored values reset once. */
@@ -70,6 +75,7 @@ function sanitize(raw: unknown): Settings {
     musicVolume: typeof r.musicVolume === 'number' && Number.isFinite(r.musicVolume) ? Math.min(1, Math.max(0, r.musicVolume)) : CLASSIC_SETTINGS.musicVolume,
     // Stored before it became optional (default on then): back to the original unless chosen again.
     silhouetteShadows: r.silhouetteShadows === true && r.optionsVersion === OPTIONS_VERSION,
+    objectShadows: r.objectShadows === true,
     enhancedLighting: r.enhancedLighting === true,
     smallEffects: r.smallEffects === true,
     foliage: r.foliage === true,

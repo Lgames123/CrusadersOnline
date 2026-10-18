@@ -25,8 +25,8 @@ const SILHOUETTE_OPACITY = 0.55;
  * far less once shown in sRGB: the opacity that darkens the picture as much as `o` does on screen.
  */
 const linearOpacity = (o: number) => 1 - Math.pow(1 - o, 2.2);
-/** Direction the light travels (down and a little aside), for the flattened silhouettes. */
-const LIGHT_DIR = new THREE.Vector3(0.35, -1, 0.25).normalize();
+/** Direction the light travels (down and aside, ~56 degrees up), for the silhouettes and the object shadows. */
+export const LIGHT_DIR = new THREE.Vector3(0.55, -1, 0.4).normalize();
 
 type SilhouetteMaterial = THREE.MeshBasicMaterial & { floor: { value: number } };
 

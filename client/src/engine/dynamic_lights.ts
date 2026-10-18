@@ -129,9 +129,11 @@ export class DynamicLights {
     this.materials.add(material);
     material.addEventListener('dispose', () => this.materials.delete(material));
     material.onBeforeCompile = (shader) => {
-      if (!this.on) return;
+      // Even off: three reuses a variant compiled before (switched back on) with the uniforms
+      // of the last compile, which would then miss these.
       Object.assign(shader.uniforms, this.uniforms);
       if (ambient) shader.uniforms['uDynAmbient'] = ambient;
+      if (!this.on) return;
       shader.vertexShader = VERTEX_PARS + shader.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n' + VERTEX);
       shader.fragmentShader = (ambient ? '#define DYN_AMBIENT\n' : '') + FRAGMENT_PARS + shader.fragmentShader.replace('vec3 outgoingLight = reflectedLight.indirectDiffuse;', FRAGMENT);
     };

@@ -81,6 +81,7 @@ import { SwingTrails } from './engine/swing_trail.ts';
 import { ModelLighting } from './engine/model_light.ts';
 import { dynamicLights } from './engine/dynamic_lights.ts';
 import { Foliage } from './engine/foliage.ts';
+import { propShadows } from './engine/prop_shadows.ts';
 import { propFixes } from './assets/prop_fixes.ts';
 import { PostFx } from './engine/post_fx.ts';
 import { TORCH_LIGHT_COLOR, TORCH_LIGHT_HEIGHT, TORCH_LIGHT_INTENSITY, TORCH_DYNAMIC_INTENSITY } from './entities/torch_light.ts';
@@ -281,6 +282,8 @@ async function main(): Promise<void> {
   const lighting = new ModelLighting(scene);
   const lightingKeys = new Set<unknown>();
   const PROP_KEY = 'prop:';
+  /** Placed objects at least this tall cast object shadows (metres; a barrel is about 1). */
+  const SHADOW_CASTER_HEIGHT = 0.5;
   /**
    * What each placed creature holds (the cap's inventory header: Captain Ursan nothing, a skeleton
    * its own weapon) and the gesture it talks with, by placement; their models are loaded first.
@@ -326,11 +329,13 @@ async function main(): Promise<void> {
     if (want === foliageFor) return;
     foliage?.dispose();
     foliage = null;
+    propShadows.setSource(null);
     foliageFor = want;
     if (!want) return;
     void Foliage.build(want.foliageGround()).then((f) => {
       if (foliageFor !== want) return void f?.dispose();
       foliage = f;
+      propShadows.setSource(f);
       f?.setDistance(settings.current.foliageDistance);
       f?.setAmounts(foliageAmounts(settings.current));
       if (f) want.object.add(f.object);
@@ -371,12 +376,16 @@ async function main(): Promise<void> {
     dynamicLights.removePrefix(LEVEL_TORCH_KEY);
     view?.torches.forEach((p, i) => dynamicLights.set(`${LEVEL_TORCH_KEY}${i}`, p, LEVEL_TORCH_COLOR, LEVEL_TORCH_INTENSITY, LEVEL_TORCH_RADIUS, 0.15));
     for (const k of [...lightingKeys]) if (typeof k === 'string' && k.startsWith(PROP_KEY)) (lighting.forget(k), lightingKeys.delete(k));
+    const casters: THREE.Object3D[] = [];
     for (const [id, v] of view?.objects ?? []) {
       const size = new THREE.Box3().setFromObject(v.object).getSize(new THREE.Vector3());
       const key = `${PROP_KEY}${id}`;
       lighting.track(key, v.object, v.def.kind === 'item' ? 0.25 : Math.min(1.5, Math.max(size.x, size.z) * 0.55), true);
       lightingKeys.add(key);
+      // Object shadows: the placed things of some size (barrels, trees, crates...), not ground items.
+      if (v.def.kind !== 'item' && size.y >= SHADOW_CASTER_HEIGHT) casters.push(v.object);
     }
+    propShadows.setLevel(casters, view?.foliageGround().meshes ?? []);
     void music.play(view?.music);
     arena = next;
     return next;
@@ -862,10 +871,12 @@ async function main(): Promise<void> {
   scene.add(local.object);
 
   lighting.silhouettes = settings.current.silhouetteShadows;
+  propShadows.enabled = settings.current.objectShadows;
   dynamicLights.enabled = settings.current.enhancedLighting;
   postFx.enabled = settings.current.enhancedLighting;
   settings.onChange((s) => {
     lighting.silhouettes = s.silhouetteShadows;
+    propShadows.enabled = s.objectShadows;
     if (dynamicLights.enabled !== s.enhancedLighting) {
       dynamicLights.enabled = s.enhancedLighting;
       postFx.enabled = s.enhancedLighting;
@@ -1424,7 +1435,7 @@ async function main(): Promise<void> {
 
   if (import.meta.env.DEV) {
     // Debug/E2E hook: lets tests drive input without pointer lock.
-    (window as unknown as { __co: unknown }).__co = { input, player: local, mw, session, remotes, inventory: inventoryPanel, scene, get camera() { return chase.camera; }, cameras: { classic: chase.classic, modern: chase.modern }, rig: chase, settings, renderer, level: levelView, get effects() { return effects; }, get foliage() { return foliage; }, render: () => postFx.render(chase.camera, 0) };
+    (window as unknown as { __co: unknown }).__co = { input, player: local, mw, session, remotes, inventory: inventoryPanel, scene, get camera() { return chase.camera; }, cameras: { classic: chase.classic, modern: chase.modern }, rig: chase, settings, renderer, level: levelView, get effects() { return effects; }, get foliage() { return foliage; }, propShadows, render: () => postFx.render(chase.camera, 0) };
   }
 
   // Fixed-step simulation (same 20 Hz step as the server), interpolated rendering.
@@ -1536,6 +1547,7 @@ async function main(): Promise<void> {
       shopAt = null;
     }
     dynamicLights.update(viewCamera, dt);
+    propShadows.update(renderer, scene, viewCamera, dt);
     postFx.render(viewCamera, dt);
     combatUi.update(dt, viewCamera, remotes, container.clientWidth, container.clientHeight);
     hud.update(dt, tick, local.character, session, remotes.count);
