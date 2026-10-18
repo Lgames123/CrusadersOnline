@@ -485,6 +485,7 @@ class OriginalAvatar implements Avatar {
     if (this.anim === ANIM.DEAD && anim !== ANIM.DEAD) this.deathCount++;
     this.anim = anim;
     this.gestureLeft = 0; // a state change ends an idle gesture
+    if (anim === ANIM.DEAD) this.dropLayers();
     // Swings, deaths, knock-downs and stuns cut a hit reaction short; anything else waits for it to finish.
     if (this.reactLeft > 0 && !isAttackAnim(anim) && anim !== ANIM.DEAD && anim !== ANIM.KNOCKDOWN && anim !== ANIM.STUNNED) return;
     this.reactLeft = 0;
@@ -611,6 +612,15 @@ class OriginalAvatar implements Avatar {
     const clip = name ? this.clips.get(name) : undefined;
     if (!clip) return;
     this.playUpper(clip);
+  }
+
+  /** Dying releases the shield and any upper-body swing or cast at once: the death clip plays whole. */
+  private dropLayers(): void {
+    this.shieldAction?.stop();
+    this.shieldUp = false;
+    this.upperSwing?.action.stop();
+    this.upperSwing = null;
+    this.upperIsCast = false;
   }
 
   setShield(up: boolean): void {

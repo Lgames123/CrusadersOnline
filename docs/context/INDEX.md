@@ -1,5 +1,6 @@
 # Context notes
 
+- 2026-10-18 [Death drops layers](2026-10-18-death-drops-layers.md) — entering DEAD stops the held shield and any upper-body swing/cast at once (setShield no-ops once dead, and the player set DEAD first, so the block pose stuck over the death clip) (Claude Code)
 - 2026-10-18 [Conjure sound](2026-10-18-conjure-sound.md) — entering ASM_SPELL_CONJURE (0x39, case 0x0042A2C4) plays Sound.ctx 327 SplSRCast01 at the caster: every self spell now starts with it under its own cast sound (Claude Code)
 - 2026-10-18 [Effects alpha blended; SPHERE = camera domes](2026-10-18-effects-alpha-blended.md) — gfx_d3d.dll only blends SRCALPHA/INVSRCALPHA (stage 0 tex × vertex): effects, glows, ring, bolt no longer additive; SPHERE shapes are domes bulging toward the camera (0x004AE480), drawn as sprites pulled their radius nearer; shape colours sRGB; torch sound plays whole (Claude Code)
 - 2026-10-18 [Spell status looks](2026-10-18-spell-status-looks.md) — no body shells: stone skin = Drake's metatex blend to Stone / …st (mode 6/8/10 → 50/75/100 %, ±2/3/4 a step), heroism = HEROISM_EFFECT every 200 ms 6 ft up (0x0047E8E0), freeze = paused anim + thaw at rate 0.8-1.2; SPHERE shapes drawn as 18-poly balls; Torch Light white (0x0044BEA0 r=g=b) (Claude Code)
