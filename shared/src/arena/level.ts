@@ -73,7 +73,7 @@ export interface LevelObject {
   /** The difficulties it is placed in (inDifficulty); absent: all of them (converter 1.27+). */
   difficulty?: number;
   /**
-   * A ground item of items.ctx `Type QUEST` (isPlaced leaves it out). The original gives quest
+   * A ground item of items.ctx `Type QUEST` or a Permanent trinket (isPlaced leaves it out). The original gives quest
    * items only through quest triggers (action 0x40 sets a player +0x1C1 bit, 0x46435B); the placed
    * ones are leftovers: Ci*b's "Message for Dain" (a re-typed "GoldPieces" at the merchant) and
    * Du1c's Rune, outside the level.

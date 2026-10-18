@@ -170,7 +170,7 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
   const bakedTexture = new Map<string, string>();
   /** Item name -> items.ctx `Texture` (index into its model's `T` list). */
   const itemTexture = new Map<string, number>();
-  /** items.ctx `Type QUEST` names: the original hands these out through quest triggers, never placed. */
+  /** items.ctx QUEST items and Permanent trinkets: the story hands these out, never placed. */
   const questItems = new Set<string>();
   /** Model bounding boxes (MDL header, original units) by converted model name, for prop colliders. */
   const modelBoxes = new Map<string, { min: [number, number, number]; max: [number, number, number] }>();
@@ -217,7 +217,8 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
         itemNames.add(it.name);
         const t = Number(it.fields['Texture']);
         if (Number.isInteger(t) && t > 0) itemTexture.set(it.name, t);
-        if (it.fields['Type'] === 'QUEST') questItems.add(it.name);
+        // Quest items and the story's Permanent trinkets (catalogFromItemRules' questItem).
+        if (it.fields['Type'] === 'QUEST' || (it.fields['Type'] === 'TRINKET' && String(it.fields['Permanent']).toLowerCase() === 'true')) questItems.add(it.name);
       }
       await sink.writeFile('rules/items.json', JSON.stringify({ items }, null, 2));
       manifest.rules['items'] = 'rules/items.json';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addItem, BUILTIN_ITEMS, canPlaceGrid, catalogFromItemRules, firstFreeGridPosition, fitsGrid, INVENTORY_GRID, layoutInventoryGrid, layoutItemViews, layoutLegacyGrid, mergeInventoryStacks, moveInventoryGridItem, overlapsGrid, sanitizeInventory, setEquipped, splitInventoryStack, type InventoryEntry } from '@crusaders/shared';
+import { addItem, BUILTIN_ITEMS, canPlaceGrid, catalogFromItemRules, firstFreeGridPosition, fitsGrid, INVENTORY_GRID, layoutInventoryGrid, layoutItemViews, layoutLegacyGrid, mergeInventoryStacks, moveInventoryGridItem, overlapsGrid, questItemForBit, sanitizeInventory, setEquipped, splitInventoryStack, type InventoryEntry } from '@crusaders/shared';
 
 describe('inventory grid geometry', () => {
   it('uses the original dimensions, including inherited fields from item rules', () => {
@@ -22,15 +22,21 @@ describe('inventory grid geometry', () => {
     expect(catalog.get('invisibility_potion')!.texture).toBeUndefined();
   });
 
-  it('door keys are key items: no bag cell, kept even when the bag is full', () => {
+  it('door keys, quest items and quest trinkets are key items: no bag cell, kept even when the bag is full', () => {
     const catalog = catalogFromItemRules({ items: [
       { name: 'Room 2 Key', fields: { Type: 'USEABLE', Model: 110, Width: 1, Height: 1 }, damage: {}, protection: {} },
-      { name: 'Rune', fields: { Type: 'QUEST', Model: 105, Width: 1, Height: 1, Permanent: 'true' }, damage: {}, protection: {} },
+      { name: 'Rune', fields: { Type: 'QUEST', Model: 105, Width: 1, Height: 1, Permanent: 'true', Quest: 4 }, damage: {}, protection: {} },
+      { name: 'War Plans', fields: { Type: 'TRINKET', Model: 106, Width: 1, Height: 1, Permanent: 'true' }, damage: {}, protection: {} },
+      { name: 'Arrow', fields: { Type: 'TRINKET', Model: 97, Width: 1, Height: 1 }, damage: {}, protection: {} },
     ] });
     expect(catalog.get('room_2_key')).toMatchObject({ type: 'key', keyItem: true, model: 110 });
-    expect(catalog.get('rune')!.keyItem).toBeUndefined();
+    expect(catalog.get('room_2_key')!.questItem).toBeUndefined();
+    expect(catalog.get('rune')).toMatchObject({ keyItem: true, questItem: true, questBit: 4, model: 105 });
+    expect(questItemForBit(catalog, 4)?.id).toBe('rune');
+    expect(catalog.get('war_plans')).toMatchObject({ keyItem: true, questItem: true });
+    expect(catalog.get('arrow')).toBeUndefined();
     const inv: InventoryEntry[] = Array.from({ length: 8 }, (_, i) => ({ slot: i, itemId: 'scale_armor', equipped: false, x: (i % 4) * 2, y: i < 4 ? 0 : 3 }));
-    expect(addItem(inv, 'rune', 1, catalog)).toBeNull();
+    expect(addItem(inv, 'scale_armor', 1, catalog)).toBeNull();
     const slot = addItem(inv, 'room_2_key', 1, catalog)!;
     expect(slot).toBe(8);
     expect(inv.find((e) => e.slot === slot)).toEqual({ slot, itemId: 'room_2_key', equipped: false });

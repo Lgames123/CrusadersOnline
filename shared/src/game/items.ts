@@ -43,10 +43,21 @@ export interface ItemDef {
   /** Several of the same item share one inventory slot. */
   stackable?: boolean;
   /**
-   * Door keys: kept on the inventory's Key Items page (the original's "Quest Items" page,
-   * 0x472C20), not in the bag. They take no bag cell and cannot be dropped, moved or sold.
+   * Key items: door keys, quest items and the story's quest trinkets. Kept on the inventory's
+   * Key Items page (the original's "Quest Items" page, 0x472C20), not in the bag. They take no
+   * bag cell and cannot be dropped, moved or sold.
    */
   keyItem?: boolean;
+  /**
+   * Handed out by the story, never picked up: items.ctx `Type QUEST` and the `Permanent` trinkets
+   * (Scout's Message, War Plans...). Ground items and chests of these are left out.
+   */
+  questItem?: boolean;
+  /**
+   * items.ctx `Quest` of a QUEST item: its player bit (+0x1C1). A quest trigger with action 0x40
+   * sets `1 << bit` (0x46435B), which gives the item: 0 Horn of Shattering ... 5 Message for Dain.
+   */
+  questBit?: number;
   price: number;
 }
 
@@ -154,7 +165,7 @@ function withSourceShape(def: ItemDef, fields: ItemRule['fields']): ItemDef {
 
 /**
  * Builds a catalog from converted items.json (melee weapons, shields, body armour), layered over
- * the built-in items. Entries with other types (potions, rings, quest items...) are ignored.
+ * the built-in items (weapons, armour, potions, books, keys, quest items...). Other types are ignored.
  */
 export function catalogFromItemRules(rules: { items: readonly ItemRule[] }): ItemCatalog {
   const out = new Map(BUILTIN_ITEMS);
@@ -182,7 +193,12 @@ export function catalogFromItemRules(rules: { items: readonly ItemRule[] }): Ite
       if (boost && amount > 0) def = { ...def, boost };
     } else if (type === 'USEABLE' && / Key$/.test(r.name)) {
       def = key(r.name, price, undefined, true);
-    } else if (type === 'QUEST' || type === 'RING') {
+    } else if (type === 'QUEST') {
+      const bit = Number(r.fields['Quest']);
+      def = { ...key(r.name, price, undefined, true), questItem: true, ...(Number.isInteger(bit) && bit >= 0 && bit < 8 ? { questBit: bit } : {}) };
+    } else if (type === 'TRINKET' && String(r.fields['Permanent']).toLowerCase() === 'true') {
+      def = { ...key(r.name, price, undefined, true), questItem: true };
+    } else if (type === 'RING') {
       def = key(r.name, price);
     }
     if (def && def.id) {
@@ -196,6 +212,12 @@ export function catalogFromItemRules(rules: { items: readonly ItemRule[] }): Ite
     }
   }
   return out;
+}
+
+/** The QUEST item a quest trigger's player bit gives (items.ctx `Quest`), if any. */
+export function questItemForBit(catalog: ItemCatalog, bit: number): ItemDef | undefined {
+  for (const def of catalog.values()) if (def.questBit === bit) return def;
+  return undefined;
 }
 
 /** Every Mana Crystals item (Mana Crystals 2 / 3 are the same item on other models). */

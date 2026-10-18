@@ -197,6 +197,8 @@ import {
   snapshotMaxBytes,
   stepCharacter,
   yawTowards,
+  questItemForBit,
+  QUEST_ACTION,
   type ArenaDef,
   type PortalDef,
   type Attributes,
@@ -717,7 +719,11 @@ export class WorldZone {
     for (const b of arena.boxes) lowest = Math.min(lowest, b.y - b.hy);
     this.fallLimit = (Number.isFinite(lowest) ? lowest : 0) - FALL_MARGIN;
     for (const s of arena.mobSpawns) this.spawnMob(s.archetype, s);
-    for (const def of arena.objects ?? []) this.objects.set(def.id, { def, state: 'present', hp: def.hp ?? 0, respawnAt: 0 });
+    for (const def of arena.objects ?? []) {
+      // Quest items come only from the story (applyQuest), whatever the level places.
+      if (def.kind === 'item' && def.item && this.groundItemDef(def.item)?.questItem) continue;
+      this.objects.set(def.id, { def, state: 'present', hp: def.hp ?? 0, respawnAt: 0 });
+    }
     for (const b of arena.brushes ?? []) {
       const o = b.door !== undefined ? this.objects.get(b.door) : undefined;
       if (o && b.swing) o.swing = { def: b.swing, points: b.points, hull: hullXZ(b.points), motion: null, blocked: false };
@@ -1101,7 +1107,8 @@ export class WorldZone {
     if (p.cutscene) return;
     const pos = p.character.position;
     if (Math.hypot(o.def.x - pos.x, o.def.z - pos.z) > INTERACT_RANGE || Math.abs(o.def.y - pos.y) > INTERACT_HEIGHT) return;
-    const grants: GroundGrant[] = o.def.kind === 'item' ? (o.def.item ? [o.def.item] : []) : (o.def.contents ?? []);
+    const grants: GroundGrant[] = (o.def.kind === 'item' ? (o.def.item ? [o.def.item] : []) : (o.def.contents ?? []))
+      .filter((g) => !this.groundItemDef(g)?.questItem); // quest items come only from the story
     // All or nothing: a bag that cannot hold everything takes nothing, and it all stays there.
     if (!this.fitsAll(p, grants)) {
       this.sendJson(connId, { op: SC.ERROR, d: { code: 'bag_full', message: 'Inventory full.' } });
@@ -2078,6 +2085,8 @@ export class WorldZone {
   }
 
   private applyQuest(p: Player, t: StoryTrigger): void {
+    // Action 0x40 sets the player's quest-item bit (0x46435B): the QUEST item of that slot.
+    if (t.quest!.actions & QUEST_ACTION.PLAYER_BIT) this.giveQuestItem(p, t.quest!.bit);
     const out = applyQuestAction(p.story.quests, t.quest!);
     if (!out.assigned.length && !out.completed.length && !out.journal.length) return;
     if (out.xp > 0) this.addExperience(p, out.xp);
@@ -2086,6 +2095,14 @@ export class WorldZone {
       p.statsDirty = true;
     }
     this.sendJson(p.connId, { op: SC.QUEST_LOG, d: { log: p.story.quests, news: { assigned: out.assigned, completed: out.completed, journal: out.journal } } });
+  }
+
+  /** Gives the QUEST item of a player bit, once: it goes to the Key Items page (no bag cell). */
+  private giveQuestItem(p: Player, bit: number): void {
+    const def = questItemForBit(this.items, bit);
+    if (!def || p.inventory.some((e) => e.itemId === def.id)) return;
+    if (addItem(p.inventory, def.id, 1, this.items) === null) return;
+    this.inventoryChanged(p);
   }
 
   /** A scripted sequence starts for this player: the client plays it, the server waits for it. */

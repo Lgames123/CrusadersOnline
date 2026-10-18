@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { WorldZone } from '@crusaders/server/simulation/world_zone';
 import {
   BUILTIN_ITEMS,
+  QUEST_ACTION,
   SC,
   createSyntheticArena,
   initPhysics,
@@ -176,6 +177,31 @@ describe('inventory authority in the zone', () => {
     t.z.dropInventoryItem(1, entry.slot, 'room_2_key');
     expect(count(p.inventory, 'room_2_key')).toBe(1);
     expect(t.dynamic()).toHaveLength(0);
+  });
+
+  it('quest items are never taken from the ground or a chest; a quest trigger gives them to the key items', () => {
+    const items = new Map(BUILTIN_ITEMS);
+    const dain: ItemDef = { id: 'message_for_dain', name: 'Message for Dain', type: 'key', width: 1, height: 1, price: 0, keyItem: true, questItem: true, questBit: 5 };
+    items.set(dain.id, dain).set(dain.name, dain);
+    const arena = createSyntheticArena();
+    arena.objects = [{ id: 7, kind: 'item', x: 0, y: 0, z: -0.5, item: { name: 'Message for Dain', quantity: 1 } }];
+    const z = new WorldZone(rapier, 'inventory', arena, { send: () => {} }, { items });
+    expect((z as unknown as Internal).objects.has(7)).toBe(false);
+    const t = zone(items);
+    t.internal.objects.get(CHEST)!.def = { id: CHEST, kind: 'chest', x: 0, y: 0, z: -0.5, contents: [{ name: 'Message for Dain', quantity: 1 }, { name: 'Gold Pieces', quantity: 5 }] } as never;
+    const p = t.join(1, FULL_BAG);
+    t.z.interact(1, CHEST);
+    expect(count(p.inventory, 'message_for_dain')).toBe(0);
+    expect((p as unknown as { gold: number }).gold).toBe(5);
+    // Gl2a's quest trigger: action 0x40, bit 5 (0x46435B), with a full bag; given once.
+    const give = (t.z as unknown as { applyQuest(p: unknown, tr: unknown): void }).applyQuest.bind(t.z);
+    const trigger = { id: 1, kind: 'quest', activation: 1, quest: { index: 5, main: true, actions: QUEST_ACTION.PLAYER_BIT, bit: 5 } };
+    give(p, trigger);
+    give(p, trigger);
+    expect(count(p.inventory, 'message_for_dain')).toBe(1);
+    const view = t.sent(1).filter((m) => m.op === SC.INVENTORY_UPDATE).at(-1)!.d.items.find((i) => i.itemId === 'message_for_dain');
+    expect(view).toMatchObject({ keyItem: true });
+    expect(view!.x).toBeUndefined();
   });
 
   it("a kill's gold goes to the purse; its items lie at the corpse for the killer alone, 2 minutes", () => {
