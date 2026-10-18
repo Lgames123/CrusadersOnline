@@ -48,6 +48,7 @@ import {
   type DoorMotion,
   type MoverMotion,
   type InventoryItemView,
+  isManaCrystals,
   type SpellId,
   type CharacterLook,
   type WorldObjectDef,
@@ -1115,6 +1116,23 @@ async function main(): Promise<void> {
     if (st.spell !== spell) session?.selectSpell(spell);
     session?.castSpell();
   };
+  /**
+   * Drinks the potion in a bag slot (hotbar, H, Z, the inventory): not while it cools down; Drake
+   * drinks it (PK12, or PJ01 for mana crystals; the server plays it for the others too).
+   */
+  const drink = (item: InventoryItemView | undefined) => {
+    if (!item || item.type !== 'potion' || hotbar.cooling(item.itemId) || !session) return;
+    local.startItemAction(isManaCrystals({ id: item.itemId }) ? ANIM.USE_CRYSTAL : ANIM.USE_POTION);
+    session.useItem(item.slot);
+  };
+  /** Wears (or takes off) gear: a weapon is drawn, a shield readied (ASM_READY_WEAPON / _SHIELD). */
+  const equip = (item: InventoryItemView | undefined, wear: boolean, to?: { x: number; y: number }) => {
+    if (!item || !session) return;
+    if (wear && !item.equipped && (item.type === 'weapon' || item.type === 'shield')) {
+      local.startItemAction(item.type === 'weapon' ? ANIM.READY_WEAPON : ANIM.READY_SHIELD);
+    }
+    session.equip(item.slot, wear, item.itemId, to);
+  };
   /** A hotbar slot used: cast its spell, drink its potion, or wear its gear (quick swap). */
   const useHotbar = (entry: HotbarEntry) => {
     if (cutscene || optionsOpen || !session) return;
@@ -1125,11 +1143,10 @@ async function main(): Promise<void> {
     const owned = (session.inventory?.items ?? []).filter((i) => i.itemId === entry.itemId);
     if (entry.type === 'potion') {
       // The smallest stack first, so stacks run out one at a time.
-      const potion = owned.sort((a, b) => (a.quantity ?? 1) - (b.quantity ?? 1))[0];
-      if (potion) session.useItem(potion.slot);
+      drink(owned.sort((a, b) => (a.quantity ?? 1) - (b.quantity ?? 1))[0]);
     } else {
       const spare = owned.find((i) => !i.equipped);
-      if (spare && !owned.some((i) => i.equipped)) session.equip(spare.slot, true, spare.itemId);
+      if (spare && !owned.some((i) => i.equipped)) equip(spare, true);
     }
   };
   hotbar.onActivate = useHotbar;
@@ -1155,8 +1172,7 @@ async function main(): Promise<void> {
       const target = nearestInteractable();
       if (target?.key) session?.interact(target.id, true);
       else {
-        const potion = (session?.inventory?.items ?? []).filter((i) => i.type === 'potion').sort((a, b) => (a.heal ?? 0) - (b.heal ?? 0))[0];
-        if (potion) session?.useItem(potion.slot);
+        drink((session?.inventory?.items ?? []).filter((i) => i.type === 'potion' && !hotbar.cooling(i.itemId)).sort((a, b) => (a.heal ?? 0) - (b.heal ?? 0))[0]);
       }
     } else if (action === 'castSpell') {
       const spell = session?.playerStats?.spell;
@@ -1169,10 +1185,9 @@ async function main(): Promise<void> {
         session?.selectSpell(st.spells[(i + 1) % st.spells.length]!.spell);
       }
     } else if (action === 'healthPotion') {
-      // H: drink the weakest healing potion carried (the original's quick potion key).
-      const potions = (session?.inventory?.items ?? []).filter((i) => i.type === 'potion');
-      const potion = potions.sort((a, b) => (a.heal ?? 0) - (b.heal ?? 0))[0];
-      if (potion) session?.useItem(potion.slot);
+      // H: drink the weakest healing potion carried (the original's quick potion key) not cooling down.
+      const potions = (session?.inventory?.items ?? []).filter((i) => i.type === 'potion' && !hotbar.cooling(i.itemId));
+      drink(potions.sort((a, b) => (a.heal ?? 0) - (b.heal ?? 0))[0]);
     }
   };
   inWorld = true;
@@ -1274,8 +1289,12 @@ async function main(): Promise<void> {
     if (!optionsOpen) input.requestLock();
     updateHint();
   }
-  inventoryPanel.onEquip = (slot, itemId, equip, to) => session?.equip(slot, equip, itemId, to);
-  inventoryPanel.onUse = (slot) => session?.useItem(slot);
+  inventoryPanel.onEquip = (slot, itemId, wear, to) => {
+    const item = session?.inventory?.items.find((i) => i.slot === slot && i.itemId === itemId);
+    if (item) equip(item, wear, to);
+    else session?.equip(slot, wear, itemId, to);
+  };
+  inventoryPanel.onUse = (slot, itemId) => drink(session?.inventory?.items.find((i) => i.slot === slot && i.itemId === itemId));
   inventoryPanel.onMove = (slot, itemId, x, y) => session?.moveInventoryItem(slot, x, y, itemId);
   inventoryPanel.onMerge = (fromSlot, toSlot) => session?.mergeInventoryStacks(fromSlot, toSlot);
   inventoryPanel.onSplit = (slot, quantity) => session?.splitInventoryStack(slot, quantity);

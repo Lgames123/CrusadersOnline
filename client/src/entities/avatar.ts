@@ -33,8 +33,11 @@ export interface Avatar {
   setShield?(up: boolean): void;
   /** Upper-body swing over the legs' clip (side swings, air swing); `id` changes per swing. */
   setUpperSwing?(kind: AttackKind | null, id: number): void;
-  /** A spell's state (ASM_SPELL_*) on the upper body over the legs' clip: cast while moving; `id` changes per cast. */
-  setUpperClip?(state: string | null, id: number): void;
+  /**
+   * A spell's state (ASM_SPELL_*) on the upper body over the legs' clip: cast while moving; or an
+   * item action's ANIM (drinking, readying gear on the move). `id` changes per cast.
+   */
+  setUpperClip?(state: string | number | null, id: number): void;
   /**
    * The held weapon's line (its model's DMY LINE: blade start and end, world space) while in a
    * swing that leaves a trail (every swing but the low chop while ducking): the swing's key

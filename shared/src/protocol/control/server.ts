@@ -165,6 +165,9 @@ export interface InventoryItemView {
   keyItem?: boolean;
   quantity?: number;
   heal?: number;
+  /** Potions: the cooldown its use starts (seconds) and, while it runs, the seconds left (potionCooldown). */
+  cooldown?: number;
+  cooldownLeft?: number;
 
   damage?: number[];
   speed?: number;
@@ -338,7 +341,22 @@ export const ANIM = {
   LAND_SOFT: 44,
   /** A spell's own state after the conjure (or at once): SPELL_CAST + its index in SPELLS (ASM_SPELL_*). */
   SPELL_CAST: 45,
+  /** Drinking a potion (PK12_u_ptn "use potion": models.ctx loads it but binds no state). */
+  USE_POTION: 56,
+  /** Using mana crystals (PJ01_u_ky "use crystal", ASM_GESTURE_MISC_04). */
+  USE_CRYSTAL: 57,
+  /** Drawing a weapon / readying a shield just equipped (ASM_READY_WEAPON PP01 / ASM_READY_SHIELD PT01). */
+  READY_WEAPON: 58,
+  READY_SHIELD: 59,
 } as const;
+
+/** Clip seconds of the item actions (Drake's clips at 30 fps: PK12 60 frames, PJ01 49, PP01 30, PT01 38). */
+export const ITEM_ACTION_SECONDS: Readonly<Record<number, number>> = {
+  [ANIM.USE_POTION]: 60 / 30,
+  [ANIM.USE_CRYSTAL]: 49 / 30,
+  [ANIM.READY_WEAPON]: 30 / 30,
+  [ANIM.READY_SHIELD]: 38 / 30,
+};
 
 /** Animation for a character's own movement state (roll, jump, duck, airborne, locomotion, idle). */
 export function movementAnim(flags: number, grounded: boolean, rollDir: number, diagonalMoves = false, airKind = 0): number {

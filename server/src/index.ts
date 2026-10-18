@@ -66,7 +66,7 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
   if (!zones.available(config.arena)) throw new Error(`ARENA ${config.arena} is not available (convert the level into ${config.generatedDir})`);
   zones.keep(config.arena);
   await zones.get(config.arena);
-  sessions = new SessionManager(tickets, zones, characters, log, { defaultArena: config.arena, difficulty: config.difficulty, devGuestSpawn: config.devGuestSpawn, devGuestSpells: config.devGuestSpells, devGuestXp: config.devGuestXp, persist: (r) => save(r, 'transfer') });
+  sessions = new SessionManager(tickets, zones, characters, log, { defaultArena: config.arena, difficulty: config.difficulty, devGuestSpawn: config.devGuestSpawn, devGuestSpells: config.devGuestSpells, devGuestXp: config.devGuestXp, devGuestItems: config.devGuestItems, persist: (r) => save(r, 'transfer') });
   // The zones' item catalog, here for what characters wear on the character screen.
   const items = config.itemRulesPath ? catalogFromItemRules(JSON.parse(readFileSync(config.itemRulesPath, 'utf8')) as Parameters<typeof catalogFromItemRules>[0]) : BUILTIN_ITEMS;
   const live = sessions;

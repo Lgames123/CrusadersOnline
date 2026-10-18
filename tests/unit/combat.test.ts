@@ -27,6 +27,9 @@ import {
   weaponClipRate,
   INPUT,
   TICK_RATE,
+  potionCooldown,
+  itemSlug,
+  catalogFromItemRules,
   INPUT_PACKET_MAX_BYTES,
   MOB_ARCHETYPES,
   PLAYER_RESPAWN_TICKS,
@@ -793,9 +796,14 @@ describe('world objects (original level placements)', () => {
     const slot = t.last(SC.INVENTORY_UPDATE)!.d.items.find((i) => i.itemId === 'healing_potion')!.slot;
     (t.zone as unknown as { players: Map<number, { hp: number }> }).players.get(1)!.hp = 50;
     t.zone.useItem(1, slot);
+    const buf = new DataView(new ArrayBuffer(INPUT_PACKET_MAX_BYTES));
+    const len = encodeInput(buf, 0, [{ clientTick: 1, flags: INPUT.ROOTED, yaw: 0, pitch: 0 }]);
+    t.zone.receiveInput(1, new DataView(buf.buffer.slice(0, len)));
     t.zone.step();
     expect(t.last(SC.PLAYER_STATS)!.d.hp).toBe(60);
     expect(t.last(SC.INVENTORY_UPDATE)!.d.items.some((i) => i.itemId === 'healing_potion')).toBe(false);
+    // Others see him drink (PK12) while he stands.
+    expect((t.zone as unknown as { players: Map<number, { anim: number }> }).players.get(1)!.anim).toBe(ANIM.USE_POTION);
   });
 
   it('breaks a prop with melee swings and brings it back later', () => {
@@ -1056,6 +1064,31 @@ describe('world objects (original level placements)', () => {
     const stats = messages.filter((m) => m.connId === 1 && m.msg.op === SC.PLAYER_STATS).at(-1)?.msg as Extract<ServerControlMsg, { op: typeof SC.PLAYER_STATS }>;
     expect(stats).toBeDefined();
     expect(stats.d.mana).toBe(10); // 5 + 5 = 10
+
+    // 10 s cooldown, shared by every Mana Crystals item: a second one is refused until it ends.
+    const last = () => (messages.filter((m) => m.connId === 1 && m.msg.op === SC.INVENTORY_UPDATE).at(-1)!.msg as Extract<ServerControlMsg, { op: typeof SC.INVENTORY_UPDATE }>).d.items.find((i) => i.itemId === 'mana_crystals_2');
+    expect(last()).toMatchObject({ cooldown: 10, cooldownLeft: 10 });
+    expect(last()!.quantity).toBeUndefined(); // one left
+    zone.useItem(1, crystal!.slot);
+    zone.step();
+    expect(last()).toBeDefined(); // refused: still carried
+    for (let i = 0; i < 10 * TICK_RATE; i++) zone.step();
+    zone.useItem(1, crystal!.slot);
+    zone.step();
+    const mana = messages.filter((m) => m.connId === 1 && m.msg.op === SC.PLAYER_STATS).at(-1)!.msg as Extract<ServerControlMsg, { op: typeof SC.PLAYER_STATS }>;
+    expect(mana.d.mana).toBe(17); // + 2 regained over the 10 s, + 5
+    expect(last()).toBeUndefined();
+  });
+
+  it('gives each potion its own cooldown (not in the original)', () => {
+    const cd = (name: string) => potionCooldown(BUILTIN_ITEMS.get(itemSlug(name))!);
+    expect(cd('Greater Healing Potion')).toEqual({ group: 'greater_healing_potion', seconds: 60 });
+    expect(cd('Healing Potion')).toEqual({ group: 'healing_potion', seconds: 30 });
+    expect(cd('Mana Potion')).toEqual({ group: 'mana_potion', seconds: 30 });
+    expect(cd('Mana Crystals 3')).toEqual({ group: 'mana_crystals', seconds: 10 });
+    // Boost potions (items.ctx UseParameters 30, FIRE, 0.25): until the effect ends.
+    const rules = { items: [{ name: 'Fire Resistance Potion', fields: { Type: 'POTION', Use: 'BOOST_PROTECTION' }, damage: {}, protection: {}, calls: [{ name: 'UseParameters', args: [30, 'FIRE', 0.25] }] }] };
+    expect(potionCooldown(catalogFromItemRules(rules).get('fire_resistance_potion')!)).toEqual({ group: 'fire_resistance_potion', seconds: 30 });
   });
 });
 

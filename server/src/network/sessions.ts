@@ -1,5 +1,5 @@
 import type { Logger } from 'pino';
-import { CS, LEVEL_PREFIX, SC, SPELLS, decodeSpells, encodeSpells, parseClientControl, type Difficulty, type ExitCrossing, type KnownSpell, type ServerControlMsg } from '@crusaders/shared';
+import { CS, LEVEL_PREFIX, MAX_STACK, SC, SPELLS, decodeSpells, encodeSpells, parseClientControl, startingInventory, type Difficulty, type InventoryEntry, type ExitCrossing, type KnownSpell, type ServerControlMsg } from '@crusaders/shared';
 import type { Account, TicketStore } from '../auth/tickets.ts';
 import type { CharacterPersistRecord, CharacterRepository } from '../persistence/characters.ts';
 import type { JoinOptions, PersistRecord, TransferState } from '../simulation/world_zone.ts';
@@ -61,6 +61,7 @@ export class SessionManager implements TransportHandlers {
       devGuestSpawn?: { x: number; y: number; z: number } | null;
       devGuestSpells?: string | null;
       devGuestXp?: number;
+      devGuestItems?: string | null;
       persist: (records: CharacterPersistRecord[]) => void;
     },
   ) {
@@ -76,6 +77,10 @@ export class SessionManager implements TransportHandlers {
     this.devGuestSpells = all ? SPELLS.map((spell) => ({ spell, level: Number(all[1]) })) : decodeSpells(opts.devGuestSpells);
     this.devGuestSpells = decodeSpells(encodeSpells(this.devGuestSpells));
     this.devGuestXp = opts.devGuestXp ?? 0;
+    const extra = (opts.devGuestItems ?? '').split(',').map((e) => e.trim().split(':')).filter(([id]) => !!id);
+    this.devGuestItems = extra.length
+      ? [...startingInventory(), ...extra.map(([itemId, n], i) => ({ slot: 2 + i, itemId: itemId!, equipped: false, ...(Number(n) > 1 ? { quantity: Math.min(MAX_STACK, Number(n)) } : {}) }))]
+      : null;
   }
 
   private readonly devGuestSpawn: { x: number; y: number; z: number } | null;
@@ -83,6 +88,8 @@ export class SessionManager implements TransportHandlers {
   /** Development only: what guests know and their experience (DEV_GUEST_SPELLS / DEV_GUEST_XP). */
   private readonly devGuestSpells: KnownSpell[];
   private readonly devGuestXp: number;
+  /** Development only: the guests' inventory (DEV_GUEST_ITEMS), else the starting one. */
+  private readonly devGuestItems: InventoryEntry[] | null;
 
   private zoneOf(s: Session): ZoneHost | null {
     return this.zones.host(s.zone);
@@ -303,6 +310,7 @@ export class SessionManager implements TransportHandlers {
           ...(this.devGuestSpawn ? { position: this.devGuestSpawn } : {}),
           ...(this.devGuestSpells.length ? { spells: this.devGuestSpells, selectedSpell: this.devGuestSpells[0]!.spell } : {}),
           ...(this.devGuestXp ? { experience: this.devGuestXp } : {}),
+          ...(this.devGuestItems ? { inventory: structuredClone(this.devGuestItems) } : {}),
         });
       } else {
         const saved = await this.characters.loadOwned(account.id, characterId);

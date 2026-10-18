@@ -33,6 +33,8 @@ export interface ItemDef {
   heal?: number;
   /** Potions with `Use RESTORE_MANA`: mana restored (items.ctx `UseParameters`). */
   mana?: number;
+  /** Potions with `Use BOOST_PROTECTION` / `BOOST_ATTRIBUTE`: the effect's seconds (`UseParameters` first argument). */
+  duration?: number;
   /** Spell books (items.ctx `Use GRANT_SPELL`): the spell learned when picked up. */
   spell?: SpellId;
   /** Several of the same item share one inventory slot. */
@@ -57,8 +59,8 @@ const shield = (name: string, price: number, model?: number): ItemDef =>
   ({ id: itemSlug(name), name, type: 'shield', width: 2, height: 2, price, ...(model !== undefined ? { model } : {}) });
 const armor = (name: string, prot: Partial<Record<DamageType, number>>, price: number, model?: number): ItemDef =>
   ({ id: itemSlug(name), name, type: 'armor', width: 2, height: 3, protection: damageVector(prot, 1), price, ...(model !== undefined ? { model } : {}) });
-const potion = (name: string, heal: number, price: number, model?: number, mana?: number): ItemDef =>
-  ({ id: itemSlug(name), name, type: 'potion', width: 1, height: 1, ...(heal ? { heal } : {}), ...(mana ? { mana } : {}), stackable: true, price, ...(model !== undefined ? { model } : {}) });
+const potion = (name: string, heal: number, price: number, model?: number, mana?: number, duration?: number): ItemDef =>
+  ({ id: itemSlug(name), name, type: 'potion', width: 1, height: 1, ...(heal ? { heal } : {}), ...(mana ? { mana } : {}), ...(duration ? { duration } : {}), stackable: true, price, ...(model !== undefined ? { model } : {}) });
 const spellBook = (name: string, spell: SpellId, price: number, model?: number): ItemDef =>
   ({ id: itemSlug(name), name, type: 'spellbook', width: 1, height: 1, spell, price, ...(model !== undefined ? { model } : {}) });
 const key = (name: string, price: number, model?: number, keyItem = false): ItemDef =>
@@ -141,7 +143,8 @@ export function catalogFromItemRules(rules: { items: readonly ItemRule[] }): Ite
     } else if (type === 'POTION') {
       const use = r.fields['Use'];
       const amount = Number(r.calls?.find((c) => c.name === 'UseParameters')?.args[0] ?? 0);
-      def = potion(r.name, use === 'HEAL' ? amount : 0, price, undefined, use === 'RESTORE_MANA' ? amount : undefined);
+      const boost = use === 'BOOST_PROTECTION' || use === 'BOOST_ATTRIBUTE';
+      def = potion(r.name, use === 'HEAL' ? amount : 0, price, undefined, use === 'RESTORE_MANA' ? amount : undefined, boost && amount > 0 ? amount : undefined);
     } else if (type === 'USEABLE' && / Key$/.test(r.name)) {
       def = key(r.name, price, undefined, true);
     } else if (type === 'QUEST' || type === 'RING') {
@@ -158,6 +161,24 @@ export function catalogFromItemRules(rules: { items: readonly ItemRule[] }): Ite
     }
   }
   return out;
+}
+
+/** Every Mana Crystals item (Mana Crystals 2 / 3 are the same item on other models). */
+export function isManaCrystals(def: Pick<ItemDef, 'id'>): boolean {
+  return /^mana_crystals(_\d+)?$/.test(def.id);
+}
+
+/**
+ * Potion cooldowns (not in the original): Greater
+ * Healing 60 s, other healing and the Mana Potion 30 s, Mana Crystals 10 s; a boost potion
+ * (resistances, speed) until its effect wears off. Each potion has its own; the crystals share one.
+ */
+export function potionCooldown(def: ItemDef): { group: string; seconds: number } | null {
+  if (def.type !== 'potion') return null;
+  if (isManaCrystals(def)) return { group: 'mana_crystals', seconds: 10 };
+  if (def.duration) return { group: def.id, seconds: def.duration };
+  if (def.id === 'greater_healing_potion') return { group: def.id, seconds: 60 };
+  return { group: def.id, seconds: 30 };
 }
 
 export const UNARMED: Readonly<ItemDef> = { id: 'unarmed', name: 'Unarmed', type: 'weapon', width: 1, height: 1, damage: damageVector({}), speed: 1, price: 0 };

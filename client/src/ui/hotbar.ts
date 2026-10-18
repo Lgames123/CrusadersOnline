@@ -72,6 +72,9 @@ export class Hotbar {
   private dragging = false;
   private suppressClick = false;
   private html = '';
+  /** Potion cooldowns by item id: when they end (performance.now() ms) and their full length (ms). */
+  private cooldowns = new Map<string, { end: number; total: number }>();
+  private cooldownFrame = 0;
 
   /** A slot was used (key or click). */
   onActivate: (entry: HotbarEntry) => void = () => {};
@@ -146,7 +149,26 @@ export class Hotbar {
 
   setInventory(items: readonly InventoryItemView[]): void {
     this.items = items;
+    // The server says how long each cooling potion has left; a near repeat keeps the end already
+    // shown (so the overlay does not jump on every inventory update).
+    const now = performance.now();
+    const next = new Map<string, { end: number; total: number }>();
+    for (const i of items) {
+      if (!i.cooldownLeft || next.has(i.itemId)) continue;
+      const end = now + i.cooldownLeft * 1000;
+      const had = this.cooldowns.get(i.itemId);
+      next.set(i.itemId, had && Math.abs(had.end - end) < 300 ? had : { end, total: Math.max(i.cooldown ?? 0, i.cooldownLeft) * 1000 });
+    }
+    // Used up during its cooldown: still shown on the (now empty) slot until it runs out.
+    for (const [id, cd] of this.cooldowns) if (!next.has(id) && cd.end > now && !items.some((i) => i.itemId === id)) next.set(id, cd);
+    this.cooldowns = next;
     this.render();
+    this.tickCooldowns();
+  }
+
+  /** A potion of this id is cooling down (it cannot be drunk yet). */
+  cooling(itemId: string): boolean {
+    return (this.cooldowns.get(itemId)?.end ?? 0) > performance.now();
   }
 
   setStats(stats: PlayerStats): void {
@@ -255,6 +277,11 @@ export class Hotbar {
         ? `<img class="hb-icon" data-thumb-key="${thumbKey}" src="${url ?? ''}" alt="" draggable="false" ${url ? '' : 'hidden'} />`
         : `<span class="hb-glyph">${entry.type === 'potion' ? '⚗' : '⚔'}</span>`;
       if (entry.type === 'potion') body += `<span class="hb-count">${owned.reduce((n, i) => n + (i.quantity ?? 1), 0)}</span>`;
+      // The cooldown: a translucent white cover that drains away with it (sized by tickCooldowns).
+      if (this.cooling(entry.itemId)) {
+        classes.push('hb-cooling');
+        body += `<span class="hb-cd"></span><span class="hb-cd-time"></span>`;
+      }
     }
     return `<div class="${classes.join(' ')}" data-hb-slot="${slot}">${body}${key}</div>`;
   }
@@ -276,6 +303,32 @@ export class Hotbar {
       this.bar.innerHTML = html;
     }
     this.root.classList.toggle('hb-collapsed', rows === 0);
+  }
+
+  /** Sizes the cooldown covers every frame while any cooldown runs; one that ends redraws its slot. */
+  private tickCooldowns(): void {
+    if (this.cooldownFrame) return;
+    const step = () => {
+      this.cooldownFrame = 0;
+      const now = performance.now();
+      let ended = false;
+      for (const [id, cd] of this.cooldowns) {
+        if (cd.end > now) continue;
+        this.cooldowns.delete(id);
+        ended = true;
+      }
+      if (ended) this.render();
+      for (const el of this.bar.querySelectorAll<HTMLElement>('.hb-cooling')) {
+        const entry = this.layout.slots[Number(el.dataset['hbSlot'])];
+        const cd = entry?.kind === 'item' ? this.cooldowns.get(entry.itemId) : undefined;
+        if (!cd) continue;
+        const left = cd.end - now;
+        el.querySelector<HTMLElement>('.hb-cd')!.style.height = `${Math.min(100, (left / cd.total) * 100).toFixed(2)}%`;
+        el.querySelector<HTMLElement>('.hb-cd-time')!.textContent = `${Math.ceil(left / 1000)}`;
+      }
+      if (this.cooldowns.size) this.cooldownFrame = requestAnimationFrame(step);
+    };
+    this.cooldownFrame = requestAnimationFrame(step);
   }
 
   // --- Pointer
@@ -316,7 +369,10 @@ export class Hotbar {
     } else {
       name = entry.name;
       const owned = this.owned(entry.itemId);
-      detail = !owned.length ? 'None carried' : entry.type === 'potion' ? 'Drink' : owned.some((i) => i.equipped) ? 'Equipped' : 'Equip';
+      const cooldown = owned.find((i) => i.cooldown)?.cooldown;
+      detail = !owned.length ? 'None carried'
+        : entry.type === 'potion' ? `Drink${cooldown ? ` · ${cooldown} s cooldown` : ''}`
+          : owned.some((i) => i.equipped) ? 'Equipped' : 'Equip';
     }
     this.tooltip.innerHTML = `<strong>${escape(name)}</strong><small>${escape(detail)}</small>`;
     this.tooltip.hidden = false;

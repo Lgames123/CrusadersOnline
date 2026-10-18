@@ -59,6 +59,11 @@ interface ClipMap {
   bash?: string;
   /** Spell wind-up (ASM_SPELL_CONJURE). */
   conjure?: string;
+  /** Drinking a potion, using mana crystals, drawing a weapon, readying a shield (item actions). */
+  usePotion?: string;
+  useCrystal?: string;
+  readyWeapon?: string;
+  readyShield?: string;
   /** Death variants (ASM_HIT_POINTS_DEPLETED and its ALT_01..08). */
   deaths?: string[];
   /** Idle variations played now and then while standing (peaceful creatures: gestures, ALT stands). */
@@ -103,6 +108,12 @@ function withStates(base: ClipMap, states: Record<string, string> | undefined): 
     ),
     bash: base.bash ?? st['ASM_RAM_SHOULDER'],
     conjure: base.conjure ?? st['ASM_SPELL_CONJURE'],
+    // models.ctx loads PK12_u_ptn ("use potion") with Drake's clips but binds no state to it;
+    // PJ01_u_ky is labelled "use crystal" (bound to ASM_GESTURE_MISC_04).
+    usePotion: base.usePotion ?? 'pk12_u_ptn',
+    useCrystal: base.useCrystal ?? 'pj01_u_ky',
+    readyWeapon: base.readyWeapon ?? st['ASM_READY_WEAPON'],
+    readyShield: base.readyShield ?? st['ASM_READY_SHIELD'],
     deaths: base.deaths ?? [st['ASM_HIT_POINTS_DEPLETED'] ?? base.death, ...[1, 2, 3, 4, 5, 6, 7, 8].map((i) => st[`ASM_HIT_POINTS_DEPLETED_ALT_0${i}`]).filter((c): c is string => !!c)],
     attackOverhead: base.attackOverhead ?? st['ASM_SWING_OVERHEAD'] ?? base.attacks[0]!,
     attackLeft: base.attackLeft ?? st['ASM_SWING_LEVEL'] ?? base.attacks[0]!,
@@ -298,6 +309,10 @@ class OriginalAvatar implements Avatar {
     if (anim === ANIM.STUNNED) return { name: m.impacts?.[0] ?? m.idle, loop: false };
     if (anim === ANIM.ATTACK_BASH) return { name: m.bash ?? m.attacks[0]!, loop: false };
     if (anim === ANIM.SPELL_CONJURE) return { name: m.conjure ?? m.idle, loop: false };
+    if (anim >= ANIM.USE_POTION && anim <= ANIM.READY_SHIELD) {
+      const own = [m.usePotion, m.useCrystal, m.readyWeapon, m.readyShield][anim - ANIM.USE_POTION];
+      return { name: own && this.clips.has(own) ? own : m.idle, loop: false };
+    }
     // A spell's own state (models.ctx B ASM_SPELL_*; PK01 / PK02 / PK04 / PK05 for Drake). A model
     // without it plays another state of its group (0x00428220): fire ball -> ASM_THROW_ITEM (the
     // Deceiver, the elementals).
@@ -485,9 +500,12 @@ class OriginalAvatar implements Avatar {
     return this.shieldUp || this.upperSwing !== null;
   }
 
-  /** A spell's state on the upper body (fire ball, slow, lightning, soul drinker cast on the move); `id` changes per cast. */
-  setUpperClip(state: string | null, id: number): void {
-    const name = state ? this.map.asm?.[state] : undefined;
+  /**
+   * A spell's state on the upper body (fire ball, slow, lightning, soul drinker cast on the move),
+   * or an item action's (`state` an ANIM.USE_* / READY_* id then); `id` changes per cast.
+   */
+  setUpperClip(state: string | number | null, id: number): void {
+    const name = typeof state === 'number' ? this.clipFor(state).name : state ? this.map.asm?.[state] : undefined;
     const clip = name ? this.clips.get(name) : undefined;
     if (!clip || this.anim === ANIM.DEAD) return;
     const key = `cast:${state}:${id}`;

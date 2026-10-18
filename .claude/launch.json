@@ -144,7 +144,8 @@
         "ARENA": "synthetic-arena",
         "DATABASE_URL": "pglite:local/pgdata-spells",
         "DEV_GUEST_SPELLS": "slow:1,soul_drinker:1,spectral_ally:1,revelation:1,torch_light:3,lightning:2",
-        "DEV_GUEST_XP": "60000"
+        "DEV_GUEST_XP": "60000",
+        "DEV_GUEST_ITEMS": "healing_potion:5,greater_healing_potion:2,mana_potion:2,mana_crystals:5,axe:1,metal_shield:1"
       },
       "port": 8191
     },

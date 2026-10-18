@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ANIM, INPUT, TICK_DT, isLocomotionAnim, SIDE_SWING_CHAIN_SECONDS, SIDE_SWING_RECHAIN_TICKS, gameplayFeatures, type GameplayFeatures, attackAnim, attackMotion, isHitAction, isLayeredSwing, dequantizeAngle, movementAnim, looksGrounded, movementFacingOffset, type AttackKind, attackTiming, COMBO_QUEUE_FRACTION, COMBO_MULTIPLIERS, type Character, type InputFrame, type Vec3, setCharacterState } from '@crusaders/shared';
+import { ANIM, INPUT, ITEM_ACTION_SECONDS, TICK_DT, isLocomotionAnim, SIDE_SWING_CHAIN_SECONDS, SIDE_SWING_RECHAIN_TICKS, gameplayFeatures, type GameplayFeatures, attackAnim, attackMotion, isHitAction, isLayeredSwing, dequantizeAngle, movementAnim, looksGrounded, movementFacingOffset, type AttackKind, attackTiming, COMBO_QUEUE_FRACTION, COMBO_MULTIPLIERS, type Character, type InputFrame, type Vec3, setCharacterState } from '@crusaders/shared';
 import type { Avatar } from './avatar.ts';
 
 /**
@@ -168,7 +168,7 @@ export class LocalPlayer {
    * (`conjure` seconds, 0 for the spells that skip it), then the spell's state for `clip`
    * seconds - on the upper body when cast on the move (no conjure, moving).
    */
-  startCast(plan: { conjure: number; clip: number; anim: number; state: string }): boolean {
+  startCast(plan: { conjure: number; clip: number; anim: number; state: string | number }): boolean {
     if (this.dead || this.swingLeft > 0 || this.casting || !this.character.grounded || isHitAction(this.character.rollDir)) return false;
     this.castLeft = plan.conjure;
     this.castClip = plan.clip;
@@ -177,6 +177,15 @@ export class LocalPlayer {
     this.castCount++;
     if (this.castUpper) this.avatar.setUpperClip?.(plan.state, this.castCount);
     return true;
+  }
+
+  /**
+   * Drinking a potion or readying gear just worn (ANIM.USE_* / READY_*): played like a cast with
+   * no conjure, rooted while standing, on the upper body on the move. False when busy (the item
+   * is still used: the server plays the clip too).
+   */
+  startItemAction(anim: number): boolean {
+    return this.startCast({ conjure: 0, clip: ITEM_ACTION_SECONDS[anim] ?? 1, anim, state: anim });
   }
 
   /** The root motion of the swing just started (once), for the next input's attack bits. */

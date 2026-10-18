@@ -54,6 +54,9 @@ import {
   GOLD_ITEM,
   itemSlug,
   takeOne,
+  potionCooldown,
+  isManaCrystals,
+  ITEM_ACTION_SECONDS,
   addItem,
   mergeInventoryStacks,
   splitInventoryStack,
@@ -526,6 +529,10 @@ interface Player extends ActorBase {
   resist: DamageVector;
   inventory: InventoryEntry[];
   inventoryDirty: boolean;
+  /** Potion cooldowns: potionCooldown group -> tick it ends (kept in this zone only). */
+  potionCooldowns: Map<string, number>;
+  /** Drinking a potion or readying gear just worn: its ANIM until `until` (played while standing). */
+  itemAction: { anim: number; until: number } | null;
   /** Equipment change requested mid-swing, applied when the swing ends. */
   pendingEquip: { slot: number; equip: boolean; itemId?: string; to?: { x: number; y: number } } | null;
   weapon: ItemDef;
@@ -993,6 +1000,8 @@ export class WorldZone {
       resist: rules.resist,
       inventory,
       inventoryDirty: saved.length === 0,
+      potionCooldowns: new Map(),
+      itemAction: null,
       pendingEquip: null,
       weapon: eq.weapon,
       armor: eq.armor,
@@ -1315,6 +1324,15 @@ export class WorldZone {
     const entry = p.inventory.find((e) => e.slot === slot);
     const def = entry && this.items.get(entry.itemId);
     if (!def || def.type !== 'potion' || (!def.heal && !def.mana)) return;
+    const cooldown = potionCooldown(def);
+    if (cooldown) {
+      if (this.tick < (p.potionCooldowns.get(cooldown.group) ?? 0)) {
+        this.sendInventory(p);
+        return;
+      }
+      p.potionCooldowns.set(cooldown.group, this.tick + Math.round(cooldown.seconds * TICK_RATE));
+    }
+    this.startItemAction(p, isManaCrystals(def) ? ANIM.USE_CRYSTAL : ANIM.USE_POTION);
     takeOne(p.inventory, slot, this.items);
     if (def.heal) p.hp = Math.min(p.maxHp, p.hp + def.heal);
     if (def.mana) p.mana = Math.min(p.maxMana, p.mana + def.mana);
@@ -1639,7 +1657,14 @@ export class WorldZone {
       return;
     }
     this.applyEquipment(p);
+    if (equip && def.type === 'weapon') this.startItemAction(p, ANIM.READY_WEAPON);
+    else if (equip && def.type === 'shield') this.startItemAction(p, ANIM.READY_SHIELD);
     this.inventoryChanged(p);
+  }
+
+  /** Drinking / readying gear: its clip plays for whoever sees the player while he stands (the client roots itself as for a cast). */
+  private startItemAction(p: Player, anim: number): void {
+    p.itemAction = { anim, until: this.tick + Math.max(1, Math.round((ITEM_ACTION_SECONDS[anim] ?? 1) * TICK_RATE)) };
   }
 
   private applyEquipment(p: Player): void {
@@ -1665,7 +1690,14 @@ export class WorldZone {
       ...(def.speed !== undefined ? { speed: def.speed } : {}),
       ...(def.protection ? { protection: def.protection } : {}),
       ...(def.heal ? { heal: def.heal } : {}),
+      ...(potionCooldown(def) ? { cooldown: potionCooldown(def)!.seconds } : {}),
     };
+  }
+
+  private cooldownLeft(p: Player, def: ItemDef): { cooldownLeft?: number } {
+    const group = potionCooldown(def)?.group;
+    const left = group ? (p.potionCooldowns.get(group) ?? 0) - this.tick : 0;
+    return left > 0 ? { cooldownLeft: left / TICK_RATE } : {};
   }
 
   private sendInventory(p: Player): void {
@@ -1684,6 +1716,7 @@ export class WorldZone {
 
         ...(e.quantity && e.quantity > 1 ? { quantity: e.quantity } : {}),
         ...(value ? { value } : {}),
+        ...this.cooldownLeft(p, def),
       });
     }
     this.sendJson(p.connId, { op: SC.INVENTORY_UPDATE, d: { items, slots: INVENTORY_SLOTS, weaponSpeed: p.weapon.speed ?? 1 } });
@@ -2198,6 +2231,10 @@ export class WorldZone {
         if (p.cast) {
           if (tick < p.cast.clipAt) p.anim = ANIM.SPELL_CONJURE;
           else if (!p.cast.upper) p.anim = ANIM.SPELL_CAST + SPELLS.indexOf(p.cast.spell);
+        }
+        if (p.itemAction) {
+          if (tick >= p.itemAction.until || !alive(p)) p.itemAction = null;
+          else if (p.anim === ANIM.IDLE && !p.cast) p.anim = p.itemAction.anim;
         }
       }
       if (alive(p)) this.updateMagic(p);
