@@ -143,6 +143,10 @@ import {
   levelForXp,
   originalDamageMultiplier,
   originalSpeedMultiplier,
+  effectiveAttributes,
+  DAMAGE_TYPES,
+  ATTRIBUTE_STATUS,
+  PROTECTION_STATUS,
   originalDamageTaken,
   originalFlinch,
   originalWeaponHit,
@@ -307,6 +311,8 @@ export interface WorldZoneOptions {
 
 
 /** World objects (original levels): interaction reach and respawn delays (slice values). */
+/** Sound a boost potion plays when drunk (0x00401AB0 / 0x00401D10: 0x19E). */
+const BOOST_POTION_SOUND = 0x19e;
 const INTERACT_RANGE = 2.5;
 const INTERACT_HEIGHT = 2;
 /** Doors: reach from the door's bounds (they are up to 24 ft wide). */
@@ -733,7 +739,9 @@ export class WorldZone {
       creatureType: (a) => this.creatureType(actor(a)),
       resist: (a, t) => {
         const x = actor(a);
-        return x.kind === 'player' ? (x.resist[t] ?? 1) * (x.armor?.protection?.[t] ?? 1) : x.archetype.resist[t] ?? 1;
+        // 0x0044CB60: base x worn protection x the kind 6 statuses (+0x17C: stone skin, resistance potions).
+        const base = x.kind === 'player' ? (x.resist[t] ?? 1) * (x.armor?.protection?.[t] ?? 1) : x.archetype.resist[t] ?? 1;
+        return base * this.magic.incomingMultiplier(x, t);
       },
       damage: (a, t, vector, push) => {
         const target = actor(t);
@@ -764,13 +772,35 @@ export class WorldZone {
       statusChanged: (a) => {
         const x = actor(a);
         if (x.kind !== 'player') return;
-        // Haste (SPED) and slows change the clip rate the movement follows (the client predicts it from PLAYER_STATS speed).
-        x.moveStats = { ...x.moveStats, clipRate: x.baseClipRate * this.playerRate(x) };
-        x.statsDirty = true;
+        // Haste (SPED) and slows change the clip rate the movement follows (the client predicts it from PLAYER_STATS speed);
+        // attribute boosts change the derived stats.
+        this.refreshDerived(x);
       },
       summonAlly: (owner, level, at, yaw, until) => this.summonAlly(actor(owner), level, at, yaw, until),
       dismissAlly: (a) => this.removeMob(actor(a) as Mob),
     };
+  }
+
+  /** Attributes with the statuses' bonus (Stats_ComputeEffectiveAttributes 0x0044E000: base + bonus, capped at 50). */
+  private effectiveAttributesOf(p: Player): Attributes {
+    return effectiveAttributes(p.attributes, this.magic.attributeBonus(p));
+  }
+
+  /**
+   * Stats_ComputeDerived (0x0044E090) from the effective attributes. The player's per-frame status
+   * tick (stats vtable slot 26, 0x0044DC30) runs it every frame, so an attribute boost takes hold
+   * at once and ends with its status. HP and mana are clamped to the new maxima.
+   */
+  private refreshDerived(p: Player): void {
+    const a = this.effectiveAttributesOf(p);
+    p.maxHp = playerMaxHp(a, p.level);
+    p.maxMana = originalMaxMana(a, p.level);
+    p.damageMultiplier = originalDamageMultiplier(a, p.level);
+    p.baseClipRate = originalSpeedMultiplier(a, p.level);
+    p.moveStats = { ...p.moveStats, clipRate: p.baseClipRate * this.playerRate(p) };
+    p.hp = Math.min(p.hp, p.maxHp);
+    p.mana = Math.min(p.mana, p.maxMana);
+    p.statsDirty = true;
   }
 
   /** A player's speed from spell effects (haste, slows; a freeze stops his input instead). */
@@ -1323,7 +1353,7 @@ export class WorldZone {
     if (!p || !alive(p)) return;
     const entry = p.inventory.find((e) => e.slot === slot);
     const def = entry && this.items.get(entry.itemId);
-    if (!def || def.type !== 'potion' || (!def.heal && !def.mana)) return;
+    if (!def || def.type !== 'potion' || (!def.heal && !def.mana && !def.boost)) return;
     const cooldown = potionCooldown(def);
     if (cooldown) {
       if (this.tick < (p.potionCooldowns.get(cooldown.group) ?? 0)) {
@@ -1336,11 +1366,30 @@ export class WorldZone {
     takeOne(p.inventory, slot, this.items);
     if (def.heal) p.hp = Math.min(p.maxHp, p.hp + def.heal);
     if (def.mana) p.mana = Math.min(p.maxMana, p.mana + def.mana);
+    if (def.boost) this.drinkBoost(p, def);
     p.statsDirty = true;
     p.inventoryDirty = true;
     this.sendInventory(p);
     const record = this.persistRecord(p);
     if (record) this.outbox.persist?.([record], 'progress');
+  }
+
+  /**
+   * A boost potion's use (0x00401D10 BOOST_PROTECTION, 0x00401AB0 BOOST_ATTRIBUTE): sound 414 and
+   * a status for the duration. Protection: kind 6, its type's damage taken x the amount (0.25 = a
+   * quarter). Attribute: kind 9-12, + the amount to that attribute (capped at 50 with the base).
+   */
+  private drinkBoost(p: Player, def: ItemDef): void {
+    const b = def.boost!;
+    const until = this.tick + Math.round((def.duration ?? 0) * TICK_RATE);
+    const at = p.character.position;
+    this.broadcastAt(at, { op: SC.SPELL_EVENT, d: { sounds: [{ id: BOOST_POTION_SOUND, at: [at.x, at.y, at.z] }] } });
+    if (b.kind === 'protection') {
+      const tag = PROTECTION_STATUS[b.type];
+      if (tag) this.magic.setStatus(p, { tag, level: 1, until, incoming: DAMAGE_TYPES.map((t) => (t === b.type ? b.multiplier : 1)) });
+    } else {
+      this.magic.setStatus(p, { tag: ATTRIBUTE_STATUS[b.attribute], level: 1, until, attributes: { [b.attribute]: b.amount } });
+    }
   }
 
   private broadcastObjects(objects: ObjectChange[]): void {
@@ -3430,11 +3479,7 @@ export class WorldZone {
       // Engine Stats_LevelUp: derived stats are recomputed and the max-HP gain is added to HP.
       const before = p.maxHp;
       p.level = level;
-      p.maxHp = playerMaxHp(p.attributes, level);
-      p.maxMana = originalMaxMana(p.attributes, level);
-      p.damageMultiplier = originalDamageMultiplier(p.attributes, level);
-      p.baseClipRate = originalSpeedMultiplier(p.attributes, level);
-      p.moveStats = { ...p.moveStats, clipRate: p.baseClipRate * this.playerRate(p) };
+      this.refreshDerived(p);
       p.hp = Math.min(p.maxHp, p.hp + (p.maxHp - before));
     }
   }
@@ -3488,9 +3533,9 @@ export class WorldZone {
         statuses: [...p.statuses.values()].map((st) => ({ tag: st.tag, seconds: Math.max(0, (st.until - this.tick) / TICK_RATE) })),
         speed: p.moveStats.clipRate ?? 1,
         name: p.name,
-        attributes: { ...p.attributes },
+        attributes: this.effectiveAttributesOf(p),
         damageMultiplier: p.damageMultiplier,
-        resist: p.resist.map((r, t) => r * (p.armor?.protection?.[t] ?? 1)),
+        resist: p.resist.map((r, t) => r * (p.armor?.protection?.[t] ?? 1) * this.magic.incomingMultiplier(p, t)),
         damage: [...(p.weapon.damage ?? [])],
       },
     });

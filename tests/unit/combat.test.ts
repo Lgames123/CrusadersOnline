@@ -30,6 +30,8 @@ import {
   potionCooldown,
   itemSlug,
   catalogFromItemRules,
+  effectiveAttributes,
+  originalSpeedMultiplier,
   INPUT_PACKET_MAX_BYTES,
   MOB_ARCHETYPES,
   PLAYER_RESPAWN_TICKS,
@@ -1089,6 +1091,112 @@ describe('world objects (original level placements)', () => {
     // Boost potions (items.ctx UseParameters 30, FIRE, 0.25): until the effect ends.
     const rules = { items: [{ name: 'Fire Resistance Potion', fields: { Type: 'POTION', Use: 'BOOST_PROTECTION' }, damage: {}, protection: {}, calls: [{ name: 'UseParameters', args: [30, 'FIRE', 0.25] }] }] };
     expect(potionCooldown(catalogFromItemRules(rules).get('fire_resistance_potion')!)).toEqual({ group: 'fire_resistance_potion', seconds: 30 });
+  });
+
+  describe('boost potions (0x00401D10 BOOST_PROTECTION, 0x00401AB0 BOOST_ATTRIBUTE)', () => {
+    const boost = (name: string, use: string, args: (string | number)[]) =>
+      ({ name, fields: { Type: 'POTION', Use: use }, damage: {}, protection: {}, calls: [{ name: 'UseParameters', args }] });
+    // items.ctx's five boost potions.
+    const items = catalogFromItemRules({
+      items: [
+        boost('Speed Potion', 'BOOST_ATTRIBUTE', [30, 'SPEED', 25]),
+        boost('Fire Resistance Potion', 'BOOST_PROTECTION', [30.0, 'FIRE', 0.25]),
+        boost('Air Resistance Potion', 'BOOST_PROTECTION', [30.0, 'AIR', 0.25]),
+        boost('Earth Resistance Potion', 'BOOST_PROTECTION', [30, 'EARTH', 0.25]),
+        boost('Water Resistance Potion', 'BOOST_PROTECTION', [30, 'WATER', 0.25]),
+      ],
+    });
+    type Internal = {
+      players: Map<number, { hp: number; attributes: { speed: number }; level: number }>;
+      applyDamage(a: unknown, t: unknown, v: number[]): void;
+    };
+    const FIRE = 2;
+    const AIR = 3;
+
+    function zoneWith(ids: string[]) {
+      const messages: ServerControlMsg[] = [];
+      const zone = new WorldZone(rapier, 'boosts', createSyntheticArena(), {
+        send: (_c, data) => { if (typeof data === 'string') messages.push(JSON.parse(data) as ServerControlMsg); },
+      }, { random: () => 0, items });
+      zone.join(1, { name: 'Drinker', characterId: null, position: { x: 0, y: 0.5, z: 0 }, inventory: ids.map((itemId, i) => ({ slot: 10 + i, itemId, equipped: false, x: i, y: 0 })) });
+      zone.step();
+      const internal = zone as unknown as Internal;
+      const stats = () => (messages.filter((m) => m.op === SC.PLAYER_STATS).at(-1) as Extract<ServerControlMsg, { op: typeof SC.PLAYER_STATS }>).d;
+      const item = (id: string) => (messages.filter((m) => m.op === SC.INVENTORY_UPDATE).at(-1) as Extract<ServerControlMsg, { op: typeof SC.INVENTORY_UPDATE }>).d.items.find((i) => i.itemId === id);
+      const steps = (n: number) => { for (let i = 0; i < n; i++) zone.step(); };
+      /** HP the player loses to `amount` of one damage type. */
+      const hit = (type: number, amount: number) => {
+        const p = internal.players.get(1)!;
+        p.hp = 500;
+        internal.applyDamage(p, p, Array.from({ length: 11 }, (_, t) => (t === type ? amount : 0)));
+        return 500 - p.hp;
+      };
+      return { zone, internal, stats, item, steps, hit };
+    }
+
+    it('reads the type or attribute and amount from UseParameters', () => {
+      expect(items.get('speed_potion')).toMatchObject({ duration: 30, boost: { kind: 'attribute', attribute: 'speed', amount: 25 } });
+      expect(items.get('fire_resistance_potion')).toMatchObject({ duration: 30, boost: { kind: 'protection', type: 'FIRE', multiplier: 0.25 } });
+      expect(items.get('water_resistance_potion')).toMatchObject({ duration: 30, boost: { kind: 'protection', type: 'WATER', multiplier: 0.25 } });
+    });
+
+    it('a resistance potion takes 25 % of its type for 30 s, and the drink goes through', () => {
+      const t = zoneWith(['fire_resistance_potion', 'fire_resistance_potion']);
+      const plain = t.hit(FIRE, 20);
+      const resist = t.stats().resist[FIRE]!;
+      t.zone.useItem(1, 10);
+      t.zone.step();
+      expect(t.stats().statuses?.map((s) => s.tag)).toContain('RFIR');
+      expect(t.stats().resist[FIRE]).toBeCloseTo(resist * 0.25);
+      expect(t.item('fire_resistance_potion')).toMatchObject({ cooldown: 30, cooldownLeft: 30 });
+      expect(t.hit(FIRE, 20)).toBeCloseTo(plain * 0.25);
+      // Other types untouched.
+      expect(t.hit(0, 20)).toBeGreaterThan(0);
+      expect(t.hit(AIR, 20)).toBeCloseTo(plain * (t.stats().resist[AIR]! / resist));
+      t.steps(30 * TICK_RATE);
+      expect(t.stats().statuses?.map((s) => s.tag) ?? []).not.toContain('RFIR');
+      expect(t.hit(FIRE, 20)).toBeCloseTo(plain);
+    });
+
+    it('resistances of different types are held at once (tag −2 is never replaced)', () => {
+      const t = zoneWith(['fire_resistance_potion', 'air_resistance_potion']);
+      const fire = t.hit(FIRE, 20);
+      const air = t.hit(AIR, 20);
+      t.zone.useItem(1, 10);
+      t.zone.useItem(1, 11);
+      t.zone.step();
+      expect(t.stats().statuses?.map((s) => s.tag)).toEqual(expect.arrayContaining(['RFIR', 'RAIR']));
+      expect(t.hit(FIRE, 20)).toBeCloseTo(fire * 0.25);
+      expect(t.hit(AIR, 20)).toBeCloseTo(air * 0.25);
+    });
+
+    it('the Speed Potion adds 25 Speed for 30 s, which feeds the speed multiplier', () => {
+      const t = zoneWith(['speed_potion']);
+      const p = t.internal.players.get(1)!;
+      const base = { ...t.stats().attributes };
+      const rate = t.stats().speed!;
+      t.zone.useItem(1, 10);
+      // The drink clip (PK12) plays.
+      expect((t.zone as unknown as { players: Map<number, { itemAction: { anim: number } | null }> }).players.get(1)!.itemAction?.anim).toBe(ANIM.USE_POTION);
+      t.zone.step();
+      expect(t.stats().statuses?.map((s) => s.tag)).toContain('BSPD');
+      expect(t.stats().attributes.speed).toBe(Math.min(50, base.speed + 25));
+      expect(t.stats().speed).toBeCloseTo(originalSpeedMultiplier(effectiveAttributes(base, { speed: 25 }), p.level));
+      expect(t.stats().speed).toBeGreaterThan(rate);
+      expect(t.item('speed_potion')).toBeUndefined();
+      t.steps(30 * TICK_RATE);
+      expect(t.stats().attributes.speed).toBe(base.speed);
+      expect(t.stats().speed).toBeCloseTo(rate);
+    });
+
+    it('the boosted attribute is capped at 50 (0x0044E000)', () => {
+      const t = zoneWith(['speed_potion']);
+      const p = t.internal.players.get(1)!;
+      p.attributes = { ...p.attributes, speed: 40 };
+      t.zone.useItem(1, 10);
+      t.zone.step();
+      expect(t.stats().attributes.speed).toBe(50);
+    });
   });
 });
 

@@ -1,3 +1,4 @@
+import { DAMAGE_TYPES, type Attributes } from './original_stats.ts';
 import { damageVector, type DamageType, type DamageVector } from './ruleset.ts';
 import { SPELL_BOOK_PARAMS, type SpellId } from './spells.ts';
 import { canPlaceGrid, firstFreeGridPosition, INVENTORY_GRID, layoutInventoryGrid } from './inventory_grid.ts';
@@ -35,6 +36,8 @@ export interface ItemDef {
   mana?: number;
   /** Potions with `Use BOOST_PROTECTION` / `BOOST_ATTRIBUTE`: the effect's seconds (`UseParameters` first argument). */
   duration?: number;
+  /** Boost potions: what they do for `duration` seconds (`UseParameters` second and third arguments). */
+  boost?: ItemBoost;
   /** Spell books (items.ctx `Use GRANT_SPELL`): the spell learned when picked up. */
   spell?: SpellId;
   /** Several of the same item share one inventory slot. */
@@ -45,6 +48,35 @@ export interface ItemDef {
    */
   keyItem?: boolean;
   price: number;
+}
+
+/**
+ * A boost potion's effect, a timed status (executable-analysis §20, 0x00401AB0 / 0x00401D10):
+ * BOOST_PROTECTION multiplies the damage taken of one type (kind 6, 0.25 = a quarter taken);
+ * BOOST_ATTRIBUTE adds to one attribute (kinds 9-12, capped at 50 with the base).
+ */
+export type ItemBoost =
+  | { kind: 'protection'; type: DamageType; multiplier: number }
+  | { kind: 'attribute'; attribute: keyof Attributes; amount: number };
+
+/** BOOST_ATTRIBUTE's attribute names (0x0044E2D0: indexes 0-3 = kinds 9-12). */
+const BOOST_ATTRIBUTES: Readonly<Record<string, keyof Attributes>> = { MIGHT: 'might', INTELLIGENCE: 'intellect', ENDURANCE: 'endurance', SPEED: 'speed' };
+
+/** A boost potion's `Use` and `UseParameters` (duration, type or attribute, amount), or undefined. */
+function itemBoost(use: unknown, args: readonly (string | number)[]): ItemBoost | undefined {
+  const what = String(args[1] ?? '').trim().toUpperCase();
+  const amount = Number(args[2]);
+  if (!Number.isFinite(amount)) return undefined;
+  if (use === 'BOOST_PROTECTION') {
+    const type = DAMAGE_TYPES.find((t) => t === what);
+    return type ? { kind: 'protection', type, multiplier: amount } : undefined;
+  }
+  if (use === 'BOOST_ATTRIBUTE') {
+    const attribute = BOOST_ATTRIBUTES[what];
+    // The status value is truncated to an integer when added (0x0047E800-0x0047E890, ftol).
+    return attribute ? { kind: 'attribute', attribute, amount: Math.trunc(amount) } : undefined;
+  }
+  return undefined;
 }
 
 export type ItemCatalog = ReadonlyMap<string, ItemDef>;
@@ -142,9 +174,12 @@ export function catalogFromItemRules(rules: { items: readonly ItemRule[] }): Ite
       if (spell) def = spellBook(r.name, spell, price);
     } else if (type === 'POTION') {
       const use = r.fields['Use'];
-      const amount = Number(r.calls?.find((c) => c.name === 'UseParameters')?.args[0] ?? 0);
-      const boost = use === 'BOOST_PROTECTION' || use === 'BOOST_ATTRIBUTE';
+      const args = r.calls?.find((c) => c.name === 'UseParameters')?.args ?? [];
+      const amount = Number(args[0] ?? 0);
+      const boost = itemBoost(use, args);
       def = potion(r.name, use === 'HEAL' ? amount : 0, price, undefined, use === 'RESTORE_MANA' ? amount : undefined, boost && amount > 0 ? amount : undefined);
+      // A duration of 0 or less is the permanent (equip) form; a potion's always has one.
+      if (boost && amount > 0) def = { ...def, boost };
     } else if (type === 'USEABLE' && / Key$/.test(r.name)) {
       def = key(r.name, price, undefined, true);
     } else if (type === 'QUEST' || type === 'RING') {

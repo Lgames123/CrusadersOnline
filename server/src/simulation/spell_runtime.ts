@@ -17,6 +17,7 @@ import {
   type SpellId,
   type SpellLevel,
   type StatusTag,
+  type Attributes,
 } from '@crusaders/shared';
 
 /**
@@ -61,9 +62,11 @@ export interface ActiveStatus {
   level: number;
   /** Speed / rate multiplier (SPED, SLOW, FRZE 0, THAW 0). */
   rate?: number;
-  /** Per damage type: outgoing (HERO) or incoming (STON) multipliers. */
+  /** Per damage type: outgoing (HERO) or incoming (STON, resistance potions) multipliers. */
   outgoing?: number[];
   incoming?: number[];
+  /** Added to the attributes (kinds 9-12: the attribute potions). */
+  attributes?: Partial<Attributes>;
 }
 
 export interface SpellHost {
@@ -708,10 +711,28 @@ export class SpellRuntime {
     return h?.outgoing ? vector.map((v, t) => v * (h.outgoing![t] ?? 1)) : vector;
   }
 
-  /** Damage taken x per type (STON). */
+  /** Damage taken x per type: every kind 6 status (STON, resistance potions) multiplies the resist (+0x17C). */
   incoming(c: SpellTarget, vector: number[]): number[] {
-    const s = c.statuses.get('STON');
-    return s?.incoming ? vector.map((v, t) => v * (s.incoming![t] ?? 1)) : vector;
+    let out = vector;
+    for (const s of c.statuses.values()) if (s.incoming) out = out.map((v, t) => v * (s.incoming![t] ?? 1));
+    return out;
+  }
+
+  /** The +0x17C multiplier of one damage type (the resist getter 0x0044CB60 includes it: freeze reads it). */
+  incomingMultiplier(c: SpellTarget, type: number): number {
+    let m = 1;
+    for (const s of c.statuses.values()) if (s.incoming) m *= s.incoming[type] ?? 1;
+    return m;
+  }
+
+  /** The attribute bonus of a character's statuses (kinds 9-12, +0xD4..+0xE0). */
+  attributeBonus(c: SpellTarget): Partial<Attributes> {
+    const out: Partial<Attributes> = {};
+    for (const s of c.statuses.values()) {
+      if (!s.attributes) continue;
+      for (const [k, v] of Object.entries(s.attributes) as [keyof Attributes, number][]) out[k] = (out[k] ?? 0) + v;
+    }
+    return out;
   }
 
   /** One tick of every spell object and effect. */

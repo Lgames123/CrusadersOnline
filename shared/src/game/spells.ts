@@ -311,9 +311,15 @@ export function creatureSpellBits(type: number, group: number): number[] {
  * a tag (one of each per character: a recast replaces it), a kind and a value.
  * kind 0 speed x value (SPED, heroism); 1 rate x value (SLOW, and the thaw stun at 0);
  * 2 frozen (FRZE); 4 outgoing damage x per type (HERO); 6 incoming damage x per type (STON);
- * 8 the world slowed round its owner (SLTI).
+ * 8 the world slowed round its owner (SLTI); 9-12 attribute + value (the boost potions).
+ * Boost potions (0x00401AB0 / 0x00401D10): BOOST_PROTECTION is kind 6 under tag −2, which is never
+ * replaced, so different resistances add up (here one tag per damage type: RFIR...); BOOST_ATTRIBUTE
+ * is kind 9 + attribute under tag 'ITM' + index (here BMIG...).
  */
-export type StatusTag = 'SPED' | 'SLOW' | 'FRZE' | 'HERO' | 'STON' | 'SLTI' | 'THAW';
+export type StatusTag =
+  | 'SPED' | 'SLOW' | 'FRZE' | 'HERO' | 'STON' | 'SLTI' | 'THAW'
+  | 'RFIR' | 'RAIR' | 'REAR' | 'RWAT'
+  | 'BMIG' | 'BINT' | 'BEND' | 'BSPD';
 
 /** Status tags shown on a character (SC.SPELL_EVENT `status`): its look and the HUD. */
 export const STATUS_NAMES: Readonly<Record<StatusTag, string>> = {
@@ -324,7 +330,21 @@ export const STATUS_NAMES: Readonly<Record<StatusTag, string>> = {
   STON: 'Stone Skin',
   SLTI: 'Slow Time',
   THAW: 'Stunned',
+  RFIR: 'Fire Resistance',
+  RAIR: 'Air Resistance',
+  REAR: 'Earth Resistance',
+  RWAT: 'Water Resistance',
+  BMIG: 'Might',
+  BINT: 'Intelligence',
+  BEND: 'Endurance',
+  BSPD: 'Speed',
 };
+
+/** The status a BOOST_PROTECTION potion of a damage type sets (the types the potions use). */
+export const PROTECTION_STATUS: Readonly<Partial<Record<string, StatusTag>>> = { FIRE: 'RFIR', AIR: 'RAIR', EARTH: 'REAR', WATER: 'RWAT' };
+
+/** The status a BOOST_ATTRIBUTE potion sets, by attribute. */
+export const ATTRIBUTE_STATUS: Readonly<Record<'might' | 'intellect' | 'endurance' | 'speed', StatusTag>> = { might: 'BMIG', intellect: 'BINT', endurance: 'BEND', speed: 'BSPD' };
 
 /** A known spell and its level. */
 export interface KnownSpell {
