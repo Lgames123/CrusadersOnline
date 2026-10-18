@@ -52,6 +52,8 @@ import {
   type MovementWorld,
   type Rapier,
   ACTION_LAND,
+  ACTION_MOUNT,
+  mountTicks,
   JUMP_B,
   JUMP_F,
   JUMP_L,
@@ -354,6 +356,42 @@ describe('shared character controller', () => {
       expect(Math.round((frame / (1000 / 30)) * 20)).toBe(leftAt);
       for (let i = 0; i < 40 && !c.grounded; i++) run(mw, c, flags | INPUT.JUMP, 0, 1);
       expect(c.rollDir).toBe(kind === JUMP_B ? 0 : ACTION_LAND);
+    }
+  });
+
+  it('catches a ledge in the air and pulls up onto it (ASM_LOW_MOUNT, 0x004912F0)', () => {
+    // A 4 m (13.1 ft) pillar, its face just ahead (yaw 0 faces -Z): a standing jump, pushing
+    // forward against the face once in the air, catches its top on the way up.
+    const { mw, c } = setup({ x: -8, y: 0.5, z: -6.8 });
+    run(mw, c, 0, 0, 10);
+    for (let i = 0; i < 20 && c.grounded; i++) run(mw, c, INPUT.JUMP, 0, 1);
+    expect(c.grounded).toBe(false);
+    let mountedAt = -1;
+    for (let i = 0; i < 40 && mountedAt < 0; i++) {
+      run(mw, c, INPUT.FORWARD, 0, 1);
+      if (c.rollDir === ACTION_MOUNT) mountedAt = i;
+    }
+    expect(mountedAt).toBeGreaterThanOrEqual(0);
+    // On the top at once, 2.21 ft past the feet against the face; it stands there for the clip.
+    expect(c.position.y).toBeCloseTo(4, 2);
+    expect(c.position.z).toBeCloseTo(-6.85 - 2.21 * 0.3048, 1);
+    expect(movementAnim(INPUT.FORWARD, c.grounded, c.rollDir)).toBe(ANIM.MOUNT_LOW);
+    const at = { ...c.position };
+    run(mw, c, INPUT.FORWARD, 0, mountTicks() - 1);
+    expect(c.rollDir).toBe(ACTION_MOUNT);
+    expect(Math.hypot(c.position.x - at.x, c.position.z - at.z)).toBeLessThan(1e-3);
+    run(mw, c, 0, 0, 2);
+    expect(c.rollTicks).toBe(0);
+    expect(c.grounded).toBe(true);
+    expect(c.position.y).toBeCloseTo(4, 1);
+  });
+
+  it('does not catch a ledge while jump is held', () => {
+    const { mw, c } = setup({ x: -8, y: 0.5, z: -6.8 });
+    run(mw, c, 0, 0, 10);
+    for (let i = 0; i < 60; i++) {
+      run(mw, c, INPUT.JUMP | (c.grounded ? 0 : INPUT.FORWARD), 0, 1);
+      expect(c.rollDir).not.toBe(ACTION_MOUNT);
     }
   });
 

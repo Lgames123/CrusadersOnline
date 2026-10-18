@@ -1,5 +1,5 @@
 import type RAPIER from '@dimforge/rapier3d-deterministic-compat';
-import { IMPACT_VARIANTS, isHitAction, ACTION_ATTACK, ACTION_BASH, ACTION_LUNGE, LUNGE_TICKS, ATTACK_CURVES, actionCurve, attackMotionTicks, curveTicks, hitReactionTicks, isAttackAction, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_LEFT_FORWARD, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_RIGHT_FORWARD, shieldHopTicks, curveAtTick, curveAtFrame, ORIGINAL_ROLLS, ROLL_CURVES, rollTicks as rollLength, advanceLoco, ACTION_JUMP, ACTION_LAND, GROUND_HOLD_SPEED, JUMP_B, JUMP_F, JUMP_L, JUMP_R, JUMP_RUN, JUMP_V, RISE_DRAG_SPENT, jumpAutoPush, jumpLimits, jumpTakeoffTicks, landSoftTicks, LOCO_CAREFUL_LEFT, LOCO_CAREFUL_RIGHT, LOCO_HOP_LEFT, LOCO_HOP_RIGHT, LOCO_RETREAT, LOCO_RUN, LOCO_SIDE_LEFT, LOCO_SIDE_RIGHT, LOCO_WALK, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, GRAVITY, JUMP_HOLD_LIFT, MAX_SLOPE_DEG, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
+import { IMPACT_VARIANTS, isHitAction, ACTION_ATTACK, ACTION_BASH, ACTION_LUNGE, LUNGE_TICKS, ATTACK_CURVES, actionCurve, attackMotionTicks, curveTicks, hitReactionTicks, isAttackAction, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_LEFT_FORWARD, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_RIGHT_FORWARD, shieldHopTicks, curveAtTick, curveAtFrame, ORIGINAL_ROLLS, ROLL_CURVES, rollTicks as rollLength, advanceLoco, ACTION_JUMP, ACTION_LAND, ACTION_MOUNT, LEDGE_MAX_FACING_DOT, LEDGE_MAX_WALL_NORMAL_Y, LEDGE_MIN_RISE, LEDGE_REACH_AHEAD, LEDGE_REACH_UP, LEDGE_TRACE_TO, mountTicks, GROUND_HOLD_SPEED, JUMP_B, JUMP_F, JUMP_L, JUMP_R, JUMP_RUN, JUMP_V, RISE_DRAG_SPENT, jumpAutoPush, jumpLimits, jumpTakeoffTicks, landSoftTicks, LOCO_CAREFUL_LEFT, LOCO_CAREFUL_RIGHT, LOCO_HOP_LEFT, LOCO_HOP_RIGHT, LOCO_RETREAT, LOCO_RUN, LOCO_SIDE_LEFT, LOCO_SIDE_RIGHT, LOCO_WALK, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, GRAVITY, JUMP_HOLD_LIFT, MAX_SLOPE_DEG, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
 import type { Vec3 } from '../math/vec3.ts';
 import { dequantizeAngle } from '../math/quantize.ts';
 import { INPUT, INPUT_ATTACK_SHIFT } from '../protocol/opcodes.ts';
@@ -21,7 +21,7 @@ export interface Character {
    * Timed movement action in progress: 0 none, 1-4 rolls (forward, back, left, right),
    * 5 / 6 shield side hops (left / right), 7 the stand after a side hop, 8-11 an attack's
    * root motion (ACTION_ATTACK + attack motion - 1), 16-18 hit reactions (impact, stun, knock-down),
-   * 24 a jump standing before take-off, 25 the soft landing.
+   * 24 a jump standing before take-off, 25 the soft landing, 26 pulling up onto a ledge.
    */
   rollDir: number;
   /** Ticks of the roll still to run. */
@@ -361,6 +361,13 @@ export function stepCharacter(
   if (desired.y > 0 && moved.y < desired.y * 0.5) vy = 0;
   if (grounded && vy < 0) vy = 0;
 
+  // In the air, a ledge within reach pulls the character up onto it (0x004916A0 / 0x004912F0).
+  const ledge = !grounded && !rolling && !(f & INPUT.JUMP) ? ledgeAhead(mw, c, moved, dequantizeAngle(input.yaw)) : null;
+  if (ledge) {
+    setCharacterState(c, ledge, 0, true, ACTION_MOUNT, mountTicks(rate));
+    return;
+  }
+
   let rollTicks = rolling ? c.rollTicks - 1 : 0;
   let rollDir = c.rollDir;
   // A side hop ends in a short stand before the next one can start.
@@ -426,11 +433,64 @@ function touchesWalkable(mw: MovementWorld): boolean {
   return n === 0;
 }
 
+/**
+ * The ledge the original's grab test (0x004912F0) finds after this step's move, as the feet
+ * position to pull up to, or null. `moved` is the step's motion (the character's new feet are
+ * its position plus it). Needs a wall touched this step, faced within ~37° and near vertical; the
+ * point 4.5 ft up and 2.21 ft ahead open; a trace from it back down to 1.5 ft above the feet
+ * meeting a walkable top more than 3 ft above them. The original lands 1.5 ft lower and lets its
+ * collision lift the body out; here the capsule must fit standing on the top.
+ */
+function ledgeAhead(mw: MovementWorld, c: Character, moved: Readonly<Vec3>, yaw: number): Vec3 | null {
+  const fx = -Math.sin(yaw);
+  const fz = -Math.cos(yaw);
+  let wall = false;
+  const n = mw.controller.numComputedCollisions();
+  for (let i = 0; i < n && !wall; i++) {
+    const hit = mw.controller.computedCollision(i);
+    if (!hit || Math.abs(hit.normal1.y) > LEDGE_MAX_WALL_NORMAL_Y) continue;
+    const len = Math.hypot(hit.normal1.x, hit.normal1.z);
+    wall = len > 0 && (hit.normal1.x * fx + hit.normal1.z * fz) / len <= LEDGE_MAX_FACING_DOT;
+  }
+  if (!wall) return null;
+  // The original tests every frame; a tick covers more height than the test's 1.5 ft window, so
+  // it is also tried at the heights the step passed through (from the end back to the start).
+  const end = c.position.y + moved.y;
+  const samples = Math.max(1, Math.ceil(Math.abs(moved.y) / LEDGE_SAMPLE));
+  for (let i = 0; i < samples; i++) {
+    const y = end - (moved.y * i) / samples;
+    const target = ledgeAt(mw, { x: c.position.x + moved.x, y, z: c.position.z + moved.z }, fx, fz);
+    if (target) return target;
+  }
+  return null;
+}
+/** Height step between ledge tests within one tick, metres. */
+const LEDGE_SAMPLE = 0.2;
+
+/** The grab test at one feet position, facing (fx, fz): the feet position on the ledge, or null. */
+function ledgeAt(mw: MovementWorld, feet: Readonly<Vec3>, fx: number, fz: number): Vec3 | null {
+  const from = { x: feet.x + fx * LEDGE_REACH_AHEAD, y: feet.y + LEDGE_REACH_UP, z: feet.z + fz * LEDGE_REACH_AHEAD };
+  if (mw.world.projectPoint(from, true, undefined, CHARACTER_GROUPS)?.isInside) return null;
+  const d = { x: feet.x - from.x, y: feet.y + LEDGE_TRACE_TO - from.y, z: feet.z - from.z };
+  const len = Math.hypot(d.x, d.y, d.z);
+  const ray = new mw.rapier.Ray(from, { x: d.x / len, y: d.y / len, z: d.z / len });
+  const hit = mw.world.castRayAndGetNormal(ray, len, true, undefined, CHARACTER_GROUPS);
+  if (!hit || hit.normal.y < GROUND_MIN_NORMAL_Y) return null;
+  const top = from.y + ray.dir.y * hit.timeOfImpact;
+  if (top - feet.y <= LEDGE_MIN_RISE) return null;
+  const target = { x: from.x, y: top, z: from.z };
+  const shape = new mw.rapier.Capsule(PLAYER_HALF_SEGMENT, PLAYER_RADIUS);
+  const centre = { x: target.x, y: target.y + HALF_HEIGHT + 0.01, z: target.z };
+  if (mw.world.intersectionWithShape(centre, { x: 0, y: 0, z: 0, w: 1 }, shape, undefined, CHARACTER_GROUPS)) return null;
+  return target;
+}
+
 /** Length in ticks of a timed action that follows a curve or holds the character (0 otherwise). */
 function actionTicks(action: number, rate = 1): number {
   if (isAttackAction(action)) return attackMotionTicks(action - ACTION_ATTACK + 1, rate);
   if (isHitAction(action)) return hitReactionTicks(action, rate);
   if (action === ACTION_LUNGE) return LUNGE_TICKS;
+  if (action === ACTION_MOUNT) return mountTicks(rate);
   const curve = actionCurve(action);
   return curve ? curveTicks(curve, rate) : 0;
 }

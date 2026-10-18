@@ -146,9 +146,9 @@ export function buildModelDocument(model: MdlModel, opts: ModelEmitOptions): Doc
   const root = doc.createNode(opts.name).setExtras(extras);
   for (let i = 0; i < model.nodes.length; i++) if (model.nodes[i]!.parent < 0) root.addChild(jointNodes[i]!);
   skin.setSkeleton(jointNodes[0]!);
-  // Clips bound to the death states keep their root motion (see addAnimation).
-  const deaths = new Set(Object.entries(opts.states ?? {}).filter(([k]) => k.startsWith('ASM_HIT_POINTS_DEPLETED')).map(([, v]) => v.toLowerCase()));
-  for (const a of opts.animations ?? []) addAnimation(doc, buffer, jointNodes, a, mq, mv, !deaths.has(a.name.toLowerCase()));
+  // Clips bound to the death and mount states keep their root motion (see addAnimation).
+  const moving = new Set(Object.entries(opts.states ?? {}).filter(([k]) => k.startsWith('ASM_HIT_POINTS_DEPLETED') || MOUNT_STATES.has(k)).map(([, v]) => v.toLowerCase()));
+  for (const a of opts.animations ?? []) addAnimation(doc, buffer, jointNodes, a, mq, mv, !moving.has(a.name.toLowerCase()));
   root.addChild(doc.createNode(`${opts.name}_mesh`).setMesh(mesh).setSkin(skin));
   scene.addChild(root);
   return doc;
@@ -204,11 +204,18 @@ export async function writeGlb(doc: Document): Promise<Uint8Array> {
 }
 
 /**
+ * Mounts are authored about where they end (PF01: the root starts 2.15 ft back and 4.5 ft down);
+ * the character stands there from their first frame, so the clip carries the body up to it.
+ */
+const MOUNT_STATES = new Set(['ASM_LOW_MOUNT', 'ASM_HIGH_MOUNT', 'ASM_HANG_MOUNT']);
+
+/**
  * Samples a clip once per original frame (30 fps) into LINEAR glTF channels. Like the engine,
  * the root's X/Z translation is held at its frame-0 value (animations play in place); the
  * horizontal root displacement over the clip is kept as `extras.rootMotion` for gameplay.
  * Death clips (ASM_HIT_POINTS_DEPLETED*) keep their root motion: the body falls where the clip
- * takes it (e.g. PI03 ends 7.5 ft to the side) and nothing else moves the dead character.
+ * takes it (e.g. PI03 ends 7.5 ft to the side) and nothing else moves the dead character; so do
+ * the mounts (MOUNT_STATES).
  */
 function addAnimation(
   doc: Document,

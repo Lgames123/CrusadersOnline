@@ -1,5 +1,6 @@
 # Context notes
 
+- 2026-10-18 [Ledge grab on jumps](2026-10-18-ledge-grab.md) — 0x004916A0 / 0x004912F0: in the air, jump not held, facing a near-vertical wall, 4.5 ft up + 2.21 ft ahead open and a top > 3 ft above the feet → ASM_LOW_MOUNT (PF01, 26 frames) onto that point; action 26, ANIM 60; converter 1.28 keeps the mount clips' root motion; climbing / hanging not done (Claude Code)
 - 2026-10-18 [Weapon and spell marks on walls](2026-10-18-impact-decals.md) — the original's decals (0x00442E30 / 0x00443580): blade on a wall (0x0048CAB0) stamps the weapon's items.ctx `Decal` (CHOP axes 2 ft, SLAM maces/hammers 2.5 ft, SCRATCH swords 2 ft) along the sweep + sound 338 + round(rand×4); fire ball SCORCH, lightning on the level LIGHTNING, ice FROST (4 ft); 5 s + 1.5 s fade, new ends overlapping; textures.nfo Decal unused (Claude Code)
 - 2026-10-18 [Death drops layers](2026-10-18-death-drops-layers.md) — entering DEAD stops the held shield and any upper-body swing/cast at once (setShield no-ops once dead, and the player set DEAD first, so the block pose stuck over the death clip) (Claude Code)
 - 2026-10-18 [Conjure sound](2026-10-18-conjure-sound.md) — entering ASM_SPELL_CONJURE (0x39, case 0x0042A2C4) plays Sound.ctx 327 SplSRCast01 at the caster: every self spell now starts with it under its own cast sound (Claude Code)

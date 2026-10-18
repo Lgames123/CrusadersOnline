@@ -42,6 +42,8 @@ interface ClipMap {
   /** Jumps by kind (JUMP_KINDS order: V, F, running, L, R, B) and the soft landing. */
   jumps?: string[];
   land?: string;
+  /** Pulling up onto a ledge (ASM_LOW_MOUNT; its clip keeps its root motion). */
+  mountLow?: string;
   /** Forward hop (ASM_HOP_F) before a creature's swing. */
   hop?: string;
   /** Standing with the shield up (ASM_COMBAT_STANDING, the combat stance). */
@@ -92,6 +94,7 @@ function withStates(base: ClipMap, states: Record<string, string> | undefined): 
     crouch: base.crouch ?? st['ASM_CROUCHING'] ?? base.idle,
     jumps: base.jumps ?? ['STANDING_JUMP_V', 'STANDING_JUMP_F', 'RUNNING_JUMP_F', 'STANDING_JUMP_L', 'STANDING_JUMP_R', 'STANDING_JUMP_B'].map((k) => st[`ASM_${k}`] ?? base.air),
     land: base.land ?? st['ASM_LAND_SOFT'] ?? base.idle,
+    mountLow: base.mountLow ?? st['ASM_LOW_MOUNT'],
     // The quick shield block (ASM_BLOCK, PE07) rather than the slow ready-shield raise.
     block: st['ASM_BLOCK'] ?? base.block,
     hop: base.hop ?? st['ASM_HOP_F'] ?? base.run,
@@ -352,6 +355,7 @@ class OriginalAvatar implements Avatar {
     if (anim === ANIM.CROUCH) return { name: m.crouch ?? m.idle, loop: false };
     if (anim >= ANIM.JUMP && anim < ANIM.JUMP + 6) return { name: m.jumps?.[anim - ANIM.JUMP] ?? m.air, loop: false };
     if (anim === ANIM.LAND_SOFT) return { name: m.land ?? m.idle, loop: false };
+    if (anim === ANIM.MOUNT_LOW) return { name: m.mountLow ?? m.idle, loop: false };
     if (anim === ANIM.HOP_FORWARD) return { name: m.hop ?? m.run, loop: false };
     if (anim === ANIM.SHIELD_IDLE) return { name: m.idle, loop: true };
     if (anim === ANIM.ALERT) return { name: m.shieldIdle ?? m.idle, loop: true };

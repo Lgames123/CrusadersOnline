@@ -352,6 +352,8 @@ export const ANIM = {
   /** Drawing a weapon / readying a shield just equipped (ASM_READY_WEAPON PP01 / ASM_READY_SHIELD PT01). */
   READY_WEAPON: 58,
   READY_SHIELD: 59,
+  /** Pulling up onto a ledge caught in the air (ASM_LOW_MOUNT, PF01). */
+  MOUNT_LOW: 60,
 } as const;
 
 /** Clip seconds of the item actions (Drake's clips at 30 fps: PK12 60 frames, PJ01 49, PP01 30, PT01 38). */
@@ -368,6 +370,7 @@ export function movementAnim(flags: number, grounded: boolean, rollDir: number, 
   const jump = JUMP_KINDS.indexOf(airKind);
   if (jump >= 0 && (rollDir === 24 || !grounded)) return ANIM.JUMP + jump;
   if (rollDir === 25) return ANIM.LAND_SOFT;
+  if (rollDir === 26) return ANIM.MOUNT_LOW;
   if (rollDir === 5) return ANIM.HOP_LEFT;
   if (rollDir === 6) return ANIM.HOP_RIGHT;
   if (rollDir === 7) return ANIM.SHIELD_IDLE; // stand after a side hop, shield still up

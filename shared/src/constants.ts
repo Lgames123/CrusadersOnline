@@ -65,6 +65,23 @@ export function landSoftTicks(rate = 1): number {
   return Math.max(1, Math.round(((0.3 * 34 - 1) / (ENGINE_CLIP_FPS * rate)) * TICK_RATE));
 }
 
+/**
+ * Ledge grab (0x004912F0, run every physics frame by 0x004916A0): in the air, jump not held,
+ * against a vertical wall (|normal y| ≤ 0.1) faced within acos 0.8 (~37°), a point 4.5 ft up
+ * (height 6 − 1.5) and 2.21 ft ahead must be open; a trace from it back to 1.5 ft above the feet
+ * must meet a top more than 3 ft above the feet. Drake then pulls up (ASM_LOW_MOUNT, PF01 whole:
+ * 27-frame header, the state ends at frame 26) onto the point ahead, at the top's height.
+ */
+export const LEDGE_REACH_UP = 4.5 * 0.3048;
+export const LEDGE_REACH_AHEAD = 2.21 * 0.3048;
+export const LEDGE_TRACE_TO = 1.5 * 0.3048;
+export const LEDGE_MIN_RISE = 3 * 0.3048;
+export const LEDGE_MAX_WALL_NORMAL_Y = 0.1;
+export const LEDGE_MAX_FACING_DOT = -0.8;
+export function mountTicks(rate = 1): number {
+  return Math.max(1, Math.round(((27 - 1) / (ENGINE_CLIP_FPS * rate)) * TICK_RATE));
+}
+
 /** Player capsule (gameplay-specification.md §3.1). Height includes both hemispheres. */
 export const PLAYER_RADIUS = 0.4;
 export const PLAYER_HEIGHT = 1.85;
@@ -328,6 +345,8 @@ export const ACTION_HOP_PAUSE = 7;
 /** A jump standing before take-off (its kind in Character.airKind), and ASM_LAND_SOFT. */
 export const ACTION_JUMP = 24;
 export const ACTION_LAND = 25;
+/** Pulling up onto a ledge caught in the air (ASM_LOW_MOUNT; see LEDGE_REACH_UP). */
+export const ACTION_MOUNT = 26;
 
 /**
  * The player's locomotion as the original moves it. Each frame the state's clip advances (at the

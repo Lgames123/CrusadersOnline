@@ -404,6 +404,18 @@ Simulated at 30 fps these rules give the standing jump 13.1 ft / 1.17 s (the mea
 
 Implemented (`jumpKind`, `jumpTakeoffTicks`, `jumpLimits`, `jumpAutoPush`, `landSoftTicks`, the stand as timed action 24 and the landing as 25, the vertical travel in the snapshot header bytes 34–35; at 20 Hz within 4 % of the 30 fps figures). Not modelled: the body-frame velocity (ours stays in world axes, so turning in the air does not swing the jump round), and the jump state outlasting an early landing.
 
+### 13.2 Ledge grab and mounts (decompiled, 2026-10-18)
+
+ASM ids (name table `0x4EA6F0`): CLIMB_UP 0x22 … HANG_TO_CLIMB 0x29, HANG 0x3B, CLIMB_TO_HANG 0x3C, HANG_MOUNT 0x3D, LOW_MOUNT 0x3E, HIGH_MOUNT 0x3F. Drake binds PM04_cl (hang), PF03_mt_hng, PF01_mt_lo, PF02_mt_hi. Key byte `0x0058B9DC` is jump (with C `0x0058B9DD` it drives the debug fly up / down in `0x004923E0`).
+
+- **Per frame** the physics update (`0x004920A0`) calls `0x004916A0`. Outside the mount states and not attached (physics flag `0x40`), it first tries a climbable wall (`0x00490E80`, flags `0x140`, not done here), then the **ledge test** `0x004912F0`; if it passes, the state is not JUMP_ATTACK (0x5A) and `0x00491540` (room above, used by the climb code too) is clear, it sets flags `0x140` and enters LOW_MOUNT (flag `0x800`, which the test always sets) else HIGH_MOUNT, through SetNextState directly.
+- **Ledge test** `0x004912F0`: fails while jump is held; when grounded needs `+0x144 − y ≤ 2` (`+0x144` not decoded); needs a wall contact this frame (flag `0x80`) with normal `+0xB0..+0xB8`, |n.y| ≤ 0.1, and n·facing ≤ −0.8 (facing = transform `+0x18 / +0x20`). P = feet + (height − 1.5) up (height `+0x68`, 6.0 ft by default; 3 when crouched, flag `0x20000`) + 2.21 ft along the facing; P must lie in an open BSP leaf (`0x004395F0` cell, `0x004387C0` point in solid). Q = feet + 1.5 ft up; the BSP line trace `0x00437EB0` from P to Q, applied by `0x00438760` (moves Q onto the plane hit, 0.01 off it), repeated while it hits (≤ 6 times), must lift Q more than 1.5 ft (Q.y > feet + 3 ft). Target `+0x14C / +0x150 / +0x154` = (P.x, Q.y − 1.5 − 0.001, P.z).
+- **During the mount** (`0x004920A0`): x, z = the target at once; y rises by the clip's vertical root speed (`0x00491E20`, controller vtable `+0x50`) clamped to the target's; when within 0.1 ft of it, or when the clip ends, the position is set to the target and the state becomes STANDING (7).
+- **Clips** (controller `0x00429BF0`, `0x004295D0(clip, start, end fraction of header +0x14, rate, blend, loop)`): HANG 0–20 % of PM04 (20), HANG_MOUNT 0–50 % of PF03 (170-frame header), LOW_MOUNT the whole PF01 (27), HIGH_MOUNT 0–45 % of PF02 (170). PF01's root starts 2.15 ft back and 4.5 ft below where it ends: the clip is authored about the target.
+- **Hanging** (`0x0042C310`, the selector while attached): with flag `0x100` (at a top), forward gives HANG then HANG_MOUNT (once `0x00491540` is clear), `0x800 / 0x1000` give LOW_MOUNT; otherwise forward / back climb (0x22 / 0x23 / 0x29), left / right 0x24 / 0x25.
+
+Implemented: the jump-time ledge grab (`ledgeAhead` in `shared/src/movement/character.ts`, timed action 26, ANIM.MOUNT_LOW). Not done: climbable walls, hanging and the hang / high mounts, the grounded case.
+
 ---
 
 ## 14. Animation State Machine, Clip Rate and Melee Timing (x32dbg, 2026-10-11)
