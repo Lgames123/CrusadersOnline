@@ -230,7 +230,7 @@ Classes:
 | 0x2D | 1,980 | creatures |
 | 0x34 | 10,734 | props: mushrooms, plants, rocks, barrels, crates, bottles, light volumes, furniture… Breakables carry HP, e.g. bottle 5, barrel 8–25, chair 15–25, armour suit 150, statue 400 |
 | 0x35 | 266 | ground items: potions, gold (quantity), weapons, shields |
-| 0x36 | 986 | sprites: the effect name is the first upper-case string in the record, e.g. `TORCHFIRE` |
+| 0x36 | 986 | sprites: component slot 1 (runtime class 0x4E11E0, 0xD8 bytes) holds half height +0xC8, half width +0xCC, raise +0xD0 (feet) and the metatex / image name at +0xD8 (+0xD4: a stale texture-cache index). Raised ones are drawn by 0x467230 as an upright quad turned to the camera about the vertical; the others by 0x466E80, facing the screen, depth pulled 50 camera units nearer. Shipped: `TORCHFIRE` 4 / 1.2 / 4 (549, metatex `torchfire` = `BASE=Fire`, the procedural fire), `Flickerslow` 1 or 2.5 / 0 (Citadel, Co, Cs inns), `Flare02-04` 12 / 0 (Bs1a) |
 | 0x38 | 25 | chests; contained items appear as item sub-records (quantity at name − 0x14) |
 | 0x3A | 14 | flags in the wind |
 

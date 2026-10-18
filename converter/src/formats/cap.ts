@@ -68,8 +68,14 @@ export interface CapObject {
   item?: { name: string; quantity: number };
   /** Chests: contained items. */
   contents?: { name: string; quantity: number }[];
-  /** Sprites: effect name, e.g. "TORCHFIRE". */
+  /** Sprites: their metatex / image name, e.g. "TORCHFIRE", "Flare04", "Flickerslow". */
   effect?: string;
+  /**
+   * Sprites (component slot 1, runtime class 0x4E11E0): half height +0xC8, half width +0xCC and
+   * raise +0xD0 (original units). Raised ones (TORCHFIRE) are drawn by 0x467230 as an upright quad
+   * turned to the camera about the vertical; the others by 0x466E80, facing the screen, centred.
+   */
+  sprite?: { halfHeight: number; halfWidth: number; raise: number };
   /** Difficulty mask (record +8), only when not every difficulty has it. */
   difficulty?: number;
 }
@@ -531,30 +537,34 @@ function parseObjects(data: Uint8Array, dv: DataView, itemNames: ReadonlySet<str
       if (Number.isFinite(hp) && hp > 0 && hp < 100000) obj.hp = hp;
     } else if (kind === 'item' && comp >= 0) {
       obj.item = { name: ascii(data, comp + 0x2c).trim(), quantity: dv.getUint32(comp + 0x18, true) };
+    } else if (kind === 'sprite') {
+      const s = at(slots[1]!, 0xe0);
+      const f = (k: number) => (s >= 0 ? Math.round(dv.getFloat32(s + k, true) * 1e5) / 1e5 : NaN);
+      const sprite = { halfHeight: f(0xc8), halfWidth: f(0xcc), raise: f(0xd0) };
+      if (s >= 0 && Object.values(sprite).every((v) => Number.isFinite(v) && Math.abs(v) < 1000)) {
+        obj.effect = ascii(data, s + 0xd8);
+        obj.sprite = sprite;
+      }
     }
     out.push(obj);
     starts.push(a);
   }
-  // Chest contents and sprite effects live inside the record: scan its bytes up to the next
-  // object record. Contained items use the item component layout (quantity at name - 0x14).
+  // Chest contents live inside the record: scan its bytes up to the next object record.
+  // Contained items use the item component layout (quantity at name - 0x14).
   out.forEach((obj, i) => {
-    if (obj.kind !== 'chest' && obj.kind !== 'sprite') return;
+    if (obj.kind !== 'chest') return;
     const end = Math.min(data.length, starts[i + 1] ?? data.length, starts[i]! + 0x2000);
     for (let o = starts[i]! + 0x80; o < end - 4; o++) {
       if (data[o - 1] !== 0 || data[o]! < 0x41 || data[o]! > 0x5a) continue; // string start
       const str = ascii(data, o);
       if (str.length < 4 || data[o + str.length] !== 0) continue;
-      if (obj.kind === 'sprite' && /^[A-Z_]+$/.test(str)) {
-        obj.effect = str;
-        return;
-      }
-      if (obj.kind === 'chest' && itemNames.has(str.trim())) {
+      if (itemNames.has(str.trim())) {
         const quantity = o >= 0x14 ? dv.getUint32(o - 0x14, true) : 1;
         (obj.contents ??= []).push({ name: str.trim(), quantity: quantity > 0 && quantity < 100000 ? quantity : 1 });
         o += str.length;
       }
     }
-    if (obj.kind === 'chest') obj.contents ??= [];
+    obj.contents ??= [];
   });
   // Object ids are indices in this list (characters' taken flags name them): the objects of only
   // some difficulties, read since converter 1.27, go last so the earlier ids stay as they were.

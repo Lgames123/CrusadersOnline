@@ -495,7 +495,8 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
           // the object's own id (and a ground item's Texture index) picks its texture.
           const list = texturesById.get(o.modelId) ?? [];
           const tex = list[(o.kind === 'item' && o.item && itemTexture.get(o.item.name)) || 0] ?? list[0];
-          const texture = glb && tex && tex !== bakedTexture.get(model!) ? manifest.textures[tex] : undefined;
+          // Sprites wear their image (metatex `*Image`); TORCHFIRE is the procedural fire (no file).
+          const texture = o.kind === 'sprite' ? (o.effect ? manifest.textures[o.effect.toLowerCase()] : undefined) : glb && tex && tex !== bakedTexture.get(model!) ? manifest.textures[tex] : undefined;
           return {
             ...o,
             position: [o.position[0], o.position[1], -o.position[2]],

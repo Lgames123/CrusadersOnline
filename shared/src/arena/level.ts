@@ -59,13 +59,16 @@ export interface LevelObject {
   hp: number;
   item?: { name: string; quantity: number };
   contents?: { name: string; quantity: number }[];
+  /** Sprites: metatex / image name ("TORCHFIRE": the procedural fire; "Flare04", "Flickerslow"). */
   effect?: string;
+  /** Sprites: quad half height, half width and raise above the position (original units). */
+  sprite?: { halfHeight: number; halfWidth: number; raise: number };
   /** Converted model file (relative to the converter output), when available. */
   model?: string;
   /**
    * Converted texture file to draw `model` with, when this object's models.ctx id (or, for a
    * ground item, its items.ctx `Texture` index) names another texture than the one baked into
-   * the shared model file (bookshelves, flags, potions, spell books).
+   * the shared model file (bookshelves, flags, potions, spell books). Sprites: their image.
    */
   texture?: string;
   /** The model's bounding box in its own frame (original units, Z mirrored): min x y z, max x y z. */

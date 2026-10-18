@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LevelLight } from '../engine/level_light.ts';
 import { dynamicLights } from '../engine/dynamic_lights.ts';
 import { propShadows } from '../engine/prop_shadows.ts';
+import { LevelSprites } from '../engine/level_sprites.ts';
 import { propFixes } from './prop_fixes.ts';
 import { nodeFrameInverse } from './original_models.ts';
 import { ItemThumbnails } from '../ui/item_thumbnails.ts';
@@ -119,7 +120,7 @@ export interface OriginalLevel {
   music?: number;
   /** Dungeon atmosphere: dim ambient light, dark fog. */
   applyAtmosphere(scene: THREE.Scene): void;
-  /** Call every frame: sky box, torch flicker and the torch light pool. */
+  /** Call every frame: sky box, torch fire and the torch light pool. */
   update(camera: THREE.Camera, dt: number): void;
 }
 
@@ -269,21 +270,6 @@ function applyTextureAlpha(material: THREE.MeshBasicMaterial): void {
     // Fully clear texels are dropped, so they never hide what is drawn after them.
     material.alphaTest = 0.02;
   }
-}
-
-function flameTexture(): THREE.Texture {
-  const c = document.createElement('canvas');
-  c.width = c.height = 64;
-  const g = c.getContext('2d')!;
-  const grad = g.createRadialGradient(32, 36, 2, 32, 32, 30);
-  grad.addColorStop(0, 'rgba(255,240,200,1)');
-  grad.addColorStop(0.35, 'rgba(255,150,40,0.85)');
-  grad.addColorStop(1, 'rgba(255,60,0,0)');
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 64, 64);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
 }
 
 /** Column-vector matrix from the stored row-major rotation (Direct3D row-vector convention: transpose). */
@@ -444,18 +430,13 @@ export async function loadOriginalLevel(arenaName: string, difficulty: Difficult
   const droppedClusters: DroppedChestCluster[] = [];
   const chestModelPromise = loadModel('models/chest01.glb');
   const torches: THREE.Vector3[] = [];
-  const flames: THREE.Sprite[] = [];
-  const flameMat = new THREE.SpriteMaterial({ map: flameTexture(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
+  const sprites = new LevelSprites();
+  props.add(sprites.group);
   await Promise.all((placements.objects ?? []).map(async (o, id) => {
     if (!isPlaced(o, difficulty)) return;
     if (o.kind === 'sprite') {
-      if (o.effect !== 'TORCHFIRE') return;
-      const flame = new THREE.Sprite(flameMat);
-      flame.position.set(...o.position);
-      flame.scale.setScalar(1.6); // original units (feet)
-      props.add(flame);
-      flames.push(flame);
-      torches.push(new THREE.Vector3(...o.position).multiplyScalar(LEVEL_UNIT_METRES));
+      sprites.add(o, LEVEL_UNIT_METRES, o.texture ? await loadTexture(o.texture) : null);
+      if (o.effect === 'TORCHFIRE') torches.push(new THREE.Vector3(...o.position).multiplyScalar(LEVEL_UNIT_METRES));
       return;
     }
     if (!o.model) return;
@@ -760,7 +741,7 @@ export async function loadOriginalLevel(arenaName: string, difficulty: Difficult
         if (d.def.kind === 'lever') d.mesh.rotation.z = (-Math.PI / 3) * d.open;
         else d.mesh.position.y = (b[4] - b[1]) * 0.95 * d.open;
       }
-      flames.forEach((f, i) => f.scale.setScalar(1.4 + 0.25 * Math.sin(t * 13 + i * 1.7) + 0.15 * Math.sin(t * 29 + i)));
+      sprites.update(camera, dt);
       if ((reassign -= dt) <= 0) {
         reassign = 0.5;
         const near = torches
