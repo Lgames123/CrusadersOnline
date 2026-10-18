@@ -2,7 +2,7 @@
  * Parser for `script/effects.stg`, the original's special-effect definitions:
  *
  * - `BEGIN SHAPE <name>`: a sprite (`SPRITE`, `texture <name>`) with OUTER / CENTER / INNER
- *   colours (r g b a, 0-255); `SPHERE` shapes are kept as sprites.
+ *   colours (r g b a, 0-255); `SPHERE` shapes are flagged (the client draws them as balls).
  * - `BEGIN FLASH <name>`: one animated instance of a shape (`ROTATING_SHAPE` / `STATIC_SHAPE`):
  *   start size, size speed and acceleration, rotation speed, the attack / sustain / decay alpha
  *   envelope (seconds), `MOVE` velocity, `GRAVITY`, `RANDOMIZE_SIZE` / `RANDOMIZE_MOVE`

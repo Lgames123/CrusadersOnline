@@ -18,6 +18,8 @@ import * as THREE from 'three';
 interface Shape {
   texture: string | null;
   center: [number, number, number, number];
+  /** `SPHERE` shapes (`numpolys` 18) are drawn as a textured ball, not a camera-facing quad. */
+  sphere?: boolean;
 }
 interface Flash {
   shape: string;
@@ -56,6 +58,8 @@ export const EFFECTS_SCALE = SIZE_SCALE;
 const MAX_LIVE = 600;
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const zAxis = new THREE.Vector3();
+/** A SPHERE shape's ball: 18 polygons (6 around, 3 bands), unit diameter. */
+const SPHERE_GEOMETRY = new THREE.SphereGeometry(0.5, 6, 3);
 /** Heading (about the vertical) of a basis' +Z: the original turns GRAVITY by the flash's heading only. */
 function headingOf(basis: THREE.Matrix4): number {
   basis.extractBasis(new THREE.Vector3(), new THREE.Vector3(), zAxis);
@@ -76,7 +80,8 @@ interface Anchor {
 }
 
 interface Live {
-  sprite: THREE.Sprite;
+  /** The flash: a sprite, or a ball for SPHERE shapes (its width across, height up). */
+  sprite: THREE.Sprite | THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   /** Attached flashes: positioned at the anchor plus `local`. */
   anchor?: Anchor;
   local?: THREE.Vector3;
@@ -180,7 +185,7 @@ export class Effects {
     const shape = this.table.shapes[flash.shape];
     const texName = shape?.texture ?? null;
     const c = shape?.center ?? [255, 255, 255, 255];
-    const material = new THREE.SpriteMaterial({
+    const look = {
       map: this.texture(texName),
       color: new THREE.Color(c[0] / 255, c[1] / 255, c[2] / 255),
       transparent: true,
@@ -188,8 +193,10 @@ export class Effects {
       // Some sprites (spark00) keep a faint alpha over the whole quad: drop it.
       alphaTest: 0.05,
       blending: texName && OPAQUE.test(texName) ? THREE.NormalBlending : THREE.AdditiveBlending,
-    });
-    const sprite = new THREE.Sprite(material);
+    };
+    const sprite = shape?.sphere
+      ? new THREE.Mesh(SPHERE_GEOMETRY, new THREE.MeshBasicMaterial({ ...look, alphaTest: 0, side: THREE.DoubleSide }))
+      : new THREE.Sprite(new THREE.SpriteMaterial(look));
     const r = () => Math.random() * 2 - 1;
     const local = (v: [number, number, number], rand?: [number, number, number]) =>
       new THREE.Vector3(v[0] + (rand ? rand[0] * r() : 0), v[1] + (rand ? rand[1] * r() : 0), v[2] + (rand ? rand[2] * r() : 0)).applyMatrix4(basis);
@@ -242,11 +249,13 @@ export class Effects {
       p.vw += f.widthAcceleration * UNIT * this.scale * dt;
       p.h = Math.max(0.001, p.h + p.vh * dt);
       p.w = Math.max(0.001, p.w + p.vw * dt);
-      p.sprite.scale.set(p.w, p.h, 1);
+      if (p.sprite instanceof THREE.Mesh) p.sprite.scale.set(p.w, p.h, p.w);
+      else p.sprite.scale.set(p.w, p.h, 1);
       p.vel.addScaledVector(p.grav, dt);
       if (p.anchor) p.sprite.position.copy(p.anchor.pos).add(p.local!.addScaledVector(p.vel, dt));
       else p.sprite.position.addScaledVector(p.vel, dt);
-      p.sprite.material.rotation += p.spin * dt;
+      if (p.sprite instanceof THREE.Mesh) p.sprite.rotation.y += p.spin * dt;
+      else p.sprite.material.rotation += p.spin * dt;
       // Trails: spawn another effect every interval while alive.
       if (f.spawnMulti && f.spawnMulti.interval > 0 && (p.nextSpawn -= dt) <= 0) {
         p.nextSpawn = f.spawnMulti.interval;

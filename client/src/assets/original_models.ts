@@ -249,6 +249,50 @@ class OriginalAvatar implements Avatar {
     return { key: this.upperSwing ? `u${this.upperSwingKey}` : `${a}:${this.swingId}`, seconds: this.swingSeconds > 0 ? this.swingSeconds : 0.7 };
   }
 
+  /** The body's meshes (not the held items): what Stone Skin turns to stone. */
+  private readonly bodyMeshes: THREE.Mesh[] = [];
+  /**
+   * The body texture's stone version (metatex INPUT1: drake -> Stone, drakeNNarmorM -> its "st"
+   * image); unset for models whose metatex has none, which Stone Skin leaves as they are.
+   */
+  stoneTexture?: () => Promise<THREE.Texture | null>;
+  /** Stone Skin's blend (metatex +0x54, 0-100) and its mode's target and step per 1/30 s (0x0047BDBB). */
+  private stone = { mix: 0, target: 0, step: 0, uniform: null as { value: number } | null };
+
+  /**
+   * Stone Skin's look (status STO2, kind 13: metatex mode 6 / 8 / 10 by level, 0x0047E710): the
+   * body blends toward its stone texture +2 / +3 / +4 % a step up to 50 / 75 / 100 %; when it
+   * ends (mode 7 / 9 / 11, 0x0047EB40) back to 0 at the same step. Level 0 = ended.
+   */
+  setStoneSkin(level: number): void {
+    const s = this.stone;
+    if (level > 0) {
+      s.target = [0, 50, 75, 100][Math.min(3, level)]!;
+      s.step = level + 1;
+    } else s.target = 0;
+    if (s.uniform || level <= 0 || !this.stoneTexture) return;
+    const uniform = { value: 0 };
+    s.uniform = uniform;
+    void this.stoneTexture().then((tex) => {
+      if (!tex) return;
+      for (const mesh of this.bodyMeshes) {
+        const m = (mesh.material as THREE.MeshStandardMaterial).clone();
+        m.onBeforeCompile = (shader) => {
+          shader.uniforms['stoneMap'] = { value: tex };
+          shader.uniforms['stoneMix'] = uniform;
+          shader.fragmentShader =
+            'uniform sampler2D stoneMap;\nuniform float stoneMix;\n' +
+            shader.fragmentShader.replace(
+              '#include <map_fragment>',
+              '#include <map_fragment>\n#ifdef USE_MAP\n  diffuseColor.rgb = mix(diffuseColor.rgb, texture2D(stoneMap, vMapUv).rgb, stoneMix);\n#endif',
+            );
+        };
+        m.customProgramCacheKey = () => 'stone-skin';
+        mesh.material = m;
+      }
+    });
+  }
+
   /** The model's attachment dummies (MDL DMY XFRM, in order) on their bones; undefined: not looked up yet. */
   private points: { bone: THREE.Bone; at: THREE.Vector3 }[] | undefined;
 
@@ -283,6 +327,9 @@ class OriginalAvatar implements Avatar {
         mesh.material = m;
       });
     }
+    model.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh) this.bodyMeshes.push(o as THREE.Mesh);
+    });
     if (equipment) attachEquipment(model, equipment);
     model.traverse((o) => {
       o.castShadow = true;
@@ -610,6 +657,13 @@ class OriginalAvatar implements Avatar {
   }
 
   update(dt: number): void {
+    const st = this.stone;
+    if (st.uniform && st.mix !== st.target) {
+      // The metatex steps its blend once per 1/30 s (assumed: the game's update rate).
+      const d = st.step * 30 * dt;
+      st.mix = st.mix < st.target ? Math.min(st.target, st.mix + d) : Math.max(st.target, st.mix - d);
+      st.uniform.value = st.mix / 100;
+    }
     if (this.restartEvery > 0 && (this.restartIn -= dt) <= 0) {
       this.restartIn += this.restartEvery;
       this.current?.reset().play();
@@ -818,6 +872,26 @@ export async function loadOriginalAvatars(): Promise<AvatarFactory | null> {
       loaded.set(kind, { gltf, clips: withStates(base, states), events, equipment, ...(texture ? { texture } : {}) });
     }
     if (loaded.size === 0) return null;
+    /** Stone versions of Drake's body textures (metatex INPUT1 of drake / drakeNNarmorM), loaded once. */
+    const stones = new Map<string, Promise<THREE.Texture | null>>();
+    const stoneOf = (bodyTexture: string): (() => Promise<THREE.Texture | null>) | undefined => {
+      const name = bodyTexture === 'drake' ? 'stone' : /^drake0\darmor\d$/.test(bodyTexture) ? `${bodyTexture}st` : null;
+      const url = name ? manifest.textures[name] : undefined;
+      if (!url) return undefined;
+      return () => {
+        let t = stones.get(url);
+        if (!t) {
+          t = textures.loadAsync(`/generated/${url}`).then((tex) => {
+            tex.flipY = false;
+            tex.colorSpace = THREE.SRGBColorSpace;
+            tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+            return tex;
+          }).catch(() => null);
+          stones.set(url, t);
+        }
+        return t;
+      };
+    };
     console.info(`[assets] using original models from your installation: ${[...loaded.keys()].join(', ')}`);
     const factory: AvatarFactory = (kind, held) => {
       const entry = loaded.get(kind === 'player' ? 'self' : kind);
@@ -833,6 +907,10 @@ export async function loadOriginalAvatars(): Promise<AvatarFactory | null> {
       }
       const avatar = new OriginalAvatar(entry.gltf, entry.clips, entry.texture, equipment);
       avatar.events = entry.events;
+      if (kind === 'player' || kind === 'self') {
+        const stone = stoneOf('drake');
+        if (stone) avatar.stoneTexture = stone;
+      }
       return avatar;
     };
     factory.preload = async (files) => {
@@ -864,6 +942,8 @@ export async function loadOriginalAvatars(): Promise<AvatarFactory | null> {
       const left = await prop(outfit.left);
       const avatar = new OriginalAvatar(source, self.clips, texture, { ...(right ? { right } : {}), ...(left ? { left } : {}) });
       avatar.events = self.events;
+      const stone = stoneOf(outfit.body?.texture ?? 'drake');
+      if (stone) avatar.stoneTexture = stone;
       return avatar;
     };
     return factory;

@@ -1,7 +1,11 @@
 import { BUILTIN_SPELLS } from '@crusaders/shared';
 
-/** Torch Light spell: a warm light around the caster (radius from default.ctx S0, in feet). */
-export const TORCH_LIGHT_COLOR = 0xffc070;
+/**
+ * Torch Light spell: a white light around the caster (radius from default.ctx S0, in feet). The
+ * update 0x004BAE60 adds a light every frame with all three colour components value1 x 25
+ * (0x0044BEA0 passes one value as r, g and b): white, never tinted.
+ */
+export const TORCH_LIGHT_COLOR = 0xffffff;
 export const TORCH_LIGHT_INTENSITY = 6;
 /** Enhanced lighting: the share of a surface's texture colour the torch adds at its centre. */
 export const TORCH_DYNAMIC_INTENSITY = 1.4;

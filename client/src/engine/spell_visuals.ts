@@ -93,13 +93,12 @@ const BOLT_LIFE = 255 / 0.34 / 1000;
 const BOLT_WIDTH = 40 * 0.05 * 0.3048;
 const FOOT = 0.3048;
 
-/** Timed-effect shells: colour, opacity, additive. */
-const STATUS_LOOK: Partial<Record<StatusTag, { color: number; opacity: number; additive: boolean }>> = {
-  FRZE: { color: 0xaee4ff, opacity: 0.5, additive: false },
-  STON: { color: 0x8c8678, opacity: 0.4, additive: false },
-  HERO: { color: 0xffc860, opacity: 0.16, additive: true },
-  SLOW: { color: 0x9a70ff, opacity: 0.14, additive: true },
-};
+/**
+ * Heroism's look (status HERO, descriptor 1, step 0x0047E8E0): HEROISM_EFFECT (variant = level)
+ * every 200 ms (0x004E2120), 6 ft above the character's feet, while it lasts.
+ */
+const HEROISM_PERIOD = 0.2;
+const HEROISM_HEIGHT = 6 * 0.3048;
 
 const glowTexture = (() => {
   let tex: THREE.Texture | null = null;
@@ -125,9 +124,11 @@ export class SpellVisuals {
   private readonly projectiles = new Map<number, ProjectileView>();
   private readonly timed: Timed[] = [];
   private readonly drains = new Map<number, { from: number; to: number; level: number; left: number; spawnIn: number; line: THREE.Line }>();
-  /** Status shells by character, by tag. */
-  private readonly shells = new Map<number, Map<StatusTag, THREE.Mesh>>();
   private readonly statusOf = new Map<number, Set<StatusTag>>();
+  /** Status levels as last sent (a status seen only by its tag counts as level 1). */
+  private readonly statusLevel = new Map<string, number>();
+  /** Heroism's periodic effect by character: seconds to the next. */
+  private readonly heroism = new Map<number, { level: number; next: number }>();
   private upperCasts = 0;
   private readonly tmp = new THREE.Vector3();
   /** Wind-ups following a character's dummies (+0x24 hangs them on the node, 0x00482150). */
@@ -165,7 +166,7 @@ export class SpellVisuals {
     if (d.projectile) this.projectile(d.projectile);
     if (d.burst) this.burst(d.burst);
     if (d.drain) this.drain(d.drain);
-    for (const s of d.status ?? []) this.setStatus(s.target, s.tag, s.on);
+    for (const s of d.status ?? []) this.setStatus(s.target, s.tag, s.on, s.level);
   }
 
   /** The statuses an entity has as it comes into view (ENTITY_SPAWN), or the local player's (PLAYER_STATS). */
@@ -175,7 +176,7 @@ export class SpellVisuals {
     for (const t of tags) if (!have.has(t)) this.setStatus(id, t, true);
   }
 
-  /** A character left view: its shells go. */
+  /** A character left view: its looks go. */
   forget(id: number): void {
     for (const t of [...(this.statusOf.get(id) ?? [])]) this.setStatus(id, t, false);
   }
@@ -246,15 +247,11 @@ export class SpellVisuals {
         fx?.spawn('SOULDRINKER_ENERGY', this.tmp.copy(a).lerp(b, k), b.clone().sub(a).normalize(), d.level - 1);
       }
     }
-    // Shells pulse a little and follow their character.
-    const now = performance.now() / 1000;
-    for (const [id, shells] of this.shells) {
+    for (const [id, h] of this.heroism) {
+      if ((h.next -= dt) > 0) continue;
+      h.next += HEROISM_PERIOD;
       const e = this.host.entity(id);
-      for (const [tag, mesh] of shells) {
-        if (e && mesh.parent !== e.object) e.object.add(mesh);
-        const look = STATUS_LOOK[tag];
-        if (look && look.additive) (mesh.material as THREE.MeshBasicMaterial).opacity = look.opacity * (0.75 + 0.25 * Math.sin(now * 4));
-      }
+      if (e) fx?.spawn('HEROISM_EFFECT', this.tmp.copy(e.object.position).setY(e.object.position.y + HEROISM_HEIGHT), null, h.level - 1);
     }
   }
 
@@ -481,28 +478,27 @@ export class SpellVisuals {
     this.drains.set(d.id, { from: d.from, to: d.to, level: d.level, left: d.seconds, spawnIn: 0, line });
   }
 
-  private setStatus(id: number, tag: StatusTag, on: boolean): void {
+  /**
+   * A timed effect's look. The original draws no shell: freeze only stops the animation (flag 4
+   * on the controller, 0x0047E6F0) with SNAPFREEZE_TARGET where it struck, slow shows its
+   * SLOW_TARGET on landing, heroism its periodic effect, stone skin the body's stone blend.
+   */
+  private setStatus(id: number, tag: StatusTag, on: boolean, level?: number): void {
     let set = this.statusOf.get(id);
     if (!set) this.statusOf.set(id, (set = new Set()));
     if (on) set.add(tag);
     else set.delete(tag);
     if (!set.size) this.statusOf.delete(id);
-    // Look: a shell round the body.
-    let shells = this.shells.get(id);
-    const look = STATUS_LOOK[tag];
-    if (on && look && !shells?.has(tag)) {
-      if (!shells) this.shells.set(id, (shells = new Map()));
-      const mat = new THREE.MeshBasicMaterial({ color: look.color, transparent: true, opacity: look.opacity, depthWrite: false, blending: look.additive ? THREE.AdditiveBlending : THREE.NormalBlending });
-      const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.48, PLAYER_HEIGHT - 0.8, 6, 14), mat);
-      mesh.position.y = PLAYER_HEIGHT / 2;
-      mesh.renderOrder = 2;
-      this.host.entity(id)?.object.add(mesh);
-      shells.set(tag, mesh);
-    } else if (!on && shells?.has(tag)) {
-      this.dispose(shells.get(tag)!);
-      shells.delete(tag);
-      if (!shells.size) this.shells.delete(id);
+    const key = `${id}:${tag}`;
+    if (on && level) this.statusLevel.set(key, level);
+    const lv = this.statusLevel.get(key) ?? 1;
+    if (!on) this.statusLevel.delete(key);
+    if (tag === 'HERO') {
+      if (on && !this.heroism.has(id)) this.heroism.set(id, { level: lv, next: 0 });
+      else if (on) this.heroism.get(id)!.level = lv;
+      else this.heroism.delete(id);
     }
+    if (tag === 'STON') this.host.entity(id)?.avatar.setStoneSkin?.(on ? lv : 0);
     // Pace: frozen / stunned stop, slowed play slower.
     const tags = this.statusOf.get(id);
     const rate = !tags ? 1 : tags.has('FRZE') || tags.has('THAW') ? 0 : tags.has('SLOW') ? 0.3 : 1;

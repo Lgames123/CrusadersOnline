@@ -60,6 +60,8 @@ export interface Avatar {
    * when the model has none.
    */
   attachPoint?(index: number, out: THREE.Vector3): boolean;
+  /** Stone Skin's look at a level (1-3), 0 when it ends: the body blends toward its stone texture. */
+  setStoneSkin?(level: number): void;
   /** Shows or hides what the right hand (weapon) or left forearm (shield) holds. */
   showHeld?(side: 'right' | 'left', visible: boolean): void;
   /** Seconds into an ASM state's clip, played by playAsm at `speed`, at which its authored `event` falls. */

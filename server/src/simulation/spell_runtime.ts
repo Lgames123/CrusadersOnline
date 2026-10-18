@@ -175,7 +175,7 @@ function segmentDistance(p: V3, a: V3, b: V3): number {
   return Math.hypot(a.x + ab.x * t - p.x, a.y + ab.y * t - p.y, a.z + ab.z * t - p.z);
 }
 const ticks = (seconds: number) => Math.round(seconds * TICK_RATE);
-/** The bolt's and the explosion's sounds play at a random rate (0x004BF480, 0x004BE980: 0.8 + 0.4 x rand). */
+/** The bolt's, the explosion's and the thaw's sounds play at a random rate (0x004BF480, 0x004BE980, 0x0047E9B0: 0.8 + 0.4 x rand). */
 const randomRate = () => round(0.8 + 0.4 * Math.random());
 
 export class SpellRuntime {
@@ -688,7 +688,7 @@ export class SpellRuntime {
     if (tag === 'FRZE' && this.host.alive(c)) {
       // The thaw (0x0047E9B0): SNAPFREEZE_THAW, the glass sound, ice shards and a 0.8 s stun.
       const p = c.character.position;
-      this.fx(p, [{ name: 'SNAPFREEZE_THAW', level: 1, at: [p.x, p.y + 3 * FT, p.z] }], [{ id: SPELL_RULES.thawSound, at: [p.x, p.y, p.z] }]);
+      this.fx(p, [{ name: 'SNAPFREEZE_THAW', level: 1, at: [p.x, p.y + 3 * FT, p.z] }], [{ id: SPELL_RULES.thawSound, at: [p.x, p.y, p.z], rate: randomRate() }]);
       this.setStatus(c, { tag: 'THAW', level: 1, until: this.host.tick() + ticks(SPELL_RULES.thawStun), rate: 0 });
     }
   }
