@@ -724,7 +724,15 @@ export async function loadOriginalLevel(arenaName: string, difficulty: Difficult
       scene.traverse((o) => {
         const light = o as THREE.Light;
         if ((light as THREE.HemisphereLight).isHemisphereLight) light.intensity = 0.7;
-        if ((light as THREE.DirectionalLight).isDirectionalLight) light.intensity = 0.15;
+        const sun = light as THREE.DirectionalLight;
+        if (sun.isDirectionalLight) {
+          sun.intensity = 0.15;
+          // Every level material is unlit (MeshBasic + lightmap): nothing receives the sun's
+          // shadow map, so its depth pass over the characters would be drawn for nothing.
+          sun.castShadow = false;
+          sun.shadow.map?.dispose();
+          sun.shadow.map = null;
+        }
       });
     },
     update(camera, dt) {
