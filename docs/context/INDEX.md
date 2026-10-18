@@ -1,5 +1,6 @@
 # Context notes
 
+- 2026-10-17 [Hold Alt for the cursor](2026-10-17-alt-free-cursor.md) — Alt down exits pointer lock (no menu/hint), Alt up re-locks without a click (page-released lock); skipped if Alt is bound; no input while held; Alt keyup always cancelled (Claude Code)
 - 2026-10-17 [Browser features kept out of the game's inputs](2026-10-17-browser-guards.md) — browser_guards.ts: no context menu / selection / drag outside text fields, no autoscroll, mouse back/forward or page zoom; while locked every keydown default cancelled but F11/F12/devtools; Ctrl+W can't be taken (Claude Code)
 - 2026-10-17 [A kill's items fall on the ground](2026-10-17-kill-loot-on-the-ground.md) — no auto-loot: gold to the purse, items as `loose` ground items around the corpse for the killer only (`onlyFor`), 2 min, drawn as their own models laid flat; player drops keep the chest; supersedes creature-drops' overflow (Claude Code)
 - 2026-10-17 [Level placements by difficulty](2026-10-17-difficulty-placements.md) — cap record +8 is a difficulty mask (0x04/0x08/0x10; loader 0x476DC0 removes the rest): converter 1.27 reads the 5 objects it dropped (Ca1a Thunderous Hammer…), appended to keep ids; arena built per server DIFFICULTY, sent in SC_ZONE_CHANGE; 18 creatures no longer spawn on medium (Claude Code)

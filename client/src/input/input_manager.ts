@@ -135,6 +135,11 @@ export class InputManager {
     return this.compiled.isAction(action, code);
   }
 
+  /** The key is bound to a movement flag, a view key or an action. */
+  isBound(code: string): boolean {
+    return this.compiled.bindings[code] !== undefined || this.viewCodes.has(code) || this.compiled.actionFor(code) !== null;
+  }
+
   /** Asks for pointer lock; the browser may refuse (no user gesture, just left with Esc): a click retries. */
   requestLock(): void {
     try {

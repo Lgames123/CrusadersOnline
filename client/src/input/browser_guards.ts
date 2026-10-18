@@ -47,8 +47,9 @@ export function installBrowserGuards(): void {
     }
     if (locked() && !PASS_THROUGH.has(e.code) && !(e.ctrlKey && e.shiftKey && (e.code === 'KeyI' || e.code === 'KeyJ'))) e.preventDefault();
   });
-  // A lone Alt or F10 focuses the browser's menu on release.
+  // A lone Alt or F10 focuses the browser's menu on release (Alt also frees the cursor, so its
+  // release comes after the lock is gone).
   window.addEventListener('keyup', (e) => {
-    if (locked() && (e.key === 'Alt' || e.code === 'F10')) e.preventDefault();
+    if (!editable(e.target) && (e.key === 'Alt' || e.code === 'F10')) e.preventDefault();
   });
 }

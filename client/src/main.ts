@@ -876,9 +876,11 @@ async function main(): Promise<void> {
   // the quest book released it.
   const clickHint = document.getElementById('click-hint')!;
   let releasing = false;
+  /** Alt held: the cursor is out for the UI; letting go takes the camera back. */
+  let altFree = false;
   let optionsAt = 0;
   const updateHint = () => {
-    clickHint.hidden = input.locked || optionsOpen || inventoryPanel.open || questBook.open || charSheet.open || !!cutscene;
+    clickHint.hidden = input.locked || altFree || optionsOpen || inventoryPanel.open || questBook.open || charSheet.open || !!cutscene;
   };
   const play = () => {
     sounds?.unlock();
@@ -908,6 +910,24 @@ async function main(): Promise<void> {
     if (!input.locked && !optionsOpen && !cutscene) play();
   });
   document.getElementById('btn-resume')!.addEventListener('click', () => setOptionsOpen(false));
+  const isAlt = (e: KeyboardEvent) => (e.code === 'AltLeft' || e.code === 'AltRight') && !input.isBound(e.code);
+  window.addEventListener('keydown', (e) => {
+    if (!isAlt(e) || e.repeat || !input.locked || cutscene) return;
+    altFree = true;
+    releasing = true;
+    document.exitPointerLock();
+  });
+  window.addEventListener('keyup', (e) => {
+    if (!isAlt(e) || !altFree) return;
+    altFree = false;
+    // A page that let go of the lock itself may take it back without a click (Pointer Lock 2.0).
+    if (!optionsOpen && !inventoryPanel.open && !questBook.open && !charSheet.open && !cutscene) input.requestLock();
+    updateHint();
+  });
+  window.addEventListener('blur', () => {
+    altFree = false;
+    updateHint();
+  });
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) setOptionsOpen(false);
   });
