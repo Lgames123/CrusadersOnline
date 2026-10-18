@@ -38,8 +38,8 @@ const RECENTRE = 5;
 /** How far up the light the shadow camera sits, and its depth range (metres). */
 const LIGHT_BACK = 150;
 const LIGHT_DEPTH = 300;
-/** How dark a shadow makes fully lit ground (0 none, 1 black). */
-const STRENGTH = 0.6;
+/** How dark a shadow makes fully lit ground by default (0 none, 1 black; the objectShadowStrength setting). */
+export const OBJECT_SHADOW_STRENGTH = 0.6;
 /**
  * The share of that kept on ground the lightmap leaves in shade (the levels' outdoor ground is
  * mostly dim: at 0 most shadows would not show).
@@ -172,6 +172,7 @@ export class PropShadows {
   private readonly v = new THREE.Vector3();
   private readonly box = new THREE.Box3();
   private readonly clearColor = new THREE.Color();
+  private darkness = OBJECT_SHADOW_STRENGTH;
   /** Shadow redraws, and the last one's milliseconds (CPU; for tuning). */
   draws = 0;
   lastDrawMs = 0;
@@ -182,6 +183,12 @@ export class PropShadows {
     this.camera.lookAt(LIGHT_DIR);
     this.rotation.copy(this.camera.quaternion);
     this.rotationInv.copy(this.rotation).invert();
+  }
+
+  /** How dark a shadow makes fully lit ground (0 none, 1 black): a uniform, nothing redrawn. */
+  set strength(k: number) {
+    this.darkness = Math.min(1, Math.max(0, k));
+    if (this.targets) this.uniforms.uPSParams.value.y = this.darkness;
   }
 
   get enabled(): boolean {
@@ -351,7 +358,7 @@ export class PropShadows {
       renderer.setRenderTarget(prevTarget);
       drawn.forEach((d, i) => (d.mesh.material = saved[i]!));
     }
-    this.uniforms.uPSParams.value.setY(STRENGTH);
+    this.uniforms.uPSParams.value.setY(this.darkness);
     this.lastDrawMs = performance.now() - start;
   }
 

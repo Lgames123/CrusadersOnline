@@ -872,11 +872,13 @@ async function main(): Promise<void> {
 
   lighting.silhouettes = settings.current.silhouetteShadows;
   propShadows.enabled = settings.current.objectShadows;
+  propShadows.strength = settings.current.objectShadowStrength;
   dynamicLights.enabled = settings.current.enhancedLighting;
   postFx.enabled = settings.current.enhancedLighting;
   settings.onChange((s) => {
     lighting.silhouettes = s.silhouetteShadows;
     propShadows.enabled = s.objectShadows;
+    propShadows.strength = s.objectShadowStrength;
     if (dynamicLights.enabled !== s.enhancedLighting) {
       dynamicLights.enabled = s.enhancedLighting;
       postFx.enabled = s.enhancedLighting;

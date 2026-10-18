@@ -22,6 +22,8 @@ export interface Settings {
    * the level's ground and grass along the silhouettes' light. Off: the ground as baked.
    */
   objectShadows: boolean;
+  /** How dark object shadows make fully lit ground: 0.1-1 (1 black), OBJECT_SHADOW_STRENGTH by default. */
+  objectShadowStrength: number;
   /**
    * Enhanced lighting (not original): torches, the Torch Light spell and sparks light the level
    * and characters around them. Off: the original's baked light only.
@@ -48,7 +50,7 @@ export interface Settings {
   optionsVersion?: number;
 }
 
-export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false, musicVolume: 0.5, silhouetteShadows: false, objectShadows: false, enhancedLighting: false, smallEffects: false, foliage: false, foliageDistance: 35, foliageGrass: 1, foliageBushes: 1, foliagePlants: 1, fixedPropUvs: true };
+export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false, musicVolume: 0.5, silhouetteShadows: false, objectShadows: false, objectShadowStrength: 0.6, enhancedLighting: false, smallEffects: false, foliage: false, foliageDistance: 35, foliageGrass: 1, foliageBushes: 1, foliagePlants: 1, fixedPropUvs: true };
 
 const KEY = 'crusaders.settings';
 /** Bumped when a default moves back to the original, so earlier stored values reset once. */
@@ -76,6 +78,7 @@ function sanitize(raw: unknown): Settings {
     // Stored before it became optional (default on then): back to the original unless chosen again.
     silhouetteShadows: r.silhouetteShadows === true && r.optionsVersion === OPTIONS_VERSION,
     objectShadows: r.objectShadows === true,
+    objectShadowStrength: typeof r.objectShadowStrength === 'number' && Number.isFinite(r.objectShadowStrength) ? Math.min(1, Math.max(0.1, r.objectShadowStrength)) : CLASSIC_SETTINGS.objectShadowStrength,
     enhancedLighting: r.enhancedLighting === true,
     smallEffects: r.smallEffects === true,
     foliage: r.foliage === true,

@@ -206,6 +206,19 @@ export class SettingsPanel {
               </label>
             </div>
 
+            <div class="opt-group">
+              <div class="opt-group-header">
+                <h3>Object Shadow Darkness</h3>
+                <span class="opt-badge" id="badge-object-shadow-strength">${Math.round(s.objectShadowStrength * 100)}%</span>
+              </div>
+              <div class="opt-slider-row">
+                <span class="opt-slider-label">Light</span>
+                <input id="set-object-shadow-strength" type="range" min="0.1" max="1" step="0.05" value="${s.objectShadowStrength}" />
+                <span class="opt-slider-label">Dark</span>
+              </div>
+              <p class="opt-desc">How much of the ground's light object shadows take away.</p>
+            </div>
+
             <div class="opt-group opt-toggle-group">
               <label class="opt-toggle-label">
                 <input id="set-lighting" type="checkbox" ${s.enhancedLighting ? 'checked' : ''} />
@@ -421,6 +434,16 @@ export class SettingsPanel {
       });
     }
 
+    const shadowStrength = this.root.querySelector<HTMLInputElement>('#set-object-shadow-strength');
+    if (shadowStrength) {
+      shadowStrength.addEventListener('input', () => {
+        const val = Number(shadowStrength.value);
+        this.store.update({ objectShadowStrength: val });
+        const badge = this.root.querySelector('#badge-object-shadow-strength');
+        if (badge) badge.textContent = `${Math.round(val * 100)}%`;
+      });
+    }
+
     const lighting = this.root.querySelector<HTMLInputElement>('#set-lighting');
     if (lighting) {
       lighting.addEventListener('change', () => {
@@ -514,6 +537,7 @@ export class SettingsPanel {
           musicVolume: 0.5,
           silhouetteShadows: false,
           objectShadows: false,
+          objectShadowStrength: 0.6,
           enhancedLighting: false,
           smallEffects: false,
           foliage: false,
