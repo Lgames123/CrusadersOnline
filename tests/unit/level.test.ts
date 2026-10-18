@@ -73,6 +73,13 @@ describe('original level arenas', () => {
     expect(buildLevelArena('level:test', floorCollision(), placements, 'hard').mobSpawns).toHaveLength(1);
   });
 
+  it("leaves out placed quest items, keeping the others' ids (quest triggers hand them out)", () => {
+    const item = (name: string, questItem?: true) => ({ kind: 'item' as const, name, modelId: 106, position: [20, 100, -20] as [number, number, number], rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1], hp: 0, item: { name, quantity: 1 }, ...(questItem ? { questItem } : {}) });
+    // Ci1b: "Message for Dain" lies at the merchant, a re-typed GoldPieces record.
+    const placements: LevelPlacements = { mesh: 'test', creatures: [], objects: [item('Healing Potion'), item('Message for Dain', true), item('Speed Potion')] };
+    expect((buildLevelArena('level:test', floorCollision(), placements).objects ?? []).map((o) => o.id)).toEqual([0, 2]);
+  });
+
   it("gives placements their own held items, talk line, gesture and idle path (converter 1.24)", () => {
     const placements: LevelPlacements = {
       mesh: 'test',

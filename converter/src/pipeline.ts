@@ -170,6 +170,8 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
   const bakedTexture = new Map<string, string>();
   /** Item name -> items.ctx `Texture` (index into its model's `T` list). */
   const itemTexture = new Map<string, number>();
+  /** items.ctx `Type QUEST` names: the original hands these out through quest triggers, never placed. */
+  const questItems = new Set<string>();
   /** Model bounding boxes (MDL header, original units) by converted model name, for prop colliders. */
   const modelBoxes = new Map<string, { min: [number, number, number]; max: [number, number, number] }>();
 
@@ -215,6 +217,7 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
         itemNames.add(it.name);
         const t = Number(it.fields['Texture']);
         if (Number.isInteger(t) && t > 0) itemTexture.set(it.name, t);
+        if (it.fields['Type'] === 'QUEST') questItems.add(it.name);
       }
       await sink.writeFile('rules/items.json', JSON.stringify({ items }, null, 2));
       manifest.rules['items'] = 'rules/items.json';
@@ -500,6 +503,7 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
             ...(texture ? { texture } : {}),
             // The model's box in its converted (Z mirrored) frame: [min x, y, z, max x, y, z].
             ...(box ? { box: [box.min[0], box.min[1], -box.max[2], box.max[0], box.max[1], -box.min[2]] } : {}),
+            ...(o.kind === 'item' && o.item && questItems.has(o.item.name) ? { questItem: true } : {}),
           };
         }),
       }));

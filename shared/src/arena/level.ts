@@ -72,6 +72,13 @@ export interface LevelObject {
   box?: number[];
   /** The difficulties it is placed in (inDifficulty); absent: all of them (converter 1.27+). */
   difficulty?: number;
+  /**
+   * A ground item of items.ctx `Type QUEST` (isPlaced leaves it out). The original gives quest
+   * items only through quest triggers (action 0x40 sets a player +0x1C1 bit, 0x46435B); the placed
+   * ones are leftovers: Ci*b's "Message for Dain" (a re-typed "GoldPieces" at the merchant) and
+   * Du1c's Rune, outside the level.
+   */
+  questItem?: true;
 }
 
 /** Difficulty bits of a placement's mask (cap record +8; the loader drops the rest, 0x476DC0). */
@@ -80,6 +87,11 @@ const DIFFICULTY_BIT: Readonly<Record<Difficulty, number>> = { easy: 0x04, mediu
 /** Whether a level placement is there at this difficulty. */
 export function inDifficulty(p: { difficulty?: number }, difficulty: Difficulty): boolean {
   return p.difficulty === undefined || (p.difficulty & DIFFICULTY_BIT[difficulty]) !== 0;
+}
+
+/** Whether a level object is there at this difficulty (placed quest items never are). */
+export function isPlaced(o: LevelObject, difficulty: Difficulty): boolean {
+  return !o.questItem && inDifficulty(o, difficulty);
 }
 
 export interface LevelPortal {
@@ -635,7 +647,7 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
   const objects: WorldObjectDef[] = [];
   const solids: { points: Float32Array; object?: number }[] = [];
   (placements.objects ?? []).forEach((o, id) => {
-    if (!inDifficulty(o, difficulty)) return;
+    if (!isPlaced(o, difficulty)) return;
     // Props block movement with their model's box, but foliage, bottles and anything under a
     // foot high (tools, fire pits) - the original's prop records carry no collision volume.
     if (o.kind === 'prop' && o.box && !NON_SOLID_PROP.test(`${o.name} ${o.model ?? ''}`) && o.box[4]! - o.box[1]! >= 1) {

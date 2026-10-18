@@ -7,7 +7,7 @@ import { nodeFrameInverse } from './original_models.ts';
 import { ItemThumbnails } from '../ui/item_thumbnails.ts';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, inDifficulty, type Difficulty, DYNAMIC_OBJECT_BASE, type ArenaDef, type LevelObject, type LevelBrush, type LevelPlacements, type WorldObjectDef, type WorldObjectState, type DoorMotion, type DoorSwing, stepDoorMotion, swingPose, type MoverDef, type MoverMotion, moverPose, shutMover, stepMover, useMover } from '@crusaders/shared';
+import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, isPlaced, type Difficulty, DYNAMIC_OBJECT_BASE, type ArenaDef, type LevelObject, type LevelBrush, type LevelPlacements, type WorldObjectDef, type WorldObjectState, type DoorMotion, type DoorSwing, stepDoorMotion, swingPose, type MoverDef, type MoverMotion, moverPose, shutMover, stepMover, useMover } from '@crusaders/shared';
 
 /**
  * An original level converted from the player's own installation (imported in the browser, or
@@ -442,7 +442,7 @@ export async function loadOriginalLevel(arenaName: string, difficulty: Difficult
   const flames: THREE.Sprite[] = [];
   const flameMat = new THREE.SpriteMaterial({ map: flameTexture(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
   await Promise.all((placements.objects ?? []).map(async (o, id) => {
-    if (!inDifficulty(o, difficulty)) return;
+    if (!isPlaced(o, difficulty)) return;
     if (o.kind === 'sprite') {
       if (o.effect !== 'TORCHFIRE') return;
       const flame = new THREE.Sprite(flameMat);

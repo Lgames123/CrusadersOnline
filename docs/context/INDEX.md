@@ -1,5 +1,6 @@
 # Context notes
 
+- 2026-10-18 [Placed quest items left out](2026-10-18-placed-quest-items.md) — QUEST items come only from quest triggers (action 0x40 → player +0x1C1, 0x46435B): converter `questItem`, `isPlaced` skips Ci*b's "Message for Dain" (re-typed GoldPieces) and Du1c's Rune, ids kept; floating / outside-mesh items listed, not moved (Claude Code)
 - 2026-10-17 [Door keys on a Key Items page](2026-10-17-key-items-page.md) — USEABLE "… Key" items are `keyItem`: no bag cell (a full bag still takes one), never dropped/moved/sold; Bag / Key Items tabs, 2×2 model tiles; original's Quest Items page 0x472C20, type table 0x4F01E8; quest items/trinkets not moved, `Permanent` unread (Claude Code)
 - 2026-10-17 [Hold Alt for the cursor](2026-10-17-alt-free-cursor.md) — Alt down exits pointer lock (no menu/hint), Alt up re-locks without a click (page-released lock); skipped if Alt is bound; no input while held; Alt keyup always cancelled (Claude Code)
 - 2026-10-17 [Browser features kept out of the game's inputs](2026-10-17-browser-guards.md) — browser_guards.ts: no context menu / selection / drag outside text fields, no autoscroll, mouse back/forward or page zoom; while locked every keydown default cancelled but F11/F12/devtools; Ctrl+W can't be taken (Claude Code)
