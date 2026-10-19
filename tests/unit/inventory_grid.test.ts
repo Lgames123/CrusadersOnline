@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addItem, BUILTIN_ITEMS, canPlaceGrid, catalogFromItemRules, firstFreeGridPosition, fitsGrid, INVENTORY_GRID, layoutInventoryGrid, layoutItemViews, layoutLegacyGrid, mergeInventoryStacks, moveInventoryGridItem, overlapsGrid, questItemForBit, sanitizeInventory, setEquipped, splitInventoryStack, type InventoryEntry } from '@crusaders/shared';
+import { addItem, BUILTIN_ITEMS, canPlaceGrid, catalogFromItemRules, DAMAGE_TYPES, equipmentOf, firstFreeGridPosition, fitsGrid, INVENTORY_GRID, layoutInventoryGrid, layoutItemViews, layoutLegacyGrid, mergeInventoryStacks, moveInventoryGridItem, overlapsGrid, questItemForBit, sanitizeInventory, setEquipped, splitInventoryStack, type InventoryEntry } from '@crusaders/shared';
 
 describe('inventory grid geometry', () => {
   it('uses the original dimensions, including inherited fields from item rules', () => {
@@ -196,3 +196,46 @@ describe('inventory grid geometry', () => {
   });
 });
 
+
+describe('rings and accessories', () => {
+  const catalog = catalogFromItemRules({ items: [
+    { name: 'Crystal Ring of Force', fields: { Type: 'RING', Model: 118, Width: 1, Height: 1, Price: 600, Equip: 'BOOST_ATTRIBUTE' }, damage: {}, protection: {}, calls: [{ name: 'EquipParameters', args: [-1, 'MIGHT', 5] }] },
+    { name: 'Dragontamer\'s Ring', fields: { Type: 'RING', Model: 118, Width: 1, Height: 1, Price: 400, Equip: 'BOOST_PROTECTION' }, damage: {}, protection: {}, calls: [{ name: 'EquipParameters', args: [-1, 'FIRE', 0.75] }] },
+    { name: 'Magic Ring', fields: { Type: 'RING', Model: 118, Width: 1, Height: 1, Price: 100 }, damage: {}, protection: {} },
+    { name: 'Magic Boots', fields: { Type: 'BOOTS', Model: 68, Width: 1, Height: 1, Price: 100 }, damage: {}, protection: {} },
+    { name: 'Dasher Boots', fields: { Type: 'BOOTS', Model: 68, Width: 1, Height: 1, Permanent: 'true' }, damage: {}, protection: {} },
+  ] });
+
+  it('reads a ring\'s Equip boost and keeps permanent boots a quest item', () => {
+    expect(catalog.get('crystal_ring_of_force')).toMatchObject({ type: 'ring', attributes: { might: 5 } });
+    expect(catalog.get('dragontamer_s_ring')!.protection![DAMAGE_TYPES.indexOf('FIRE')]).toBe(0.75);
+    expect(catalog.get('magic_boots')).toMatchObject({ type: 'boots' });
+    expect(catalog.get('dasher_boots')).toMatchObject({ keyItem: true, questItem: true });
+  });
+
+  it('wears two rings; a third replaces the first', () => {
+    const inv: InventoryEntry[] = [
+      { slot: 0, itemId: 'crystal_ring_of_force', equipped: false, x: 0, y: 0 },
+      { slot: 1, itemId: 'dragontamer_s_ring', equipped: false, x: 1, y: 0 },
+      { slot: 2, itemId: 'magic_ring', equipped: false, x: 2, y: 0 },
+    ];
+    expect(setEquipped(inv, 0, true, catalog)).toBe(true);
+    expect(setEquipped(inv, 1, true, catalog)).toBe(true);
+    expect(inv.filter((e) => e.equipped).map((e) => e.slot)).toEqual([0, 1]);
+    const eq = equipmentOf(inv, catalog);
+    expect(eq.attributes).toEqual({ might: 5 });
+    expect(eq.protection[DAMAGE_TYPES.indexOf('FIRE')]).toBe(0.75);
+    expect(setEquipped(inv, 2, true, catalog)).toBe(true);
+    expect(inv.filter((e) => e.equipped).map((e) => e.slot)).toEqual([1, 2]);
+    expect(sanitizeInventory(inv.map((e) => ({ ...e, equipped: true })), catalog).filter((e) => e.equipped).length).toBe(2);
+  });
+
+  it('every placeholder accessory gives +1 Speed and +1 Might in its own slot', () => {
+    const ids = ['leather_cap', 'bone_amulet', 'leather_gloves', 'leather_belt', 'leather_boots'];
+    const inv: InventoryEntry[] = ids.map((itemId, slot) => ({ slot, itemId, equipped: false, x: slot * 2, y: 0 }));
+    for (const e of inv) expect(setEquipped(inv, e.slot, true, BUILTIN_ITEMS)).toBe(true);
+    const eq = equipmentOf(inv, BUILTIN_ITEMS);
+    expect(eq.accessories.map((d) => d.type).sort()).toEqual(['amulet', 'belt', 'boots', 'gloves', 'helm']);
+    expect(eq.attributes).toEqual({ speed: 5, might: 5 });
+  });
+});

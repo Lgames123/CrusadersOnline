@@ -178,6 +178,8 @@ export interface InventoryItemView {
   damage?: number[];
   speed?: number;
   protection?: number[];
+  /** Worn: attribute bonus (rings, accessories). */
+  attributes?: Partial<Attributes>;
   /** What a merchant pays for it (items.ctx Price × count); absent = it takes no item without a price. */
   value?: number;
 }

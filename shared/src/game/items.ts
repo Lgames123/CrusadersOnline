@@ -9,7 +9,15 @@ import { canPlaceGrid, firstFreeGridPosition, INVENTORY_GRID, layoutInventoryGri
  * `rules/items.json` (converter/src/formats/items_ctx.ts) can replace it with the full table via
  * catalogFromItemRules().
  */
-export type ItemType = 'weapon' | 'shield' | 'armor' | 'potion' | 'spellbook' | 'key';
+export type ItemType = 'weapon' | 'shield' | 'armor' | 'potion' | 'spellbook' | 'key' | AccessoryType;
+
+/**
+ * Worn pieces besides weapon, shield and armour. items.ctx has RING and BOOTS (rings with
+ * `Equip BOOST_ATTRIBUTE / BOOST_PROTECTION`); helm, amulet, gloves and belt are not original
+ * (the MU-style paper doll).
+ */
+export type AccessoryType = 'ring' | 'amulet' | 'helm' | 'gloves' | 'belt' | 'boots';
+export const ACCESSORY_TYPES: readonly AccessoryType[] = ['ring', 'amulet', 'helm', 'gloves', 'belt', 'boots'];
 
 export interface ItemDef {
   /** Stable slug, e.g. "long_sword" (stored in inventory_items.item_id). */
@@ -28,8 +36,10 @@ export interface ItemDef {
   damage?: DamageVector;
   /** Weapons: swing-rate multiplier (items.ctx `Speed`). */
   speed?: number;
-  /** Armour: damage-taken multipliers (items.ctx `SetProtection`), 1 = none. */
+  /** Armour, rings: damage-taken multipliers (items.ctx `SetProtection`, a ring's `Equip BOOST_PROTECTION`), 1 = none. */
   protection?: DamageVector;
+  /** Worn: added to the attributes (a ring's `Equip BOOST_ATTRIBUTE`, the placeholder accessories). */
+  attributes?: Partial<Attributes>;
   /** Potions with `Use HEAL`: hit points restored (items.ctx `UseParameters`). */
   heal?: number;
   /** Potions with `Use RESTORE_MANA`: mana restored (items.ctx `UseParameters`). */
@@ -106,6 +116,8 @@ const potion = (name: string, heal: number, price: number, model?: number, mana?
   ({ id: itemSlug(name), name, type: 'potion', width: 1, height: 1, ...(heal ? { heal } : {}), ...(mana ? { mana } : {}), ...(duration ? { duration } : {}), stackable: true, price, ...(model !== undefined ? { model } : {}) });
 const spellBook = (name: string, spell: SpellId, price: number, model?: number): ItemDef =>
   ({ id: itemSlug(name), name, type: 'spellbook', width: 1, height: 1, spell, price, ...(model !== undefined ? { model } : {}) });
+const accessory = (name: string, type: AccessoryType, width: number, height: number, price: number, attributes?: Partial<Attributes>, model?: number): ItemDef =>
+  ({ id: itemSlug(name), name, type, width, height, price, ...(attributes ? { attributes } : {}), ...(model !== undefined ? { model } : {}) });
 const key = (name: string, price: number, model?: number, keyItem = false): ItemDef =>
   ({ id: itemSlug(name), name, type: 'key', width: 1, height: 1, price, ...(model !== undefined ? { model } : {}), ...(keyItem ? { keyItem } : {}) });
 
@@ -133,6 +145,12 @@ export const BUILTIN_ITEMS: ItemCatalog = new Map(
     potion('Mana Crystals 3', 0, 20, 69, 5),
     potion('Mana Potion', 0, 100, 62, 25),
     spellBook('Torch Light Spell Book', 'torch_light', 100, 63),
+    // Placeholders for the paper doll's other slots (not original): +1 Speed, +1 Might each.
+    accessory('Leather Cap', 'helm', 2, 2, 50, { speed: 1, might: 1 }),
+    accessory('Bone Amulet', 'amulet', 1, 1, 50, { speed: 1, might: 1 }, 67),
+    accessory('Leather Gloves', 'gloves', 2, 2, 50, { speed: 1, might: 1 }),
+    accessory('Leather Belt', 'belt', 2, 1, 50, { speed: 1, might: 1 }),
+    accessory('Leather Boots', 'boots', 2, 2, 50, { speed: 1, might: 1 }),
   ].map((d) => [d.id, d]),
 );
 
@@ -198,8 +216,15 @@ export function catalogFromItemRules(rules: { items: readonly ItemRule[] }): Ite
       def = { ...key(r.name, price, undefined, true), questItem: true, ...(Number.isInteger(bit) && bit >= 0 && bit < 8 ? { questBit: bit } : {}) };
     } else if (type === 'TRINKET' && String(r.fields['Permanent']).toLowerCase() === 'true') {
       def = { ...key(r.name, price, undefined, true), questItem: true };
-    } else if (type === 'RING') {
-      def = key(r.name, price);
+    } else if (type === 'BOOTS' && String(r.fields['Permanent']).toLowerCase() === 'true') {
+      // Dasher Boots: a story item like the Permanent trinkets.
+      def = { ...key(r.name, price, undefined, true), questItem: true };
+    } else if (type === 'RING' || type === 'BOOTS') {
+      def = accessory(r.name, type === 'RING' ? 'ring' : 'boots', 1, 1, price);
+      // `Equip` + `EquipParameters` (-1 = while worn, what, amount), the same arguments as a boost potion's.
+      const boost = itemBoost(r.fields['Equip'], r.calls?.find((c) => c.name === 'EquipParameters')?.args ?? []);
+      if (boost?.kind === 'attribute') def = { ...def, attributes: { [boost.attribute]: boost.amount } };
+      else if (boost?.kind === 'protection') def = { ...def, protection: damageVector({ [boost.type]: boost.multiplier }, 1) };
     }
     if (def && def.id) {
       const shaped = withSourceShape(def, r.fields);
@@ -270,6 +295,12 @@ export interface Equipment {
   weapon: ItemDef;
   shield: ItemDef | null;
   armor: ItemDef | null;
+  /** Rings, amulet, helm, gloves, belt, boots worn. */
+  accessories: ItemDef[];
+  /** Every worn item's damage-taken multipliers, multiplied (armour and rings). */
+  protection: DamageVector;
+  /** Every worn item's attribute bonus, summed. */
+  attributes: Partial<Attributes>;
 }
 
 /** Removes one item from the stack in `slot` (the entry goes away at zero). Returns its definition. */
@@ -286,13 +317,17 @@ export function takeOne(inv: InventoryEntry[], slot: number, catalog: ItemCatalo
 }
 
 export function equipmentOf(inv: readonly InventoryEntry[], catalog: ItemCatalog): Equipment {
-  const eq: Equipment = { weapon: UNARMED, shield: null, armor: null };
+  const eq: Equipment = { weapon: UNARMED, shield: null, armor: null, accessories: [], protection: damageVector({}, 1), attributes: {} };
   for (const e of inv) {
     if (!e.equipped) continue;
     const def = catalog.get(e.itemId);
     if (!def) continue;
     if (def.type === 'weapon') eq.weapon = def;
     else if (def.type === 'shield' || def.type === 'armor') eq[def.type] = def;
+    else if (isAccessory(def.type)) eq.accessories.push(def);
+    else continue;
+    if (def.protection) eq.protection = eq.protection.map((v, t) => v * (def.protection![t] ?? 1));
+    for (const [k, v] of Object.entries(def.attributes ?? {}) as [keyof Attributes, number][]) eq.attributes[k] = (eq.attributes[k] ?? 0) + v;
   }
   return eq;
 }
@@ -333,9 +368,18 @@ export function addItem(inv: InventoryEntry[], itemId: string, quantity = 1, cat
   return null;
 }
 
-/** Item types worn on the character (one of each). */
+export function isAccessory(type: ItemType): type is AccessoryType {
+  return (ACCESSORY_TYPES as readonly ItemType[]).includes(type);
+}
+
+/** Item types worn on the character. */
 export function isEquippable(type: ItemType): boolean {
-  return type === 'weapon' || type === 'shield' || type === 'armor';
+  return type === 'weapon' || type === 'shield' || type === 'armor' || isAccessory(type);
+}
+
+/** How many of a type can be worn at once: two rings, one of everything else. */
+export function equipCapacity(type: ItemType): number {
+  return type === 'ring' ? 2 : isEquippable(type) ? 1 : 0;
 }
 
 /**
@@ -357,7 +401,9 @@ export function setEquipped(inv: InventoryEntry[], slot: number, equip: boolean,
     entry.equipped = false;
     return true;
   }
-  const prev = inv.find((e) => e.equipped && catalog.get(e.itemId)?.type === def.type);
+  // A full slot gives up its first worn item (both ring slots full: the first ring).
+  const worn = inv.filter((e) => e.equipped && catalog.get(e.itemId)?.type === def.type);
+  const prev = worn.length >= equipCapacity(def.type) ? worn[0] : undefined;
   if (prev) {
     const prevDef = catalog.get(prev.itemId);
     if (prevDef) {
@@ -410,17 +456,17 @@ export function splitInventoryStack(inv: InventoryEntry[], slot: number, quantit
   return true;
 }
 
-/** Drops unknown items and invalid / duplicate slots and keeps at most one equipped item per type. */
+/** Drops unknown items and invalid / duplicate slots and keeps at most equipCapacity equipped items per type. */
 export function sanitizeInventory(inv: readonly InventoryEntry[], catalog: ItemCatalog): InventoryEntry[] {
   const out: InventoryEntry[] = [];
   const slots = new Set<number>();
-  const equipped = new Set<ItemType>();
+  const equipped = new Map<ItemType, number>();
   for (const e of [...inv].sort((a, b) => a.slot - b.slot)) {
     const def = catalog.get(e.itemId);
     if (!def || !Number.isInteger(e.slot) || e.slot < 0 || e.slot >= INVENTORY_SLOTS || slots.has(e.slot)) continue;
     slots.add(e.slot);
-    const eq = e.equipped && def.type !== 'potion' && def.type !== 'spellbook' && def.type !== 'key' && !equipped.has(def.type);
-    if (eq) equipped.add(def.type);
+    const eq = e.equipped && (equipped.get(def.type) ?? 0) < equipCapacity(def.type);
+    if (eq) equipped.set(def.type, (equipped.get(def.type) ?? 0) + 1);
     const q = Math.floor(e.quantity ?? 1);
     const grid = !eq && !def.keyItem && Number.isInteger(e.x)
  && Number.isInteger(e.y) && e.x! >= 0 && e.y! >= 0 ? { x: e.x!, y: e.y! } : {};

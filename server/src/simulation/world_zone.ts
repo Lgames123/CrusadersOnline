@@ -580,6 +580,9 @@ interface Player extends ActorBase {
   pendingEquip: { slot: number; equip: boolean; itemId?: string; to?: { x: number; y: number } } | null;
   weapon: ItemDef;
   armor: ItemDef | null;
+  /** Everything worn: damage-taken multipliers (armour, rings) and attribute bonus (rings, accessories). */
+  gearProtection: DamageVector;
+  gearAttributes: Partial<Attributes>;
   damageMultiplier: number;
   shield: ItemDef | null;
   /** Portals whose trigger the player is standing in (fires on entry only). */
@@ -821,7 +824,7 @@ export class WorldZone {
       resist: (a, t) => {
         const x = actor(a);
         // 0x0044CB60: base x worn protection x the kind 6 statuses (+0x17C: stone skin, resistance potions).
-        const base = x.kind === 'player' ? (x.resist[t] ?? 1) * (x.armor?.protection?.[t] ?? 1) : x.archetype.resist[t] ?? 1;
+        const base = x.kind === 'player' ? (x.resist[t] ?? 1) * (x.gearProtection[t] ?? 1) : x.archetype.resist[t] ?? 1;
         return base * this.magic.incomingMultiplier(x, t);
       },
       damage: (a, t, vector, push) => {
@@ -862,9 +865,11 @@ export class WorldZone {
     };
   }
 
-  /** Attributes with the statuses' bonus (Stats_ComputeEffectiveAttributes 0x0044E000: base + bonus, capped at 50). */
+  /** Attributes with the statuses' and worn items' bonus (Stats_ComputeEffectiveAttributes 0x0044E000: base + bonus, capped at 50). */
   private effectiveAttributesOf(p: Player): Attributes {
-    return effectiveAttributes(p.attributes, this.magic.attributeBonus(p));
+    const bonus = { ...this.magic.attributeBonus(p) };
+    for (const [k, v] of Object.entries(p.gearAttributes) as [keyof Attributes, number][]) bonus[k] = (bonus[k] ?? 0) + v;
+    return effectiveAttributes(p.attributes, bonus);
   }
 
   /**
@@ -1086,12 +1091,13 @@ export class WorldZone {
     const xp = Math.max(0, Math.floor(opts.experience ?? 0));
     const level = levelForXp(xp);
     const rules = playerRules(this.difficulty);
-    const maxHp = playerMaxHp(rules.attributes, level);
-    const hp = opts.hp !== undefined && opts.hp > 0 ? Math.min(opts.hp, maxHp) : maxHp;
     const saved = sanitizeInventory(opts.inventory ?? [], this.items);
     const inventory = saved.length > 0 ? saved : startingInventory();
     const eq = equipmentOf(inventory, this.items);
-    const maxMana = originalMaxMana(rules.attributes, level);
+    const worn = effectiveAttributes(rules.attributes, eq.attributes);
+    const maxHp = playerMaxHp(worn, level);
+    const hp = opts.hp !== undefined && opts.hp > 0 ? Math.min(opts.hp, maxHp) : maxHp;
+    const maxMana = originalMaxMana(worn, level);
     const spells = (opts.spells ?? []).map((s) => ({ ...s }));
     // Known from the start (0x004BC980); characters saved without it get it too.
     for (const s of [...STARTING_SPELLS].reverse()) if (!spells.some((k) => k.spell === s.spell)) spells.unshift({ ...s });
@@ -1105,8 +1111,8 @@ export class WorldZone {
       unstuckTick: -Infinity,
       name: opts.name,
       character: createCharacter(this.mw, spawn),
-      moveStats: { ...this.playerStats, clipRate: originalSpeedMultiplier(rules.attributes, level) },
-      baseClipRate: originalSpeedMultiplier(rules.attributes, level),
+      moveStats: { ...this.playerStats, clipRate: originalSpeedMultiplier(worn, level) },
+      baseClipRate: originalSpeedMultiplier(worn, level),
       pitch: 0,
       statuses: new Map(),
       timeAcc: 0,
@@ -1146,7 +1152,9 @@ export class WorldZone {
       pendingEquip: null,
       weapon: eq.weapon,
       armor: eq.armor,
-      damageMultiplier: originalDamageMultiplier(rules.attributes, level),
+      gearProtection: eq.protection,
+      gearAttributes: eq.attributes,
+      damageMultiplier: originalDamageMultiplier(worn, level),
       hitUntil: 0,
       shield: eq.shield,
       inPortal: new Set(),
@@ -1842,8 +1850,10 @@ export class WorldZone {
     p.weapon = eq.weapon;
     p.shield = eq.shield;
     p.armor = eq.armor;
+    p.gearProtection = eq.protection;
+    p.gearAttributes = eq.attributes;
     if (!p.shield) p.blocking = false;
-    p.statsDirty = true;
+    this.refreshDerived(p);
   }
 
   /** What the client is told of an item kind (inventory cards, shop stock). */
@@ -1859,6 +1869,7 @@ export class WorldZone {
       ...(def.damage ? { damage: def.damage } : {}),
       ...(def.speed !== undefined ? { speed: def.speed } : {}),
       ...(def.protection ? { protection: def.protection } : {}),
+      ...(def.attributes ? { attributes: def.attributes } : {}),
       ...(def.heal ? { heal: def.heal } : {}),
       ...(potionCooldown(def) ? { cooldown: potionCooldown(def)!.seconds } : {}),
     };
@@ -3592,7 +3603,7 @@ export class WorldZone {
     // Stone skin (STON, kind 6: the resist multipliers +0x17C).
     incoming = this.magic.incoming(target, incoming);
     const resist = target.kind === 'player' ? target.resist : target.archetype.resist;
-    const protection = target.kind === 'player' ? target.armor?.protection : undefined;
+    const protection = target.kind === 'player' ? target.gearProtection : undefined;
     const damage = Math.round(originalDamageTaken(incoming, resist, protection) * 100) / 100;
     this.loseHp(attacker, target, damage, false, knockdown);
   }
@@ -3808,7 +3819,7 @@ export class WorldZone {
         name: p.name,
         attributes: this.effectiveAttributesOf(p),
         damageMultiplier: p.damageMultiplier,
-        resist: p.resist.map((r, t) => r * (p.armor?.protection?.[t] ?? 1) * this.magic.incomingMultiplier(p, t)),
+        resist: p.resist.map((r, t) => r * (p.gearProtection[t] ?? 1) * this.magic.incomingMultiplier(p, t)),
         damage: [...(p.weapon.damage ?? [])],
       },
     });

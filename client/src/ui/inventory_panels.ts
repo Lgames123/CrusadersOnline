@@ -1,4 +1,4 @@
-import { BUILTIN_SPELLS, canPlaceGrid, DAMAGE_TYPES, firstFreeGridPosition, INVENTORY_GRID, layoutItemViews, SPELL_NAMES, type GridPlacement, type Inventory, type InventoryItemView, type PlayerStats, type ShopItemView, type SpellId } from '@crusaders/shared';
+import { BUILTIN_SPELLS, canPlaceGrid, DAMAGE_TYPES, equipCapacity, firstFreeGridPosition, isEquippable, INVENTORY_GRID, layoutItemViews, SPELL_NAMES, type GridPlacement, type Inventory, type InventoryItemView, type PlayerStats, type ShopItemView, type SpellId } from '@crusaders/shared';
 import { HeldItemPreview } from './held_item_preview.ts';
 import { ItemThumbnails } from './item_thumbnails.ts';
 import { itemPreviewModelFile } from '../assets/item_models.ts';
@@ -15,25 +15,31 @@ export interface GroundItemView {
   distance: number;
 }
 
-type EquipKind = 'weapon' | 'shield' | 'armor';
+type ItemType = InventoryItemView['type'];
+/** A paper-doll slot: the item type it takes, the two ring slots apart. */
+type EquipSlotKind = Exclude<ItemType, 'potion' | 'spellbook' | 'key' | 'ring'> | 'ring1' | 'ring2';
 
-const ITEM_MARK: Record<InventoryItemView['type'], string> = {
+const ITEM_MARK: Record<ItemType, string> = {
   weapon: '⚔', shield: '◈', armor: '♜', potion: '⚗', spellbook: '✦', key: '⚿',
+  ring: '◯', amulet: '❖', helm: '⛑', gloves: '✋', belt: '▬', boots: '⛸',
 };
 
-const TYPE_LABEL: Record<InventoryItemView['type'], string> = {
+const TYPE_LABEL: Record<ItemType, string> = {
   weapon: 'Weapon', shield: 'Shield', armor: 'Armour', potion: 'Potion', spellbook: 'Spell book', key: 'Quest item',
+  ring: 'Ring', amulet: 'Amulet', helm: 'Helm', gloves: 'Gloves', belt: 'Belt', boots: 'Boots',
 };
+
+const ATTRIBUTE_LABEL: Record<string, string> = { might: 'Might', intellect: 'Intellect', endurance: 'Endurance', speed: 'Speed' };
 
 /**
  * Paper-doll slots on the 8-cell-wide, 6-row equipment board (MU Online's layout around the
- * body), as grid-area row / column / row span / column span. Only weapon, shield and armour
- * exist in the ruleset; the others are placeholders for later (the amulet slot is 2×1).
+ * body), as grid-area row / column / row span / column span (the amulet slot is 2×1). Two rings
+ * are worn, shown in inventory slot order.
  */
-const EQUIP_SLOTS: { kind: EquipKind | 'head' | 'ring1' | 'ring2' | 'amulet' | 'gloves' | 'boots' | 'belt'; label: string; area: string }[] = [
+const EQUIP_SLOTS: { kind: EquipSlotKind; label: string; area: string }[] = [
   { kind: 'ring1', label: 'Ring', area: '1 / 1 / span 1 / span 1' },
   { kind: 'ring2', label: 'Ring', area: '1 / 2 / span 1 / span 1' },
-  { kind: 'head', label: 'Helm', area: '1 / 4 / span 2 / span 2' },
+  { kind: 'helm', label: 'Helm', area: '1 / 4 / span 2 / span 2' },
   { kind: 'amulet', label: 'Amulet', area: '1 / 7 / span 1 / span 2' },
   { kind: 'weapon', label: 'Weapon', area: '2 / 1 / span 3 / span 2' },
   { kind: 'armor', label: 'Armour', area: '3 / 4 / span 3 / span 2' },
@@ -56,8 +62,13 @@ const DRAG_THRESHOLD = 5;
 /** A sent request blocks further item actions until the server answers (or this long). */
 const REQUEST_TIMEOUT_MS = 1500;
 
-function isEquipKind(type: InventoryItemView['type']): type is EquipKind {
-  return type === 'weapon' || type === 'shield' || type === 'armor';
+/** The paper-doll slots an item type goes in. */
+function equipSlotsOf(type: ItemType): string[] {
+  return type === 'ring' ? ['ring1', 'ring2'] : isEquippable(type) ? [type] : [];
+}
+
+function equipSelector(type: ItemType): string {
+  return equipSlotsOf(type).map((k) => `[data-equip="${k}"]`).join(', ') || ':not(*)';
 }
 
 function escape(s: string): string {
@@ -390,11 +401,11 @@ export class InventoryPanels {
     this.renderPending = false;
     this.hideTooltip();
     const items = this.items();
-    const worn = (kind: string) => items.find((i) => i.equipped && i.type === kind);
+    const rings = items.filter((i) => i.equipped && i.type === 'ring').sort((a, b) => a.slot - b.slot);
+    const worn = (kind: EquipSlotKind) => kind === 'ring1' ? rings[0] : kind === 'ring2' ? rings[1] : items.find((i) => i.equipped && i.type === kind);
     this.equipment.innerHTML = EQUIP_SLOTS.map(({ kind, label, area }) => {
       const item = worn(kind);
-      const future = !isEquipKind(kind as InventoryItemView['type']);
-      return `<div class="equip-slot${item ? ' occupied' : ''}${future ? ' future' : ''}" data-equip="${kind}" style="grid-area:${area}" ${future ? 'title="Not in this ruleset yet"' : ''}>${item ? this.itemCard(item) : `<span class="equip-label">${label}</span>`}</div>`;
+      return `<div class="equip-slot${item ? ' occupied' : ''}" data-equip="${kind}" style="grid-area:${area}">${item ? this.itemCard(item) : `<span class="equip-label">${label}</span>`}</div>`;
     }).join('') + '<div class="equip-figure" aria-hidden="true"></div>';
     const bag = items.filter((i) => !i.equipped && !i.keyItem);
     const placed = layoutItemViews(items);
@@ -436,12 +447,13 @@ export class InventoryPanels {
     item.damage?.forEach((v, i) => v > 0 && lines.push(`${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} damage: ${v}`));
     if (item.speed !== undefined && item.speed !== 1) lines.push(`Attack speed: ${item.speed}`);
     item.protection?.forEach((v, i) => v < 1 && lines.push(`${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} taken: ×${v}`));
+    for (const [k, v] of Object.entries(item.attributes ?? {})) if (v) lines.push(`${v > 0 ? '+' : ''}${v} ${ATTRIBUTE_LABEL[k] ?? k}`);
     if (item.heal) lines.push(`Restores ${item.heal} health`);
     if (item.quantity && item.quantity > 1) lines.push(`Quantity: ${item.quantity}`);
     if (this.shop) lines.push(item.value ? `Sells for ${item.value.toLocaleString('en-US')} gold` : 'The merchant will not take this');
     const hints = [
       this.shop && item.value ? 'Right-click to sell' : '',
-      isEquipKind(item.type) ? (item.equipped ? 'Click to unequip' : 'Click to equip') : item.type === 'potion' ? 'Click to drink' : '',
+      isEquippable(item.type) ? (item.equipped ? 'Click to unequip' : 'Click to equip') : item.type === 'potion' ? 'Click to drink' : '',
       !this.shop && item.quantity && item.quantity > 1 ? 'Right-click to split' : '',
       'Drag outside to drop',
     ].filter(Boolean);
@@ -489,6 +501,7 @@ export class InventoryPanels {
     item.damage?.forEach((v, i) => v > 0 && lines.push(`${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} damage: ${v}`));
     if (item.speed !== undefined && item.speed !== 1) lines.push(`Attack speed: ${item.speed}`);
     item.protection?.forEach((v, i) => v < 1 && lines.push(`${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} taken: ×${v}`));
+    for (const [k, v] of Object.entries(item.attributes ?? {})) if (v) lines.push(`${v > 0 ? '+' : ''}${v} ${ATTRIBUTE_LABEL[k] ?? k}`);
     if (item.heal) lines.push(`Restores ${item.heal} health`);
     lines.push(`Price: ${item.price.toLocaleString('en-US')} gold`);
     return `<strong class="tt-name tt-${item.type}">${escape(item.name)}</strong>
@@ -509,9 +522,10 @@ export class InventoryPanels {
     send();
   }
 
-  /** Whether the item worn in its slot would fit in the bag once `incoming` leaves it. */
+  /** Whether the item a full slot gives up (setEquipped: the first worn) would fit in the bag once `incoming` leaves it. */
   private swapFits(incoming: InventoryItemView): boolean {
-    const prev = this.items().find((i) => i.equipped && i.type === incoming.type && i.slot !== incoming.slot);
+    const worn = this.items().filter((i) => i.equipped && i.type === incoming.type && i.slot !== incoming.slot).sort((a, b) => a.slot - b.slot);
+    const prev = worn.length >= equipCapacity(incoming.type) ? worn[0] : undefined;
     if (!prev) return true;
     const occupied = [...layoutItemViews(this.items().filter((i) => i.slot !== incoming.slot)).values()];
     return firstFreeGridPosition(INVENTORY_GRID, shapeOf(prev), occupied) !== null;
@@ -565,7 +579,7 @@ export class InventoryPanels {
     const item = el && this.itemBySlot(Number(el.dataset['slot']));
     if (!item) return;
     if (item.type === 'potion') this.request(() => this.onUse(item.slot, item.itemId));
-    else if (!isEquipKind(item.type)) return;
+    else if (!isEquippable(item.type)) return;
     else if (item.equipped) {
       const occupied = [...layoutItemViews(this.items()).values()];
       if (!firstFreeGridPosition(INVENTORY_GRID, shapeOf(item), occupied)) this.onNotice?.('Inventory full.');
@@ -654,7 +668,7 @@ export class InventoryPanels {
     this.drag = { item, source, grab, target };
     source.classList.add('inv-dragging');
     this.root.classList.add('inv-is-dragging');
-    if (isEquipKind(item.type)) this.equipment.querySelector(`[data-equip="${item.type}"]`)?.classList.add('equip-accepts');
+    this.equipment.querySelectorAll(equipSelector(item.type)).forEach((el) => el.classList.add('equip-accepts'));
     this.hideTooltip();
     const cell = this.cellSize();
     // The grabbed point of the footprint, proportionally (an equipment slot is not footprint-sized).
@@ -699,7 +713,7 @@ export class InventoryPanels {
     if (!under?.closest('.inv-main')) return { kind: 'drop' }; // the ground window, or anywhere outside
     const shape = shapeOf(item);
     if (under.closest('.inv-equipment')) {
-      if (item.equipped || !isEquipKind(item.type)) return { kind: 'none' };
+      if (item.equipped || !isEquippable(item.type)) return { kind: 'none' };
       return { kind: 'equip', slot: item.slot, valid: this.swapFits(item) };
     }
     const at = this.gridOrigin(x, y);
@@ -736,10 +750,11 @@ export class InventoryPanels {
     const ground = this.root.querySelector('.inv-ground');
     ground?.classList.toggle('drop-hover', action.kind === 'drop' && this.shown.ground);
     this.shopWindow.classList.toggle('drop-hover', action.kind === 'sell');
-    const slot = isEquipKind(drag.item.type) ? this.equipment.querySelector(`[data-equip="${drag.item.type}"]`) : null;
     const equipping = action.kind === 'equip';
-    slot?.classList.toggle('drop-hover', equipping && action.valid);
-    slot?.classList.toggle('drop-invalid', equipping && !action.valid);
+    this.equipment.querySelectorAll(equipSelector(drag.item.type)).forEach((slot) => {
+      slot.classList.toggle('drop-hover', equipping && action.valid);
+      slot.classList.toggle('drop-invalid', equipping && !action.valid);
+    });
     this.grid.querySelectorAll('.inv-item.drop-hover').forEach((el) => el.classList.remove('drop-hover'));
     const mergeInto = action.kind === 'merge' ? action.toSlot : action.kind === 'equip' && action.slot !== drag.item.slot ? action.slot : null;
     if (mergeInto !== null) this.grid.querySelector(`[data-slot="${mergeInto}"]`)?.classList.add('drop-hover');
