@@ -1,4 +1,7 @@
 import {
+  DEFAULT_RATES,
+  type CustomSpawnSpec,
+  type WorldRates,
   SHOP_REOPEN_MS,
   entryPrice,
   giftFlag,
@@ -687,6 +690,11 @@ interface Mob extends ActorBase {
   /** Out of the world until a scripted sequence shows it (Necros); `hideOnRespawn`: back out when it respawns. */
   hidden: boolean;
   hideOnRespawn: boolean;
+  /**
+   * An admin's custom spawn (not original): its spawn id, damage multiplier, whether it comes back
+   * after death, and when it is removed (ms since epoch).
+   */
+  custom?: { id: string; damage: number; respawn: boolean; expiresAt: number };
 }
 
 type Actor = Player | Mob;
@@ -700,6 +708,26 @@ const isCitizen = (m: Mob) => m.archetype.passive && m.weapon.id === UNARMED.id;
 const CHARACTER_SPACING = 2 * PLAYER_RADIUS;
 /** Quick shield block clip (PE07, 20 frames at 1000/30 fps). */
 const MOB_BLOCK_ANIM_TICKS = Math.round((20 / (1000 / 30)) * 20);
+/** A creature's movement at `k` times its speed (admin custom spawns): its clips' rate, or its own speeds. */
+function speedScaled(stats: MovementStats, k: number): MovementStats {
+  if (k === 1) return stats;
+  if (stats.clipLocomotion !== false) return { ...stats, clipRate: (stats.clipRate ?? 1) * k };
+  const pair = (v: readonly [number, number] | undefined) => (v ? ([v[0] * k, v[1] * k] as [number, number]) : v);
+  return {
+    ...stats,
+    runSpeed: stats.runSpeed * k, walkSpeed: stats.walkSpeed * k, backSpeed: stats.backSpeed * k, walkBackSpeed: stats.walkBackSpeed * k,
+    strafeSpeed: stats.strafeSpeed * k, walkStrafeSpeed: stats.walkStrafeSpeed * k,
+    strafeLeft: pair(stats.strafeLeft), strafeRight: pair(stats.strafeRight), walkStrafeLeft: pair(stats.walkStrafeLeft), walkStrafeRight: pair(stats.walkStrafeRight),
+  } as MovementStats;
+}
+
+/** The admin panel's view of one zone (adminReport). */
+export interface ZoneAdminReport {
+  players: { connId: number; level: number; hp: number; maxHp: number; gold: number; xp: number; dead: boolean; x: number; y: number; z: number }[];
+  spawns: { id: string; total: number; alive: number }[];
+  rates: WorldRates;
+}
+
 /** A blocked rush step's 5 % roll, over the original's steps in one tick. */
 const RUSH_TICK_CHANCE = 1 - (1 - RUSH_STEP_CHANCE) ** (RUSH_STEPS_PER_SECOND / TICK_RATE);
 
@@ -745,6 +773,8 @@ export class WorldZone {
   private readonly fallLimit: number;
   /** The spell objects and timed effects (spell_runtime.ts). */
   private readonly magic: SpellRuntime;
+  /** Event rate multipliers set from the admin panel (not original; 1 = the original's). */
+  private rates: WorldRates = { ...DEFAULT_RATES };
 
   constructor(rapier: Rapier, name: string, arena: ArenaDef, outbox: ZoneOutbox, opts: WorldZoneOptions = {}) {
     this.name = name;
@@ -2448,8 +2478,13 @@ export class WorldZone {
     }
     if (this.objects.size) this.stepDoors();
     for (const a of this.actors.values()) {
-      if (a.deadUntil !== 0 && tick >= a.deadUntil) this.respawn(a);
+      if (a.deadUntil !== 0 && tick >= a.deadUntil) {
+        // A custom spawn that does not come back is gone once its corpse time is over.
+        if (a.kind === 'mob' && a.custom && !a.custom.respawn) this.removeMob(a);
+        else this.respawn(a);
+      }
     }
+    if (tick % 20 === 0) this.expireCustomSpawns();
 
     // 5. Replicated state.
     for (const a of this.actors.values()) {
@@ -3548,7 +3583,8 @@ export class WorldZone {
     // Creatures skip the stronger-of-slash/bash and Might rules (empty stats slot 45): their
     // unarmed damage (+0x18) plus the whole weapon vector (0x0044CCF0).
     const weapon = a.damage ?? a.weapon.damage!;
-    return this.magic.outgoing(a, a.unarmed ? weapon.map((v, t) => v + (a.unarmed![t] ?? 0)) : [...weapon]);
+    const k = a.custom?.damage ?? 1;
+    return this.magic.outgoing(a, (a.unarmed ? weapon.map((v, t) => v + (a.unarmed![t] ?? 0)) : [...weapon]).map((v) => v * k));
   }
 
   /** Incoming damage (engine: Stats_TakeDamage + HP loss with flinch roll). */
@@ -3608,7 +3644,7 @@ export class WorldZone {
       if (target.kind === 'player') target.cast = null;
       if (target.kind === 'mob') {
         target.mobCast = null;
-        target.deadUntil = this.tick + target.archetype.respawnTicks;
+        target.deadUntil = this.tick + Math.max(1, Math.round(target.archetype.respawnTicks / this.rates.respawn));
         target.threat.clear();
         // A spectral ally's kills are its owner's.
         const credit = attacker.kind === 'player' ? attacker : attacker.ally !== undefined ? this.actors.get(attacker.ally) : undefined;
@@ -3636,32 +3672,43 @@ export class WorldZone {
    */
   private grantReward(p: Player, mob: Mob): { xp: number; gold: number } {
     const arch = mob.archetype;
-    this.addExperience(p, arch.xpReward);
+    // Event rates (admin panel, not original): XP and gold scaled, loot chances scaled.
+    const r = this.rates;
+    const xp = Math.round(arch.xpReward * r.xp);
+    this.addExperience(p, xp);
     let grants: GroundGrant[];
     if (mob.carries) grants = mob.carries;
     else {
       const gold = arch.goldMin + Math.floor(this.random() * (arch.goldMax - arch.goldMin + 1));
       grants = [...(gold > 0 ? [{ name: GOLD_ITEM, quantity: gold }] : [])];
       for (const drop of arch.loot) {
-        const def = this.random() < drop.chance ? this.items.get(drop.itemId) : undefined;
-        if (def) grants.push({ name: def.name, quantity: 1, itemId: def.id });
+        const def = this.random() < Math.min(1, drop.chance * r.drops) ? this.items.get(drop.itemId) : undefined;
+        if (def) grants.push({ name: def.name, quantity: (drop as { quantity?: number }).quantity ?? 1, itemId: def.id });
       }
     }
     let gold = 0;
     const loot: { def: ItemDef; quantity: number }[] = [];
     for (const g of grants) {
-      const n = Math.max(1, g.quantity);
-      if (g.name === GOLD_ITEM) gold += this.grantItem(p, g.name, n);
-      else {
+      let n = Math.max(1, g.quantity);
+      if (g.name === GOLD_ITEM) {
+        n = Math.round(n * r.gold);
+        if (n > 0) gold += this.grantItem(p, g.name, n);
+      } else {
         const def = this.groundItemDef(g);
-        if (def) loot.push({ def, quantity: n });
+        // A placement's carried items: the drop rate scales their expected count (keys and
+        // quest items are never multiplied nor taken away).
+        if (def && mob.carries && r.drops !== 1 && !def.keyItem && !def.questItem) {
+          const want = n * r.drops;
+          n = Math.floor(want) + (this.random() < want - Math.floor(want) ? 1 : 0);
+        }
+        if (def && n > 0) loot.push({ def, quantity: n });
       }
     }
     if (loot.length) this.dropKillLoot(p, mob, loot);
     p.statsDirty = true;
     const record = this.persistRecord(p);
     if (record) this.outbox.persist?.([record], 'progress');
-    return { xp: arch.xpReward, gold };
+    return { xp, gold };
   }
 
   /**
@@ -3788,7 +3835,7 @@ export class WorldZone {
         op: SC.ENTITY_SPAWN,
         d: {
           id, kind, name: other.name, maxHp: other.maxHp,
-          ...(other.kind === 'mob' ? { archetype: other.archetype.id, ...(other.placement !== undefined ? { placement: other.placement } : {}), ...(other.ally !== undefined ? { ally: true } : {}) } : {}),
+          ...(other.kind === 'mob' ? { archetype: other.archetype.id, ...(other.placement !== undefined ? { placement: other.placement } : {}), ...(other.ally !== undefined ? { ally: true } : {}), ...(other.custom && other.scale !== 1 ? { scale: other.scale } : {}) } : {}),
           ...(other.statuses.size ? { statuses: [...other.statuses.keys()] } : {}),
         },
       });
@@ -3826,6 +3873,165 @@ export class WorldZone {
 
     p.history.set(tick, current);
     p.history.delete(tick - HISTORY_TICKS);
+  }
+
+  // --- Admin panel (not original) -------------------------------------------------------
+
+  /** Event rate multipliers (admin panel); every zone gets the same. */
+  setRates(rates: WorldRates): void {
+    this.rates = { ...rates };
+  }
+
+  /**
+   * An admin's custom spawn: `count` creatures of an archetype around a point, with its numbers
+   * changed (name, HP, XP, gold, loot, scale, damage, speed). Returns their entity ids; throws
+   * with a message for the panel when it cannot.
+   */
+  spawnCustom(spec: CustomSpawnSpec): number[] {
+    if (!MOB_ARCHETYPES[spec.archetype]) throw new Error(`Unknown creature type ${spec.archetype}.`);
+    let at: { x: number; y: number; z: number; yaw: number };
+    if ('player' in spec.at) {
+      const want = spec.at.player.toLowerCase();
+      const p = [...this.players.values()].find((o) => o.name.toLowerCase() === want);
+      if (!p) throw new Error(`${spec.at.player} is not in ${this.name}.`);
+      const pos = p.character.position;
+      const yaw = dequantizeAngle(p.yaw);
+      // A few steps in front of him (yaw 0 = -Z), facing him.
+      const d = 3 * spec.scale;
+      at = { x: pos.x - Math.sin(yaw) * d, y: pos.y + 0.2, z: pos.z - Math.cos(yaw) * d, yaw: yaw + Math.PI };
+    } else if ('start' in spec.at) {
+      const s = this.arena.starts?.[0] ?? { ...this.arena.spawnPoints[0]!, yaw: 0 };
+      at = { x: s.x, y: s.y + 0.2, z: s.z, yaw: s.yaw };
+    } else at = spec.at;
+    const ids: number[] = [];
+    for (let i = 0; i < spec.count; i++) {
+      // The first on the point, the rest on rings of six around it.
+      const a = i * 2.4;
+      const r = i === 0 ? 0 : 1.2 * Math.max(1, spec.scale) * (1 + Math.floor((i - 1) / 6));
+      const id = this.spawnMob(spec.archetype, {
+        archetype: spec.archetype, x: at.x + Math.sin(a) * r, y: at.y, z: at.z + Math.cos(a) * r, yaw: at.yaw,
+        ...(spec.hp !== undefined ? { hp: spec.hp } : {}), ...(spec.xp !== undefined ? { xp: spec.xp } : {}), scale: spec.scale,
+      });
+      const m = this.actors.get(id) as Mob;
+      const goldMin = spec.goldMin ?? m.archetype.goldMin;
+      m.archetype = {
+        ...m.archetype,
+        ...(spec.name ? { name: spec.name } : {}),
+        goldMin,
+        goldMax: Math.max(goldMin, spec.goldMax ?? m.archetype.goldMax),
+        ...(spec.loot ? { loot: spec.loot.map((l) => ({ itemId: l.itemId, chance: l.chance, quantity: l.quantity })) } : {}),
+      };
+      m.name = m.archetype.name;
+      m.stats = speedScaled(m.stats, spec.speed);
+      m.custom = { id: spec.id, damage: spec.damage, respawn: spec.respawn, expiresAt: spec.expiresAt };
+      // Not a level placement: it has nothing to say.
+      m.talkLine = -1;
+      if (spec.aggressive) m.fightsNearest = true;
+      ids.push(id);
+    }
+    return ids;
+  }
+
+  /** Removes a custom spawn's creatures; how many there were. */
+  despawnCustom(id: string): number {
+    let n = 0;
+    for (const a of [...this.actors.values()]) {
+      if (a.kind !== 'mob' || a.custom?.id !== id) continue;
+      this.removeMob(a);
+      n++;
+    }
+    return n;
+  }
+
+  private expireCustomSpawns(): void {
+    const now = Date.now();
+    for (const a of [...this.actors.values()]) if (a.kind === 'mob' && a.custom && now >= a.custom.expiresAt) this.removeMob(a);
+  }
+
+  /** A player tool of the admin panel on the player of `connId`; returns a line for the panel. */
+  adminPlayer(connId: number, op: { action: 'heal' | 'unstuck' | 'gold' | 'xp' | 'item' | 'summon'; amount?: number; itemId?: string; toConn?: number }): string {
+    const p = this.players.get(connId);
+    if (!p) throw new Error('That player is not in this zone any more.');
+    switch (op.action) {
+      case 'heal': {
+        // Full HP and mana; brought back where he lies when dead.
+        if (!alive(p)) {
+          p.deadUntil = 0;
+          p.anim = ANIM.IDLE;
+          p.hitUntil = 0;
+        }
+        p.hp = p.maxHp;
+        p.mana = p.maxMana;
+        p.statsDirty = true;
+        this.notify(p, 'admin', 'An administrator has healed you.');
+        return `${p.name} healed.`;
+      }
+      case 'unstuck':
+        p.swing = null;
+        p.queuedAttack = false;
+        p.cast = null;
+        this.toRespawnSpot(p);
+        this.notify(p, 'admin', 'An administrator has moved you to a safe place.');
+        return `${p.name} moved to the respawn spot.`;
+      case 'gold': {
+        const n = Math.trunc(op.amount ?? 0);
+        if (n > 0) this.grantItem(p, GOLD_ITEM, n);
+        else {
+          p.gold = Math.max(0, p.gold + n);
+          p.statsDirty = true;
+        }
+        this.persistNow(p);
+        return `${p.name} now has ${p.gold} gold.`;
+      }
+      case 'xp': {
+        const n = Math.trunc(op.amount ?? 0);
+        if (n <= 0) throw new Error('Experience can only be given.');
+        this.addExperience(p, n);
+        this.persistNow(p);
+        return `${p.name} is level ${p.level} (${p.xp} XP).`;
+      }
+      case 'item': {
+        const def = op.itemId ? this.items.get(op.itemId) : undefined;
+        if (!def) throw new Error(`Unknown item ${op.itemId ?? ''}.`);
+        const got = this.grantItem(p, def.name, Math.max(1, Math.trunc(op.amount ?? 1)), def.id);
+        if (!got) throw new Error(`${p.name}'s bag has no room for ${def.name}.`);
+        this.persistNow(p);
+        return `${p.name} received ${got} × ${def.name}.`;
+      }
+      case 'summon': {
+        const to = op.toConn !== undefined ? this.players.get(op.toConn) : undefined;
+        if (!to) throw new Error('Both players must be in the same zone.');
+        const t = to.character.position;
+        const yaw = dequantizeAngle(to.yaw);
+        setCharacterState(p.character, { x: t.x - Math.sin(yaw) * 1.5, y: t.y + 0.2, z: t.z - Math.cos(yaw) * 1.5 }, 0, false);
+        p.inPortal.clear();
+        this.notify(p, 'admin', `An administrator has brought you to ${to.name}.`);
+        return `${p.name} brought to ${to.name}.`;
+      }
+    }
+  }
+
+  private persistNow(p: Player): void {
+    const record = this.persistRecord(p);
+    if (record) this.outbox.persist?.([record], 'progress');
+  }
+
+  /** What the admin panel shows of this zone: its players and its custom spawns. */
+  adminReport(): ZoneAdminReport {
+    const round = (v: number) => Math.round(v * 100) / 100;
+    const players = [...this.players.values()].map((p) => ({
+      connId: p.connId, level: p.level, hp: Math.ceil(p.hp), maxHp: p.maxHp, gold: p.gold, xp: p.xp, dead: !alive(p),
+      x: round(p.character.position.x), y: round(p.character.position.y), z: round(p.character.position.z),
+    }));
+    const spawns = new Map<string, { id: string; total: number; alive: number }>();
+    for (const a of this.actors.values()) {
+      if (a.kind !== 'mob' || !a.custom) continue;
+      const s = spawns.get(a.custom.id) ?? { id: a.custom.id, total: 0, alive: 0 };
+      s.total++;
+      if (alive(a)) s.alive++;
+      spawns.set(a.custom.id, s);
+    }
+    return { players, spawns: [...spawns.values()], rates: { ...this.rates } };
   }
 
   /** Debug/test access to a connection's authoritative character. */

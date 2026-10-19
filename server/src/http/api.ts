@@ -1,14 +1,14 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { z } from 'zod';
 import type { Logger } from 'pino';
-import { CHARACTER_NAME_RE, MAX_CHARACTERS, realmPopulation, type ItemCatalog, type RealmInfo } from '@crusaders/shared';
+import { CHARACTER_NAME_RE, MAX_CHARACTERS, PERMANENT_UNTIL, realmPopulation, type ItemCatalog, type RealmInfo } from '@crusaders/shared';
 import { createGuestAccount, type TicketStore } from '../auth/tickets.ts';
 import type { ServerConfig } from '../config.ts';
 import { UsernameTakenError, type AccountRecord, type AccountRepository } from '../persistence/accounts.ts';
 import { NameTakenError, type CharacterRepository } from '../persistence/characters.ts';
 import { TokenBucket } from '../network/rate_limit.ts';
 
-const SESSION_COOKIE = 'co_session';
+export const SESSION_COOKIE = 'co_session';
 const MAX_BODY_BYTES = 4096;
 
 const CredentialsSchema = z.object({
@@ -22,7 +22,7 @@ const DeleteCharacterSchema = z.object({ name: z.string().max(20) });
 const TicketSchema = z.object({ characterId: z.uuid() });
 const CHARACTER_PATH = /^\/api\/characters\/([0-9a-f-]{36})$/i;
 
-class HttpError extends Error {
+export class HttpError extends Error {
   readonly status: number;
   readonly code: string;
 
@@ -33,12 +33,12 @@ class HttpError extends Error {
   }
 }
 
-function json(res: ServerResponse, status: number, body: unknown, headers: Record<string, string | string[]> = {}): void {
+export function json(res: ServerResponse, status: number, body: unknown, headers: Record<string, string | string[]> = {}): void {
   res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers });
   res.end(JSON.stringify(body));
 }
 
-async function readJson(req: IncomingMessage): Promise<unknown> {
+export async function readJson(req: IncomingMessage): Promise<unknown> {
   if (!/^application\/json\b/i.test(req.headers['content-type'] ?? '')) throw new HttpError(415, 'json_required');
   const chunks: Buffer[] = [];
   let size = 0;
@@ -54,7 +54,7 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   }
 }
 
-function readCookie(req: IncomingMessage, name: string): string | null {
+export function readCookie(req: IncomingMessage, name: string): string | null {
   for (const part of (req.headers.cookie ?? '').split(';')) {
     const [k, ...v] = part.trim().split('=');
     if (k === name) return v.join('=') || null;
@@ -95,6 +95,15 @@ export interface ApiDeps {
   onlinePlayers?: () => number;
   /** Whether a character is in (or entering) the world: it cannot be deleted then. */
   isCharacterOnline?: (characterId: string) => boolean;
+  /** Admin panel routes (/api/admin/*), given the signed-in admin account. */
+  admin?: (req: IncomingMessage, res: ServerResponse, path: string, url: URL, account: AccountRecord) => Promise<boolean>;
+}
+
+/** Why a banned account is refused, for the login page. */
+export function bannedMessage(a: AccountRecord): string | null {
+  if (!a.bannedUntil || a.bannedUntil <= Date.now()) return null;
+  const when = a.bannedUntil >= PERMANENT_UNTIL ? 'permanently' : `until ${new Date(a.bannedUntil).toUTCString()}`;
+  return `This account is banned ${when}${a.banReason ? ` (${a.banReason})` : ''}.`;
 }
 
 /**
@@ -122,13 +131,23 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
     const token = readCookie(req, SESSION_COOKIE);
     const account = token ? await accounts.resolveSession(token) : null;
     if (!token || !account) throw new HttpError(401, 'not_authenticated');
+    const banned = bannedMessage(account);
+    if (banned) throw new HttpError(403, 'banned', banned);
     return { account, token };
   }
 
   async function startSession(res: ServerResponse, account: AccountRecord, status: number): Promise<void> {
+    const banned = bannedMessage(account);
+    if (banned) throw new HttpError(403, 'banned', banned);
+    // ADMIN_USERS: these accounts get the admin panel when they sign in.
+    if (!account.isAdmin && config.adminUsers.includes(account.username.toLowerCase())) {
+      await accounts.setAdmin(account.username, true);
+      account.isAdmin = true;
+      log.info({ username: account.username }, 'admin granted (ADMIN_USERS)');
+    }
     const token = await accounts.createSession(account.id, config.sessionTtlHours);
     const characters = await accounts.listCharacters(account.id);
-    json(res, status, { username: account.username, characters }, { 'set-cookie': sessionCookie(token, config.sessionTtlHours * 3600) });
+    json(res, status, { username: account.username, characters, ...(account.isAdmin ? { admin: true } : {}) }, { 'set-cookie': sessionCookie(token, config.sessionTtlHours * 3600) });
   }
 
   async function credentials(req: IncomingMessage): Promise<{ username: string; password: string }> {
@@ -147,6 +166,20 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
   }
 
   return async (req, res, path) => {
+    if (path.startsWith('/api/admin/') && deps.admin) {
+      try {
+        const { account } = await requireAccount(req);
+        if (!account.isAdmin) throw new HttpError(403, 'not_admin', 'This account is not an administrator.');
+        return await deps.admin(req, res, path, new URL(req.url ?? '/', 'http://localhost'), account);
+      } catch (err) {
+        if (err instanceof HttpError) json(res, err.status, { error: err.code, message: err.message });
+        else {
+          log.error({ err, path }, 'admin request failed');
+          json(res, 500, { error: 'internal_error' });
+        }
+        return true;
+      }
+    }
     const deleting = req.method === 'DELETE' ? CHARACTER_PATH.exec(path) : null;
     const route = deleting ? 'DELETE /api/characters/:id' : `${req.method} ${path}`;
     try {
@@ -178,7 +211,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         }
         case 'GET /api/auth/me': {
           const { account } = await requireAccount(req);
-          json(res, 200, { username: account.username, characters: await accounts.listCharacters(account.id) });
+          json(res, 200, { username: account.username, characters: await accounts.listCharacters(account.id), ...(account.isAdmin ? { admin: true } : {}) });
           return true;
         }
         case 'GET /api/realms': {
@@ -242,7 +275,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
             if (list.length === 0) throw new HttpError(404, 'character_not_found');
           }
           if (list.length === 0) throw new HttpError(409, 'no_character');
-          json(res, 200, { ticket: tickets.issue({ id: account.id, name: account.username, characters: list, guest: false }) });
+          json(res, 200, { ticket: tickets.issue({ id: account.id, name: account.username, characters: list, guest: false, admin: account.isAdmin, mutedUntil: account.mutedUntil }) });
           return true;
         }
         case 'POST /api/dev/guest-ticket': {

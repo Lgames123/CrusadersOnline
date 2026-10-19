@@ -12,6 +12,10 @@ export interface AccountsTable {
   is_admin: Generated<boolean>;
   created_at: Timestamp;
   updated_at: Timestamp;
+  /** Moderation (006_admin.sql). */
+  banned_until: Timestamp | null;
+  ban_reason: string | null;
+  muted_until: Timestamp | null;
 }
 
 export interface SessionsTable {
@@ -66,9 +70,33 @@ export interface InventoryItemsTable {
   durability: Generated<number>;
 }
 
+export interface AdminEventsTable {
+  id: Generated<string>;
+  name: string;
+  /** WorldRates as JSON. */
+  rates: string;
+  starts_at: Timestamp;
+  ends_at: Timestamp;
+  announce: Generated<boolean>;
+  created_by: string;
+  cancelled_at: Timestamp | null;
+  created_at: Timestamp;
+}
+
+export interface AdminActionsTable {
+  id: Generated<string>;
+  at: Timestamp;
+  admin: string;
+  action: string;
+  target: string | null;
+  detail: string | null;
+}
+
 export interface DB {
   accounts: AccountsTable;
   sessions: SessionsTable;
   characters: CharactersTable;
   inventory_items: InventoryItemsTable;
+  admin_events: AdminEventsTable;
+  admin_actions: AdminActionsTable;
 }

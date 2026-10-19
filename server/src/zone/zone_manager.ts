@@ -1,6 +1,6 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { LEVEL_PREFIX, type ExitCrossing } from '@crusaders/shared';
+import { DEFAULT_RATES, LEVEL_PREFIX, type ExitCrossing, type WorldRates } from '@crusaders/shared';
 import type { PersistReason, PersistRecord, TransferState } from '../simulation/world_zone.ts';
 import type { ZoneMetrics, ZoneWorkerData } from './messages.ts';
 import { ZoneHost } from './zone_host.ts';
@@ -32,6 +32,10 @@ export class ZoneManager {
   private readonly base: Omit<ZoneWorkerData, 'zone' | 'arena'>;
   private readonly events: ZoneManagerEvents;
   private readonly kept = new Set<string>();
+  /** Zones kept running for the admin panel (custom spawns in them), with a count per arena. */
+  private readonly pinned = new Map<string, number>();
+  /** Event rates every zone runs with (admin panel). */
+  private rates: WorldRates = { ...DEFAULT_RATES };
   private readonly idleStopMs: number;
   private readonly sweeper: ReturnType<typeof setInterval>;
   private stopping = false;
@@ -49,9 +53,37 @@ export class ZoneManager {
     this.kept.add(arena);
   }
 
+  /** Keeps a zone running while something of the admin panel is in it (`unpin` releases it). */
+  pin(arena: string): void {
+    this.pinned.set(arena, (this.pinned.get(arena) ?? 0) + 1);
+  }
+
+  unpin(arena: string): void {
+    const n = (this.pinned.get(arena) ?? 0) - 1;
+    if (n > 0) this.pinned.set(arena, n);
+    else this.pinned.delete(arena);
+  }
+
+  /** Sets the event rates of every running zone and of zones started later. */
+  setRates(rates: WorldRates): void {
+    this.rates = { ...rates };
+    for (const h of this.ready.values()) h.setRates(this.rates);
+  }
+
+  get currentRates(): WorldRates {
+    return { ...this.rates };
+  }
+
+  /** Every arena that can be run (the synthetic arena and each converted level act). */
+  arenas(): string[] {
+    const dir = path.join(this.base.generatedDir, 'levels');
+    const acts = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.placements.json')).map((f) => `${LEVEL_PREFIX}${f.slice(0, -'.placements.json'.length)}`) : [];
+    return ['synthetic-arena', ...acts.filter((a) => this.available(a)).sort()];
+  }
+
   /** Stops the zones that have had no players for idleStopMs; resolves with their names. */
   async stopIdle(now = Date.now()): Promise<string[]> {
-    const idle = [...this.ready.values()].filter((h) => !this.kept.has(h.zone) && h.members.size === 0 && now - h.lastActive >= this.idleStopMs);
+    const idle = [...this.ready.values()].filter((h) => !this.kept.has(h.zone) && !this.pinned.has(h.zone) && h.members.size === 0 && now - h.lastActive >= this.idleStopMs);
     for (const h of idle) {
       this.ready.delete(h.zone);
       this.zones.delete(h.zone);
@@ -87,7 +119,7 @@ export class ZoneManager {
     let p = this.zones.get(arena);
     if (!p) {
       const host = new ZoneHost(
-        { ...this.base, zone: arena, arena },
+        { ...this.base, zone: arena, arena, rates: this.rates },
         {
           deliver: (connId, data) => this.events.deliver(connId, data),
           persist: (records, reason) => this.events.persist(records, reason),
@@ -99,6 +131,8 @@ export class ZoneManager {
       );
       p = host.whenReady().then(() => {
         host.lastActive = Date.now();
+        // Rates changed while it was starting.
+        host.setRates(this.rates);
         this.ready.set(arena, host);
         return host;
       });

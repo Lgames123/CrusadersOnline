@@ -8,6 +8,10 @@ export interface Account {
   characters: CharacterSummary[];
   /** Ephemeral development guest: nothing is persisted. */
   guest: boolean;
+  /** Admin panel access (accounts.is_admin). */
+  admin?: boolean;
+  /** Chat muted until (ms since epoch), when it was at ticket time. */
+  mutedUntil?: number | null;
 }
 
 interface PendingTicket {

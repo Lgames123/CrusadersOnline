@@ -201,6 +201,39 @@
         "GAME_SERVER_URL": "http://127.0.0.1:8192"
       },
       "port": 3102
+    },
+    {
+      "name": "admin-server",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/server",
+        "start"
+      ],
+      "env": {
+        "SERVER_PORT": "8193",
+        "ARENA": "synthetic-arena",
+        "DATABASE_URL": "pglite:local/pgdata-admin",
+        "ADMIN_USERS": "admin"
+      },
+      "port": 8193
+    },
+    {
+      "name": "admin-client",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/client",
+        "exec",
+        "vite",
+        "--port",
+        "3103",
+        "--strictPort"
+      ],
+      "env": {
+        "GAME_SERVER_URL": "http://127.0.0.1:8193"
+      },
+      "port": 3103
     }
   ]
 }

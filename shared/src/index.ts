@@ -7,6 +7,7 @@ export * from './protocol/binary/snapshot.ts';
 export * from './protocol/control/schemas.ts';
 export * from './protocol/control/server.ts';
 export * from './protocol/account.ts';
+export * from './protocol/admin.ts';
 export * from './arena/types.ts';
 export * from './arena/synthetic.ts';
 export * from './arena/level.ts';

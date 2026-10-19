@@ -17,6 +17,7 @@
     "build": "pnpm --filter @crusaders/client build",
     "test:integration": "pnpm --filter @crusaders/tests test:integration",
     "db:migrate": "pnpm --filter @crusaders/server db:migrate",
-    "test:e2e": "pnpm --filter @crusaders/tests test:e2e"
+    "test:e2e": "pnpm --filter @crusaders/tests test:e2e",
+    "admin": "pnpm --filter @crusaders/server admin"
   }
 }

@@ -1,5 +1,5 @@
 import type { Logger } from 'pino';
-import { CS, LEVEL_PREFIX, MAX_STACK, SC, SPELLS, decodeSpells, encodeSpells, parseClientControl, startingInventory, type Difficulty, type InventoryEntry, type ExitCrossing, type KnownSpell, type ServerControlMsg } from '@crusaders/shared';
+import { CS, LEVEL_PREFIX, MAX_STACK, PERMANENT_UNTIL, SC, SPELLS, decodeSpells, encodeSpells, parseClientControl, startingInventory, type Difficulty, type InventoryEntry, type ExitCrossing, type KnownSpell, type ServerControlMsg } from '@crusaders/shared';
 import type { Account, TicketStore } from '../auth/tickets.ts';
 import type { CharacterPersistRecord, CharacterRepository } from '../persistence/characters.ts';
 import type { JoinOptions, PersistRecord, TransferState } from '../simulation/world_zone.ts';
@@ -34,6 +34,31 @@ interface Session {
   name: string;
   /** Chat lines: a speaker past it is told to slow down, not disconnected. */
   chatBucket: TokenBucket;
+  /** When the connection opened (admin panel). */
+  openedAt: number;
+}
+
+/** A chat line as the admin panel's log sees it (players' lines and the staff's own). */
+export interface ChatLogEntry {
+  channel: 'local' | 'global' | 'private' | 'admin';
+  from: string;
+  to?: string;
+  zone?: string;
+  text: string;
+}
+
+/** A connection as the admin panel lists it. */
+export interface SessionView {
+  connId: number;
+  accountId: string;
+  account: string;
+  character: string;
+  guest: boolean;
+  admin: boolean;
+  zone: string;
+  state: State;
+  since: number;
+  mutedUntil: number | null;
 }
 
 /**
@@ -67,8 +92,14 @@ export class SessionManager implements TransportHandlers {
       devGuestXp?: number;
       devGuestItems?: string | null;
       persist: (records: CharacterPersistRecord[]) => void;
+      /** Every player's chat line, for the admin panel's log. */
+      onChat?: (line: ChatLogEntry) => void;
+      /** A line told to each character entering the world (a running event), or null. */
+      greeting?: () => string | null;
     },
   ) {
+    this.onChat = opts.onChat;
+    this.greeting = opts.greeting;
     this.tickets = tickets;
     this.zones = zones;
     this.characters = characters;
@@ -87,6 +118,10 @@ export class SessionManager implements TransportHandlers {
       : null;
   }
 
+  private readonly onChat: ((line: ChatLogEntry) => void) | undefined;
+  private readonly greeting: (() => string | null) | undefined;
+  /** Chat mutes by account id (ms since epoch), from the ticket and the admin panel. */
+  private readonly mutes = new Map<string, number>();
   private readonly devGuestSpawn: { x: number; y: number; z: number } | null;
   private readonly difficulty: Difficulty;
   /** Development only: what guests know and their experience (DEV_GUEST_SPELLS / DEV_GUEST_XP). */
@@ -178,6 +213,7 @@ export class SessionManager implements TransportHandlers {
       enteredAt: 0,
       name: '',
       chatBucket: new TokenBucket(1, 5),
+      openedAt: Date.now(),
     };
     this.sessions.set(conn.id, session);
   }
@@ -225,6 +261,7 @@ export class SessionManager implements TransportHandlers {
         clearTimeout(s.authTimer);
         s.account = account;
         s.state = 'authenticated';
+        if (account.mutedUntil && account.mutedUntil > Date.now()) this.mutes.set(account.id, account.mutedUntil);
         this.send(s, { op: SC.AUTH_SUCCESS, d: { accountName: account.name, characters: account.characters } });
         this.log.info({ conn: conn.id, account: account.name }, 'authenticated');
         return;
@@ -251,7 +288,11 @@ export class SessionManager implements TransportHandlers {
         host.join(conn.id, s.pendingJoin);
         s.pendingJoin = null;
         s.state = 'in_world';
-        s.enteredAt ||= Date.now();
+        if (!s.enteredAt) {
+          s.enteredAt = Date.now();
+          const hello = this.greeting?.();
+          if (hello) this.send(s, { op: SC.CHAT_BROADCAST, d: { channel: 'system', kind: 'admin', text: hello } });
+        }
         this.log.info({ conn: conn.id, account: s.account?.name, zone: s.zone }, 'entered zone');
         return;
       }
@@ -330,6 +371,11 @@ export class SessionManager implements TransportHandlers {
     // Control characters (newlines, bidi overrides) would break the line or spoof others.
     const text = raw.replace(/[\p{Cc}\p{Cf}]/gu, ' ').trim();
     if (!text) return;
+    const muted = s.account ? this.mutes.get(s.account.id) : undefined;
+    if (muted !== undefined) {
+      if (muted > Date.now()) return notice(muted >= PERMANENT_UNTIL ? 'You are muted.' : `You are muted for ${Math.ceil((muted - Date.now()) / 60_000)} more minute(s).`);
+      this.mutes.delete(s.account!.id);
+    }
     if (!s.chatBucket.take()) return notice('You are sending messages too fast.');
     if (channel === 'private') {
       const wanted = to?.toLowerCase();
@@ -338,8 +384,10 @@ export class SessionManager implements TransportHandlers {
       const d = { channel, from: s.name, to: target.name, text };
       this.send(target, { op: SC.CHAT_BROADCAST, d });
       if (target !== s) this.send(s, { op: SC.CHAT_BROADCAST, d: { ...d, sent: true } });
+      this.onChat?.({ channel, from: s.name, to: target.name, zone: s.zone, text });
       return;
     }
+    this.onChat?.({ channel, from: s.name, zone: s.zone, text });
     const d = { channel, from: s.name, text };
     const msg = JSON.stringify({ op: SC.CHAT_BROADCAST, d } satisfies ServerControlMsg);
     for (const o of this.sessions.values()) {
@@ -347,6 +395,75 @@ export class SessionManager implements TransportHandlers {
     }
     this.send(s, { op: SC.CHAT_BROADCAST, d: { ...d, sent: true } });
     this.log.info({ conn: s.conn.id, channel, from: s.name, length: text.length }, 'chat');
+  }
+
+  // --- Admin panel (not original) -------------------------------------------------------
+
+  private view(s: Session): SessionView {
+    const muted = s.account ? this.mutes.get(s.account.id) ?? null : null;
+    return {
+      connId: s.conn.id,
+      accountId: s.account?.id ?? '',
+      account: s.account?.name ?? '',
+      character: s.name,
+      guest: s.account?.guest ?? false,
+      admin: s.account?.admin ?? false,
+      zone: s.zone,
+      state: s.state,
+      since: s.enteredAt || s.openedAt,
+      mutedUntil: muted !== null && muted > Date.now() ? muted : null,
+    };
+  }
+
+  /** Every authenticated connection. */
+  list(): SessionView[] {
+    return [...this.sessions.values()].filter((s) => s.account).map((s) => this.view(s));
+  }
+
+  /** The connections of a character name or account name (any case), or of an account id. */
+  find(nameOrAccountId: string): SessionView[] {
+    const want = nameOrAccountId.toLowerCase();
+    return [...this.sessions.values()]
+      .filter((s) => s.account && (s.name.toLowerCase() === want || s.account.name.toLowerCase() === want || s.account.id === nameOrAccountId))
+      .map((s) => this.view(s));
+  }
+
+  /** Closes a connection with a message the client shows; whether it was there. */
+  kick(connId: number, message: string): boolean {
+    const s = this.sessions.get(connId);
+    if (!s) return false;
+    this.send(s, { op: SC.ERROR, d: { code: 'kicked', message } });
+    this.log.info({ conn: connId, account: s.account?.name, message }, 'kicked');
+    s.conn.close(CLOSE.POLICY, message.slice(0, 120));
+    return true;
+  }
+
+  /** Chat mute of an account (null: lifted), told to its characters in the world. */
+  setMute(accountId: string, until: number | null): void {
+    if (until === null) this.mutes.delete(accountId);
+    else this.mutes.set(accountId, until);
+    const text = until === null ? 'You can chat again.' : until >= PERMANENT_UNTIL ? 'You have been muted.' : `You have been muted for ${Math.ceil((until - Date.now()) / 60_000)} minute(s).`;
+    for (const s of this.sessions.values()) if (s.account?.id === accountId && this.inWorld(s)) this.send(s, { op: SC.CHAT_BROADCAST, d: { channel: 'system', kind: 'admin', text } });
+  }
+
+  /**
+   * A staff line (kind `admin`, shown on every chat tab): to everyone in the world, to one zone,
+   * or to one character (false: not online).
+   */
+  adminLine(text: string, from: string, target: { zone: string } | { to: string } | null): boolean {
+    const clean = text.replace(/[\p{Cc}\p{Cf}]/gu, ' ').trim();
+    const to = target && 'to' in target ? target.to.toLowerCase() : null;
+    const zone = target && 'zone' in target ? target.zone : null;
+    const msg = JSON.stringify({ op: SC.CHAT_BROADCAST, d: { channel: 'system', kind: 'admin', text: to ? `(to you) ${clean}` : clean } } satisfies ServerControlMsg);
+    let reached = 0;
+    for (const s of this.sessions.values()) {
+      if (!this.inWorld(s) || (zone && s.zone !== zone) || (to && s.name.toLowerCase() !== to)) continue;
+      s.conn.send(msg);
+      reached++;
+    }
+    if (to && reached === 0) return false;
+    this.onChat?.({ channel: 'admin', from, text: clean, ...(to ? { to: target && 'to' in target ? target.to : '' } : {}), ...(zone ? { zone } : {}) });
+    return true;
   }
 
   private async enterWorld(s: Session, account: Account, characterId: string, name: string): Promise<void> {

@@ -13,7 +13,23 @@ export interface AccountRecord {
   id: string;
   username: string;
   isAdmin: boolean;
+  /** Moderation, ms since epoch (null: none); a past date has run out. */
+  bannedUntil: number | null;
+  banReason: string | null;
+  mutedUntil: number | null;
 }
+
+type AccountRow = { id: string; username: string; is_admin: boolean; banned_until: Date | null; ban_reason: string | null; muted_until: Date | null };
+const ACCOUNT_COLUMNS = ['accounts.id', 'accounts.username', 'accounts.is_admin', 'accounts.banned_until', 'accounts.ban_reason', 'accounts.muted_until'] as const;
+
+const toRecord = (r: AccountRow): AccountRecord => ({
+  id: r.id,
+  username: r.username,
+  isAdmin: r.is_admin,
+  bannedUntil: r.banned_until ? new Date(r.banned_until).getTime() : null,
+  banReason: r.ban_reason,
+  mutedUntil: r.muted_until ? new Date(r.muted_until).getTime() : null,
+});
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest();
 
@@ -40,7 +56,7 @@ export class AccountRepository {
         // A new game: the first act's start point (no saved position); the server's default
         // arena instead when that act is not converted.
         await trx.insertInto('characters').values({ account_id: acc.id, name: username, zone_id: `${LEVEL_PREFIX}${NEW_GAME_ACT}` }).execute();
-        return { id: acc.id, username: acc.username, isAdmin: acc.is_admin };
+        return { id: acc.id, username: acc.username, isAdmin: acc.is_admin, bannedUntil: null, banReason: null, mutedUntil: null };
       });
     } catch (err) {
       if (/unique|duplicate/i.test((err as Error).message)) throw new UsernameTakenError('username already taken');
@@ -51,7 +67,7 @@ export class AccountRepository {
   async verifyLogin(username: string, password: string): Promise<AccountRecord | null> {
     const row = await this.db
       .selectFrom('accounts')
-      .select(['id', 'username', 'is_admin', 'password_hash'])
+      .select([...ACCOUNT_COLUMNS, 'accounts.password_hash'])
       .where((eb) => eb(eb.fn('lower', ['username']), '=', username.toLowerCase()))
       .executeTakeFirst();
     if (!row) {
@@ -60,7 +76,7 @@ export class AccountRepository {
       return null;
     }
     const ok = await argon2.verify(row.password_hash, password).catch(() => false);
-    return ok ? { id: row.id, username: row.username, isAdmin: row.is_admin } : null;
+    return ok ? toRecord(row) : null;
   }
 
   /** Returns the opaque session token; only its SHA-256 is stored. */
@@ -77,12 +93,22 @@ export class AccountRepository {
     const row = await this.db
       .selectFrom('sessions')
       .innerJoin('accounts', 'accounts.id', 'sessions.account_id')
-      .select(['accounts.id', 'accounts.username', 'accounts.is_admin'])
+      .select([...ACCOUNT_COLUMNS])
       .where('sessions.id', '=', hashToken(token))
       .where('sessions.revoked_at', 'is', null)
       .where('sessions.expires_at', '>', new Date())
       .executeTakeFirst();
-    return row ? { id: row.id, username: row.username, isAdmin: row.is_admin } : null;
+    return row ? toRecord(row) : null;
+  }
+
+  /** Grants or takes away the admin panel (ADMIN_USERS, scripts/admin.ts). False: no such account. */
+  async setAdmin(username: string, admin: boolean): Promise<boolean> {
+    const r = await this.db
+      .updateTable('accounts')
+      .set({ is_admin: admin, updated_at: new Date() })
+      .where((eb) => eb(eb.fn('lower', ['username']), '=', username.toLowerCase()))
+      .executeTakeFirst();
+    return Number(r.numUpdatedRows) > 0;
   }
 
   async revokeSession(token: string): Promise<void> {

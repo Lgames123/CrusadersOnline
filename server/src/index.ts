@@ -3,10 +3,13 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net';
 import { pino, type Logger } from 'pino';
 import { BUILTIN_ITEMS, catalogFromItemRules } from '@crusaders/shared';
+import { createAdminApi } from './admin/admin_api.ts';
+import { AdminService } from './admin/admin_service.ts';
 import { TicketStore } from './auth/tickets.ts';
 import { REPO_ROOT, loadConfig, type ServerConfig } from './config.ts';
 import { createApiHandler } from './http/api.ts';
 import { AccountRepository } from './persistence/accounts.ts';
+import { AdminRepository } from './persistence/admin.ts';
 import { CharacterRepository } from './persistence/characters.ts';
 import { migrateToLatest, openDatabase } from './persistence/db.ts';
 import { SessionManager } from './network/sessions.ts';
@@ -37,6 +40,7 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
   log.info({ itemRules: config.itemRulesPath ?? 'built-in' }, 'item catalog');
   const accounts = new AccountRepository(database.db);
   const characters = new CharacterRepository(database.db);
+  for (const name of config.adminUsers) if (await accounts.setAdmin(name, true)) log.info({ username: name }, 'admin (ADMIN_USERS)');
 
   // Saves are fire-and-forget from the zone's point of view; shutdown awaits them.
   const pendingSaves = new Set<Promise<void>>();
@@ -66,10 +70,19 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
   if (!zones.available(config.arena)) throw new Error(`ARENA ${config.arena} is not available (convert the level into ${config.generatedDir})`);
   zones.keep(config.arena);
   await zones.get(config.arena);
-  sessions = new SessionManager(tickets, zones, characters, log, { defaultArena: config.arena, difficulty: config.difficulty, devGuestSpawn: config.devGuestSpawn, devGuestSpells: config.devGuestSpells, devGuestXp: config.devGuestXp, devGuestItems: config.devGuestItems, persist: (r) => save(r, 'transfer') });
+  let admin: AdminService | null = null;
+  sessions = new SessionManager(tickets, zones, characters, log, {
+    defaultArena: config.arena, difficulty: config.difficulty, devGuestSpawn: config.devGuestSpawn, devGuestSpells: config.devGuestSpells, devGuestXp: config.devGuestXp, devGuestItems: config.devGuestItems,
+    persist: (r) => save(r, 'transfer'),
+    onChat: (line) => admin?.chat(line),
+    greeting: () => admin?.greeting() ?? null,
+  });
   // The zones' item catalog, here for what characters wear on the character screen.
   const items = config.itemRulesPath ? catalogFromItemRules(JSON.parse(readFileSync(config.itemRulesPath, 'utf8')) as Parameters<typeof catalogFromItemRules>[0]) : BUILTIN_ITEMS;
   const live = sessions;
+  const adminService = new AdminService({ sessions, zones, repo: new AdminRepository(database.db), items, log });
+  admin = adminService;
+  await adminService.start();
   const api = createApiHandler({
     config,
     accounts,
@@ -79,6 +92,7 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
     log,
     onlinePlayers: () => live.playerCount,
     isCharacterOnline: (id) => live.isCharacterActive(id),
+    admin: createAdminApi(adminService),
   });
 
   const http = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -97,6 +111,7 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
 
   const transport = createWsTransport(http, '/ws', sessions);
   const shutdownBackends = async () => {
+    adminService.stop();
     await zones.stopAll();
     await Promise.allSettled([...pendingSaves]);
     await database.close();
@@ -128,6 +143,7 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
       // 1. Stop accepting connections. 2. Stop the zone, which flushes every character still in
       // the world. 3. Close (then terminate) sockets and idle HTTP connections. 4. Await saves.
       const httpClosed = new Promise<void>((resolve) => http.close(() => resolve()));
+      adminService.stop();
       await zones.stopAll();
       await transport.close();
       http.closeAllConnections();

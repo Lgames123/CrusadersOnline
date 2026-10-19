@@ -5,13 +5,13 @@ import path from 'node:path';
 import { BUILTIN_ITEMS, LEVEL_PREFIX, buildLevelArena, catalogFromItemRules, gameplayFeatures, createSyntheticArena, initPhysics, spellTableFromRules, type ArenaDef, type ItemCatalog, type LevelPlacements, type SpellTable } from '@crusaders/shared';
 import { SimulationClock, TickStats } from '../simulation/clock.ts';
 import { WorldZone } from '../simulation/world_zone.ts';
-import type { FromZone, ToZone, ZoneWorkerData } from './messages.ts';
+import type { FromZone, ToZone, ZoneReply, ZoneWorkerData } from './messages.ts';
 
 const METRICS_EVERY_TICKS = 100; // 5 s
 const PERSIST_EVERY_TICKS = 20 * 60; // 60 s (persistence.md §2)
 
 const port = parentPort!;
-const { zone: zoneName, arena: arenaName, difficulty, features, itemRulesPath, generatedDir } = workerData as ZoneWorkerData;
+const { zone: zoneName, arena: arenaName, difficulty, features, itemRulesPath, generatedDir, rates } = workerData as ZoneWorkerData;
 
 function loadItems(file: string | null): ItemCatalog {
   if (!file) return BUILTIN_ITEMS;
@@ -60,6 +60,7 @@ const zone = new WorldZone(rapier, zoneName, loadArena(arenaName), {
     post({ t: 'portal', connId, target, ...(keep ? { keep } : {}), ...(via ? { via } : {}) });
   },
 }, { difficulty, features: gameplayFeatures(features ?? []), items: loadItems(itemRulesPath), spells: loadSpells(generatedDir) });
+if (rates) zone.setRates(rates);
 
 const flush = () => {
   if (batch.length === 0) return;
@@ -148,6 +149,22 @@ port.on('message', (msg: ToZone) => {
       flush();
       const r = zone.leaveForTransfer(msg.connId);
       post({ t: 'transferred', connId: msg.connId, record: r?.record ?? null, state: r?.state ?? null });
+      break;
+    }
+    case 'rates':
+      zone.setRates(msg.rates);
+      break;
+    case 'request': {
+      let reply: ZoneReply;
+      try {
+        const r = msg.req;
+        const data = r.kind === 'report' ? zone.adminReport() : r.kind === 'spawn' ? zone.spawnCustom(r.spec) : r.kind === 'despawn' ? zone.despawnCustom(r.id) : zone.adminPlayer(r.connId, r.op);
+        reply = { ok: true, data };
+      } catch (err) {
+        reply = { ok: false, error: (err as Error).message };
+      }
+      flush();
+      post({ t: 'reply', reqId: msg.reqId, reply });
       break;
     }
     case 'stop':

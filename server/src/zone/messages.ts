@@ -1,5 +1,5 @@
-import type { ExitCrossing, SpellId } from '@crusaders/shared';
-import type { JoinOptions, PersistReason, PersistRecord, TransferState } from '../simulation/world_zone.ts';
+import type { CustomSpawnSpec, ExitCrossing, SpellId, WorldRates } from '@crusaders/shared';
+import type { JoinOptions, PersistReason, PersistRecord, TransferState, ZoneAdminReport } from '../simulation/world_zone.ts';
 import type { AttackKind } from '@crusaders/shared';
 
 /** Main thread <-> zone worker messages (ADR-009). Binary payloads are transferred, not copied. */
@@ -26,7 +26,21 @@ export type ToZone =
   | { t: 'unstuck'; connId: number }
   /** Remove the player for a zone transfer; answered with 'transferred'. */
   | { t: 'transfer'; connId: number }
+  /** Admin panel: event rates for every zone. */
+  | { t: 'rates'; rates: WorldRates }
+  /** Admin panel: a request answered with 'reply' (same reqId). */
+  | { t: 'request'; reqId: number; req: ZoneRequest }
   | { t: 'stop' };
+
+/** Admin panel requests a zone answers (WorldZone admin methods). */
+export type ZoneRequest =
+  | { kind: 'report' }
+  | { kind: 'spawn'; spec: CustomSpawnSpec }
+  | { kind: 'despawn'; id: string }
+  | { kind: 'player'; connId: number; op: { action: 'heal' | 'unstuck' | 'gold' | 'xp' | 'item' | 'summon'; amount?: number; itemId?: string; toConn?: number } };
+
+/** The answer: the request's result, or the error's message. */
+export type ZoneReply = { ok: true; data: ZoneAdminReport | number[] | number | string } | { ok: false; error: string };
 
 export interface ZoneMetrics {
   zone: string;
@@ -48,6 +62,7 @@ export type FromZone =
   /** A player entered a portal trigger (the main thread decides whether to transfer). */
   | { t: 'portal'; connId: number; target: string; keep?: { x: number; y: number; z: number; mesh: string }; via?: ExitCrossing }
   | { t: 'transferred'; connId: number; record: PersistRecord | null; state: TransferState | null }
+  | { t: 'reply'; reqId: number; reply: ZoneReply }
   | { t: 'stopped' };
 
 export interface ZoneWorkerData {
@@ -60,4 +75,6 @@ export interface ZoneWorkerData {
   itemRulesPath: string | null;
   /** Converter output directory, for "level:<act>" arenas. */
   generatedDir: string;
+  /** Event rates in force when the zone starts (admin panel). */
+  rates?: WorldRates;
 }

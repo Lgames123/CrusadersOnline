@@ -48,6 +48,8 @@ export interface EntitySpawnMsg {
     /** Timed spell effects on it now (their looks), and whether it fights on the players' side (spectral ally). */
     statuses?: StatusTag[];
     ally?: boolean;
+    /** Model scale of a creature that is not a level placement (an admin's custom spawn); placements' come from the level. */
+    scale?: number;
   };
 }
 
@@ -262,7 +264,8 @@ export interface PongMsg {
 
 export type ChatChannel = 'local' | 'global' | 'private' | 'system';
 /** What a server (`system`) line reports: the chat tints it by kind. */
-export type ChatNoticeKind = 'loot' | 'gold' | 'xp' | 'level' | 'spell' | 'quest' | 'trade' | 'error' | 'info';
+/** `admin`: a line from the server's staff (the admin panel), shown on every tab. */
+export type ChatNoticeKind = 'loot' | 'gold' | 'xp' | 'level' | 'spell' | 'quest' | 'trade' | 'error' | 'info' | 'admin';
 
 /**
  * A chat line. Players' lines carry `from` (and `to` on private ones, echoed to the sender

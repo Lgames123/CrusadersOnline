@@ -79,7 +79,8 @@ export class RemoteEntities {
     const look = info.kind === 'mob' && info.placement !== undefined ? this.placementLook(info.placement) : undefined;
     const avatar: Avatar = this.originals?.(kind, look?.held) ?? new ProceduralAvatar(kind);
     if (look?.talkState) avatar.setTalkState?.(look.talkState);
-    if (look?.scale) avatar.setScale?.(look.scale);
+    const scale = info.scale ?? look?.scale;
+    if (scale) avatar.setScale?.(scale);
     avatar.object.visible = false; // until the first sample arrives
     avatar.seed = id;
     this.scene.add(avatar.object);

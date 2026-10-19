@@ -51,6 +51,8 @@ export interface ServerConfig {
   devGuestItems: string | null;
   /** Name of this world on the server selection screen (REALM_NAME). */
   realmName: string;
+  /** Accounts (usernames, lower case) given the admin panel at start and when they sign in (ADMIN_USERS, comma-separated). */
+  adminUsers: string[];
 }
 
 /** Repository root; relative paths (e.g. pglite:local/pgdata) resolve against it. */
@@ -95,6 +97,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     devGuestXp: env === 'production' ? 0 : Math.max(0, Number(process.env['DEV_GUEST_XP'] ?? 0) || 0),
     devGuestItems: env === 'production' ? null : process.env['DEV_GUEST_ITEMS'] ?? null,
     realmName: (process.env['REALM_NAME'] ?? '').trim().slice(0, 32) || 'Ardon',
+    adminUsers: (process.env['ADMIN_USERS'] ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
     ...overrides,
   };
 }

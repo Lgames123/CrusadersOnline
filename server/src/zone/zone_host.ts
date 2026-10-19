@@ -1,8 +1,8 @@
 import { Worker } from 'node:worker_threads';
-import type { ExitCrossing, SpellId } from '@crusaders/shared';
+import type { ExitCrossing, SpellId, WorldRates } from '@crusaders/shared';
 import type { JoinOptions, PersistReason, PersistRecord, TransferState } from '../simulation/world_zone.ts';
 import type { AttackKind } from '@crusaders/shared';
-import type { FromZone, ToZone, ZoneMetrics, ZoneWorkerData } from './messages.ts';
+import type { FromZone, ToZone, ZoneMetrics, ZoneReply, ZoneRequest, ZoneWorkerData } from './messages.ts';
 
 export interface ZoneHostEvents {
   deliver(connId: number, data: Uint8Array | string): void;
@@ -22,6 +22,8 @@ export class ZoneHost {
   readonly members = new Set<number>();
   /** Last join / leave / transfer, ms (Date.now): idle zones are stopped (ZoneManager). */
   lastActive = Date.now();
+  /** Latest tick timings (every 5 s), for the admin panel. */
+  lastMetrics: ZoneMetrics | null = null;
   private readonly worker: Worker;
   private readonly ready: Promise<void>;
 
@@ -40,6 +42,7 @@ export class ZoneHost {
             for (const [connId, d] of msg.batch) events.deliver(connId, typeof d === 'string' ? d : new Uint8Array(d));
             break;
           case 'metrics':
+            this.lastMetrics = msg.metrics;
             events.metrics?.(msg.metrics);
             break;
           case 'persist':
@@ -50,6 +53,10 @@ export class ZoneHost {
             break;
           case 'transferred':
             events.transferred?.(msg.connId, msg.record, msg.state);
+            break;
+          case 'reply':
+            this.replies.get(msg.reqId)?.(msg.reply);
+            this.replies.delete(msg.reqId);
             break;
         }
       });
@@ -62,6 +69,30 @@ export class ZoneHost {
   }
 
   private stopping = false;
+  private nextReq = 1;
+  private readonly replies = new Map<number, (r: ZoneReply) => void>();
+
+  /** An admin panel request; rejects with the zone's message (or after 5 s / when stopping). */
+  request(req: ZoneRequest): Promise<ZoneReply & { ok: true }> {
+    if (this.stopping) return Promise.reject(new Error(`${this.zone} is stopping.`));
+    const reqId = this.nextReq++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.replies.delete(reqId);
+        reject(new Error(`${this.zone} did not answer.`));
+      }, 5000);
+      this.replies.set(reqId, (r) => {
+        clearTimeout(timer);
+        if (r.ok) resolve(r);
+        else reject(new Error(r.error));
+      });
+      this.post({ t: 'request', reqId, req });
+    });
+  }
+
+  setRates(rates: WorldRates): void {
+    this.post({ t: 'rates', rates });
+  }
 
   private post(msg: ToZone, transfer: ArrayBuffer[] = []): void {
     if (this.stopping) return; // late leave/input after the final flush

@@ -185,6 +185,11 @@ export class ChatWindow {
 
   /** A line from the server. */
   add(d: ChatBroadcastMsg['d']): void {
+    // The staff's lines (admin panel) on every tab: nobody misses them.
+    if (d.kind === 'admin') {
+      for (const t of TABS) this.push(t.tab, { ...d, at: Date.now() });
+      return;
+    }
     const tab: Tab = d.channel;
     if (d.channel === 'private' && d.from && !d.sent) {
       this.replyTo = d.from;
@@ -221,7 +226,12 @@ export class ChatWindow {
     const at = new Date(line.at);
     time.textContent = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
     row.append(time);
-    if (line.from) {
+    if (line.kind === 'admin') {
+      const tag = document.createElement('span');
+      tag.className = 'chat-name';
+      tag.textContent = '[Admin]';
+      row.append(tag, document.createTextNode(' '));
+    } else if (line.from) {
       const mine = line.sent === true;
       const other = mine ? line.to ?? line.from : line.from;
       const name = document.createElement('span');

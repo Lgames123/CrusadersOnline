@@ -11,7 +11,8 @@
     "dev": "node --watch src/main.ts",
     "start": "node src/main.ts",
     "typecheck": "tsc -p .",
-    "db:migrate": "node src/scripts/migrate.ts"
+    "db:migrate": "node src/scripts/migrate.ts",
+    "admin": "node src/scripts/admin.ts"
   },
   "dependencies": {
     "@crusaders/shared": "workspace:*",

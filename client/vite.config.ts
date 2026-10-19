@@ -45,5 +45,10 @@ export default defineConfig({
     },
   },
   preview: { port: 3000, strictPort: true },
-  build: { target: 'es2022', chunkSizeWarningLimit: 2500 },
+  build: {
+    target: 'es2022',
+    chunkSizeWarningLimit: 2500,
+    // The game, and the admin panel (admin.html; its API refuses non-admin accounts).
+    rollupOptions: { input: { main: path.resolve(import.meta.dirname, 'index.html'), admin: path.resolve(import.meta.dirname, 'admin.html') } },
+  },
 });
