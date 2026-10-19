@@ -12,7 +12,15 @@
       img { -webkit-user-drag: none; }
       #app { position: fixed; inset: 0; }
       canvas { display: block; width: 100%; height: 100%; }
-      #hud { position: fixed; top: 8px; left: 10px; font: 12px/1.5 ui-monospace, Consolas, monospace; text-shadow: 0 1px 2px #000; pointer-events: none; white-space: pre; }
+      #hud { position: fixed; top: 8px; right: 10px; z-index: 6; font: 12px/1.5 ui-monospace, Consolas, monospace; text-align: right; text-shadow: 0 1px 2px #000; pointer-events: none; white-space: pre; }
+      #hud[hidden] { display: none; }
+      #classic-hud { position: fixed; left: 0; top: 0; width: 640px; height: 480px; z-index: 5; transform-origin: 0 0; pointer-events: none; }
+      #classic-hud[hidden], #classic-hud [hidden] { display: none; }
+      #classic-hud .ch-group { position: absolute; }
+      #classic-hud .ch-piece { position: absolute; left: 0; top: 0; width: 100%; height: 100%; user-select: none; }
+      #classic-hud .ch-flip { transform: rotate(180deg); }
+      #classic-hud .ch-spell-icon { left: 10px; top: 9px; width: 45px; height: 45px; border-radius: 50%; }
+      #classic-hud .ch-number { position: absolute; left: 0; right: 0; height: 12px; color: #f4ead0; font: 700 11px/12px "Palatino Linotype", Georgia, serif; text-align: center; text-shadow: 0 0 2px #000, 0 1px 1px #000; }
       .overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(8, 9, 12, 0.6); }
       .overlay.hidden { display: none; }
       #overlay .panel { max-height: calc(100vh - 32px); overflow: auto; }
@@ -40,7 +48,7 @@
       .floater.dealt { color: #ffd54f; }
       .floater.taken { color: #ff6e6e; }
       .floater.other { color: #e0e0e0; font-size: 13px; }
-      #player-panel { position: fixed; left: 12px; bottom: 12px; width: 240px; padding: 8px 10px; background: rgba(12,11,9,.72); border: 1px solid #6b5a3a; font: 12px/1.4 system-ui, sans-serif; }
+      #player-panel { position: fixed; left: 12px; top: 12px; z-index: 5; width: 240px; padding: 8px 10px; background: rgba(12,11,9,.72); border: 1px solid #6b5a3a; font: 12px/1.4 system-ui, sans-serif; }
       #player-panel .row { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
       #player-panel .row > span:first-child { width: 34px; color: #d9b45a; }
       #player-panel .track { flex: 1; height: 8px; background: rgba(0,0,0,.6); border: 1px solid #000; }
@@ -196,6 +204,44 @@
       #inventory .shop-price i { width: 9px; height: 9px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff2b0, #d9a93a 55%, #7a5512); }
       @media (max-width: 640px) { #inventory .inv-shop { width: 190px; } }
       @media (max-width: 640px) { #inventory .inv-dock { right: 8px; bottom: 8px; } #inventory .ground-open .inv-ground, #inventory .inv-ground-inner { width: 170px; } }
+      #chat { position: fixed; left: 12px; top: 50%; width: 380px; height: 200px; z-index: 8; display: flex; flex-direction: column; min-width: 0; border: 1px solid #6b5a3a; background: rgba(12,11,9,.55); box-shadow: 0 4px 14px rgba(0,0,0,.5); color: #e8dcc0; font: 12.5px/1.35 system-ui, sans-serif; user-select: none; transition: background .15s; }
+      #chat[hidden] { display: none; }
+      #chat:hover, #chat.chat-typing { background: rgba(12,11,9,.8); }
+      #chat .chat-head { display: flex; align-items: stretch; gap: 1px; flex: none; background: linear-gradient(180deg, rgba(42,34,22,.95), rgba(18,15,10,.95)); border-bottom: 1px solid #4a3d26; cursor: move; touch-action: none; }
+      #chat .chat-tab { padding: 4px 9px; border: 0; background: none; color: #b9a988; font: 600 12px/1.3 system-ui, sans-serif; cursor: pointer; white-space: nowrap; }
+      #chat .chat-tab:hover { color: #fff; }
+      #chat .chat-tab.chat-active { color: #ffe08a; box-shadow: inset 0 -2px 0 #d9b45a; background: rgba(217,180,90,.1); }
+      #chat .chat-unread { margin-left: 5px; padding: 0 4px; border-radius: 7px; background: #a8322a; color: #fff; font-size: 10px; }
+      #chat .chat-grip { flex: 1; min-width: 12px; }
+      #chat .chat-min { width: 24px; border: 0; border-left: 1px solid #4a3d26; background: none; color: #e9d7a6; font: 700 12px/1 system-ui, sans-serif; cursor: pointer; }
+      #chat .chat-min:hover { color: #fff; background: rgba(217,180,90,.15); }
+      #chat .chat-log { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 7px; user-select: text; scrollbar-width: thin; scrollbar-color: #6b5a3a transparent; text-shadow: 0 1px 1px #000; overflow-wrap: anywhere; }
+      #chat .chat-line { margin: 1px 0; }
+      #chat .chat-time { margin-right: 6px; color: #7d7360; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+      #chat .chat-name { color: #d9b45a; font-weight: 600; cursor: pointer; }
+      #chat .chat-name:hover { text-decoration: underline; }
+      #chat .chat-self { cursor: default; }
+      #chat .chat-self:hover { text-decoration: none; }
+      #chat .chat-global .chat-name { color: #f0a85a; }
+      #chat .chat-global { color: #f3e2c4; }
+      #chat .chat-private, #chat .chat-private .chat-name { color: #e39bff; }
+      #chat .chat-system { color: #c9c2b0; }
+      #chat .chat-kind-loot, #chat .chat-kind-quest { color: #8fd18a; }
+      #chat .chat-kind-gold, #chat .chat-kind-trade { color: #ffd54f; }
+      #chat .chat-kind-xp { color: #9fc3ff; }
+      #chat .chat-kind-level, #chat .chat-kind-spell { color: #7fe0ff; font-weight: 600; }
+      #chat .chat-kind-error { color: #ff8a7a; }
+      #chat .chat-input { display: flex; align-items: center; gap: 4px; flex: none; margin: 0; padding: 3px 4px; border-top: 1px solid #4a3d26; background: rgba(0,0,0,.35); }
+      #chat .chat-prefix { color: #d9b45a; font-weight: 600; font-size: 11.5px; padding-left: 3px; }
+      #chat .chat-input input { min-width: 0; padding: 3px 6px; border: 1px solid #4a3d26; background: rgba(0,0,0,.5); color: #f0e6cc; font: inherit; outline: none; user-select: text; }
+      #chat .chat-input input:focus { border-color: #d9b45a; }
+      #chat .chat-to { width: 92px; flex: none; }
+      #chat .chat-to[hidden] { display: none; }
+      #chat .chat-text { flex: 1; }
+      #chat .chat-resize { position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; cursor: nwse-resize; touch-action: none; background: linear-gradient(135deg, transparent 50%, #6b5a3a 50%, #6b5a3a 60%, transparent 60%, transparent 72%, #6b5a3a 72%, #6b5a3a 82%, transparent 82%); }
+      #chat.chat-minimized { height: auto; }
+      #chat.chat-minimized .chat-log, #chat.chat-minimized .chat-input, #chat.chat-minimized .chat-resize { display: none; }
+      #chat.chat-minimized .chat-head { border-bottom: 0; }
       #subtitle { z-index: 10; position: fixed; left: 50%; bottom: 30%; transform: translateX(-50%); max-width: min(640px, calc(100vw - 32px)); padding: 8px 14px; background: rgba(12,11,9,.8); border: 1px solid #6b5a3a; color: #f0e6cc; font: 15px/1.4 system-ui, sans-serif; text-align: center; pointer-events: none; }
       #subtitle .who { color: #d9b45a; font-weight: 600; margin-right: 6px; }
       #quest-book { position: fixed; inset: 0; z-index: 12; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.25); }
@@ -428,8 +474,10 @@
     <div id="world-ui"></div>
     <div id="hud"></div>
     <div id="player-panel" hidden></div>
+    <div id="classic-hud" hidden></div>
     <div id="inventory" hidden></div>
     <div id="hotbar" hidden></div>
+    <div id="chat" hidden></div>
     <div id="prompt" hidden></div>
     <div id="subtitle" hidden></div>
     <div id="cutscene" hidden><div class="bar top"></div><div class="bar bottom"></div></div>

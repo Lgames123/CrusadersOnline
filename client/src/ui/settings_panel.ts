@@ -120,6 +120,28 @@ export class SettingsPanel {
                 </span>
               </label>
             </div>
+
+            <div class="opt-group opt-toggle-group">
+              <label class="opt-toggle-label">
+                <input id="set-classic-hud" type="checkbox" ${s.hudStyle === 'classic' ? 'checked' : ''} />
+                <span class="opt-toggle-box"></span>
+                <span class="opt-toggle-text">
+                  <strong>Classic HUD</strong>
+                  <span class="opt-desc">The original's health and mana coins with the selected spell. When disabled, a panel with health, mana and experience bars, level, statuses and gold.</span>
+                </span>
+              </label>
+            </div>
+
+            <div class="opt-group opt-toggle-group">
+              <label class="opt-toggle-label">
+                <input id="set-stats" type="checkbox" ${s.showStats ? 'checked' : ''} />
+                <span class="opt-toggle-box"></span>
+                <span class="opt-toggle-text">
+                  <strong>Show Performance Stats</strong>
+                  <span class="opt-desc">FPS, server tick, position and connection details in the top right corner.</span>
+                </span>
+              </label>
+            </div>
           </div>
         `;
 
@@ -485,6 +507,11 @@ export class SettingsPanel {
       });
     }
 
+    const classicHud = this.root.querySelector<HTMLInputElement>('#set-classic-hud');
+    classicHud?.addEventListener('change', () => this.store.update({ hudStyle: classicHud.checked ? 'classic' : 'modern' }));
+    const stats = this.root.querySelector<HTMLInputElement>('#set-stats');
+    stats?.addEventListener('change', () => this.store.update({ showStats: stats.checked }));
+
     const propUvs = this.root.querySelector<HTMLInputElement>('#set-prop-uvs');
     if (propUvs) {
       propUvs.addEventListener('change', () => {
@@ -546,6 +573,8 @@ export class SettingsPanel {
           foliageBushes: 1,
           foliagePlants: 1,
           fixedPropUvs: true,
+          hudStyle: 'classic',
+          showStats: false,
           keybindings: getDefaultKeybindings(),
         });
         this.render();

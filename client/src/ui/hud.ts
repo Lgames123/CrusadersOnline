@@ -1,23 +1,52 @@
 import type { Character, ClientSession, PlayerStats } from '@crusaders/shared';
 import { BUILTIN_SPELLS, SPELL_NAMES, STATUS_NAMES, xpForLevel } from '@crusaders/shared';
+import type { ClassicHud } from './classic_hud.ts';
 
-/** Debug line plus the player panel (HP, level/XP, gold) and the death notice. */
+export type HudStyle = 'classic' | 'modern';
+
+/**
+ * The player's HUD in the top left corner — the original's coins (classic) or the panel (HP,
+ * level/XP, mana, spell, gold; modern) — the performance stats line (optional) and the death
+ * notice.
+ */
 export class Hud {
   private frames = 0;
   private acc = 0;
   private fps = 0;
   private readonly debug: HTMLElement;
   private readonly panel: HTMLElement;
+  private readonly classic: ClassicHud;
   private readonly death: HTMLElement;
+  private style_: HudStyle = 'classic';
+  private hasStats = false;
 
-  constructor(debug: HTMLElement, panel: HTMLElement, death: HTMLElement) {
+  constructor(debug: HTMLElement, panel: HTMLElement, classic: ClassicHud, death: HTMLElement) {
     this.debug = debug;
     this.panel = panel;
+    this.classic = classic;
     this.death = death;
+    this.showStats = false;
+  }
+
+  set style(style: HudStyle) {
+    this.style_ = style;
+    this.show();
+  }
+
+  /** FPS, tick, position and network line (top right). */
+  set showStats(on: boolean) {
+    this.debug.hidden = !on;
+  }
+
+  private show(): void {
+    this.panel.hidden = !this.hasStats || this.style_ !== 'modern';
+    this.classic.visible = this.hasStats && this.style_ === 'classic';
   }
 
   stats(s: PlayerStats): void {
-    this.panel.hidden = false;
+    this.hasStats = true;
+    this.show();
+    this.classic.update(s);
     const hpPct = s.maxHp > 0 ? (100 * s.hp) / s.maxHp : 0;
     // Original curve: thresholds 500, 1500, 3500, ... (xpForLevel).
     const from = xpForLevel(s.level);
@@ -44,6 +73,11 @@ export class Hud {
     this.frames++;
     this.acc += dt;
     if (this.acc < 0.25) return;
+    if (this.debug.hidden) {
+      this.frames = 0;
+      this.acc = 0;
+      return;
+    }
     this.fps = Math.round(this.frames / this.acc);
     this.frames = 0;
     this.acc = 0;

@@ -214,6 +214,8 @@ import {
   type MovementWorld,
   type Rapier,
   type ServerControlMsg,
+  type ChatNoticeKind,
+  SPELL_NAMES,
   type WorldObjectDef,
   type WorldObjectState,
   type SwingTiming,
@@ -878,6 +880,11 @@ export class WorldZone {
     this.outbox.send(connId, JSON.stringify(msg));
   }
 
+  /** A server line in the player's chat (its Server tab): loot, gold, experience, trades… */
+  private notify(p: Player, kind: ChatNoticeKind, text: string): void {
+    this.sendJson(p.connId, { op: SC.CHAT_BROADCAST, d: { channel: 'system', kind, text } });
+  }
+
   private register(a: Actor): void {
     this.actors.set(a.entityId, a);
     this.states.set(a.entityId, createEntityState(a.entityId));
@@ -1215,6 +1222,7 @@ export class WorldZone {
     if (name === GOLD_ITEM) {
       p.gold += n;
       p.statsDirty = true;
+      this.notify(p, 'gold', `You receive ${n} gold.`);
       return n;
     }
     const def = this.groundItemDef({ name, quantity, ...(itemId !== undefined ? { itemId } : {}) });
@@ -1227,6 +1235,7 @@ export class WorldZone {
     if (added) {
       p.inventoryDirty = true;
       this.sendInventory(p);
+      this.notify(p, 'loot', `You receive ${added > 1 ? `${added} × ` : ''}${def.name}.`);
     }
     return added;
   }
@@ -1244,6 +1253,7 @@ export class WorldZone {
       p.selectedSpell ??= spell;
     }
     p.statsDirty = true;
+    this.notify(p, 'spell', known ? `${SPELL_NAMES[spell]} is now level ${known.level}.` : `You learn ${SPELL_NAMES[spell]}.`);
     return true;
   }
 
@@ -2099,6 +2109,7 @@ export class WorldZone {
     if (out.gold > 0) {
       p.gold += out.gold;
       p.statsDirty = true;
+      this.notify(p, 'gold', `You receive ${out.gold} gold.`);
     }
     this.sendJson(p.connId, { op: SC.QUEST_LOG, d: { log: p.story.quests, news: { assigned: out.assigned, completed: out.completed, journal: out.journal } } });
   }
@@ -2109,6 +2120,7 @@ export class WorldZone {
     if (!def || p.inventory.some((e) => e.itemId === def.id)) return;
     if (addItem(p.inventory, def.id, 1, this.items) === null) return;
     this.inventoryChanged(p);
+    this.notify(p, 'quest', `You receive ${def.name}.`);
   }
 
   /** A scripted sequence starts for this player: the client plays it, the server waits for it. */
@@ -2660,6 +2672,8 @@ export class WorldZone {
     p.shop.stock.splice(index, 1);
     p.gold -= cost;
     p.statsDirty = true;
+    const what = `${entry.quantity > 1 ? `${entry.quantity} × ` : ''}${def.name}`;
+    this.notify(p, 'trade', cost > 0 ? `You buy ${what} for ${cost} gold.` : `You receive ${what}.`);
     if (entry.gift !== undefined) {
       const flag = giftFlag(this.act ?? '', id, entry.gift);
       p.storyFlags.add(flag);
@@ -2690,8 +2704,10 @@ export class WorldZone {
     const quantity = entry.quantity ?? 1;
     p.inventory.splice(p.inventory.indexOf(entry), 1);
     if (entry.equipped) this.applyEquipment(p);
-    p.gold += tradePrice(def, quantity);
+    const price = tradePrice(def, quantity);
+    p.gold += price;
     p.statsDirty = true;
+    this.notify(p, 'trade', `You sell ${quantity > 1 ? `${quantity} × ` : ''}${def.name} for ${price} gold.`);
     p.shop.stock.push({ itemId: def.id, quantity });
     this.inventoryChanged(p);
     this.sendShop(p);
@@ -3495,8 +3511,10 @@ export class WorldZone {
 
   /** Stats_AddExperience: the XP, and Stats_LevelUp for each level reached. */
   private addExperience(p: Player, xp: number): void {
+    if (xp <= 0) return;
     p.xp += xp;
     p.statsDirty = true;
+    this.notify(p, 'xp', `You gain ${xp} experience.`);
     const level = levelForXp(p.xp);
     if (level > p.level) {
       // Engine Stats_LevelUp: derived stats are recomputed and the max-HP gain is added to HP.
@@ -3504,6 +3522,7 @@ export class WorldZone {
       p.level = level;
       this.refreshDerived(p);
       p.hp = Math.min(p.maxHp, p.hp + (p.maxHp - before));
+      this.notify(p, 'level', `You reached level ${level}!`);
     }
   }
 

@@ -90,8 +90,10 @@ import { TORCH_LIGHT_COLOR, TORCH_LIGHT_HEIGHT, TORCH_LIGHT_INTENSITY, TORCH_DYN
 import { connectToWorld } from './network/connect.ts';
 import { CombatUi } from './ui/combat_ui.ts';
 import { Hud } from './ui/hud.ts';
+import { ClassicHud } from './ui/classic_hud.ts';
 import { InventoryPanels, type InventoryPanelKind } from './ui/inventory_panels.ts';
 import { Hotbar, hotbarItemEntry, type HotbarEntry } from './ui/hotbar.ts';
+import { ChatWindow } from './ui/chat.ts';
 import { logout } from './frontend/api.ts';
 import { CHARACTER_SCREEN_FLAG, runFrontEnd } from './frontend/front_end.ts';
 import { TitleScene } from './frontend/title_scene.ts';
@@ -188,10 +190,13 @@ async function main(): Promise<void> {
     return p;
   };
   const combatUi = new CombatUi(document.getElementById('world-ui')!);
-  const hud = new Hud(document.getElementById('hud')!, document.getElementById('player-panel')!, document.getElementById('death')!);
+  const classicHud = new ClassicHud(document.getElementById('classic-hud')!, assetManifest?.textures ?? {});
+  const hud = new Hud(document.getElementById('hud')!, document.getElementById('player-panel')!, classicHud, document.getElementById('death')!);
   const inventoryPanel = new InventoryPanels(document.getElementById('inventory')!);
   const hotbar = new Hotbar(document.getElementById('hotbar')!);
   inventoryPanel.hotbar = hotbar;
+  /** Text chat (online only): Local, Global, Server and Private tabs. */
+  const chat = new ChatWindow(document.getElementById('chat')!);
   const questBook = new QuestBook(document.getElementById('quest-book')!, assetManifest?.textures ?? {});
   questBook.setStrings(gameStrings);
   const charSheet = new CharacterSheet(document.getElementById('char-sheet')!, assetManifest?.textures ?? {});
@@ -228,6 +233,12 @@ async function main(): Promise<void> {
   const settings = new SettingsStore();
   propFixes.enabled = settings.current.fixedPropUvs;
   settings.onChange((s) => (propFixes.enabled = s.fixedPropUvs));
+  const applyHud = (s: Settings) => {
+    hud.style = s.hudStyle;
+    hud.showStats = s.showStats;
+  };
+  applyHud(settings.current);
+  settings.onChange(applyHud);
   /** The level act's music (the original's CD tracks, looped). */
   const music = new MusicPlayer(settings.current.musicVolume);
   settings.onChange((s) => (music.volume = s.musicVolume));
@@ -701,7 +712,9 @@ async function main(): Promise<void> {
             lines.forEach((l, i) => window.setTimeout(() => combatUi.notice(l, headPos), i * 900));
             sounds?.play(SFX.turnPage);
           },
+          chat: (d) => chat.add(d),
           error: (_code, message) => {
+            chat.notice(message, 'error');
             if (!player) return;
             headPos.copy(player.object.position);
             headPos.y += player.avatar.headHeight;
@@ -827,6 +840,7 @@ async function main(): Promise<void> {
     setQuestBookOpen(false);
     setCharSheetOpen(false);
     hotbar.visible = false;
+    chat.visible = false;
     cutsceneUi.hidden = false;
     prompt.hidden = true;
     clickHint.hidden = true;
@@ -868,6 +882,7 @@ async function main(): Promise<void> {
     remotes.scripted.clear();
     cutsceneUi.hidden = true;
     hotbar.visible = !!session;
+    chat.visible = !!session;
     session?.cutsceneDone(c.sequence.name);
     // Drake stays in this act (no level load): the view flies from the sequence's last camera
     // to its place behind him, facing where the stand-in faces.
@@ -967,7 +982,7 @@ async function main(): Promise<void> {
   let altFree = false;
   let optionsAt = 0;
   const updateHint = () => {
-    clickHint.hidden = input.locked || altFree || optionsOpen || inventoryPanel.open || questBook.open || charSheet.open || !!cutscene;
+    clickHint.hidden = input.locked || altFree || chat.typing || optionsOpen || inventoryPanel.open || questBook.open || charSheet.open || !!cutscene;
   };
   const play = () => {
     sounds?.unlock();
@@ -1008,9 +1023,24 @@ async function main(): Promise<void> {
     if (!isAlt(e) || !altFree) return;
     altFree = false;
     // A page that let go of the lock itself may take it back without a click (Pointer Lock 2.0).
-    if (!optionsOpen && !inventoryPanel.open && !questBook.open && !charSheet.open && !cutscene) input.requestLock();
+    if (!optionsOpen && !chat.typing && !inventoryPanel.open && !questBook.open && !charSheet.open && !cutscene) input.requestLock();
     updateHint();
   });
+  // The chat line takes the keyboard (Enter): the camera lets go of the pointer, and takes it
+  // back without a click when the line closes, unless a window was open before.
+  let chatTookLock = false;
+  chat.onSend = (channel, text, to) => session?.chat(channel, text, to);
+  chat.onTyping = (typing) => {
+    if (typing && input.locked) {
+      chatTookLock = true;
+      releasing = true;
+      document.exitPointerLock();
+    } else if (!typing && chatTookLock) {
+      chatTookLock = false;
+      if (!optionsOpen && !inventoryPanel.open && !questBook.open && !charSheet.open && !cutscene) input.requestLock();
+    }
+    updateHint();
+  };
   window.addEventListener('blur', () => {
     altFree = false;
     updateHint();
@@ -1266,6 +1296,7 @@ async function main(): Promise<void> {
   inWorld = true;
   hotbar.setCharacter(auth.kind === 'account' ? auth.characterId : null);
   hotbar.visible = !!session;
+  chat.visible = !!session;
   gameFiles.visible = false;
   updateHint();
   play();
@@ -1337,6 +1368,11 @@ async function main(): Promise<void> {
   input.onLockChange = (locked) => {
     const ours = releasing;
     releasing = false;
+    // A click on the world took the pointer back while typing: the line closes.
+    if (locked) {
+      chatTookLock = false;
+      chat.blur();
+    }
     // Esc released the pointer: the options (sequences play to their end, as in the original).
     if (!locked && !ours && !inventoryPanel.open && !questBook.open && !charSheet.open && !cutscene) setOptionsOpen(true);
     updateHint();
@@ -1432,7 +1468,11 @@ async function main(): Promise<void> {
     }
     if (optionsOpen) return;
     const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target as HTMLElement | null)?.isContentEditable;
-    if (!typing && (e.ctrlKey || e.shiftKey) && !e.altKey && !e.repeat && e.code === 'KeyG') {
+    if (!typing && session && !e.repeat && (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Slash') && !input.isBound(e.code) && !e.ctrlKey && !e.altKey) {
+      // Enter opens the chat line; / opens it on a command.
+      e.preventDefault();
+      chat.focus(e.code === 'Slash' ? '/' : '');
+    } else if (!typing && (e.ctrlKey || e.shiftKey) && !e.altKey && !e.repeat && e.code === 'KeyG') {
       // Ctrl+G (Shift+G too): the ground window beside the inventory.
       e.preventDefault();
       setInventoryPanelOpen('ground', !inventoryPanel.isOpen('ground'));

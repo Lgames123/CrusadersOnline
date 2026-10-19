@@ -31,12 +31,17 @@ export const PlayerAttackPacketSchema = z.object({
   }),
 });
 
+/** Longest chat line, characters. */
+export const CHAT_MAX_LENGTH = 256;
+
 export const ChatMessagePacketSchema = z.object({
   op: z.literal(CS.CHAT_MESSAGE),
   seq: z.number().int().positive(),
+  /** `local`: the sender's map (zone); `global`: every map; `private`: the character named `to`. */
   d: z.object({
-    channel: z.enum(['local', 'global']),
-    text: z.string().trim().min(1).max(256),
+    channel: z.enum(['local', 'global', 'private']),
+    text: z.string().trim().min(1).max(CHAT_MAX_LENGTH),
+    to: z.string().trim().min(1).max(32).optional(),
   }),
 });
 

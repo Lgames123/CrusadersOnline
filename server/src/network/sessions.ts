@@ -30,6 +30,10 @@ interface Session {
   authTimer: NodeJS.Timeout;
   /** When the character entered the world (played time), 0 until then. */
   enteredAt: number;
+  /** The character's name once it enters the world (chat sender, private-line address). */
+  name: string;
+  /** Chat lines: a speaker past it is told to slow down, not disconnected. */
+  chatBucket: TokenBucket;
 }
 
 /**
@@ -172,6 +176,8 @@ export class SessionManager implements TransportHandlers {
       controlBucket: new TokenBucket(5, 10),
       authTimer: setTimeout(() => conn.close(CLOSE.AUTH_TIMEOUT, 'authentication timeout'), AUTH_TIMEOUT_MS),
       enteredAt: 0,
+      name: '',
+      chatBucket: new TokenBucket(1, 5),
     };
     this.sessions.set(conn.id, session);
   }
@@ -293,18 +299,57 @@ export class SessionManager implements TransportHandlers {
       case CS.CUTSCENE_DONE:
         if (s.state === 'in_world') this.zoneOf(s)?.cutsceneDone(conn.id, msg.d.sequence);
         return;
+      case CS.CHAT_MESSAGE:
+        this.chat(s, msg.d.channel, msg.d.text, msg.d.to);
+        return;
       case CS.PING:
         this.send(s, { op: SC.PONG, d: { clientTime: msg.d.clientTime, serverTick: this.zoneOf(s)?.tick ?? 0 } });
         return;
       default:
-        // Combat and chat arrive with M09; accepted but ignored for now.
+        // Every other parsed op is handled above.
         return;
     }
+  }
+
+  /** Whether a session's character is in the world (or between two zones of it). */
+  private inWorld(s: Session): boolean {
+    return s.state === 'in_world' || s.state === 'zoning' || s.state === 'transferring';
+  }
+
+  /**
+   * A chat line: `local` to every player of the sender's zone, `global` to every player, `private`
+   * to the character named `to` (any case) and echoed back to the sender. Not the original's
+   * (single player); the server's own lines (loot, experience) come from the zones as `system`.
+   */
+  private chat(s: Session, channel: 'local' | 'global' | 'private', raw: string, to?: string): void {
+    if (!this.inWorld(s) || !s.name) return;
+    const notice = (text: string) => this.send(s, { op: SC.CHAT_BROADCAST, d: { channel: 'system', kind: 'error', text } });
+    // Control characters (newlines, bidi overrides) would break the line or spoof others.
+    const text = raw.replace(/[\p{Cc}\p{Cf}]/gu, ' ').trim();
+    if (!text) return;
+    if (!s.chatBucket.take()) return notice('You are sending messages too fast.');
+    if (channel === 'private') {
+      const wanted = to?.toLowerCase();
+      const target = wanted ? [...this.sessions.values()].find((o) => this.inWorld(o) && o.name.toLowerCase() === wanted) : undefined;
+      if (!target) return notice(`${to ?? 'Nobody'} is not online.`);
+      const d = { channel, from: s.name, to: target.name, text };
+      this.send(target, { op: SC.CHAT_BROADCAST, d });
+      if (target !== s) this.send(s, { op: SC.CHAT_BROADCAST, d: { ...d, sent: true } });
+      return;
+    }
+    const d = { channel, from: s.name, text };
+    const msg = JSON.stringify({ op: SC.CHAT_BROADCAST, d } satisfies ServerControlMsg);
+    for (const o of this.sessions.values()) {
+      if (o !== s && this.inWorld(o) && (channel === 'global' || o.zone === s.zone)) o.conn.send(msg);
+    }
+    this.send(s, { op: SC.CHAT_BROADCAST, d: { ...d, sent: true } });
+    this.log.info({ conn: s.conn.id, channel, from: s.name, length: text.length }, 'chat');
   }
 
   private async enterWorld(s: Session, account: Account, characterId: string, name: string): Promise<void> {
     try {
       if (account.guest) {
+        s.name = name;
         await this.sendToZone(s, this.defaultArena, {
           name, characterId: null,
           ...(this.devGuestSpawn ? { position: this.devGuestSpawn } : {}),
@@ -316,6 +361,7 @@ export class SessionManager implements TransportHandlers {
         const saved = await this.characters.loadOwned(account.id, characterId);
         if (!saved) return this.reject(s, 'character not found');
         if (!this.sessions.has(s.conn.id)) return; // disconnected while loading
+        s.name = saved.name;
         // Resume in the saved level zone when it still exists (the saved position belongs to it);
         // characters last seen in the synthetic test arena, or anywhere unavailable, start in
         // the server's default arena.

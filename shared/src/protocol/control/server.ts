@@ -260,6 +260,20 @@ export interface PongMsg {
   d: { clientTime: number; serverTick: number };
 }
 
+export type ChatChannel = 'local' | 'global' | 'private' | 'system';
+/** What a server (`system`) line reports: the chat tints it by kind. */
+export type ChatNoticeKind = 'loot' | 'gold' | 'xp' | 'level' | 'spell' | 'quest' | 'trade' | 'error' | 'info';
+
+/**
+ * A chat line. Players' lines carry `from` (and `to` on private ones, echoed to the sender
+ * too); `system` lines are the server telling this player what happened (loot, experience…).
+ */
+export interface ChatBroadcastMsg {
+  op: typeof SC.CHAT_BROADCAST;
+  /** `sent`: the sender's own copy of their line. */
+  d: { channel: ChatChannel; text: string; from?: string; to?: string; sent?: boolean; kind?: ChatNoticeKind };
+}
+
 export interface ErrorMsg {
   op: typeof SC.ERROR;
   d: { code: string; message: string };
@@ -272,6 +286,7 @@ export type ServerControlMsg =
   | EntityDespawnMsg
   | PongMsg
   | ErrorMsg
+  | ChatBroadcastMsg
   | PlayerStatsMsg
   | CombatEventMsg
   | InventoryUpdateMsg
