@@ -169,7 +169,7 @@ export class LocalPlayer {
    * seconds - on the upper body when cast on the move (no conjure, moving).
    */
   startCast(plan: { conjure: number; clip: number; anim: number; state: string | number }): boolean {
-    if (this.dead || this.swingLeft > 0 || this.casting || !this.character.grounded || isHitAction(this.character.rollDir)) return false;
+    if (this.dead || this.swingLeft > 0 || this.casting || !looksGrounded(this.character) || isHitAction(this.character.rollDir)) return false;
     this.castLeft = plan.conjure;
     this.castClip = plan.clip;
     this.castAnim = plan.anim;

@@ -332,6 +332,8 @@ export interface WorldZoneOptions {
 }
 
 
+/** A recast this many ticks before a released cast ends is taken (the client times its clip by its own clock). */
+const CAST_END_GRACE_TICKS = 2;
 /** World objects (original levels): interaction reach and respawn delays (slice values). */
 /** Sound a boost potion plays when drunk (0x00401AB0 / 0x00401D10: 0x19E). */
 const BOOST_POTION_SOUND = 0x19e;
@@ -1432,7 +1434,12 @@ export class WorldZone {
    */
   castSpell(connId: number): void {
     const p = this.players.get(connId);
-    if (!p || !alive(p) || p.cast || p.swing || p.hitUntil > this.tick || !p.character.grounded || p.cutscene || this.held(p)) return;
+    // A released cast in its last ticks gives way: the client's clip ends by its own clock and a
+    // recast can land a tick or two before the server's.
+    if (p?.cast?.released && this.tick >= p.cast.end - CAST_END_GRACE_TICKS) p.cast = null;
+    // On the ground as the animation sees it: running over a bump or a stair edge leaves the
+    // ground for a tick or two, and a cast there played on the client and was dropped here.
+    if (!p || !alive(p) || p.cast || p.swing || p.hitUntil > this.tick || !looksGrounded(p.character) || p.cutscene || this.held(p)) return;
     const spell = p.selectedSpell;
     const known = spell && p.spells.find((s) => s.spell === spell);
     if (!spell || !known || !CASTABLE_SPELLS.has(spell)) return;
