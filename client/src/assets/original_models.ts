@@ -293,9 +293,17 @@ class OriginalAvatar implements Avatar {
     s.uniform = uniform;
     void this.stoneTexture().then((tex) => {
       if (!tex) return;
+      // Patched in place, over the shader hooks already on it: the body's material is the unlit
+      // copy ModelLighting tints each frame and the dynamic lights extend (model_light.ts); a
+      // clone would leave both behind and stay at the light it had when the spell landed.
       for (const mesh of this.bodyMeshes) {
-        const m = (mesh.material as THREE.MeshStandardMaterial).clone();
-        m.onBeforeCompile = (shader) => {
+        const m = mesh.material as THREE.Material;
+        if (m.userData['stoneSkin']) continue;
+        m.userData['stoneSkin'] = true;
+        const before = m.onBeforeCompile.bind(m);
+        const beforeKey = m.customProgramCacheKey.bind(m);
+        m.onBeforeCompile = (shader, renderer) => {
+          before(shader, renderer);
           shader.uniforms['stoneMap'] = { value: tex };
           shader.uniforms['stoneMix'] = uniform;
           shader.fragmentShader =
@@ -305,8 +313,8 @@ class OriginalAvatar implements Avatar {
               '#include <map_fragment>\n#ifdef USE_MAP\n  diffuseColor.rgb = mix(diffuseColor.rgb, texture2D(stoneMap, vMapUv).rgb, stoneMix);\n#endif',
             );
         };
-        m.customProgramCacheKey = () => 'stone-skin';
-        mesh.material = m;
+        m.customProgramCacheKey = () => beforeKey() + '|stone-skin';
+        m.needsUpdate = true;
       }
     });
   }
