@@ -66,6 +66,7 @@ import {
   splitInventoryStack,
   moveInventoryGridItem,
   equipmentOf,
+  USE_MASK,
   sanitizeInventory,
   setEquipped,
   isEquippable,
@@ -236,7 +237,7 @@ import {
   type SwingTiming,
 } from '@crusaders/shared';
 import { InputQueue } from './input_queue.ts';
-import { SpellRuntime, type ActiveStatus, type SpellHost } from './spell_runtime.ts';
+import { BODY_MID, SpellRuntime, type ActiveStatus, type SpellHost } from './spell_runtime.ts';
 
 /** Snapshots older than this are not used as delta baselines (full snapshot instead). */
 const MAX_BASELINE_AGE = 20;
@@ -704,6 +705,19 @@ type Actor = Player | Mob;
 
 const alive = (a: Actor) => a.deadUntil === 0;
 /** Unarmed peaceful creatures (citizens, merchants): no flinch, no fighting back - they run. */
+/** Tooltip lines for what an item's use behaviour adds (DRINK_SOUL, the shield's mask, REFLECT). */
+function itemEffects(def: ItemDef): string[] {
+  const out: string[] = [];
+  if (def.soulDrink) out.push(`Drinks ${def.soulDrink.amount} health ${def.type === 'shield' ? 'from each blow it stops' : 'with each blow'}${def.soulDrink.giants ? ', giants too' : ''}`);
+  if (def.type === 'shield') {
+    const mask = def.blocks ?? 0;
+    if (mask & USE_MASK.FIREBALL) out.push('Stops fire ball explosions');
+    if (mask & USE_MASK.LIGHTNING) out.push(def.reflects ? 'Turns lightning back on its caster' : 'Stops lightning');
+    if (mask & USE_MASK.GIANTS) out.push('Stops the blows of giants');
+  }
+  return out;
+}
+
 /** The edge picking a blow's impact sound (0x44CEF0 / 0x44D290): outgoing SLASH above BASH. */
 const sharpEdge = (a: { weapon: { damage?: readonly number[] } }) => !!a.weapon.damage && a.weapon.damage[1]! < a.weapon.damage[0]!;
 const isCitizen = (m: Mob) => m.archetype.passive && m.weapon.id === UNARMED.id;
@@ -776,6 +790,8 @@ export class WorldZone {
   private readonly fallLimit: number;
   /** The spell objects and timed effects (spell_runtime.ts). */
   private readonly magic: SpellRuntime;
+  /** What the spell runtime may do (drain and heal are shared with the soul-drinking items). */
+  private readonly host: SpellHost;
   /** Event rate multipliers set from the admin panel (not original; 1 = the original's). */
   private rates: WorldRates = { ...DEFAULT_RATES };
 
@@ -807,7 +823,8 @@ export class WorldZone {
       if (o && b.swing) o.swing = { def: b.swing, points: b.points, hull: hullXZ(b.points), motion: null, blocked: false };
       else if (o && b.mover) o.mover = { def: b.mover, motion: shutMover() };
     }
-    this.magic = new SpellRuntime(this.spellHost());
+    this.host = this.spellHost();
+    this.magic = new SpellRuntime(this.host);
   }
 
   /** What the spell runtime may do to the zone's characters. */
@@ -846,6 +863,15 @@ export class WorldZone {
         }
         return take;
       },
+      shieldStops: (t, from, kind) => {
+        // Explosions and bolts ask the target's shield too (0x004BEA10 / 0x004BEE90 → 0x0044D5E0):
+        // only a shield whose mask has FIREBALL (Fire Shield) or LIGHTNING (Reflective Shield) takes them.
+        const x = actor(t);
+        if (!alive(x) || !this.shieldRaised(x)) return false;
+        const mask = x.shield?.blocks ?? (USE_MASK.MELEE | USE_MASK.PROJECTILE);
+        return (mask & USE_MASK[kind]) !== 0 && this.facesBlock(x, from);
+      },
+      reflects: (t) => actor(t).shield?.reflects === true,
       heal: (a, amount) => {
         const x = actor(a);
         if (!alive(x)) return;
@@ -1872,6 +1898,7 @@ export class WorldZone {
       ...(def.attributes ? { attributes: def.attributes } : {}),
       ...(def.heal ? { heal: def.heal } : {}),
       ...(potionCooldown(def) ? { cooldown: potionCooldown(def)!.seconds } : {}),
+      ...(itemEffects(def).length ? { effects: itemEffects(def) } : {}),
     };
   }
 
@@ -3478,9 +3505,14 @@ export class WorldZone {
             d: { attacker: a.entityId, target: target.entityId, damage: 0, hp: Math.ceil(target.hp), killed: false, blocked: true, sharp: sharpEdge(a), ...(sweep ? { sweep } : {}) },
           });
           this.shove(a, target, s, true);
+          // A Vampiric Shield drinks from the blow it stops.
+          this.soulDrink(target, a, target.shield?.soulDrink);
+          if (!alive(a)) return;
           continue;
         }
         this.applyDamage(a, target, this.rollDamage(a, s.combo), a.kind === 'mob' && a.archetype.knocksDown === true);
+        // The weapon's use runs on every landed blow (0x0044D59A): Blade of Hunger, Rod of Necros.
+        this.soulDrink(a, target, a.weapon.soulDrink);
         if (alive(target)) this.shove(a, target, s, false);
         if (!alive(a)) return;
       }
@@ -3509,14 +3541,58 @@ export class WorldZone {
       ? p.blocking
       : this.mobShieldUp(p);
     if (!raised) return false;
+    // The shield's use behaviour (0x401F20): the big creatures' blows only with the GIANTS bit.
+    if (!this.shieldStops(p, attacker)) return false;
+    return this.facesBlock(p, attacker.character.position);
+  }
+
+  /** The block's frontal cone (0x0044D5E0): dot(facing, toward the source) > cos(30 rad). */
+  private facesBlock(p: Actor, from: { x: number; z: number }): boolean {
     const pp = p.character.position;
-    const ap = attacker.character.position;
-    const dx = ap.x - pp.x;
-    const dz = ap.z - pp.z;
+    const dx = from.x - pp.x;
+    const dz = from.z - pp.z;
     const dist = Math.hypot(dx, dz);
     if (dist < 1e-6) return true;
     const f = forwardXZ(dequantizeAngle(p.yaw));
     return (dx * f.x + dz * f.z) / dist > ORIGINAL_BLOCK_COS;
+  }
+
+  /** Ice Titans and the elementals (types 0x87-0x8A) and creatures of scale 1.5 or more (render +0x20 >= 1.5 at 0x4DE418). */
+  private giant(a: Actor): boolean {
+    const t = this.creatureType(a);
+    return (t >= 0x87 && t <= 0x8a) || (a.kind === 'mob' && a.scale >= 1.5);
+  }
+
+  /**
+   * Whether a raised shield's mask (items.ctx BLOCK / REFLECT / DRINK_SOUL, 0x401F20) takes this
+   * blow: MELEE, or GIANTS for the big creatures. Every plain shield lacks GIANTS: an Ice Titan's
+   * club goes through it. A creature guarding with no shield item keeps the default mask.
+   */
+  private shieldStops(p: Actor, attacker: Actor): boolean {
+    const mask = p.shield?.blocks ?? (USE_MASK.MELEE | USE_MASK.PROJECTILE);
+    return (mask & (this.giant(attacker) ? USE_MASK.GIANTS : USE_MASK.MELEE)) !== 0;
+  }
+
+  /**
+   * DRINK_SOUL (0x004014C0), a weapon's on each landed blow or a shield's on each stopped one
+   * (0x0044D59A / 0x00474550): up to `amount` HP drawn from the other into the bearer, at most
+   * what it has left; the big creatures only with GIANTS. SOULDRINKER_ENERGY on the drained,
+   * SOULDRINKER_CAST on the drinker (effects 0x12 / 0x0D).
+   */
+  private soulDrink(bearer: Actor, other: Actor, drink: { amount: number; giants: boolean } | undefined): void {
+    if (!drink || drink.amount <= 0 || !alive(bearer) || !alive(other)) return;
+    if (this.giant(other) && !drink.giants) return;
+    const take = this.host.drain(bearer, other, drink.amount);
+    if (take <= 0) return;
+    this.host.heal(bearer, take);
+    const at = bearer.character.position;
+    this.broadcastAt(at, {
+      op: SC.SPELL_EVENT,
+      d: { fx: [
+        { name: 'SOULDRINKER_ENERGY', level: 1, at: [0, BODY_MID, 0], entity: other.entityId },
+        { name: 'SOULDRINKER_CAST', level: 1, at: [0, BODY_MID, 0], entity: bearer.entityId },
+      ] },
+    });
   }
 
   /**

@@ -35,7 +35,7 @@ type T3 = [number, number, number];
 
 const FT = 0.3048;
 /** Height of a character's middle above its feet (hit tests, targets). */
-const BODY_MID = PLAYER_HEIGHT * 0.55;
+export const BODY_MID = PLAYER_HEIGHT * 0.55;
 /** A projectile meets a character within this distance of its axis. */
 const PROJECTILE_RADIUS = PLAYER_RADIUS + 0.25;
 const AIR = DAMAGE_TYPES.indexOf('AIR');
@@ -87,6 +87,10 @@ export interface SpellHost {
   /** Soul drinker: HP drawn out (no flinch); returns what was taken. */
   drain(attacker: SpellTarget, victim: SpellTarget, amount: number): number;
   heal(a: SpellTarget, amount: number): void;
+  /** A raised shield facing `from` whose use mask takes this kind (FIREBALL: explosions, LIGHTNING: bolts). */
+  shieldStops(a: SpellTarget, from: V3, kind: 'FIREBALL' | 'LIGHTNING'): boolean;
+  /** Its shield's use is REFLECT (Reflective Shield). */
+  reflects(a: SpellTarget): boolean;
   /** Sends to every player near `at`. */
   emit(at: V3, d: SpellEventMsg['d']): void;
   /** A status began or ended on a character (its speed, the owner's stats). */
@@ -409,6 +413,8 @@ export class SpellRuntime {
         if (b.spell === 'holy_wrath' && UNHOLY_TYPES.has(this.host.creatureType(c)) === !!b.unholy) continue;
         if (!lineOfSight(this.host.mw, b.at, m, 0)) continue;
         b.hit.add(c.entityId);
+        // An explosion is kept off by a shield raised toward it that stops FIREBALL (0x004BEA10).
+        if (b.spell === 'fireball' && this.host.shieldStops(c, b.at, 'FIREBALL')) continue;
         this.burstHit(b, c, dist);
       }
       if (b.life <= 0) this.bursts.splice(i, 1);
@@ -541,11 +547,26 @@ export class SpellRuntime {
     chain.hit.add(target.entityId);
     chain.next = this.host.tick() + ticks(R.lightningChainDelay);
     const from = this.hand(chain.owner);
-    const to = mid(target);
-    this.fx(to, [{ name: 'LIGHTNING_TARGET', level: chain.level, at: [0, BODY_MID, 0], entity: target.entityId }], [{ id: R.lightningSound, at: tuple(to), rate: randomRate() }], { at: tuple(to), color: [180, 200, 255], radius: 8, seconds: 0.3 }, [{ from: tuple(from), to: tuple(to) }]);
     // AIR value1 (the bolt's +0x24, the spell's value1 by level).
     const v = new Array<number>(DAMAGE_TYPES.length).fill(0);
     v[AIR] = chain.values.value1;
+    // A shield that stops LIGHTNING takes the bolt at its bearer's hand, unharmed (0x004BEE90:
+    // the bolt is bent to the hand dummy and does no damage). Reflective Shield (REFLECT) sends it
+    // back at its caster, from the shield (the chain ends there).
+    if (this.host.shieldStops(target, from, 'LIGHTNING')) {
+      const hand = this.hand(target);
+      this.fx(hand, [], [{ id: R.lightningSound, at: tuple(hand), rate: randomRate() }], { at: tuple(hand), color: [180, 200, 255], radius: 8, seconds: 0.3 }, [{ from: tuple(from), to: tuple(hand) }]);
+      if (this.host.reflects(target) && this.host.alive(chain.owner) && !chain.hit.has(chain.owner.entityId) && !this.globed(chain.owner)) {
+        const back = mid(chain.owner);
+        this.fx(back, [{ name: 'LIGHTNING_TARGET', level: chain.level, at: [0, BODY_MID, 0], entity: chain.owner.entityId }], [{ id: R.lightningSound, at: tuple(back), rate: randomRate() }], undefined, [{ from: tuple(hand), to: tuple(back) }]);
+        chain.hit.add(chain.owner.entityId);
+        this.host.damage(target, chain.owner, v);
+      }
+      chain.left = 0;
+      return;
+    }
+    const to = mid(target);
+    this.fx(to, [{ name: 'LIGHTNING_TARGET', level: chain.level, at: [0, BODY_MID, 0], entity: target.entityId }], [{ id: R.lightningSound, at: tuple(to), rate: randomRate() }], { at: tuple(to), color: [180, 200, 255], radius: 8, seconds: 0.3 }, [{ from: tuple(from), to: tuple(to) }]);
     this.host.damage(chain.owner, target, v);
   }
 

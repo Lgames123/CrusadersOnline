@@ -68,7 +68,45 @@ export interface ItemDef {
    * sets `1 << bit` (0x46435B), which gives the item: 0 Horn of Shattering ... 5 Message for Dain.
    */
   questBit?: number;
+  /**
+   * Shields: what the raised shield stops (its `Use` BLOCK / REFLECT / DRINK_SOUL behaviour's mask,
+   * USE_MASK bits; 0x401F20). Default MELEE | PROJECTILE; `UseParameters(FIREBALL)` adds
+   * explosions, `(LIGHTNING)` bolts, `(GIANTS)` blows of the big creatures.
+   */
+  blocks?: number;
+  /** Shields with `Use REFLECT` (Reflective Shield): a stopped bolt goes back to its caster. */
+  reflects?: boolean;
+  /**
+   * `Use DRINK_SOUL` (0x004014C0): a weapon on each landed blow, a shield on each stopped blow,
+   * draws up to `amount` HP from the other creature into the bearer; the big creatures only with
+   * the GIANTS bit (Blade of Hunger 1 + GIANTS, Rod of Necros 5, Vampiric Shield 3).
+   */
+  soulDrink?: { amount: number; giants: boolean };
+  /** Armour: Drake's body while worn (items.ctx `SetArmorSkin(model, texture)`, models.ctx 121 / 124). */
+  armorSkin?: { model: number; texture: number };
   price: number;
+}
+
+/** A shield's / soul drinker's target mask (0x4EA0F0 names → 0x4EA104 bits). */
+export const USE_MASK = { MELEE: 1, PROJECTILE: 2, FIREBALL: 4, LIGHTNING: 8, GIANTS: 16 } as const;
+/** BLOCK, REFLECT and DRINK_SOUL start with MELEE | PROJECTILE (0x0040253D, 0x004025C9, 0x0040271A). */
+const DEFAULT_USE_MASK = USE_MASK.MELEE | USE_MASK.PROJECTILE;
+/** DRINK_SOUL's amount before its `UseParameters` (10.0, 0x00402557). */
+const DEFAULT_SOUL_DRINK = 10;
+
+/**
+ * A `UseParameters` list for BLOCK / REFLECT / DRINK_SOUL (0x00401700 / 0x00401990 / 0x00402030):
+ * CLEAR empties the mask, a mask name adds its bit, a number (DRINK_SOUL only) is the amount.
+ */
+function useMask(params: readonly (string | number)[]): { mask: number; amount?: number } {
+  let mask: number = DEFAULT_USE_MASK;
+  let amount: number | undefined;
+  for (const p of params) {
+    if (typeof p === 'number') amount = p;
+    else if (p.toUpperCase() === 'CLEAR') mask = 0;
+    else mask |= USE_MASK[p.toUpperCase() as keyof typeof USE_MASK] ?? 0;
+  }
+  return { mask, ...(amount !== undefined ? { amount } : {}) };
 }
 
 /**
@@ -157,10 +195,39 @@ export const BUILTIN_ITEMS: ItemCatalog = new Map(
 /** Shape of one entry in the converter's rules/items.json. */
 interface ItemRule {
   name: string;
+  parent?: string | null;
   fields: Record<string, string | number>;
   damage: Partial<Record<string, number>>;
   protection: Partial<Record<string, number>>;
   calls?: { name: string; args: (string | number)[] }[];
+}
+
+type RuleCall = NonNullable<ItemRule['calls']>[number];
+
+/**
+ * An item's calls with its parents' (the engine copies the parent and runs the child's statements
+ * after): a parent's call survives unless the child makes its own of that name. items.json only
+ * keeps the child's when it has any (Enoch's Plate of Might loses Heavy Plate Mail's
+ * SetArmorSkin), so the chain is walked here.
+ */
+function inheritedCalls(rule: ItemRule, byName: ReadonlyMap<string, ItemRule>, depth = 0): RuleCall[] {
+  const own = rule.calls ?? [];
+  const parent = rule.parent ? byName.get(rule.parent.toLowerCase()) : undefined;
+  if (!parent || depth > 32) return [...own];
+  const names = new Set(own.map((c) => c.name));
+  return [...inheritedCalls(parent, byName, depth + 1).filter((c) => !names.has(c.name)), ...own];
+}
+
+/** `Equip BOOST_ATTRIBUTE / BOOST_PROTECTION` + `EquipParameters(-1, what, amount)` on any worn item. */
+function withEquipBoost(def: ItemDef, equip: unknown, calls: readonly RuleCall[]): ItemDef {
+  const boost = itemBoost(equip, calls.find((c) => c.name === 'EquipParameters')?.args ?? []);
+  if (boost?.kind === 'attribute') return { ...def, attributes: { ...def.attributes, [boost.attribute]: (def.attributes?.[boost.attribute] ?? 0) + boost.amount } };
+  if (boost?.kind === 'protection') {
+    const base = def.protection ?? damageVector({}, 1);
+    const extra = damageVector({ [boost.type]: boost.multiplier }, 1);
+    return { ...def, protection: base.map((v, t) => v * (extra[t] ?? 1)) };
+  }
+  return def;
 }
 
 /** Reads a positive integral inventory dimension, falling back safely for incomplete data. */
@@ -187,16 +254,38 @@ function withSourceShape(def: ItemDef, fields: ItemRule['fields']): ItemDef {
  */
 export function catalogFromItemRules(rules: { items: readonly ItemRule[] }): ItemCatalog {
   const out = new Map(BUILTIN_ITEMS);
+  const byName = new Map(rules.items.map((r) => [r.name.toLowerCase(), r]));
   for (const r of rules.items) {
     const type = String(r.fields['Type'] ?? '');
     const price = Number(r.fields['Price'] ?? 0) || 0;
+    const calls = inheritedCalls(r, byName);
+    // Every UseParameters line, in order (Blade of Hunger has two: 1 and GIANTS).
+    const useParams = calls.filter((c) => c.name === 'UseParameters').flatMap((c) => c.args);
+    const use = String(r.fields['Use'] ?? '');
     let def: ItemDef | null = null;
-    if (type === 'WEAPON' && r.fields['SubType'] === 'MELEE') {
+    // THROWABLE (Boomer Axe) and MISSILE (Dasher Hand Bow, sold in Du9c) swing like the rest in
+    // Drake's hand: he has no ASM_THROW_ITEM clip, so the throw / shot (0x0042C77F / 0x0042C7BE,
+    // on that clip's event) never comes, and no level holds an Arrow.
+    if (type === 'WEAPON' && ['MELEE', 'THROWABLE', 'MISSILE'].includes(String(r.fields['SubType']))) {
       def = weapon(r.name, r.damage as Partial<Record<DamageType, number>>, Number(r.fields['Speed'] ?? 1) || 1, price);
+      if (use === 'DRINK_SOUL') {
+        const { mask, amount } = useMask(useParams);
+        def = { ...def, soulDrink: { amount: amount ?? DEFAULT_SOUL_DRINK, giants: (mask & USE_MASK.GIANTS) !== 0 } };
+      }
+      def = withEquipBoost(def, r.fields['Equip'], calls);
     } else if (type === 'SHIELD') {
       def = shield(r.name, price);
+      const { mask, amount } = useMask(useParams);
+      def = { ...def, blocks: mask };
+      if (Object.keys(r.protection).length) def = { ...def, protection: damageVector(r.protection as Partial<Record<DamageType, number>>, 1) };
+      if (use === 'REFLECT') def = { ...def, reflects: true };
+      if (use === 'DRINK_SOUL') def = { ...def, soulDrink: { amount: amount ?? DEFAULT_SOUL_DRINK, giants: (mask & USE_MASK.GIANTS) !== 0 } };
+      def = withEquipBoost(def, r.fields['Equip'], calls);
     } else if (type === 'ARMOR') {
       def = armor(r.name, r.protection as Partial<Record<DamageType, number>>, price);
+      const skin = calls.find((c) => c.name === 'SetArmorSkin')?.args;
+      if (skin && Number.isInteger(Number(skin[0]))) def = { ...def, armorSkin: { model: Number(skin[0]), texture: Number(skin[1] ?? 0) || 0 } };
+      def = withEquipBoost(def, r.fields['Equip'], calls);
     } else if (type === 'SPELLBOOK' && r.fields['Use'] === 'GRANT_SPELL') {
       // Inherited books keep the parent's Use; the spell is the book's own UseParameters.
       const spell = SPELL_BOOK_PARAMS[String(r.calls?.find((c) => c.name === 'UseParameters')?.args[0] ?? '')];
@@ -220,19 +309,18 @@ export function catalogFromItemRules(rules: { items: readonly ItemRule[] }): Ite
       // Dasher Boots: a story item like the Permanent trinkets.
       def = { ...key(r.name, price, undefined, true), questItem: true };
     } else if (type === 'RING' || type === 'BOOTS') {
-      def = accessory(r.name, type === 'RING' ? 'ring' : 'boots', 1, 1, price);
       // `Equip` + `EquipParameters` (-1 = while worn, what, amount), the same arguments as a boost potion's.
-      const boost = itemBoost(r.fields['Equip'], r.calls?.find((c) => c.name === 'EquipParameters')?.args ?? []);
-      if (boost?.kind === 'attribute') def = { ...def, attributes: { [boost.attribute]: boost.amount } };
-      else if (boost?.kind === 'protection') def = { ...def, protection: damageVector({ [boost.type]: boost.multiplier }, 1) };
+      def = withEquipBoost(accessory(r.name, type === 'RING' ? 'ring' : 'boots', 1, 1, price), r.fields['Equip'], calls);
     }
     if (def && def.id) {
-      const shaped = withSourceShape(def, r.fields);
+      // items.ctx `Name` is what the game shows (Soul Sucker reads "Blade of Hunger"); the id stays the engine name's.
+      const shown = typeof r.fields['Name'] === 'string' ? r.fields['Name'].trim() : '';
+      const shaped = { ...withSourceShape(def, r.fields), ...(shown ? { name: shown } : {}) };
       out.set(shaped.id, shaped);
       out.set(r.name, shaped);
-      if (typeof r.fields['Name'] === 'string' && r.fields['Name'].trim()) {
-        out.set(itemSlug(r.fields['Name']), shaped);
-        out.set(r.fields['Name'].trim(), shaped);
+      if (shown) {
+        out.set(itemSlug(shown), shaped);
+        out.set(shown, shaped);
       }
     }
   }

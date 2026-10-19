@@ -881,8 +881,33 @@ export async function loadOriginalAvatars(): Promise<AvatarFactory | null> {
     const prop = async (file: string | undefined): Promise<THREE.Object3D | undefined> => {
       if (!file) return undefined;
       if (!props.has(file)) {
-        const url = manifest.models[file];
-        props.set(file, url ? (await loader.loadAsync(`/generated/${url}`).catch(() => null))?.scene ?? null : null);
+        // `<file>#<texture>`: the same model in another of its models.ctx texture variants.
+        const [base, variant] = file.split('#') as [string, string | undefined];
+        const url = manifest.models[base];
+        let scene = url ? (await loader.loadAsync(`/generated/${url}`).catch(() => null))?.scene ?? null : null;
+        const texUrl = variant ? manifest.textures[variant] : undefined;
+        if (scene && texUrl) {
+          const map = await textures.loadAsync(`/generated/${texUrl}`).catch(() => null);
+          if (map) {
+            scene = scene.clone(true);
+            scene.traverse((o) => {
+              const mesh = o as THREE.Mesh;
+              if (!mesh.isMesh) return;
+              const swap = (m: THREE.Material) => {
+                const std = m.clone() as THREE.MeshStandardMaterial;
+                map.flipY = std.map?.flipY ?? false;
+                map.wrapS = std.map?.wrapS ?? THREE.RepeatWrapping;
+                map.wrapT = std.map?.wrapT ?? THREE.RepeatWrapping;
+                map.colorSpace = std.map?.colorSpace ?? THREE.SRGBColorSpace;
+                std.map = map;
+                std.needsUpdate = true;
+                return std;
+              };
+              mesh.material = Array.isArray(mesh.material) ? mesh.material.map(swap) : swap(mesh.material);
+            });
+          }
+        }
+        props.set(file, scene);
       }
       return props.get(file) ?? undefined;
     };

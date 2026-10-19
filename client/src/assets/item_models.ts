@@ -31,6 +31,12 @@ const MODEL_TEXTURES: Readonly<Record<number, readonly string[]>> = {
   4: ['ringfire4', 'unholyfire', 'revelation'],
   8: ['longsword01', 'longsword01a'],
   28: ['shield128', 'reflshld', 'vampshld', 'iceshield'],
+  71: ['standardaxe', 'boomeraxe64'],
+  76: ['warhammer64', 'hammershatter'],
+  // Blade of the Burning Heart and of the Silent Chill wear the plain blade (models.ctx 77).
+  77: ['broad', 'broad', 'shadowblade', 'broad'],
+  99: ['halberd64', 'flamestinger'],
+  244: ['ironclub64', 'rodofnecros'],
   62: ['potion-blue', 'potion-dkgr', 'potion-g', 'potion-grey'],
   63: ['lightbk64', 'firebk64', 'heroismbk64', 'souldbk64'],
   106: ['scrollmessdain', 'scrollmessscout', 'scrollmesswar'],
@@ -55,40 +61,58 @@ export function itemPreviewModelFile(model: number | undefined): string | undefi
   return model === undefined ? undefined : MODEL_FILES[model];
 }
 
-/** Armour item model id -> Drake's body model and its texture (models.ctx 80-83, 247 / 121, 124). */
-const ARMOR_BODIES: Readonly<Record<number, { model: string; texture: string }>> = {
-  80: { model: 'drake02armor', texture: 'drake02armor2' },
-  81: { model: 'drake02armor', texture: 'drake02armor3' },
-  82: { model: 'drake02armor', texture: 'drake02armor4' },
-  83: { model: 'drakearmor05fixed', texture: 'drake05armor5' },
-  247: { model: 'drake02armor', texture: 'drake02armor5' },
+/**
+ * Drake's armour bodies, items.ctx `SetArmorSkin(model, texture)`: models.ctx 121 Drake02armor.mdl
+ * (scale, banded, light plate, dragon scale) and 124 DrakeArmor05fixed.mdl (heavy plate; Plate of
+ * Sanctuary and of Elemental Protection inherit it from Heavy Plate Mail).
+ */
+const ARMOR_SKINS: Readonly<Record<number, { model: string; textures: readonly string[] }>> = {
+  121: { model: 'drake02armor', textures: ['drake02armor2', 'drake02armor3', 'drake02armor4', 'drake02armor5'] },
+  124: { model: 'drakearmor05fixed', textures: ['drake05armor5'] },
 };
 
-/** Model files Drake is drawn with: weapon (right hand), shield (left forearm), armour body. */
+/**
+ * Models files Drake is drawn with: weapon (right hand), shield (left forearm), armour body. A held
+ * item's file may end in `#<texture>`: the model drawn with that texture variant (Shadow Blade...).
+ */
 export interface DrakeOutfit {
   right?: string;
   left?: string;
   body?: { model: string; texture: string };
 }
 
-type ItemRows = { name: string; fields: Record<string, string | number> }[];
-let itemRows: Promise<ItemRows> | null = null;
-let itemModels: Promise<Map<string, number>> | null = null;
+type ItemRow = { name: string; parent?: string | null; fields: Record<string, string | number>; calls?: { name: string; args: (string | number)[] }[] };
+type ItemLook = { model?: number; texture: number; skin?: { model: number; texture: number } };
+let itemRows: Promise<ItemRow[]> | null = null;
+let itemLooks: Promise<Map<string, ItemLook>> | null = null;
 let itemDecals: Promise<Map<string, DecalKind>> | null = null;
 
 /** The converted items.ctx rows (empty without the game files). */
-function loadItemRows(): Promise<ItemRows> {
+function loadItemRows(): Promise<ItemRow[]> {
   itemRows ??= fetch('/generated/rules/items.json')
-    .then((r) => (r.ok ? (r.json() as Promise<{ items: ItemRows }>) : { items: [] }))
+    .then((r) => (r.ok ? (r.json() as Promise<{ items: ItemRow[] }>) : { items: [] }))
     .then(({ items }) => items)
     .catch(() => []);
   return itemRows;
 }
 
-/** Item id -> items.ctx Model id, from the converted rules (empty without the game files). */
-function loadItemModels(): Promise<Map<string, number>> {
-  itemModels ??= loadItemRows().then((items) => new Map(items.filter((i) => typeof i.fields['Model'] === 'number').map((i) => [itemSlug(i.name), i.fields['Model'] as number])));
-  return itemModels;
+/** Item id -> items.ctx Model, Texture and armour skin (inherited from the parents), from the converted rules. */
+function loadItemLooks(): Promise<Map<string, ItemLook>> {
+  itemLooks ??= loadItemRows().then((items) => {
+    const byName = new Map(items.map((i) => [i.name.toLowerCase(), i]));
+    const skinOf = (row: ItemRow | undefined, depth = 0): ItemLook['skin'] => {
+      if (!row || depth > 32) return undefined;
+      const args = row.calls?.find((c) => c.name === 'SetArmorSkin')?.args;
+      if (args) return { model: Number(args[0]), texture: Number(args[1] ?? 0) || 0 };
+      return skinOf(row.parent ? byName.get(row.parent.toLowerCase()) : undefined, depth + 1);
+    };
+    return new Map(items.map((i) => {
+      const model = typeof i.fields['Model'] === 'number' ? i.fields['Model'] : undefined;
+      const skin = i.fields['Type'] === 'ARMOR' ? skinOf(i) : undefined;
+      return [itemSlug(i.name), { ...(model !== undefined ? { model } : {}), texture: Number(i.fields['Texture'] ?? 0) || 0, ...(skin ? { skin } : {}) }];
+    }));
+  });
+  return itemLooks;
 }
 
 /** The mark a weapon leaves where it strikes a wall (items.ctx `Decal`), or null. */
@@ -101,13 +125,25 @@ export async function weaponDecal(itemId: string | undefined): Promise<DecalKind
   return (await itemDecals).get(itemId) ?? null;
 }
 
+/** A held item's file key, with `#<texture>` when its items.ctx Texture picks another variant. */
+function heldFile(look: ItemLook | undefined): string | undefined {
+  const file = look?.model !== undefined ? MODEL_FILES[look.model] : undefined;
+  if (!file) return undefined;
+  const variants = MODEL_TEXTURES[look!.model!];
+  const tex = variants && look!.texture > 0 ? variants[look!.texture] : undefined;
+  return tex && tex !== variants![0] ? `${file}#${tex}` : file;
+}
+
 /** The models for a character's equipped items. */
 export async function outfitFor(look: CharacterLook): Promise<DrakeOutfit> {
-  const models = await loadItemModels();
-  const id = (item: string | undefined) => (item ? models.get(item) : undefined);
-  const right = MODEL_FILES[id(look.weapon) ?? -1];
-  const left = MODEL_FILES[id(look.shield) ?? -1];
-  const body = ARMOR_BODIES[id(look.armor) ?? -1];
+  const looks = await loadItemLooks();
+  const of = (item: string | undefined) => (item ? looks.get(item) : undefined);
+  const right = heldFile(of(look.weapon));
+  const left = heldFile(of(look.shield));
+  const skin = of(look.armor)?.skin;
+  const skinDef = skin ? ARMOR_SKINS[skin.model] : undefined;
+  const skinTexture = skinDef?.textures[skin!.texture] ?? skinDef?.textures[0];
+  const body = skinDef && skinTexture ? { model: skinDef.model, texture: skinTexture } : undefined;
   return { ...(right ? { right } : {}), ...(left ? { left } : {}), ...(body ? { body } : {}) };
 }
 

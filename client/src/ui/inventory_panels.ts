@@ -446,9 +446,10 @@ export class InventoryPanels {
     const lines: string[] = [];
     item.damage?.forEach((v, i) => v > 0 && lines.push(`${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} damage: ${v}`));
     if (item.speed !== undefined && item.speed !== 1) lines.push(`Attack speed: ${item.speed}`);
-    item.protection?.forEach((v, i) => v < 1 && lines.push(`${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} taken: ×${v}`));
+    item.protection?.forEach((v, i) => v !== 1 && lines.push(`${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} taken: ×${v}`));
     for (const [k, v] of Object.entries(item.attributes ?? {})) if (v) lines.push(`${v > 0 ? '+' : ''}${v} ${ATTRIBUTE_LABEL[k] ?? k}`);
     if (item.heal) lines.push(`Restores ${item.heal} health`);
+    for (const e of item.effects ?? []) lines.push(e);
     if (item.quantity && item.quantity > 1) lines.push(`Quantity: ${item.quantity}`);
     if (this.shop) lines.push(item.value ? `Sells for ${item.value.toLocaleString('en-US')} gold` : 'The merchant will not take this');
     const hints = [
@@ -500,9 +501,10 @@ export class InventoryPanels {
     const lines: string[] = [];
     item.damage?.forEach((v, i) => v > 0 && lines.push(`${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} damage: ${v}`));
     if (item.speed !== undefined && item.speed !== 1) lines.push(`Attack speed: ${item.speed}`);
-    item.protection?.forEach((v, i) => v < 1 && lines.push(`${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} taken: ×${v}`));
+    item.protection?.forEach((v, i) => v !== 1 && lines.push(`${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} taken: ×${v}`));
     for (const [k, v] of Object.entries(item.attributes ?? {})) if (v) lines.push(`${v > 0 ? '+' : ''}${v} ${ATTRIBUTE_LABEL[k] ?? k}`);
     if (item.heal) lines.push(`Restores ${item.heal} health`);
+    for (const e of item.effects ?? []) lines.push(e);
     lines.push(`Price: ${item.price.toLocaleString('en-US')} gold`);
     return `<strong class="tt-name tt-${item.type}">${escape(item.name)}</strong>
       <span class="tt-type">${TYPE_LABEL[item.type]} · ${width}×${height}</span>

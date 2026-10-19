@@ -180,6 +180,8 @@ export interface InventoryItemView {
   protection?: number[];
   /** Worn: attribute bonus (rings, accessories). */
   attributes?: Partial<Attributes>;
+  /** What else it does, as tooltip lines (soul drinking, what a shield also stops, reflection). */
+  effects?: string[];
   /** What a merchant pays for it (items.ctx Price × count); absent = it takes no item without a price. */
   value?: number;
 }
