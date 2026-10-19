@@ -5,7 +5,7 @@ import { dequantizeAngle, dequantizePosition } from '../math/quantize.ts';
 import { CS, SC } from '../protocol/opcodes.ts';
 import { INPUT_PACKET_MAX_BYTES, MAX_INPUT_FRAMES, createInputFrame, encodeInput, type InputFrame } from '../protocol/binary/input.ts';
 import { decodeSnapshot, type EntityState } from '../protocol/binary/snapshot.ts';
-import type { AttackKind, ChatBroadcastMsg, CombatEventMsg, CutsceneMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PlayerStatsMsg, QuestLogMsg, ServerControlMsg, ShopMsg, SpellEventMsg, StorySoundMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
+import type { AttackKind, ChatBroadcastMsg, CombatEventMsg, CutsceneMsg, EndingMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PlayerStatsMsg, QuestLogMsg, ServerControlMsg, ShopMsg, SpellEventMsg, StorySoundMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
 import type { ArenaDef } from '../arena/types.ts';
 import type { Difficulty } from '../game/ruleset.ts';
 import { createMovementWorld, disposeMovementWorld, setBrushPose, setDoorOpen, setDoorPose, type MovementWorld, type Rapier } from '../movement/physics.ts';
@@ -64,6 +64,8 @@ export interface ClientSessionEvents {
   error?(code: string, message: string): void;
   /** A scripted sequence starts for this player: play it, then call cutsceneDone(). */
   cutscene?(d: CutsceneMsg['d']): void;
+  /** Necros fell to this player: play his death timeline (the server loads the ending act). */
+  ending?(d: EndingMsg['d']): void;
   /** The quest book (on entry and after every change). */
   quests?(d: QuestLogMsg['d']): void;
   /** A message trigger fired for this player (its id in the level's story.messages). */
@@ -327,6 +329,9 @@ export class ClientSession {
         break;
       case SC.CUTSCENE:
         this.events.cutscene?.(msg.d);
+        break;
+      case SC.ENDING:
+        this.events.ending?.(msg.d);
         break;
       case SC.QUEST_LOG:
         this.questLog = msg.d.log;

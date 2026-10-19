@@ -428,6 +428,8 @@ export function applyQuestAction(log: QuestLog, q: StoryQuestAction): QuestOutco
 export interface StoryState {
   flags: string[];
   quests: QuestLog;
+  /** When the character finished the game (Necros's death, ending.ts), as Unix ms; absent: not yet. */
+  completedAt?: number;
 }
 
 export const STORY_FLAG = /^[a-z0-9_-]{1,24}:\d{1,9}$/;
@@ -445,5 +447,11 @@ export function sanitizeStoryState(v: unknown): StoryState {
   if (!v || typeof v !== 'object') return emptyStoryState();
   const o = v as Partial<StoryState>;
   const flags = Array.isArray(o.flags) ? [...new Set(o.flags.filter((f): f is string => typeof f === 'string' && STORY_FLAG.test(f)))].slice(0, 4096) : [];
-  return { flags, quests: sanitizeQuestLog(o.quests) };
+  const completedAt = typeof o.completedAt === 'number' && Number.isFinite(o.completedAt) && o.completedAt > 0 ? Math.floor(o.completedAt) : undefined;
+  return { flags, quests: sanitizeQuestLog(o.quests), ...(completedAt !== undefined ? { completedAt } : {}) };
+}
+
+/** A copy of a story state that shares nothing with it. */
+export function cloneStoryState(s: StoryState): StoryState {
+  return { flags: [...s.flags], quests: structuredClone(s.quests), ...(s.completedAt !== undefined ? { completedAt: s.completedAt } : {}) };
 }

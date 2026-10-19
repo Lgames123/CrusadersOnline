@@ -56,6 +56,8 @@ export const SC = {
   SHOP: 0x51,
   /** Spells: casts, projectiles, bursts, bolts, drains and timed effects on characters, for every player near. */
   SPELL_EVENT: 0x52,
+  /** Necros fell to this player (ending.ts): play his death timeline; the ending act loads next. */
+  ENDING: 0x53,
 } as const;
 
 /** Input flag bits carried in CS_PLAYER_INPUT. */

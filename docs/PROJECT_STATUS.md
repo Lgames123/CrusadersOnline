@@ -57,7 +57,7 @@ load run with open targets. M11 runs locally in Docker but has no real domain.
 
 | Item | Decision / note |
 |---|---|
-| **Ending after Necros's death** | The kill is not wired (bs1a's story has no death trigger). Planned (not original): Drake is sent to the start of the game (exact spot to be decided; new games begin in Ws9a) and every story area is open from then on (story-gated triggers, doors and exits treat him as done). He earns a completion reward, still to be decided: a title, a cape or similar. Later: **waypoints**, so a player can teleport to the areas and maps already unlocked. |
+| **Ending after Necros's death** | **Done** (2026-10-19, executable-analysis §24). As the original: the death timeline, then Cs5b and Seq24. Not original: everyone who hurt Necros gets it; Drake stays in Cs5b; the completion date is saved (`StoryState.completedAt`); every door opens for him from either side. Still open: the **completion reward** (title, cape or similar; nothing given yet), and **waypoints** to teleport to unlocked areas and maps. |
 | **Intro movies (.bik)** | Option at character creation: "watch the introduction?". The two Bink files need a conversion to a browser format (e.g. WebM) in the import pipeline. |
 | **Walk-in movers still at rest** | Wheels, Gl\*b crushers (they need their damage), chandeliers, Bs1a gears. |
 | **Creature against creature** | Guards against hostiles; Ws5a's scripted fight. |
@@ -110,12 +110,11 @@ Renumber when the time comes.
 
 ## 3. Recommended order
 
-1. Ending after Necros, with the post-game state (all areas open). This makes the campaign
-   playable from start to finish.
-2. The intro movie option at character creation.
-3. Remaining campaign mechanisms (movers, creature against creature, relay ops).
-4. MMO Stage 2 (party, then shared loot), which unlocks the later stages.
-5. Side quests as a feature, and waypoints, when the post-game loop needs content.
+1. The intro movie option at character creation.
+2. Remaining campaign mechanisms (movers, creature against creature, relay ops).
+3. MMO Stage 2 (party, then shared loot), which unlocks the later stages.
+4. The completion reward, waypoints and the side quests (a feature), when the post-game loop
+   needs content.
 
 ## 4. Where to look
 

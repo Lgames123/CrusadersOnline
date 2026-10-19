@@ -114,7 +114,8 @@ Current priorities and the user's decisions are in `PROJECT_STATUS.md` §2–3.
 
 | Task ID | Description | Priority | Dependencies | Complexity | Status | Notes |
 |---|---|---|---|---|---|---|
-| **CMP-001** | Ending after Necros's death: send Drake to the start of the game, open every story-gated area for him (post-game state), completion reward (title / cape, TBD) | P0 | Necros fight | Medium | **NOT STARTED** | Not original; bs1a has no death trigger |
+| **CMP-001** | Ending after Necros's death: death timeline, Cs5b's Seq24, story marked complete, every door open (post-game state) | P0 | Necros fight | Medium | **VERIFIED** | executable-analysis §24; tests/unit/ending.test.ts; checked live |
+| **CMP-008** | Completion reward (title, cape or similar) for characters with `completedAt` | P2 | CMP-001 | Low | **NOT STARTED** | To be decided |
 | **CMP-002** | Waypoints: teleport to areas and maps the character has unlocked | P2 | CMP-001 | Medium | **NOT STARTED** | Not original |
 | **CMP-003** | Intro movies (.bik): option at character creation to watch the introduction | P1 | Bink conversion in the importer | Medium | **NOT STARTED** | |
 | **CMP-004** | Walk-in movers: wheels, Gl\*b crushers (with damage), chandeliers, Bs1a gears | P1 | — | Medium | **NOT STARTED** | |

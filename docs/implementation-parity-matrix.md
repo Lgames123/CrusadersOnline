@@ -35,7 +35,7 @@ table only gives the state.
 | **AI** | Creature vs creature | Guards fight hostiles; Ws5a fight | Not done | `SPECIFIED` | |
 | **Inventory** | Bag, paper doll, rings | Grid bag, worn slots | MU-style window, authoritative server | `CHANGED_FOR_MULTIPLAYER` | |
 | **Items** | Ground items and chests | Once per game | Once per character | `CHANGED_FOR_MULTIPLAYER` | |
-| **Story** | Main quests and cutscenes | 29 sequences, 10 main quests | Same, per character | `IMPLEMENTED` | Ending after Necros not wired |
+| **Story** | Main quests and cutscenes | 29 sequences, 10 main quests | Same, per character | `IMPLEMENTED` | Ending as the original, then the post-game (ending.ts) |
 | **Story** | Side quests | 26 records, never offered (cut) | Not done; planned as feature `sideQuests` | `SPECIFIED` | Records decoded: `game-design/side-quests.md` |
 | **World** | Doors, levers, movers | Mover triggers, relays | Doors, levers, Catacombs floor and bridges | `IMPLEMENTED` | Wheels, crushers, chandeliers, gears at rest |
 | **World** | Save | Save files | Continuous PostgreSQL persistence | `CHANGED_FOR_MULTIPLAYER` | |

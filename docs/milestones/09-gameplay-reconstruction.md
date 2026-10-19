@@ -18,4 +18,4 @@ Expand the vertical slice into full gameplay reconstruction by integrating comba
 - [x] Spells consume server-validated mana and trigger spatial area-of-effect spells (all 11).
 - [x] Inventory swaps are authoritative and persisted (inventory authority, migration 005).
 - [x] NPC talk lines and the original shops.
-- [ ] The campaign can be played to its end (ending after Necros: `PROJECT_STATUS.md` §2.1).
+- [x] The campaign can be played to its end (Necros's death timeline, Cs5b's Seq24, the post-game state).

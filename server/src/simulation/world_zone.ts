@@ -18,6 +18,11 @@ import {
   inVolume,
   applyQuestAction,
   emptyStoryState,
+  cloneStoryState,
+  ENDING_ACT,
+  ENDING_EXIT,
+  ENDING_LOAD_SECONDS,
+  NECROS_ACT,
   estimateSequenceMs,
   stagedPlayerSpot,
   stagedPlayerYaw,
@@ -640,6 +645,11 @@ interface Player extends ActorBase {
   shop: { id: number; stock: ShopEntry[]; openedAt: number; gift: boolean } | null;
   /** A scripted sequence the client is playing; the server finishes it by `until` at the latest. */
   cutscene: { sequence: StorySequence; until: number } | null;
+  /**
+   * The ending (ending.ts): Necros fell to him, the client plays the death timeline and the
+   * server loads the ending act at `until`. Held still and out of every fight meanwhile.
+   */
+  ending: { until: number } | null;
 }
 
 interface Mob extends ActorBase {
@@ -659,6 +669,8 @@ interface Mob extends ActorBase {
   spawnYaw: number;
   state: 'idle' | 'chase' | 'return' | 'flee' | 'talk' | 'watch';
   threat: Map<number, number>;
+  /** Players who have hurt it since it last died (their entity ids; an ally's blows count for its owner). */
+  hurtBy: Set<number>;
   /**
    * The original's melee brain (0x00409520): deciding, running in (beyond 12 ft), walking in
    * (shield up) to its engage distance, an attack sequence, the pause after it, and what follows
@@ -745,6 +757,8 @@ interface Mob extends ActorBase {
 type Actor = Player | Mob;
 
 const alive = (a: Actor) => a.deadUntil === 0;
+/** In a scripted sequence or the ending: held still, the keys and the world's triggers ignored. */
+const scripted = (p: Player) => !!p.cutscene || !!p.ending;
 /** Unarmed peaceful creatures (citizens, merchants): no flinch, no fighting back - they run. */
 /** Tooltip lines for what an item's use behaviour adds (DRINK_SOUL, the shield's mask, REFLECT). */
 function itemEffects(def: ItemDef): string[] {
@@ -998,6 +1012,8 @@ export class WorldZone {
 
   private hostile(a: Actor, b: Actor): boolean {
     if (a === b) return false;
+    // A player watching the ending is out of every fight.
+    if ((a.kind === 'player' && a.ending) || (b.kind === 'player' && b.ending)) return false;
     if ((a.kind === 'mob' && a.hidden) || (b.kind === 'mob' && b.hidden)) return false;
     const players = (x: Actor) => x.kind === 'player' || x.ally !== undefined;
     if (players(a) === players(b)) return false;
@@ -1120,6 +1136,7 @@ export class WorldZone {
       spawnYaw: quantizeAngle(at.yaw ?? 0),
       state: 'idle',
       threat: new Map(),
+      hurtBy: new Set(),
       brain: 'decide',
       lastPick: null,
       spellPick: null,
@@ -1252,12 +1269,13 @@ export class WorldZone {
       shield: eq.shield,
       inPortal: new Set(),
       blocking: false,
-      story: opts.story ? { flags: [...opts.story.flags], quests: structuredClone(opts.story.quests) } : emptyStoryState(),
+      story: opts.story ? cloneStoryState(opts.story) : emptyStoryState(),
       storyFlags: new Set(opts.story?.flags ?? []),
       insideSounds: new Set(),
       insideDoors: new Set(),
       shop: null,
       cutscene: null,
+      ending: null,
     };
     this.players.set(connId, p);
     this.register(p);
@@ -1275,6 +1293,9 @@ export class WorldZone {
     this.sendStats(p);
     this.sendInventory(p);
     this.sendJson(connId, { op: SC.QUEST_LOG, d: { log: p.story.quests } });
+    // Necros's ship has no way out: a finished character (back after leaving during his death
+    // timeline) goes on to the ending act at once.
+    if (this.act === NECROS_ACT && p.story.completedAt !== undefined) p.ending = { until: this.tick + 1 };
     if (this.objects.size) {
       const changed = [...this.objects.values()]
         .filter((o) => (this.stateFor(p, o) !== 'present' || o.dynamic) && this.sees(p, o))
@@ -1302,7 +1323,7 @@ export class WorldZone {
       if (portal?.use && alive(p) && inPortal(portal, p.character.position, PORTAL_USE_REACH)) this.outbox.portal?.(p.connId, portal.target, undefined, this.crossing(portal, p));
       return;
     }
-    if (p && alive(p) && !p.cutscene) this.useStory(p);
+    if (p && alive(p) && !scripted(p)) this.useStory(p);
     const o = this.objects.get(id);
     // A swinging door may be opened again while it swings shut.
     // A parked mover is used again to send it back (0x48EC10).
@@ -1312,7 +1333,7 @@ export class WorldZone {
       this.openDoor(p, o);
       return;
     }
-    if (p.cutscene) return;
+    if (scripted(p)) return;
     const pos = p.character.position;
     if (Math.hypot(o.def.x - pos.x, o.def.z - pos.z) > INTERACT_RANGE || Math.abs(o.def.y - pos.y) > INTERACT_HEIGHT) return;
     const grants: GroundGrant[] = (o.def.kind === 'item' ? (o.def.item ? [o.def.item] : []) : (o.def.contents ?? []))
@@ -1358,7 +1379,8 @@ export class WorldZone {
     const b = o.def.bounds;
     if (!b || o.def.byLever) return;
     const pos = p.character.position;
-    if (o.def.useFrom) {
+    // A character who finished the story opens any door from either side, key or not (ending.ts).
+    if (o.def.useFrom && p.story.completedAt === undefined) {
       const use = doorUseAt(o.def, pos, (item) => this.carries(p, item), DOOR_USE_SLACK);
       if (!use) return;
       if ('needs' in use) return this.notify(p, 'error', `The door is locked. You need ${use.needs}.`);
@@ -1433,7 +1455,8 @@ export class WorldZone {
    * undone, unless he has crossed it before (a way he has already earned, kept as a story flag).
    */
   private guardDoors(p: Player, before: { x: number; y: number; z: number }): void {
-    if (!this.guardedDoors.length) return;
+    // A character who finished the story goes through every door (not original: ending.ts).
+    if (!this.guardedDoors.length || p.story.completedAt !== undefined) return;
     const act = this.act ?? this.arena.name;
     const pos = p.character.position;
     for (const o of this.guardedDoors) {
@@ -1570,7 +1593,7 @@ export class WorldZone {
     if (p?.cast?.released && this.tick >= p.cast.end - CAST_END_GRACE_TICKS) p.cast = null;
     // On the ground as the animation sees it: running over a bump or a stair edge leaves the
     // ground for a tick or two, and a cast there played on the client and was dropped here.
-    if (!p || !alive(p) || p.cast || p.swing || p.hitUntil > this.tick || !looksGrounded(p.character) || p.cutscene || this.held(p)) return;
+    if (!p || !alive(p) || p.cast || p.swing || p.hitUntil > this.tick || !looksGrounded(p.character) || scripted(p) || this.held(p)) return;
     const spell = p.selectedSpell;
     const known = spell && p.spells.find((s) => s.spell === spell);
     if (!spell || !known || !CASTABLE_SPELLS.has(spell)) return;
@@ -1886,7 +1909,7 @@ export class WorldZone {
 
   /** Bag changes wait for a free player: not dead, swinging, in a scripted sequence or with his Boomer Axe in flight. */
   private inventoryBusy(p: Player): boolean {
-    return !alive(p) || !!p.swing || !!p.cutscene || this.boomer.flying(p);
+    return !alive(p) || !!p.swing || scripted(p) || this.boomer.flying(p);
   }
 
   /** The entry in `slot`, unless the client named another item (its view of the slot is stale). */
@@ -1912,7 +1935,7 @@ export class WorldZone {
   equip(connId: number, slot: number, equip: boolean, itemId?: string, to?: { x: number; y: number }): void {
     const p = this.players.get(connId);
     if (!p) return;
-    if (!alive(p) || p.cutscene) {
+    if (!alive(p) || scripted(p)) {
       this.sendInventory(p);
       return;
     }
@@ -2119,7 +2142,7 @@ export class WorldZone {
    */
   unstuck(connId: number): void {
     const p = this.players.get(connId);
-    if (!p || !alive(p) || p.cutscene || this.held(p)) return;
+    if (!p || !alive(p) || scripted(p) || this.held(p)) return;
     const left = Math.ceil((p.unstuckTick + UNSTUCK_COOLDOWN * TICK_RATE - this.tick) / TICK_RATE);
     if (left > 0) return this.notify(p, 'error', `You can use Unstuck again in ${left} s.`);
     p.unstuckTick = this.tick;
@@ -2170,7 +2193,7 @@ export class WorldZone {
       spells: p.spells.map((s) => ({ ...s })),
       selectedSpell: p.selectedSpell,
       zone: this.arena.name,
-      story: { flags: [...p.story.flags], quests: structuredClone(p.story.quests) },
+      story: cloneStoryState(p.story),
       ...(this.takeInventoryChange(p)),
     };
   }
@@ -2210,7 +2233,7 @@ export class WorldZone {
       mana: p.mana,
       spells: p.spells.map((s) => ({ ...s })),
       selectedSpell: p.selectedSpell,
-      story: { flags: [...p.story.flags], quests: structuredClone(p.story.quests) },
+      story: cloneStoryState(p.story),
       carried: this.carriedTimers(p),
     };
     const record = this.leave(connId);
@@ -2395,7 +2418,7 @@ export class WorldZone {
   /** An exit fired by a script (0x462890): to its level, arriving as through that exit. */
   private takeScriptedExit(p: Player, ref: { exit: string; exitNumber: number }): void {
     const name = ref.exit.toLowerCase();
-    if (name === 'end') return; // the game's ending (state 5): nothing to load
+    if (name === ENDING_EXIT) return this.storyEnds(p); // the game's ending (state 5): nothing to load
     const target = `${LEVEL_PREFIX}${name}`;
     const portal = this.arena.portals?.find((q) => q.target === target && q.exit === ref.exitNumber);
     this.outbox.portal?.(p.connId, target, undefined, portal ? this.crossing(portal, p) : undefined);
@@ -2440,6 +2463,49 @@ export class WorldZone {
       if (t) this.fireTrigger(killer, t);
       else if (story.messages?.some((m) => m.id === d.trigger)) this.sendJson(killer.connId, { op: SC.STORY_MESSAGE, d: { message: d.trigger } });
     }
+  }
+
+  /**
+   * Necros fell (0x0044F7B0, ending.ts): everyone here who hurt him finishes the game. The story is
+   * marked complete at once (saved now, so leaving during the timeline loses nothing); the client
+   * plays the death timeline and the ending act loads ENDING_LOAD_SECONDS later (loadEnding).
+   */
+  private necrosFalls(necros: Mob): void {
+    const at = { ...necros.character.position };
+    const yaw = dequantizeAngle(necros.yaw);
+    for (const p of this.players.values()) {
+      if (!necros.hurtBy.has(p.entityId) || p.ending) continue;
+      const first = p.story.completedAt === undefined;
+      if (first) p.story.completedAt = Date.now();
+      p.statsDirty = true;
+      p.ending = { until: this.tick + Math.ceil(ENDING_LOAD_SECONDS * TICK_RATE) };
+      p.swing = null;
+      p.queuedAttack = false;
+      p.cast = null;
+      p.blocking = false;
+      for (const m of this.actors.values()) if (m.kind === 'mob') m.threat.delete(p.entityId);
+      this.sendJson(p.connId, { op: SC.ENDING, d: { at, yaw, first } });
+      const record = this.persistRecord(p);
+      if (record) this.outbox.persist?.([record], 'progress');
+    }
+  }
+
+  /** The death timeline is over: to the ending act's first start point, as the original's load of CS5B. */
+  private loadEnding(p: Player): void {
+    p.ending = null;
+    this.outbox.portal?.(p.connId, `${LEVEL_PREFIX}${ENDING_ACT}`, undefined, { exit: 0, toStart: true, offset: { x: 0, y: 0, z: 0 } });
+  }
+
+  /**
+   * The story's last scene ended (exit "end": the original's game-over state 5). Not original: the
+   * character stays in the act, the story complete (in case Necros's death did not mark it).
+   */
+  private storyEnds(p: Player): void {
+    if (p.story.completedAt === undefined) p.story.completedAt = Date.now();
+    p.statsDirty = true;
+    this.notify(p, 'quest', 'You have finished the story. Every way it once barred is open to you now.');
+    const record = this.persistRecord(p);
+    if (record) this.outbox.persist?.([record], 'progress');
   }
 
   /** Sets a brush's mover going (a relay's target, 0x48EC10). */
@@ -2552,6 +2618,11 @@ export class WorldZone {
       const y = this.arena.meshes.length ? floorAt(this.arena, x, z, p.character.position.y) : end[1] * s;
       if (y !== null) setCharacterState(p.character, { x, y: y + 0.1, z }, 0, false);
     }
+    // Exit "end" (Seq24, the last scene) loads nothing: the story is over.
+    if (load === ENDING_EXIT) {
+      load = null;
+      this.storyEnds(p);
+    }
     const record = this.persistRecord(p);
     if (record) this.outbox.persist?.([record], 'progress');
     // Another act of the same level keeps Drake where he stands (the acts share the mesh's coordinates).
@@ -2597,7 +2668,7 @@ export class WorldZone {
    */
   attack(connId: number, kind: AttackKind = 'normal'): void {
     const p = this.players.get(connId);
-    if (!p || !alive(p) || p.hitUntil > this.tick || p.cast) return;
+    if (!p || !alive(p) || p.hitUntil > this.tick || p.cast || p.ending) return;
     p.blocking = false; // swinging lowers the shield until the next input re-raises it
     // The Boomer Axe in hand is thrown, near a foe or not (not original: Drake swings it).
     if (p.weapon.boomer && !p.swing) {
@@ -2661,14 +2732,14 @@ export class WorldZone {
         // The client roots itself during its own swing (INPUT.ROOTED, same tick on both
         // sides); the dead do not act. The client mirrors the dead rule.
         // During a scripted sequence the player's character stands where it was (the stand-in plays).
-        if (!alive(p) || p.cutscene || this.held(p)) this.frame.flags = 0;
+        if (!alive(p) || scripted(p) || this.held(p)) this.frame.flags = 0;
         p.pitch = dequantizePitch(this.frame.pitch);
         const before = { x: p.character.position.x, y: p.character.position.y, z: p.character.position.z };
         stepCharacter(this.mw, p.character, this.frame, p.moveStats, TICK_DT);
-        if (alive(p) && !p.cutscene) this.guardDoors(p, before);
+        if (alive(p) && !scripted(p)) this.guardDoors(p, before);
         p.lastProcessedInput = this.frame.clientTick;
-        if (alive(p) && !p.cutscene) p.yaw = this.frame.yaw;
-        if (!p.cutscene) this.checkPortals(p);
+        if (alive(p) && !scripted(p)) p.yaw = this.frame.yaw;
+        if (!scripted(p)) this.checkPortals(p);
         this.catchFall(p);
         const moving = (this.frame.flags & MOVE_MASK) !== 0 && !(this.frame.flags & INPUT.ROOTED);
         p.blocking = alive(p) && p.shield !== null && (this.frame.flags & INPUT.BLOCK) !== 0 && !p.swing && p.hitUntil <= tick && p.character.rollDir !== ACTION_BASH;
@@ -2691,7 +2762,9 @@ export class WorldZone {
         }
       }
       if (alive(p)) this.updateMagic(p);
-      if (p.cutscene) {
+      if (p.ending) {
+        if (tick >= p.ending.until) this.loadEnding(p);
+      } else if (p.cutscene) {
         if (tick >= p.cutscene.until) this.finishCutscene(p);
       } else if (alive(p)) {
         this.checkStory(p);
@@ -3935,6 +4008,8 @@ export class WorldZone {
 
   /** Stats_LoseHp (0x0044CA00): the HP loss, the player's flinch roll, death; `rush`: a rush's own cost. */
   private loseHp(attacker: Actor, target: Actor, damage: number, rush = false, knockdown = false): void {
+    // A player watching the ending takes nothing (a projectile already on its way).
+    if (target.kind === 'player' && target.ending) return;
     const hpBefore = target.hp;
     let impact: number | undefined;
     target.hp = Math.max(0, target.hp - damage);
@@ -3962,6 +4037,8 @@ export class WorldZone {
 
     if (target.kind === 'mob') {
       target.threat.set(attacker.entityId, (target.threat.get(attacker.entityId) ?? 0) + damage);
+      const hurter = attacker.kind === 'player' ? attacker : attacker.ally !== undefined ? this.actors.get(attacker.ally) : undefined;
+      if (damage > 0 && hurter?.kind === 'player') target.hurtBy.add(hurter.entityId);
       // Unarmed peaceful creatures (citizens) take the blows; armed ones (guards) fight back.
       const fightsBack = !target.archetype.passive || target.weapon.id !== UNARMED.id;
       if (target.state !== 'chase' && fightsBack) target.state = 'chase';
@@ -3982,6 +4059,9 @@ export class WorldZone {
         target.mobCast = null;
         target.deadUntil = this.tick + Math.max(1, Math.round(target.archetype.respawnTicks / this.rates.respawn));
         target.threat.clear();
+        // Necros's death ends the game for everyone who hurt him (0x0044C6A0 -> 0x0044F7B0).
+        if (target.archetype.type === NECROS_TYPE && target.ally === undefined) this.necrosFalls(target);
+        target.hurtBy.clear();
         // A spectral ally's kills are its owner's.
         const credit = attacker.kind === 'player' ? attacker : attacker.ally !== undefined ? this.actors.get(attacker.ally) : undefined;
         if (credit?.kind === 'player' && target.ally === undefined) {
@@ -4146,6 +4226,7 @@ export class WorldZone {
         damageMultiplier: p.damageMultiplier,
         resist: p.resist.map((r, t) => r * (p.gearProtection[t] ?? 1) * this.magic.incomingMultiplier(p, t)),
         damage: [...(p.weapon.damage ?? [])],
+        ...(p.story.completedAt !== undefined ? { storyComplete: true } : {}),
       },
     });
   }

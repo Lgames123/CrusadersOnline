@@ -767,3 +767,26 @@ Implemented: converter 1.30 (`damage`, `scale`); archetypes `ice_elemental` / `r
 **Back** (`0x004C0CC0`): d = wielder − axe, pace = 80 / |d| (ft); per axis a spline with key 0 (t 0) = here, keys 1 and 2 (t 1, 2) = here + d × 0.25 i + q (d.z, 0, −d.x), q = rand × 0.3 × s, s = ±1 at random then flipped; key 3 (t 3) is set every frame (`0x004C07D2`) to the hand point in the wielder's frame: (3, 6, 0) ft when the hand is empty (`0x0046B880` → none), else (0, 5, 0). Natural cubic spline (`0x004C2BF0`, end curvatures 0), evaluated `a + bx + cx² + dx³` (`0x004C28F0`). t += dt × pace; velocity = (S(t) − pos) / dt, so it keeps hitting characters on the way (`0x004C0A20` does not look at +0x3C). Crossing t = 3 − 0.15 × pace with an empty hand sets the wielder's controller flag 0x200000 (the THROW_ITEM / FIRE_BALL group, §20: the catch); at t ≥ 3 − 0.05 × pace: empty hand → the item goes back into the inventory and the hand (`0x0046B000`), else (`0x004C0ED0`) it strikes the wielder (`0x004C0A50` on him) and falls as a ground item (`0x0043D880`) 5 ft above him; the loop sound stops and the axe returns to the pool (`0x004838D0`, `0x00483290`).
 
 Implemented: `server/src/simulation/boomer_axe.ts` (zone: weapon unarmed while it flies), `client/src/engine/boomer_visuals.ts`.
+
+## 24. The Ending: Necros's Death, Cs5b and Exit "end" (decompiled, 2026-10-19)
+
+**Death.** A creature's death (`0x0044C6A0`) ends with `if (type == 0x96) 0x0044F7B0(creature)`. There is no death trigger in bs1a's story, and bs1a has no exits: this code path is the only way on.
+
+**`0x0044F7B0`** queues timed events (`0x0044E700` appends them to the list at `0x00585408`), all built once (guard bits at `0x00585638` / `0x00585410`):
+
+- **Camera shots** (class `0x004E0BD4`, `0x0044E850`: two 8-key splines, eye and target; `0x004C2AD0` sets a key). Keys 0.45 s apart, all on one point, so each shot is a fixed camera. Target = Necros's local (0, 4, 2) ft through vtable +0xF8 (to world). Eye = target + 10 ft × (sin a, 0, cos a) in world axes, with a = +60° at t 0, −60° at t 1.1667, and 0° at t 2.3333 (doubles at `0x004E0C80` / `0x004E0C78` / `0x004DF108`). A fourth shot at t 3.5 has eye = target + (0, 10, 10) ft.
+- **Time scale.** `0x004C6560(0.1)` at once, then 0.5 at 3.5 s and 1.0 at 11.5 s (class `0x004E0C54` events, start +0x0C, value +4: read as the clock's scale, not traced further).
+- **Fade.** Class `0x004E0BB0` (`0x0044E730`, tag `'FADE'`): out at 7.5 s for 3 s, colour (255, 255, 255). A second fade comes back in at 10.5 s over 2 s.
+- **Load.** At 10.5 s, class `0x004E0BF8` with the string `"CS5B"` (`0x004EEECC`), plus a class `0x004E0C30` event at the same time.
+- **Status.** The player is given status `'SLTI'` (`0x0044C650`).
+
+**Cs5b** (Cador Sul, act 5) is reached by nothing else: no portal or relay of any act targets it. Its start 0 (2336, 963, −832) lies inside flag trigger 231582, so Seq24 plays on arrival. In it Prince Dain, Tamris and Drake talk for 33 s (PD_26_01..03, TA_26_01..03, DK_26_01..02). It fades out, and ScriptedSequenceDone loads exit `"end"` (game state 5).
+
+**Implemented:** `shared/src/game/ending.ts`, plus the zone's `necrosFalls` / `loadEnding` / `storyEnds` and `client/src/story/necros_death.ts`. MMO changes:
+
+- Every player who hurt Necros gets the ending.
+- The story is marked complete at the death (`StoryState.completedAt`).
+- Exit `"end"` keeps the character in Cs5b, and from then on every door opens for him from either side.
+- A finished character found on the ship goes on to Cs5b.
+
+**Not reproduced:** the `0x004E0C30` event and the `SLTI` status on the player (their effects are not traced). The time scale only slows the client's animations and effects; the server world keeps its pace.

@@ -43,7 +43,7 @@ The CrusadersOnline roadmap is organized into dependency-ordered phases. Work st
 | 8 (M09) | Far along: movement, combat, spells, creatures, items and the main story are in. See `PROJECT_STATUS.md` §2.1 for what is left. |
 | 9 (M10) | Tests and a 100-bot run are in place; the tick p99 and bandwidth targets are not met yet. |
 | 10 (M11) | Runs locally in Docker; no real domain or TLS yet. |
-| 11, campaign completion (new) | Ending after Necros with a post-game state (all story areas open, completion reward), intro movie option at character creation, waypoints later. |
+| 11, campaign completion (new) | Ending after Necros done (post-game: every door open). Next: intro movie option at character creation; later the completion reward and waypoints. |
 | 12, MMO systems (new) | Staged plan in `game-design/mmo/11-implementation-roadmap.md`. Stage 1 is mostly in place; Stage 2 needs a party system. |
 | Side quests (feature) | Cut from the original. Inventory in `game-design/side-quests.md`; to be implemented later behind `sideQuests`. |
 

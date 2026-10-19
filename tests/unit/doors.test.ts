@@ -36,6 +36,7 @@ import {
   type ArenaDef,
   type Rapier,
   type ServerControlMsg,
+  type StoryState,
 } from '@crusaders/shared';
 
 let rapier: Rapier;
@@ -91,14 +92,14 @@ describe('doors', () => {
     expect(catalog.has('dwarven_tome')).toBe(false);
   });
 
-  function zone(useFrom?: DoorUse[], carry = false, at = { x: 0, y: 0.5, z: 0 }) {
+  function zone(useFrom?: DoorUse[], carry = false, at = { x: 0, y: 0.5, z: 0 }, story?: StoryState) {
     const items = new Map(BUILTIN_ITEMS);
     items.set('room_2_key', { id: 'room_2_key', name: 'Room 2 Key', type: 'key', width: 1, height: 1, price: 0 });
     const messages: ServerControlMsg[] = [];
     const z = new WorldZone(rapier, 'doors', doorArena(useFrom), {
       send: (_c, data) => { if (typeof data === 'string') messages.push(JSON.parse(data) as ServerControlMsg); },
     }, { items });
-    z.join(1, { name: 'Opener', characterId: null, position: at, ...(carry ? { inventory: [{ slot: 0, itemId: 'room_2_key', equipped: false }] } : {}) });
+    z.join(1, { name: 'Opener', characterId: null, position: at, ...(carry ? { inventory: [{ slot: 0, itemId: 'room_2_key', equipped: false }] } : {}), ...(story ? { story } : {}) });
     const opened = () => messages.some((m) => m.op === SC.OBJECT_STATE && m.d.objects.some((o) => o.id === 500_000 && o.state === 'open'));
     const blocked = () => wallDistance((z as unknown as { mw: Parameters<typeof wallDistance>[0] }).mw, { x: 0, y: 0, z: 0 }, 0, 3, 1) !== null;
     const buf = new DataView(new ArrayBuffer(INPUT_PACKET_MAX_BYTES));
@@ -256,6 +257,23 @@ describe('doors', () => {
     expect(t.where(2).z).toBeGreaterThan(-1.5);
     t.run(2, 40, INPUT.FORWARD);
     expect(t.where(2).z).toBeLessThan(-1.5);
+  });
+
+  it('a character who finished the story opens any door from either side, key or not, and walks through guarded ones (ending.ts)', () => {
+    const done = { ...emptyStoryState(), completedAt: 1 };
+    // Far-side triggers only (Ca1c's Glaciers door), from the near side.
+    const t = zone([doorTrigger(-1), doorTrigger(-1, 0x4008)], false, { x: 0, y: 0.5, z: -0.6 }, done);
+    t.z.interact(1, 500_000);
+    expect(t.opened()).toBe(true);
+    t.run(1, 60, INPUT.FORWARD);
+    expect(t.where(1).z).toBeLessThan(-1.5);
+    // A key door without its key, and a sealed one (no trigger volume).
+    const key = zone([doorTrigger(1, 0x220, 'Room 2 Key')], false, { x: 0, y: 0.5, z: -0.5 }, done);
+    key.z.interact(1, 500_000);
+    expect(key.opened()).toBe(true);
+    const sealed = zone([], false, { x: 0, y: 0.5, z: 0 }, done);
+    sealed.z.interact(1, 500_000);
+    expect(sealed.opened()).toBe(true);
   });
 
   it("the original's door triggers as converted: Ca1c's Glaciers door opens from that side only, Ca3c's from the hub too, Mica's door needs its key", () => {

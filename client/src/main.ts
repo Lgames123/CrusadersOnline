@@ -32,6 +32,7 @@ import {
   PORTAL_USE_REACH,
   inPortal,
   doorUseAt,
+  ENDING_EXIT,
   DOOR_USE_SLACK,
   MESSAGE_MS,
   inStoryVolume,
@@ -103,6 +104,7 @@ import { TitleScene } from './frontend/title_scene.ts';
 import { QuestBook, loadGameStrings } from './ui/quest_book.ts';
 import { CharacterSheet } from './ui/character_sheet.ts';
 import { Cutscene, type Puppet } from './story/cutscene.ts';
+import { NecrosDeath } from './story/necros_death.ts';
 
 const MAX_FRAME_MS = 250;
 
@@ -208,6 +210,10 @@ async function main(): Promise<void> {
   charSheet.setStrings(gameStrings);
   // Scripted sequences (cutscenes): played here, the server waits for the end (CS_CUTSCENE_DONE).
   let cutscene: Cutscene | null = null;
+  /** Necros's death timeline (SC_ENDING): the view until the ending act loads. */
+  let ending: NecrosDeath | null = null;
+  /** A scripted view is playing: the keys and the game's windows wait. */
+  const inScene = () => !!cutscene || !!ending;
   /** The view flying back behind Drake after a sequence (OUTRO_SECONDS). */
   let outro: { camera: THREE.PerspectiveCamera; from: THREE.Vector3; fromQ: THREE.Quaternion; fromFov: number; t: number } | null = null;
   const OUTRO_SECONDS = 1.5;
@@ -224,7 +230,8 @@ async function main(): Promise<void> {
     cam.updateProjectionMatrix();
   };
   const fadeEl = document.getElementById('fade')!;
-  const fade = (out: boolean, ms: number) => {
+  const fade = (out: boolean, ms: number, colour = '#000') => {
+    fadeEl.style.background = colour;
     fadeEl.style.transition = ms > 0 ? `opacity ${ms}ms linear` : 'none';
     fadeEl.style.opacity = out ? '1' : '0';
     // Commit it now: an instant fade and a timed one started in the same frame (Ws9a's opening:
@@ -233,6 +240,9 @@ async function main(): Promise<void> {
   };
   /** Starts a sequence of the current level (SC_CUTSCENE); set up once the local player exists. */
   let playCutscene: (name: string, actors: (number | null)[]) => void = (name) => session?.cutsceneDone(name);
+  /** Starts / ends Necros's death timeline (SC_ENDING; ended by the next world entry). */
+  let startEnding: (at: { x: number; y: number; z: number }, yaw: number) => void = () => { };
+  let endEnding: () => void = () => { };
 
   // Before anything that loads asynchronously reads it (the effects below).
   const settings = new SettingsStore();
@@ -672,6 +682,7 @@ async function main(): Promise<void> {
             enterYaw = d.yaw ?? null;
             // From black: an act's opening sequence (the server sends it on its first tick, before
             // that tick's snapshot) takes the fade over; otherwise the world fades in.
+            endEnding();
             fade(true, 0);
             entryFade = live?.stats.snapshots ?? 0;
             outro = null;
@@ -684,6 +695,7 @@ async function main(): Promise<void> {
             for (const [id, state] of live.objectStates) levelView?.setObjectState(id, state, live.swings.get(id)?.motion ?? null, live.movers.get(id)?.motion ?? null);
           },
           cutscene: (d) => playCutscene(d.sequence, d.actors),
+          ending: (d) => startEnding(d.at, d.yaw),
           // A message trigger a relay or a death fired for this player (signs and hints are local).
           storyMessage: (id) => {
             const m = levelView?.arena.story?.messages?.find((x) => x.id === id);
@@ -891,7 +903,11 @@ async function main(): Promise<void> {
     session?.cutsceneDone(c.sequence.name);
     // Drake stays in this act (no level load): the view flies from the sequence's last camera
     // to its place behind him, facing where the stand-in faces.
-    const loads = c.sequence.steps.some((st) => st.action === 'ScriptedSequenceDone' && st.args['loadlevel']);
+    // Exit "end" (the story's last scene) loads nothing: Drake stays (ending.ts).
+    const loads = c.sequence.steps.some((st) => {
+      const level = st.args['loadlevel'];
+      return st.action === 'ScriptedSequenceDone' && !!level && !(typeof level === 'object' && 'exit' in level && level.exit.toLowerCase() === ENDING_EXIT);
+    });
     if (!loads) {
       input.yaw = local.object.rotation.y;
       local.placeAt(local.object.position, local.object.rotation.y);
@@ -905,6 +921,32 @@ async function main(): Promise<void> {
       pendingOutfitItems = null;
       void updatePlayerOutfit(pending);
     }
+  };
+  startEnding = (at, yaw) => {
+    if (ending) return;
+    if (cutscene) endCutscene();
+    closeInventoryPanels();
+    setQuestBookOpen(false);
+    setCharSheetOpen(false);
+    setOptionsOpen(false);
+    hotbar.visible = false;
+    chat.visible = false;
+    cutsceneUi.hidden = false;
+    prompt.hidden = true;
+    local.avatar.setShield?.(false);
+    local.avatar.setUpperSwing?.(null, 0);
+    outro = null;
+    // 0x0044F7B0's FADE events are white (colour 255, 255, 255).
+    ending = new NecrosDeath(chase.camera, at, yaw, (out, ms) => fade(out, ms, '#fff'));
+    cinemaFov(ending.camera);
+  };
+  endEnding = () => {
+    if (!ending) return;
+    ending = null;
+    cutsceneUi.hidden = true;
+    hotbar.visible = !!session;
+    chat.visible = !!session;
+    chase.snap();
   };
   lighting.track('me', local.object, PLAYER_RADIUS * 1.3, false, true);
   lighting.playerKey = 'me';
@@ -961,7 +1003,7 @@ async function main(): Promise<void> {
   };
   local.onQueuedSwing = (kind) => swingStarted(kind, input.yaw);
   input.onAttack = () => {
-    if (cutscene) return;
+    if (inScene()) return;
     // The movement key held with the click picks the attack (original controls).
     // Holding C (ducked) ignores clicks, as in the original.
     if (input.heldFlags & INPUT.DUCK) return;
@@ -991,7 +1033,7 @@ async function main(): Promise<void> {
   /** Alt held: the cursor is out for the UI; letting go takes the camera back. */
   let altFree = false;
   let optionsAt = 0;
-  input.wantsLock = () => !(altFree || chat.typing || optionsOpen || inventoryPanel.open || questBook.open || charSheet.open || cutscene);
+  input.wantsLock = () => !(altFree || chat.typing || optionsOpen || inventoryPanel.open || questBook.open || charSheet.open || inScene());
   const play = () => {
     sounds?.unlock();
     music.unlock();
@@ -1016,12 +1058,12 @@ async function main(): Promise<void> {
     } else play();
   };
   renderer.domElement.addEventListener('click', () => {
-    if (!input.locked && !optionsOpen && !cutscene) play();
+    if (!input.locked && !optionsOpen && !inScene()) play();
   });
   document.getElementById('btn-resume')!.addEventListener('click', () => setOptionsOpen(false));
   const isAlt = (e: KeyboardEvent) => (e.code === 'AltLeft' || e.code === 'AltRight') && !input.isBound(e.code);
   window.addEventListener('keydown', (e) => {
-    if (!isAlt(e) || e.repeat || !input.locked || cutscene) return;
+    if (!isAlt(e) || e.repeat || !input.locked || inScene()) return;
     altFree = true;
     releasing = true;
     document.exitPointerLock();
@@ -1030,7 +1072,7 @@ async function main(): Promise<void> {
     if (!isAlt(e) || !altFree) return;
     altFree = false;
     // A page that let go of the lock itself may take it back without a click (Pointer Lock 2.0).
-    if (!optionsOpen && !chat.typing && !inventoryPanel.open && !questBook.open && !charSheet.open && !cutscene) input.requestLock();
+    if (!optionsOpen && !chat.typing && !inventoryPanel.open && !questBook.open && !charSheet.open && !inScene()) input.requestLock();
   });
   // The chat line takes the keyboard (Enter): the camera lets go of the pointer, and takes it
   // back without a click when the line closes, unless a window was open before.
@@ -1043,7 +1085,7 @@ async function main(): Promise<void> {
       document.exitPointerLock();
     } else if (!typing && chatTookLock) {
       chatTookLock = false;
-      if (!optionsOpen && !inventoryPanel.open && !questBook.open && !charSheet.open && !cutscene) input.requestLock();
+      if (!optionsOpen && !inventoryPanel.open && !questBook.open && !charSheet.open && !inScene()) input.requestLock();
     }
   };
   window.addEventListener('blur', () => {
@@ -1130,8 +1172,11 @@ async function main(): Promise<void> {
       if ((door.state !== 'present' && !door.swing) || door.def.byLever || p.y < b[1] - 2 || p.y > b[4]) continue;
       const d = Math.hypot(Math.max(b[0] - p.x, 0, p.x - b[3]), Math.max(b[2] - p.z, 0, p.z - b[5]));
       if (d > DOOR_RANGE || (best && best.d < d)) continue;
-      // Only from where the original's triggers open it (the server checks the same).
-      const use = doorUseAt(door.def, p, (item) => (session.inventory?.items ?? []).some((i) => i.name === item), DOOR_USE_SLACK);
+      // Only from where the original's triggers open it (the server checks the same), but for a
+      // character who finished the story (any door, either side).
+      const use = session.playerStats?.storyComplete
+        ? { open: true as const, walk: false }
+        : doorUseAt(door.def, p, (item) => (session.inventory?.items ?? []).some((i) => i.name === item), DOOR_USE_SLACK);
       if (!use) continue;
       const label = door.def.kind === 'lever' ? 'Tab — pull lever' : 'needs' in use ? `Locked — needs ${use.needs}` : 'Tab — open door';
       best = { id, label, d };
@@ -1243,7 +1288,7 @@ async function main(): Promise<void> {
   };
   /** A hotbar slot used: cast its spell, drink its potion, or wear its gear (quick swap). */
   const useHotbar = (entry: HotbarEntry) => {
-    if (cutscene || optionsOpen || !session) return;
+    if (inScene() || optionsOpen || !session) return;
     if (entry.kind === 'spell') {
       castSpell(entry.spell);
       return;
@@ -1259,11 +1304,11 @@ async function main(): Promise<void> {
   };
   hotbar.onActivate = useHotbar;
   input.onHotbar = (slot) => {
-    if (cutscene || optionsOpen) return;
+    if (inScene() || optionsOpen) return;
     hotbar.activate(slot);
   };
   input.onAction = (action) => {
-    if (cutscene) return;
+    if (inScene()) return;
     if (action === 'interact') {
       // The use key also reads any sign in reach, whatever else it does.
       const sign = messagesAt(MESSAGE_USE)[0];
@@ -1389,7 +1434,7 @@ async function main(): Promise<void> {
       chat.blur();
     }
     // Esc released the pointer: the options (sequences play to their end, as in the original).
-    if (!locked && !ours && !inventoryPanel.open && !questBook.open && !charSheet.open && !cutscene) setOptionsOpen(true);
+    if (!locked && !ours && !inventoryPanel.open && !questBook.open && !charSheet.open && !inScene()) setOptionsOpen(true);
   };
 
   // Inventory window (online only); the ground window opens beside it (and opens it).
@@ -1464,7 +1509,7 @@ async function main(): Promise<void> {
   questBook.onTurn = () => sounds?.play(SFX.turnPage);
   window.addEventListener('keydown', (e) => {
     // Sequences cannot be skipped.
-    if (cutscene) return;
+    if (inScene()) return;
     if (e.code === 'Escape') {
       if (e.repeat) return;
       // The Esc that released the pointer may arrive too: it opened the menu already.
@@ -1512,6 +1557,7 @@ async function main(): Promise<void> {
     postFx.setSize(container.clientWidth, container.clientHeight);
     chase.resize(container.clientWidth / container.clientHeight);
     if (cutscene) cinemaFov(cutscene.camera);
+    if (ending) cinemaFov(ending.camera);
   });
 
   if (import.meta.env.DEV) {
@@ -1538,7 +1584,7 @@ async function main(): Promise<void> {
       if (input.attackHeld) input.onAttack();
       input.sample(frame, ++tick);
       // During a scripted sequence the character stands still (the server ignores the keys too).
-      if (cutscene) frame.flags = 0;
+      if (inScene()) frame.flags = 0;
       if (local.rooted) frame.flags |= INPUT.ROOTED;
       // An attack whose clip carries Drake starts its root motion on this step (shared movement).
       frame.flags |= local.takeAttackMotion() << INPUT_ATTACK_SHIFT;
@@ -1547,7 +1593,16 @@ async function main(): Promise<void> {
     }
     const dt = frameMs / 1000;
     local.viewHeading = input.yaw;
-    if (cutscene) {
+    // Necros's death slows the world (its clips, effects and debris) under the timeline's real clock.
+    const worldDt = ending ? dt * ending.timeScale : dt;
+    if (ending) {
+      ending.update(dt);
+      local.render(acc / TICK_MS, worldDt);
+      if (ending.finished) {
+        endEnding();
+        fade(false, 800);
+      }
+    } else if (cutscene) {
       cutscene.update(dt);
       local.avatar.update(dt);
       if (cutscene?.finished) endCutscene();
@@ -1556,12 +1611,12 @@ async function main(): Promise<void> {
       myTorch.position.set(local.object.position.x, local.object.position.y + TORCH_LIGHT_HEIGHT, local.object.position.z);
       dynamicLights.set(MY_TORCH_KEY, myTorch.position, TORCH_LIGHT_COLOR, TORCH_DYNAMIC_INTENSITY, myTorch.distance, 0.08);
     }
-    if (session) remotes.update(session, dt);
-    for (const p of scenePuppets.values()) p.avatar.update(dt);
-    effects?.update(dt);
-    decals?.update(dt);
-    spellVisuals.update(dt);
-    debris?.update(dt);
+    if (session) remotes.update(session, worldDt);
+    for (const p of scenePuppets.values()) p.avatar.update(worldDt);
+    effects?.update(worldDt);
+    decals?.update(worldDt);
+    spellVisuals.update(worldDt);
+    debris?.update(worldDt);
     lighting.update(dt, now / 1000);
     // Players' sword trails (every swing but the ducking chop).
     trails.update(dt);
@@ -1597,7 +1652,7 @@ async function main(): Promise<void> {
       if (!cutscene) fade(false, 600);
       entryFade = null;
     }
-    let viewCamera = cutscene ? cutscene.camera : chase.camera;
+    let viewCamera = ending ? ending.camera : cutscene ? cutscene.camera : chase.camera;
     if (!cutscene && outro) {
       outro.t += dt;
       const k = Math.min(1, outro.t / OUTRO_SECONDS);
@@ -1621,7 +1676,7 @@ async function main(): Promise<void> {
         sounds.play(stepSounds()[stepFoot = 1 - stepFoot]!, local.object.position, { volume: 0.35 });
       }
     }
-    if (levelView && session && !cutscene) {
+    if (levelView && session && !inScene()) {
       const t = nearestInteractable();
       const sign = !t && messagesAt(MESSAGE_USE).length > 0;
       prompt.hidden = !t && !sign;

@@ -28,4 +28,5 @@ export * from './game/spells.ts';
 export * from './game/decals.ts';
 export * from './game/features.ts';
 export * from './game/story.ts';
+export * from './game/ending.ts';
 export * from './game/sequence.ts';

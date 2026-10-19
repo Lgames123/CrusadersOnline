@@ -45,11 +45,13 @@ Changes made for the multiplayer world or on request. Each has a context note in
 - **Input:** a movement key closes the inventory windows; holding Alt frees the cursor; there is no
   "click to play" hint.
 - **MMO tools:** text chat, hotbar, admin panel.
+- **Ending:** everyone who hurt Necros gets the ending. After Cs5b's last scene, Drake stays in
+  Cs5b with the story complete, and every door opens for him from either side.
 
 ## 4. Planned Non-Original Features (decided 2026-10-19)
 
-- **Ending after Necros:** Drake returns to the start of the game, and every story area stays
-  open for him. He gets a completion reward (title, cape or similar; to be decided).
+- **Completion reward:** a title, a cape or similar, for characters who finished the story; to
+  be decided.
 - **Waypoints:** later, so players can teleport to the areas and maps they have unlocked.
 - **Intro movies:** an option at character creation to watch the introduction (.bik).
 - **Side quests:** the 26 cut quests, behind `sideQuests` (`game-design/side-quests.md`).

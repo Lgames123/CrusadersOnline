@@ -84,6 +84,8 @@ export interface PlayerStatsMsg {
     resist: number[];
     /** The wielded weapon's damage per type (0x46C0D0); zeros unarmed. */
     damage: number[];
+    /** The character finished the story (ending.ts): every door opens for him, from either side. */
+    storyComplete?: true;
   };
 }
 
@@ -233,6 +235,16 @@ export interface CutsceneMsg {
   d: { sequence: string; actors: (number | null)[] };
 }
 
+/**
+ * Necros died and this player hurt him (ending.ts): the client plays the death timeline around
+ * `at` (his feet, metres) and `yaw` (his heading, radians); the server loads the ending act at
+ * ENDING_LOAD_SECONDS. `first`: the character finished the game with this kill.
+ */
+export interface EndingMsg {
+  op: typeof SC.ENDING;
+  d: { at: { x: number; y: number; z: number }; yaw: number; first: boolean };
+}
+
 /** The player's quest book; `news` lists what changed with this message (absent on entry). */
 export interface QuestLogMsg {
   op: typeof SC.QUEST_LOG;
@@ -312,7 +324,8 @@ export type ServerControlMsg =
   | StoryMessageMsg
   | StorySoundMsg
   | ShopMsg
-  | SpellEventMsg;
+  | SpellEventMsg
+  | EndingMsg;
 
 /** Animation state ids carried in snapshot `anim`. */
 export const ANIM = {
