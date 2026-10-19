@@ -133,6 +133,13 @@ export interface MobAttack {
   kind: 'normal' | 'overhead' | 'low' | 'thrust' | 'bash' | 'jump';
   clip: ClipEvents;
   reach: number;
+  /**
+   * Later SWING events of the clip (frames): each starts the sweep again (0x00457A60 ->
+   * Swing_Component_Start), so the hit list clears and the reach becomes this one's.
+   */
+  again?: readonly { frame: number; reach: number }[];
+  /** Its clip has no SWING event: it plays and moves but hits nothing (0x00457A60 never starts a sweep). */
+  harmless?: boolean;
 }
 /**
  * Reach of the creature attacks: the executable's attack table (.data 0x004EA200: state, angle
@@ -147,7 +154,6 @@ export const MOB_ATTACKS: readonly MobAttack[] = [
   { kind: 'low', clip: { swing: 14, impact: 16, recovery: 19 }, reach: reachFt(6) },
   { kind: 'overhead', clip: { swing: 10, impact: 12, recovery: 16 }, reach: reachFt(7.5) },
 ];
-const mobSwing = (k: MobSwingKind): MobAttack => MOB_ATTACKS.find((a) => a.kind === k)!;
 /** Close-range jab (ASM_THRUST, PP02: SWING 6, RECOVERY 17; no IMPACT event, hit on frame 9). */
 export const MOB_THRUST: MobAttack = { kind: 'thrust', clip: { swing: 6, impact: 9, recovery: 17 }, reach: reachFt(6) };
 /**
@@ -172,6 +178,57 @@ export const RUSH_STEPS_PER_SECOND = 120;
 export const RUSH_CONTACT_SLACK = 0.5 * FT;
 /** Leaping strike (ASM_JUMP_ATTACK, PN05). */
 export const MOB_JUMP_ATTACK: MobAttack = { kind: 'jump', clip: { swing: 17, impact: 20, recovery: 24 }, reach: reachFt(7.5) };
+
+/** The attack a creature plays for each of the brain's attack states. */
+export interface MobAttackSet {
+  normal: MobAttack;
+  low: MobAttack;
+  overhead: MobAttack;
+  thrust: MobAttack;
+  jump: MobAttack;
+  bash: MobAttack;
+}
+/** The humanoid creatures' (PN02, PN01, PN03, PP02, PN05, PL01). */
+export const HUMANOID_ATTACKS: MobAttackSet = {
+  normal: MOB_ATTACKS[0]!, low: MOB_ATTACKS[1]!, overhead: MOB_ATTACKS[2]!, thrust: MOB_THRUST, jump: MOB_JUMP_ATTACK, bash: MOB_BASH,
+};
+/**
+ * The elementals' (IceElemental.mdl; Ice, Rock and Lava share it). A blow is swept by the model's
+ * own lines, DMY LINE LEFT HAND / RIGHT HAND on the fingers (0x00421D50: line 0, 1, or for
+ * "SWING DOUBL" the segment between their midpoints), from a SWING event until the first event
+ * named exactly RECOVERY (0x00482E90; 60 frames when there is none, so to the clip's end), one
+ * hit per sweep. Reach: the farthest the lines get ahead of the clip's start over each sweep
+ * (forward kinematics on the clips, feet), times the creature's scale (the lines are on the
+ * scaled model).
+ * - SWING_LEVEL and SWING_OVERHEAD bind M18C01ice_a_h: SWING DOUBL 25, RECOVERY 32; 11.5 ft.
+ * - CHOP_LOW binds M18C02ice_a_m: SWING START 10, then "SWING RECOVERY" 19 and 28 and SWING START
+ *   28 (all SWING events, none named RECOVERY): sweeps from 10 (8.1 ft), 19 (11.8) and 28 (12.8)
+ *   to the clip's end, 43 frames.
+ * - No ASM_THRUST clip: the state falls back to the first of its group (0x00428220, table
+ *   0x004EBD18 group 0x20: CHOP_LOW, SWING_LEVEL, SWING_OVERHEAD) with one, CHOP_LOW.
+ * - ASM_JUMP_ATTACK M18A07ice_jmp_f (32 frames) and ASM_RAM_SHOULDER ice_ram_shoulder (45) carry
+ *   no events: they never hit.
+ */
+const ELEMENTAL_HIGH: MobAttack = { kind: 'normal', clip: { swing: 25, impact: 32, recovery: 32 }, reach: reachFt(11.5) };
+const ELEMENTAL_LOW: MobAttack = {
+  kind: 'low', clip: { swing: 10, impact: 42, recovery: 42, end: 43 }, reach: reachFt(8.1),
+  again: [{ frame: 19, reach: reachFt(11.8) }, { frame: 28, reach: reachFt(12.8) }],
+};
+export const ELEMENTAL_ATTACKS: MobAttackSet = {
+  normal: ELEMENTAL_HIGH,
+  low: ELEMENTAL_LOW,
+  overhead: { ...ELEMENTAL_HIGH, kind: 'overhead' },
+  thrust: ELEMENTAL_LOW,
+  jump: { kind: 'jump', clip: { swing: 1, impact: 1, recovery: 31, end: 32 }, reach: 0, harmless: true },
+  bash: { kind: 'bash', clip: { swing: 4, impact: 9, recovery: 44, end: 45 }, reach: reachFt(6) },
+};
+/** An attack's reach for a creature of this scale (its hit lines are on the scaled model). */
+export function scaledAttack(a: MobAttack, scale: number): MobAttack {
+  if (scale === 1) return a;
+  return { ...a, reach: a.reach * scale, ...(a.again ? { again: a.again.map((g) => ({ ...g, reach: g.reach * scale })) } : {}) };
+}
+/** Creatures scaled above this never hop in and add 3 to the standing attack roll (0x004083F0). */
+export const MOB_BIG_SCALE = 1.5;
 
 /**
  * The original's melee brain (decompiled: 0x00409520 and the routines it runs). Distances are
@@ -219,16 +276,21 @@ export interface MobSequence {
   pauseMs: number;
 }
 
-/** The attack sequence for a creature `distance` metres from its target (`roll` in [0, 1)). */
-export function chooseMobSequence(distance: number, roll: number, canHop = true): MobSequence {
+/**
+ * The attack sequence for a creature `distance` metres from its target (`roll` in [0, 1)), from
+ * its attack set; a creature scaled above 1.5 never hops and adds 3 to the standing roll.
+ */
+export function chooseMobSequence(distance: number, roll: number, canHop = true, set: MobAttackSet = HUMANOID_ATTACKS, scale = 1): MobSequence {
+  const swing = (k: MobSwingKind) => set[k];
+  const big = scale > MOB_BIG_SCALE;
   const r = Math.min(11, Math.floor(roll * 12));
-  if (distance > MOB_HOP_ATTACK_RANGE && canHop) {
+  if (distance > MOB_HOP_ATTACK_RANGE && canHop && !big) {
     const [first, ...rest] = MOB_SEQUENCES[r]!;
-    return { hop: true, upper: mobSwing(first!), main: rest.map(mobSwing), pauseMs: MOB_SEQUENCE_PAUSE_MS[rest.length]! };
+    return { hop: true, upper: swing(first!), main: rest.map(swing), pauseMs: MOB_SEQUENCE_PAUSE_MS[rest.length]! };
   }
-  if (distance < MOB_THRUST_ATTACK_RANGE) return { hop: false, upper: null, main: [MOB_THRUST], pauseMs: MOB_SEQUENCE_PAUSE_MS[0]! };
-  const seq = MOB_SEQUENCES[r]!;
-  return { hop: false, upper: null, main: seq.map(mobSwing), pauseMs: MOB_SEQUENCE_PAUSE_MS[seq.length - 1]! };
+  if (distance < MOB_THRUST_ATTACK_RANGE) return { hop: false, upper: null, main: [set.thrust], pauseMs: MOB_SEQUENCE_PAUSE_MS[0]! };
+  const seq = MOB_SEQUENCES[Math.min(11, r + (big ? 3 : 0))]!;
+  return { hop: false, upper: null, main: seq.map(swing), pauseMs: MOB_SEQUENCE_PAUSE_MS[seq.length - 1]! };
 }
 
 /**
@@ -237,9 +299,11 @@ export function chooseMobSequence(distance: number, roll: number, canHop = true)
  * (2 of 3) or leaps (1 of 3); one without a shield leaps.
  */
 export const MOB_SPECIAL_ROLL = 0.8;
-export function chooseMobSpecial(hasShield: boolean, roll: number): MobSequence {
-  if (hasShield && Math.floor(roll * 3) < 2) return { hop: false, upper: null, main: [MOB_BASH, MOB_THRUST], pauseMs: MOB_SEQUENCE_PAUSE_MS[1]! };
-  return { hop: false, upper: null, main: [MOB_JUMP_ATTACK], pauseMs: MOB_SEQUENCE_PAUSE_MS[0]! };
+export function chooseMobSpecial(hasShield: boolean, roll: number, set: MobAttackSet = HUMANOID_ATTACKS, rams = false): MobSequence {
+  if (hasShield && Math.floor(roll * 3) < 2) return { hop: false, upper: null, main: [set.bash, set.thrust], pauseMs: MOB_SEQUENCE_PAUSE_MS[1]! };
+  // Necros, shieldless, rams instead of leaping.
+  if (rams && !hasShield) return { hop: false, upper: null, main: [set.bash], pauseMs: MOB_SEQUENCE_PAUSE_MS[0]! };
+  return { hop: false, upper: null, main: [set.jump], pauseMs: MOB_SEQUENCE_PAUSE_MS[0]! };
 }
 
 /**
@@ -375,6 +439,21 @@ export interface MobArchetype {
   passive?: boolean;
   /** The creature type id (template table, 113-162): what spells test (holy wrath, soul drinker, freeze resist). */
   type?: number;
+  /** Unarmed damage per type (stats +0x18), added to the weapon's; placements carry their own. */
+  unarmed?: DamageVector;
+  /** Its attacks (clips, hit windows, reach) for the brain's attack states; absent: HUMANOID_ATTACKS. */
+  attacks?: MobAttackSet;
+  /** Shieldless, its special against a raised shield is the ram, not the leap (Necros, 0x004087A0). */
+  rams?: boolean;
+  /** Ignores the impact of a blow (controller flag 0x8000; only Necros, 0x00426C70). */
+  steadfast?: boolean;
+  /** Its blows always knock the player down (0x0044CA00: a source of type 0x96 sets 0x4000000). */
+  knocksDown?: boolean;
+  /**
+   * Locomotion from its own clips (feet and frames, at 1000/30 fps) instead of the humanoid rig's:
+   * run, walk, retreat, sidesteps left / right.
+   */
+  locomotion?: { run: [number, number]; walk: [number, number]; retreat: [number, number]; left: [number, number]; right: [number, number] };
 }
 
 /**
@@ -386,6 +465,11 @@ export interface MobArchetype {
 function meleeVariant(base: MobArchetype, over: Partial<MobArchetype> & Pick<MobArchetype, 'id' | 'name'>): MobArchetype {
   return { ...base, loot: [], ...over };
 }
+
+/** The elementals' locomotion clips (IceElemental.mdl: ice_run, m18a01ice_w_fw, ice_retreat, m18a02 / m18a03 sidesteps). */
+const ELEMENTAL_LOCOMOTION: NonNullable<MobArchetype['locomotion']> = {
+  run: [17.98, 20], walk: [8.26, 33], retreat: [5.17, 44], left: [8.57, 38], right: [4.13, 38],
+};
 
 const SKELETON_WARRIOR: MobArchetype = {
   id: 'skeleton_warrior',
@@ -474,6 +558,41 @@ export const MOB_ARCHETYPES: Record<string, MobArchetype> = {
     id: 'deceiver', name: 'Deceiver', maxHp: 201, xpReward: 250, weapon: 'mace', shield: null, engage: 5 * 0.3048,
     resist: [0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 1, 0],
   }),
+  // Elementals (IceElemental.mdl, unarmed, one template each: texture ice / stoneelemental /
+  // fireelemental): their fist blows (ELEMENTAL_ATTACKS) and own locomotion clips (ice_run 18 ft
+  // in 20 frames, m18a01ice_w_fw 8.3 / 33, ice_retreat 5.2 / 44, sidesteps 8.6 and 4.1 / 38).
+  // Their fire ball (spell masks 0x20 / 0x80) plays ASM_THROW_ITEM, icewalk, with no SPELL event.
+  // HP, XP, resists and unarmed damage: the placements' (Ice 36 of 37, Rock and Lava all).
+  ice_elemental: meleeVariant(SKELETON_WARRIOR, {
+    id: 'ice_elemental', name: 'Ice Elemental', maxHp: 175, xpReward: 200, weapon: 'unarmed', shield: null,
+    resist: [0.25, 1, 1.5, 1, 1, 0, 0, 0, 1, 0, 0], unarmed: [0, 10, 0, 0, 0, 20, 0, 0, 0, 0, 0],
+    attacks: ELEMENTAL_ATTACKS, locomotion: ELEMENTAL_LOCOMOTION,
+  }),
+  rock_elemental: meleeVariant(SKELETON_WARRIOR, {
+    id: 'rock_elemental', name: 'Rock Elemental', maxHp: 150, xpReward: 125, weapon: 'unarmed', shield: null,
+    resist: [1, 1, 1, 1.25, 0, 1, 1, 1, 0.75, 0, 0], unarmed: [0, 10, 0, 0, 10, 0, 0, 0, 0, 0, 0],
+    attacks: ELEMENTAL_ATTACKS, locomotion: ELEMENTAL_LOCOMOTION,
+  }),
+  lava_elemental: meleeVariant(SKELETON_WARRIOR, {
+    id: 'lava_elemental', name: 'Lava Elemental', maxHp: 200, xpReward: 250, weapon: 'unarmed', shield: null,
+    resist: [0.5, 0.75, 0, 1, 0.75, 1.25, 1, 1, 1, 0, 0], unarmed: [0, 10, 30, 0, 0, 0, 0, 0, 0, 0, 0],
+    attacks: ELEMENTAL_ATTACKS, locomotion: ELEMENTAL_LOCOMOTION,
+  }),
+  // Necros (type 150, bs1a): unarmed, his forearm's DMY LINE NECRARM sweeps the humanoid swings
+  // (6-7 ft, the attack table's reach); 1000 HP, DARK 40 unarmed. Never flinches, knocks the
+  // player down with every blow, rams a raised shield, casts soul drinker, unholy wrath, triple
+  // fire balls and his Force Globe (spells.ts NECROS_SPELLS). He fights where he stands: no leash.
+  necros: meleeVariant(SKELETON_WARRIOR, {
+    id: 'necros', name: 'Necros', maxHp: 1000, xpReward: 10, weapon: 'unarmed', shield: null,
+    resist: [0.8, 0.8, 0.21, 0.24, 0.22, 0.21, 0.43, 0.13, 0.3, 0.3, 0], unarmed: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 40],
+    rams: true, steadfast: true, knocksDown: true, leashRadius: Infinity, respawnTicks: ticks(300_000),
+  }),
+  // Ghost Father (type 156, the Cs4b inn): Male04b in Male04bGhostFather, holding the Longsword of
+  // the Crusader; 150 HP, 200 XP; FIRE x5, everything else x0.2; SPIRIT / BODY / LIGHT / DARK 4 unarmed.
+  ghost_father: meleeVariant(SKELETON_WARRIOR, {
+    id: 'ghost_father', name: 'Ghost Father', maxHp: 150, xpReward: 200, shield: null,
+    resist: [0.2, 0.2, 5, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2], unarmed: [0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4],
+  }),
   // The Spectral Ally spell's creature (type 155, disposition 6: on the caster's side; 0x00440230).
   // HP, weapon damage and resists are set per spell level when it is summoned.
   spectral_ally: meleeVariant(SKELETON_WARRIOR, {
@@ -486,6 +605,7 @@ export const MOB_ARCHETYPES: Record<string, MobArchetype> = {
 const ARCHETYPE_TYPES: Readonly<Record<string, number>> = {
   skeleton_warrior: 145, skeleton_ghost: 146, shadow: 147, dark_mage: 143, dark_master: 144, dasher_brute: 133,
   ogre_outlaw: 131, dwarf_rebel: 124, dwarf_zealot: 125, ice_titan: 135, black_knight: 116, deceiver: 134, spectral_ally: 155,
+  ice_elemental: 136, rock_elemental: 137, lava_elemental: 138, necros: 150, ghost_father: 156,
 };
 for (const [id, type] of Object.entries(ARCHETYPE_TYPES)) MOB_ARCHETYPES[id]!.type = type;
 

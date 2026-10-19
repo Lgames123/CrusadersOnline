@@ -134,6 +134,16 @@ export interface ArenaDef {
     gesture?: number;
     /** Original levels: its idle walk (metres): pause ms at each point, loop or back and forth. */
     path?: { points: { x: number; y: number; z: number }[]; pause: number; loop: boolean };
+    /** Original levels: its unarmed damage per type (added to its weapon's; converter 1.30+). */
+    damage?: number[];
+    /** Original levels: its model scale (absent: 1; converter 1.30+). */
+    scale?: number;
+    /**
+     * Original levels: kept out of the world until a scripted sequence makes it appear (its track
+     * opens with Appear 0 and later shows it: Necros at the end of seqNecros). Not seen, not hit,
+     * not thinking; a player's finished sequence brings it in, and it hides again when it respawns.
+     */
+    hidden?: boolean;
   }[];
   /** Items, chests and breakable props (original levels). */
   objects?: WorldObjectDef[];

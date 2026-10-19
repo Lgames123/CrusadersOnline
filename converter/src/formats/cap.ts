@@ -7,7 +7,8 @@ import { capTypeTable, parseStory, type CapStory } from './cap_story.ts';
  * Meshes/Ca_a.msh); one PKWARE DCL stream at 0x94 holds the object records. Only creature
  * records are decoded here: marker 2D 00 00 00 CD CD CD CD, type id at +0x1C, instance name at
  * +0x40, and fields relative to the "XP block" (02 00 00 00 | xp | 0 0 0 | disposition x2):
- *   -0x200 position (3 x float32), -0x1B8 max HP, -0x118 11 resist factors, +4 XP, +20 disposition.
+ *   -0x200 position (3 x float32), -0x1D4 scale, -0x1B8 max HP, -0x1A8 11 unarmed damage values,
+ *   -0x118 11 resist factors, +4 XP, +20 disposition.
  */
 export class CapError extends Error {}
 
@@ -28,6 +29,14 @@ export interface CapCreature {
   xp: number;
   disposition: number;
   resist: number[];
+  /**
+   * Unarmed damage per type (SLASH ... DARK; the stats' +0x18 vector, what Stats_GetOutgoingDamage
+   * 0x0044CCF0 adds to the weapon's): Rock Elemental BASH 10 + EARTH 10, skeletons DARK 2.
+   * Only when not all zero.
+   */
+  damage?: number[];
+  /** Model scale (the render component's +0x20): Ice Titans 1.5-2, Rock Elementals 0.8. Only when not 1. */
+  scale?: number;
   /** Facing (the transform's third row, x and z), original axes. */
   facing: [number, number];
   /**
@@ -278,6 +287,9 @@ export function parseCap(bytes: Uint8Array, itemNames: ReadonlySet<string> = new
     if (!position.every(Number.isFinite)) continue;
     const resist: number[] = [];
     for (let i = 0; i < 11; i++) resist.push(Math.round(f32(x - 0x118 + 4 * i) * 1000) / 1000);
+    const damage: number[] = [];
+    for (let i = 0; i < 11; i++) damage.push(Math.round(f32(x - 0x1a8 + 4 * i) * 1000) / 1000);
+    const scale = Math.round(f32(x - 0x1d4) * 1000) / 1000;
     // The transform's 3x3 rotation sits just before the position; its third row is the facing.
     const facing: [number, number] = [f32(x - 0x200 - 0xc), f32(x - 0x200 - 0x4)];
     creatureAt.set(a, creatures.length);
@@ -293,6 +305,8 @@ export function parseCap(bytes: Uint8Array, itemNames: ReadonlySet<string> = new
       xp: dv.getInt32(x + 4, true),
       disposition: dv.getInt32(x + 20, true),
       resist,
+      ...(damage.every(Number.isFinite) && damage.some((d) => d !== 0) ? { damage } : {}),
+      ...(Number.isFinite(scale) && scale > 0 && scale !== 1 ? { scale } : {}),
       facing: facing.every(Number.isFinite) ? [Math.round(facing[0] * 1e4) / 1e4, Math.round(facing[1] * 1e4) / 1e4] : [0, 1],
     });
     a = x;

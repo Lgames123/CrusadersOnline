@@ -46,6 +46,10 @@ export interface LevelCreature {
   gesture?: number;
   /** Its idle walk (stats +0x1DC kinds 1 / 3): points (original units, Z mirrored), pause ms at each, loop or back and forth. */
   path?: { kind: number; points: [number, number, number][]; pause: number; loop: boolean };
+  /** Unarmed damage per type, SLASH ... DARK (stats +0x18; converter 1.30+, absent when all zero). */
+  damage?: number[];
+  /** Model scale (converter 1.30+; absent: 1). */
+  scale?: number;
 }
 
 export interface LevelObject {
@@ -530,6 +534,11 @@ export const LEVEL_ARCHETYPES: Readonly<Record<number, string>> = {
   145: 'skeleton_warrior',
   146: 'skeleton_ghost',
   147: 'shadow',
+  136: 'ice_elemental',
+  137: 'rock_elemental',
+  138: 'lava_elemental',
+  150: 'necros',
+  156: 'ghost_father',
 };
 
 /** Hostile disposition in the placement records. */
@@ -591,6 +600,25 @@ function spawnPoints(mesh: TriMeshDef, hostiles: { x: number; y: number; z: numb
 const ASM_DEATH = 78;
 
 /**
+ * Placements a sequence brings into the level: their track's first Appear hides them and a later
+ * one shows them (Necros, who takes Necros Before's place at the end of seqNecros). The original
+ * loads them visible and the sequence starts as the act begins; here the world is shared, so they
+ * wait out of it until a player's sequence has shown them.
+ */
+function revealedBySequence(story: LevelStory | undefined): Set<number> {
+  const out = new Set<number>();
+  for (const q of story?.sequences ?? []) {
+    for (const t of q.tracks) {
+      const a = q.actors[t.actor - SEQUENCE_ACTOR_BASE];
+      if (!a || !('creature' in a)) continue;
+      const appears = t.steps.map((i) => q.steps[i]).filter((st) => st?.action === 'Appear').map((st) => st!.args['appear']);
+      if (appears[0] === 0 && appears.slice(1).includes(1)) out.add(a.creature);
+    }
+  }
+  return out;
+}
+
+/**
  * Placements of the creatures a sequence kills (a RunAnimation of the death clip on their
  * track): actors of the script only (Ws9a's cell guards, Du1c / Du3c's), never fought or respawned.
  */
@@ -628,6 +656,8 @@ function placementExtras(c: LevelCreature, s: number): Partial<ArenaDef['mobSpaw
   if (c.path && c.path.points.length > 1) {
     out.path = { points: c.path.points.map((p) => ({ x: p[0] * s, y: p[1] * s, z: p[2] * s })), pause: c.path.pause, loop: c.path.loop };
   }
+  if (c.damage?.length === 11) out.damage = c.damage;
+  if (c.scale !== undefined && c.scale > 0 && c.scale !== 1) out.scale = c.scale;
   return out;
 }
 
@@ -639,6 +669,7 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
     .map((c) => ({ x: c.position[0] * s, y: c.position[1] * s, z: c.position[2] * s }));
   const mobSpawns: ArenaDef['mobSpawns'] = [];
   const scripted = scriptedDeaths(placements.story);
+  const revealed = revealedBySequence(placements.story);
   const puppets: NonNullable<ArenaDef['puppets']> = [];
   placements.creatures.forEach((c, placement) => {
     if (!inDifficulty(c, difficulty)) return;
@@ -685,6 +716,7 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
       resist: c.resist,
       ...(c.facing ? { yaw: Math.atan2(-c.facing[0], -c.facing[1]) } : {}),
       ...placementExtras(c, s),
+      ...(revealed.has(placement) ? { hidden: true } : {}),
     });
   });
   const objects: WorldObjectDef[] = [];

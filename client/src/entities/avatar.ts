@@ -12,6 +12,8 @@ export interface Avatar {
   clipRate?: number;
   /** Height above the feet where name plates / health bars go, metres. */
   readonly headHeight: number;
+  /** The creature's model scale (a placement's: Ice Titans 1.5-2, Rock Elementals 0.8). */
+  setScale?(scale: number): void;
   /**
    * anim = ANIM.* value; swingSeconds = duration of the current swing when attacking;
    * swingId changes for every new swing, so back-to-back swings of one kind restart the clip.
@@ -88,12 +90,22 @@ const COLORS: Record<string, { body: number; trim: number }> = {
   ice_titan: { body: 0xb0c8d8, trim: 0x607888 },
   black_knight: { body: 0x2a2a2e, trim: 0x101012 },
   deceiver: { body: 0x5a4a6a, trim: 0x2a1a3a },
+  ice_elemental: { body: 0x9ad0f0, trim: 0x4a80a8 },
+  rock_elemental: { body: 0x7a7266, trim: 0x4a443c },
+  lava_elemental: { body: 0xc8501e, trim: 0x5a1a08 },
+  necros: { body: 0x3a2a2a, trim: 0x8a1a1a },
+  ghost_father: { body: 0xb8c8d0, trim: 0x6a7a88 },
 };
 
 /** Procedural mannequin with a sword whose swing and death pose follow the state. */
 export class ProceduralAvatar implements Avatar {
   readonly object = new THREE.Group();
-  readonly headHeight = PLAYER_HEIGHT + 0.25;
+  headHeight = PLAYER_HEIGHT + 0.25;
+
+  setScale(scale: number): void {
+    this.object.scale.setScalar(scale);
+    this.headHeight = PLAYER_HEIGHT * scale + 0.25;
+  }
   private readonly body = new THREE.Group();
   private readonly arm = new THREE.Group();
   private readonly shield: THREE.Mesh;

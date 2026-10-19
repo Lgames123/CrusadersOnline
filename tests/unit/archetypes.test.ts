@@ -6,7 +6,8 @@ describe('creature archetypes', () => {
     for (const [type, id] of Object.entries(LEVEL_ARCHETYPES)) {
       const a = MOB_ARCHETYPES[id];
       expect(a, `type ${type}`).toBeDefined();
-      expect(BUILTIN_ITEMS.get(a!.weapon)?.type, `${id} weapon`).toBe('weapon');
+      // The elementals and Necros fight unarmed (their template names no weapon).
+      if (a!.weapon !== 'unarmed') expect(BUILTIN_ITEMS.get(a!.weapon)?.type, `${id} weapon`).toBe('weapon');
       if (a!.shield) expect(BUILTIN_ITEMS.get(a!.shield)?.type, `${id} shield`).toBe('shield');
       expect(a!.resist).toHaveLength(11);
     }

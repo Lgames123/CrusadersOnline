@@ -87,8 +87,13 @@ import {
   TICK_RATE,
   CASTABLE_SPELLS,
   CREATURE_CAST,
-  CREATURE_SPELLS,
+  creatureSpell,
   creatureSpellBits,
+  creatureCastWalks,
+  CREATURE_SPELL_MASKS,
+  FORCE_GLOBE_BIT,
+  FORCE_GLOBE_SECONDS,
+  NECROS_TYPE,
   creatureSpellClipSeconds,
   PLAYER_CREATURE_TYPE,
   UNHOLY_TYPES,
@@ -171,7 +176,11 @@ import {
   MOB_TURN_RATE,
   MOB_UPPER_SWING_CODES,
   type MobAttack,
+  type MobAttackSet,
   type MobSequence,
+  HUMANOID_ATTACKS,
+  ORIGINAL_CLIP_FPS,
+  scaledAttack,
   RUSH_CONTACT_SLACK,
   RUSH_PUSH_SHARE,
   RUSH_STEP_CHANCE,
@@ -485,6 +494,10 @@ interface Swing {
   upper?: boolean;
   /** A creature attack's reach (centre to centre, m). */
   reach?: number;
+  /** A creature attack's later sweeps: at these ticks into the swing the hit list clears, with this reach. */
+  again?: { at: number; reach: number }[];
+  /** A creature attack whose clip starts no sweep: it lands nothing. */
+  harmless?: boolean;
 }
 
 interface ActorBase {
@@ -611,7 +624,7 @@ interface Mob extends ActorBase {
    * (its template mask bit, the target, the clip's SPELL event — null when the clip has none —
    * and its end) and the end of the cooldown (+0xE0, from the start of the last cast).
    */
-  spellPick: 'close' | 'ranged' | null;
+  spellPick: 'close' | 'ranged' | 'globe' | null;
   mobCast: { bit: number; target: number; releaseAt: number | null; end: number; released: boolean } | null;
   spellReadyAt: number;
   /** End of the pause / the post-attack phase. */
@@ -663,6 +676,15 @@ interface Mob extends ActorBase {
   ally?: number;
   /** Its weapon's damage when not the item's (the spectral ally's, by spell level). */
   damage?: DamageVector;
+  /** Its unarmed damage (stats +0x18; the placement's, else the archetype's), added to the weapon's. */
+  unarmed: DamageVector | null;
+  /** Its model scale (placement): its hit lines' reach and the big-creature attack rule. */
+  scale: number;
+  /** Its attacks, at its scale. */
+  attacks: MobAttackSet;
+  /** Out of the world until a scripted sequence shows it (Necros); `hideOnRespawn`: back out when it respawns. */
+  hidden: boolean;
+  hideOnRespawn: boolean;
 }
 
 type Actor = Player | Mob;
@@ -848,6 +870,7 @@ export class WorldZone {
 
   private hostile(a: Actor, b: Actor): boolean {
     if (a === b) return false;
+    if ((a.kind === 'mob' && a.hidden) || (b.kind === 'mob' && b.hidden)) return false;
     const players = (x: Actor) => x.kind === 'player' || x.ally !== undefined;
     if (players(a) === players(b)) return false;
     if (a.kind === 'mob' && a.ally !== undefined && b.kind === 'mob' && b.archetype.passive) return false;
@@ -927,7 +950,24 @@ export class WorldZone {
     const heldWeapon = placed(at.weapon);
     const heldShield = placed(at.shield);
     const weapon = (heldWeapon === null ? UNARMED : heldWeapon?.type === 'weapon' ? heldWeapon : undefined)
-      ?? this.items.get(archetype.weapon) ?? (archetype.passive ? UNARMED : undefined);
+      ?? (archetype.weapon === UNARMED.id ? UNARMED : this.items.get(archetype.weapon)) ?? (archetype.passive ? UNARMED : undefined);
+    const scale = at.scale !== undefined && at.scale > 0 ? at.scale : 1;
+    const set = archetype.attacks ?? HUMANOID_ATTACKS;
+    const attacks: MobAttackSet = {
+      normal: scaledAttack(set.normal, scale), low: scaledAttack(set.low, scale), overhead: scaledAttack(set.overhead, scale),
+      thrust: scaledAttack(set.thrust, scale), jump: scaledAttack(set.jump, scale), bash: scaledAttack(set.bash, scale),
+    };
+    const loco = archetype.locomotion;
+    // Its own locomotion clips (feet in frames at 1000/30 fps), else the humanoid rig's.
+    const clipMps = (c: [number, number]) => (c[0] * 0.3048 * ORIGINAL_CLIP_FPS) / c[1];
+    const stats: MovementStats = loco
+      ? {
+        ...DEFAULT_MOVEMENT_STATS, jumpVelocity: 0, clipLocomotion: false,
+        runSpeed: clipMps(loco.run), walkSpeed: clipMps(loco.walk), backSpeed: clipMps(loco.retreat), walkBackSpeed: clipMps(loco.retreat),
+        strafeSpeed: (clipMps(loco.left) + clipMps(loco.right)) / 2, walkStrafeSpeed: (clipMps(loco.left) + clipMps(loco.right)) / 2,
+        strafeLeft: [-clipMps(loco.left), 0], strafeRight: [clipMps(loco.right), 0], walkStrafeLeft: [-clipMps(loco.left), 0], walkStrafeRight: [clipMps(loco.right), 0],
+      }
+      : { ...DEFAULT_MOVEMENT_STATS, jumpVelocity: 0 };
     if (!weapon) throw new Error(`unknown weapon ${archetype.weapon} for ${archetypeId}`);
     const shield = heldShield === null ? null : heldShield?.type === 'shield' ? heldShield : archetype.shield ? this.items.get(archetype.shield) ?? null : null;
     const mob: Mob = {
@@ -978,8 +1018,13 @@ export class WorldZone {
       talkUntil: 0,
       fleeFrom: { x: 0, z: 0 },
       input: createInputFrame(),
-      // Creatures share the humanoid rig's root-motion speeds (run, walk); no jumping.
-      stats: { ...DEFAULT_MOVEMENT_STATS, jumpVelocity: 0 },
+      // The humanoid rig's root-motion speeds (run, walk) unless it has its own; no jumping.
+      stats,
+      unarmed: at.damage?.length === 11 ? at.damage : archetype.unarmed ?? null,
+      scale,
+      attacks,
+      hidden: at.hidden === true,
+      hideOnRespawn: at.hidden === true,
       ...(at.placement !== undefined ? { placement: at.placement } : {}),
       ...(at.carries ? { carries: at.carries } : {}),
       statuses: new Map(),
@@ -2172,7 +2217,7 @@ export class WorldZone {
   private startCutscene(p: Player, sequence: StorySequence): void {
     const actors = sequence.actors.map((a) => {
       if (!a || !('creature' in a)) return null;
-      for (const m of this.actors.values()) if (m.kind === 'mob' && m.placement === a.creature && alive(m)) return m.entityId;
+      for (const m of this.actors.values()) if (m.kind === 'mob' && m.placement === a.creature && alive(m) && !m.hidden) return m.entityId;
       return null;
     });
     // At most the estimated length (actors' steps at walking pace) and a margin.
@@ -2214,6 +2259,13 @@ export class WorldZone {
     const standIn = new Set(seq.actors.map((a, i) => (a && 'player' in a ? i + 2 : -1)).filter((i) => i >= 0));
     let end: [number, number, number] | null = null;
     let load: string | null = null;
+    // Creatures the sequence brought in (their track shows them: Necros) are in the world now.
+    for (const track of seq.tracks) {
+      const actor = seq.actors[track.actor - 2];
+      if (!actor || !('creature' in actor)) continue;
+      if (!track.steps.some((i) => seq.steps[i]?.action === 'Appear' && seq.steps[i]!.args['appear'] === 1)) continue;
+      for (const m of this.actors.values()) if (m.kind === 'mob' && m.placement === actor.creature && m.hidden && alive(m)) m.hidden = false;
+    }
     for (const track of seq.tracks) {
       for (const index of track.steps) {
         const step = seq.steps[index];
@@ -2375,7 +2427,7 @@ export class WorldZone {
 
     // 2. Mobs think and move.
     for (const a of this.actors.values()) {
-      if (a.kind !== 'mob' || !alive(a)) continue;
+      if (a.kind !== 'mob' || !alive(a) || a.hidden) continue;
       this.updateMob(a);
       this.mobFall(a);
     }
@@ -2560,7 +2612,7 @@ export class WorldZone {
     m.anim = m.hitUntil > this.tick
       ? (m.character.rollDir === ACTION_KNOCKDOWN ? ANIM.KNOCKDOWN : ANIM.HIT)
       : m.mobCast
-        ? ANIM.SPELL_CAST + SPELLS.indexOf(CREATURE_SPELLS[m.mobCast.bit]!.spell)
+        ? ANIM.SPELL_CAST + SPELLS.indexOf(m.mobCast.bit === FORCE_GLOBE_BIT ? 'torch_light' : creatureSpell(m.archetype.type ?? 0, m.mobCast.bit, this.difficulty)!.spell)
       : m.blockUntil > this.tick
         ? ANIM.BLOCK
         : m.state === 'flee' && m.alertUntil > this.tick
@@ -3024,7 +3076,12 @@ export class WorldZone {
           m.brain = 'decide';
           continue;
         case 'spell':
-          if (this.mobSpell(m, target, dist)) return;
+          if (this.mobSpell(m, target, dist)) {
+            // The elementals' throw is their walk clip: it carries them forward (icewalk's root motion).
+            const c = m.mobCast;
+            if (c && c.bit !== FORCE_GLOBE_BIT && this.tick < c.end && creatureCastWalks(m.archetype.type ?? 0, creatureSpell(m.archetype.type ?? 0, c.bit)!.spell)) m.input.flags = INPUT.FORWARD | INPUT.WALK;
+            return;
+          }
           m.brain = 'decide';
           continue;
         default:
@@ -3052,13 +3109,15 @@ export class WorldZone {
   }
 
   /**
-   * The spell choices ahead of the melee ones (0x004096A0; Necros's Force Globe, mask 0x100, is
-   * not implemented): a close spell at 8-20 ft when floor(rand x 1000) > 700, else a ranged
-   * one beyond 8 ft with a clear line from the eyes (0x004070E0: 0.9 of its height).
+   * The spell choices ahead of the melee ones (0x004096A0): first the Force Globe (mask 0x100)
+   * whenever it is down and was not the previous pick, at any range; then a close spell at
+   * 8-20 ft when floor(rand x 1000) > 700, else a ranged one beyond 8 ft with a clear line from
+   * the eyes (0x004070E0: 0.9 of its height).
    */
-  private spellChoice(m: Mob, target: Actor, dist: number): 'close' | 'ranged' | null {
+  private spellChoice(m: Mob, target: Actor, dist: number): 'close' | 'ranged' | 'globe' | null {
     const type = m.archetype.type;
     if (type === undefined) return null;
+    if ((CREATURE_SPELL_MASKS[type] ?? 0) & (1 << FORCE_GLOBE_BIT) && !m.statuses.has('GLOB') && !(m.lastPick === 'spell' && m.spellPick === 'globe')) return 'globe';
     const band = mobBand(dist);
     if (band === 0) return null;
     if (band <= 2 && creatureSpellBits(type, CREATURE_CAST.closeMask).length && Math.floor(this.random() * 1000) > CREATURE_CAST.closeRoll) return 'close';
@@ -3074,7 +3133,8 @@ export class WorldZone {
   private mobSpell(m: Mob, target: Actor, dist: number): boolean {
     const c = m.mobCast;
     if (!c) {
-      if (mobBand(dist) === 0) return false;
+      // The globe is raised at any range (0x0040AA20 drops only the other phases within 8 ft).
+      if (mobBand(dist) === 0 && m.spellPick !== 'globe') return false;
       const t = target.character.position;
       const p = m.character.position;
       const facing = Math.abs(angleDiff(yawTowards(p.x, p.z, t.x, t.z), dequantizeAngle(m.yaw))) < CREATURE_CAST.facing;
@@ -3085,7 +3145,7 @@ export class WorldZone {
     if (this.tick < c.end) return true;
     m.mobCast = null;
     m.brain = 'pause';
-    m.brainUntil = this.tick + Math.round(CREATURE_CAST.pause * TICK_RATE);
+    m.brainUntil = this.tick + Math.round((m.archetype.type === NECROS_TYPE ? CREATURE_CAST.necrosPause : CREATURE_CAST.pause) * TICK_RATE);
     return true;
   }
 
@@ -3096,13 +3156,26 @@ export class WorldZone {
    */
   private startMobCast(m: Mob, target: Actor): boolean {
     const type = m.archetype.type!;
+    if (m.spellPick === 'globe') {
+      // Bit 8's state is ASM_SPELL_TORCH_LIGHT (table 0x004EC258): PK01, released on its SPELL frame.
+      const clip = creatureSpellClipSeconds(type, 'torch_light');
+      m.spellReadyAt = this.tick + 1;
+      m.mobCast = {
+        bit: FORCE_GLOBE_BIT, target: target.entityId, released: false,
+        releaseAt: this.tick + Math.max(1, Math.round((clip.release ?? 0) * TICK_RATE)),
+        end: this.tick + Math.max(1, Math.round(clip.end * TICK_RATE)),
+      };
+      m.seq = null;
+      m.shieldUntil = 0;
+      return true;
+    }
     let bits = creatureSpellBits(type, m.spellPick === 'close' ? CREATURE_CAST.closeMask : CREATURE_CAST.rangedMask);
-    if (UNHOLY_TYPES.has(this.creatureType(target))) bits = bits.filter((b) => CREATURE_SPELLS[b]!.spell !== 'soul_drinker');
+    if (UNHOLY_TYPES.has(this.creatureType(target))) bits = bits.filter((b) => creatureSpell(type, b)!.spell !== 'soul_drinker');
     if (!bits.length) return false;
     const bit = bits[Math.min(bits.length - 1, Math.floor(this.random() * bits.length))]!;
-    const s = CREATURE_SPELLS[bit]!;
+    const s = creatureSpell(type, bit, this.difficulty)!;
     const clip = creatureSpellClipSeconds(type, s.spell);
-    m.spellReadyAt = this.tick + Math.round(s.cooldown * TICK_RATE);
+    m.spellReadyAt = this.tick + Math.max(1, Math.round(s.cooldown * TICK_RATE));
     m.mobCast = {
       bit, target: target.entityId, released: false,
       releaseAt: clip.release === null ? null : this.tick + Math.max(1, Math.round(clip.release * TICK_RATE)),
@@ -3118,9 +3191,14 @@ export class WorldZone {
   private releaseMobCast(m: Mob): void {
     const c = m.mobCast!;
     c.released = true;
+    if (c.bit === FORCE_GLOBE_BIT) {
+      // The Force Globe (0x00441110): round the caster for 10 s.
+      this.magic.setStatus(m, { tag: 'GLOB', level: 1, until: this.tick + Math.round(FORCE_GLOBE_SECONDS * TICK_RATE) });
+      return;
+    }
     const t = this.actors.get(c.target);
     if (!t || !alive(t)) return;
-    const s = CREATURE_SPELLS[c.bit]!;
+    const s = creatureSpell(m.archetype.type ?? 0, c.bit, this.difficulty)!;
     const hand = this.magic.hand(m);
     const tp = t.character.position;
     const to = { x: tp.x - hand.x, y: tp.y + PLAYER_HEIGHT * 0.55 - hand.y, z: tp.z - hand.z };
@@ -3150,7 +3228,9 @@ export class WorldZone {
   /** Starts an attack sequence (0x00409920): a special against a raised shield, else 0x004083F0's choice. */
   private startSequence(m: Mob, target: Actor, dist: number): void {
     const special = this.shieldRaised(target) && Math.floor(this.random() * 1000) > MOB_SPECIAL_ROLL * 1000;
-    const seq = special ? chooseMobSpecial(m.shield !== null, this.random()) : chooseMobSequence(dist, this.random());
+    const seq = special
+      ? chooseMobSpecial(m.shield !== null, this.random(), m.attacks, m.archetype.rams)
+      : chooseMobSequence(dist, this.random(), true, m.attacks, m.scale);
     m.seq = { ...seq, main: [...seq.main], upperAt: this.tick + MOB_HOP_SWING_DELAY, hopUntil: this.tick + MOB_HOP_TICKS };
     if (seq.hop) startTimedAction(m.character, ACTION_LUNGE); // PC07's root motion, then still
   }
@@ -3185,7 +3265,13 @@ export class WorldZone {
 
   /** Starts a creature swing (one of its ASM attacks, timed by that clip's events). */
   private startMobSwing(m: Mob, atk: MobAttack, upper: boolean): void {
-    m.swing = { combo: 1, kind: atk.kind, start: this.tick, timing: clipSwingTiming(atk.clip), hit: new Set(), reach: atk.reach, ...(upper ? { upper: true } : {}) };
+    const at = (frame: number) => Math.round((frame / ORIGINAL_CLIP_FPS) * TICK_RATE);
+    m.swing = {
+      combo: 1, kind: atk.kind, start: this.tick, timing: clipSwingTiming(atk.clip), hit: new Set(), reach: atk.reach,
+      ...(upper ? { upper: true } : {}),
+      ...(atk.again ? { again: atk.again.map((g) => ({ at: at(g.frame), reach: g.reach })) } : {}),
+      ...(atk.harmless ? { harmless: true } : {}),
+    };
     m.swingSerial++;
     // The leaping strike (PN05) and the shield bash (PL01) carry the creature by their root motion.
     if (atk.kind === 'jump') startTimedAction(m.character, ACTION_ATTACK + 3);
@@ -3275,7 +3361,7 @@ export class WorldZone {
     let reel = false;
     if (v.kind === 'mob' && isCitizen(v)) {
       if (a.kind === 'player') this.raiseAlarm(a);
-    } else if (!a.rushHit.has(v.entityId) && v.character.grounded && v.hitUntil <= this.tick) {
+    } else if (!a.rushHit.has(v.entityId) && v.character.grounded && v.hitUntil <= this.tick && !(v.kind === 'mob' && v.archetype.steadfast)) {
       a.rushHit.add(v.entityId);
       reel = true;
       if (v.kind === 'mob') {
@@ -3312,8 +3398,13 @@ export class WorldZone {
     const s = a.swing!;
     const elapsed = this.tick - s.start;
     const t = s.timing;
+    // A later SWING event of the clip sweeps again: a new hit list, its own reach.
+    while (s.again?.length && elapsed >= s.again[0]!.at) {
+      s.reach = s.again.shift()!.reach;
+      s.hit.clear();
+    }
     // A creature's shield bash meets bodies through its charge (rushContact), not a hit window.
-    if (s.kind !== 'bash' && elapsed >= t.startup && elapsed < t.startup + t.active) {
+    if (s.kind !== 'bash' && !s.harmless && elapsed >= t.startup && elapsed < t.startup + t.active) {
       const pos = a.character.position;
       const yaw = dequantizeAngle(a.yaw);
       const reach = a.kind === 'player' ? PLAYER_REACH + PLAYER_RADIUS : s.reach ?? a.archetype.reach + PLAYER_RADIUS;
@@ -3340,7 +3431,7 @@ export class WorldZone {
           this.shove(a, target, s, true);
           continue;
         }
-        this.applyDamage(a, target, this.rollDamage(a, s.combo));
+        this.applyDamage(a, target, this.rollDamage(a, s.combo), a.kind === 'mob' && a.archetype.knocksDown === true);
         if (alive(target)) this.shove(a, target, s, false);
         if (!alive(a)) return;
       }
@@ -3451,22 +3542,24 @@ export class WorldZone {
       // Heroism (HERO, kind 4: the damage multipliers +0x11C).
       return this.magic.outgoing(a, damageVector(hit.type === 'slash' ? { SLASH: amount } : { BASH: amount }));
     }
-    // Creatures skip the stronger-of-slash/bash and Might rules (empty stats slot 45): whole weapon vector.
-    return this.magic.outgoing(a, [...(a.damage ?? a.weapon.damage!)]);
+    // Creatures skip the stronger-of-slash/bash and Might rules (empty stats slot 45): their
+    // unarmed damage (+0x18) plus the whole weapon vector (0x0044CCF0).
+    const weapon = a.damage ?? a.weapon.damage!;
+    return this.magic.outgoing(a, a.unarmed ? weapon.map((v, t) => v + (a.unarmed![t] ?? 0)) : [...weapon]);
   }
 
   /** Incoming damage (engine: Stats_TakeDamage + HP loss with flinch roll). */
-  private applyDamage(attacker: Actor, target: Actor, incoming: DamageVector): void {
+  private applyDamage(attacker: Actor, target: Actor, incoming: DamageVector, knockdown = false): void {
     // Stone skin (STON, kind 6: the resist multipliers +0x17C).
     incoming = this.magic.incoming(target, incoming);
     const resist = target.kind === 'player' ? target.resist : target.archetype.resist;
     const protection = target.kind === 'player' ? target.armor?.protection : undefined;
     const damage = Math.round(originalDamageTaken(incoming, resist, protection) * 100) / 100;
-    this.loseHp(attacker, target, damage);
+    this.loseHp(attacker, target, damage, false, knockdown);
   }
 
   /** Stats_LoseHp (0x0044CA00): the HP loss, the player's flinch roll, death; `rush`: a rush's own cost. */
-  private loseHp(attacker: Actor, target: Actor, damage: number, rush = false): void {
+  private loseHp(attacker: Actor, target: Actor, damage: number, rush = false, knockdown = false): void {
     const hpBefore = target.hp;
     let impact: number | undefined;
     target.hp = Math.max(0, target.hp - damage);
@@ -3481,7 +3574,9 @@ export class WorldZone {
       if (target.kind === 'player') {
         const roll = originalFlinch(damage, hpBefore, this.random());
         reaction = roll === 'knockdown' ? ACTION_KNOCKDOWN : roll === 'stun' ? ACTION_STUN : rush ? null : ACTION_IMPACT;
-      } else reaction = this.creatureImpact(target, attacker);
+        // Necros's blow sets the knock-down flag whatever the roll (0x0044CA00, source type 0x96).
+        if (knockdown) reaction = ACTION_KNOCKDOWN;
+      } else reaction = target.archetype.steadfast ? null : this.creatureImpact(target, attacker);
       if (reaction !== null) {
         impact = IMPACT_VARIANTS[reaction]?.state;
         // A knock-down is not cut short by another hit's lighter reaction.
@@ -3623,6 +3718,7 @@ export class WorldZone {
       a.threat.clear();
       delete a.fightsNearest;
       this.calmDown(a);
+      a.hidden = a.hideOnRespawn;
       a.yaw = a.spawnYaw;
       setCharacterState(a.character, a.spawn, 0, false);
     } else {
@@ -3675,7 +3771,7 @@ export class WorldZone {
     for (let i = 0; i < n; i++) {
       const id = this.scratchIds[i]!;
       const other = this.actors.get(id);
-      if (!other) continue;
+      if (!other || (other.kind === 'mob' && other.hidden)) continue;
       const op = other.character.position;
       if (id !== p.entityId && Math.hypot(op.x - pos.x, op.z - pos.z) > INTEREST_RADIUS) continue;
       current.set(id, this.states.get(id)!);

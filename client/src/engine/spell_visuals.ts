@@ -100,6 +100,15 @@ const FOOT = 0.3048;
 const HEROISM_PERIOD = 0.2;
 const HEROISM_HEIGHT = 6 * 0.3048;
 
+/**
+ * Necros's Force Globe (class 15, factory 0x00440E70; update 0x004C1E20): models.ctx model 5
+ * (model5.mdl, a unit sphere) wearing texture 1, `eglobe`, round its owner and turning about the
+ * vertical while it lasts, blinking in its last moments. Sized here to enclose the owner (the
+ * original scales it by the owner's bounding radius, +0x40); turn and blink rates approximate.
+ */
+const GLOBE_TURN = Math.PI / 2;
+const GLOBE_BLINK_FROM = 2;
+
 const glowTexture = (() => {
   let tex: THREE.Texture | null = null;
   return () => {
@@ -129,6 +138,9 @@ export class SpellVisuals {
   private readonly statusLevel = new Map<string, number>();
   /** Heroism's periodic effect by character: seconds to the next. */
   private readonly heroism = new Map<number, { level: number; next: number }>();
+  /** Force Globes by character: the sphere (a child of the character) and the seconds left. */
+  private readonly globes = new Map<number, { mesh: THREE.Mesh | null; left: number }>();
+  private globeGeometry: Promise<THREE.BufferGeometry | null> | null = null;
   private upperCasts = 0;
   private readonly tmp = new THREE.Vector3();
   /** Wind-ups following a character's dummies (+0x24 hangs them on the node, 0x00482150). */
@@ -166,7 +178,7 @@ export class SpellVisuals {
     if (d.projectile) this.projectile(d.projectile);
     if (d.burst) this.burst(d.burst);
     if (d.drain) this.drain(d.drain);
-    for (const s of d.status ?? []) this.setStatus(s.target, s.tag, s.on, s.level);
+    for (const s of d.status ?? []) this.setStatus(s.target, s.tag, s.on, s.level, s.seconds);
   }
 
   /** The statuses an entity has as it comes into view (ENTITY_SPAWN), or the local player's (PLAYER_STATS). */
@@ -253,6 +265,56 @@ export class SpellVisuals {
       const e = this.host.entity(id);
       if (e) fx?.spawn('HEROISM_EFFECT', this.tmp.copy(e.object.position).setY(e.object.position.y + HEROISM_HEIGHT), null, h.level - 1);
     }
+    for (const g of this.globes.values()) {
+      g.left -= dt;
+      if (!g.mesh) continue;
+      g.mesh.rotation.y += GLOBE_TURN * dt;
+      g.mesh.visible = g.left > GLOBE_BLINK_FROM || Math.floor(g.left * 8) % 2 === 0;
+    }
+  }
+
+  /** model5.mdl's mesh (models.ctx model 5), a unit sphere. */
+  private globeMesh(): Promise<THREE.BufferGeometry | null> {
+    return (this.globeGeometry ??= this.loadManifest().then(async (m) => {
+      const file = m?.models['model5'];
+      if (!file) return null;
+      const gltf = await new GLTFLoader().loadAsync(`/generated/${file}`).catch(() => null);
+      let geo: THREE.BufferGeometry | null = null;
+      gltf?.scene.updateMatrixWorld(true);
+      gltf?.scene.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!geo && mesh.isMesh) geo = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
+      });
+      return geo;
+    }));
+  }
+
+  private globe(id: number, on: boolean, seconds: number | undefined): void {
+    const have = this.globes.get(id);
+    if (!on) {
+      if (have?.mesh) this.dispose(have.mesh);
+      this.globes.delete(id);
+      return;
+    }
+    if (have) {
+      if (seconds !== undefined) have.left = seconds;
+      return;
+    }
+    const g = { mesh: null as THREE.Mesh | null, left: seconds ?? 10 };
+    this.globes.set(id, g);
+    void Promise.all([this.globeMesh(), this.texture('eglobe')]).then(([geo, tex]) => {
+      const e = this.host.entity(id);
+      if (!geo || !tex || !e || this.globes.get(id) !== g) return;
+      const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide });
+      const mesh = new THREE.Mesh(geo, mat);
+      // In the character's own (scaled) frame: round its body, centred at half its height.
+      const k = e.object.scale.x || 1;
+      const r = (e.avatar.headHeight * 0.62) / k;
+      mesh.scale.setScalar(r);
+      mesh.position.y = r * 0.85;
+      e.object.add(mesh);
+      g.mesh = mesh;
+    });
   }
 
   // ---- parts ----
@@ -483,7 +545,7 @@ export class SpellVisuals {
    * on the controller, 0x0047E6F0) with SNAPFREEZE_TARGET where it struck, slow shows its
    * SLOW_TARGET on landing, heroism its periodic effect, stone skin the body's stone blend.
    */
-  private setStatus(id: number, tag: StatusTag, on: boolean, level?: number): void {
+  private setStatus(id: number, tag: StatusTag, on: boolean, level?: number, seconds?: number): void {
     let set = this.statusOf.get(id);
     if (!set) this.statusOf.set(id, (set = new Set()));
     if (on) set.add(tag);
@@ -499,6 +561,7 @@ export class SpellVisuals {
       else this.heroism.delete(id);
     }
     if (tag === 'STON') this.host.entity(id)?.avatar.setStoneSkin?.(on ? lv : 0);
+    if (tag === 'GLOB') this.globe(id, on, seconds);
     // Pace: frozen / stunned stop, slowed play slower.
     const tags = this.statusOf.get(id);
     const rate = !tags ? 1 : tags.has('FRZE') || tags.has('THAW') ? 0 : tags.has('SLOW') ? 0.3 : 1;

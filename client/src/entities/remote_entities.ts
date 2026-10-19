@@ -33,7 +33,7 @@ export class RemoteEntities {
   private readonly sample: RemoteSample = { x: 0, y: 0, z: 0, yaw: 0, anim: 0, animPhase: 0, hp: 0, flags: 0 };
 
   /** Original levels: what a placement holds and gestures with while talking (by placement index). */
-  placementLook: (placement: number) => { held?: HeldOverride; talkState?: string } | undefined = () => undefined;
+  placementLook: (placement: number) => { held?: HeldOverride; talkState?: string; scale?: number } | undefined = () => undefined;
 
   /** Entities a scripted sequence is playing on this client: not moved by snapshots meanwhile. */
   readonly scripted = new Set<number>();
@@ -79,6 +79,7 @@ export class RemoteEntities {
     const look = info.kind === 'mob' && info.placement !== undefined ? this.placementLook(info.placement) : undefined;
     const avatar: Avatar = this.originals?.(kind, look?.held) ?? new ProceduralAvatar(kind);
     if (look?.talkState) avatar.setTalkState?.(look.talkState);
+    if (look?.scale) avatar.setScale?.(look.scale);
     avatar.object.visible = false; // until the first sample arrives
     avatar.seed = id;
     this.scene.add(avatar.object);

@@ -273,7 +273,7 @@ export class SpellRuntime {
     if (!p.target) {
       let best = Math.cos(R.homingCone);
       for (const c of this.host.characters()) {
-        if (!this.host.alive(c) || !this.host.hostile(p.owner, c)) continue;
+        if (!this.host.alive(c) || !this.host.hostile(p.owner, c) || this.globed(c)) continue;
         const to = norm({ x: c.character.position.x - p.pos.x, y: c.character.position.y + BODY_MID - p.pos.y, z: c.character.position.z - p.pos.z });
         const dot = to.x * v.x + to.y * v.y + to.z * v.z;
         if (dot > best) {
@@ -400,6 +400,8 @@ export class SpellRuntime {
       b.life -= TICK_DT;
       for (const c of this.host.characters()) {
         if (b.hit.has(c.entityId) || c === b.owner || !this.host.alive(c) || !this.host.hostile(b.owner, c)) continue;
+        // A Force Globe keeps the explosion off (0x004BEA10); holy wrath and slow bursts still reach it.
+        if (b.spell === 'fireball' && this.globed(c)) continue;
         const m = mid(c);
         const dist = Math.hypot(m.x - b.at.x, m.y - b.at.y, m.z - b.at.z);
         if (dist > b.radius + PLAYER_RADIUS) continue;
@@ -477,7 +479,7 @@ export class SpellRuntime {
       const s = this.storms[i]!;
       s.life -= TICK_DT;
       for (const c of this.host.characters()) {
-        if (s.hit.has(c.entityId) || c === s.owner || !this.host.alive(c) || !this.host.hostile(s.owner, c)) continue;
+        if (s.hit.has(c.entityId) || c === s.owner || !this.host.alive(c) || !this.host.hostile(s.owner, c) || this.globed(c)) continue;
         const m = mid(c);
         if (Math.hypot(m.x - s.at.x, m.y - s.at.y, m.z - s.at.z) > s.radius + PLAYER_RADIUS) continue;
         s.hit.add(c.entityId);
@@ -499,7 +501,7 @@ export class SpellRuntime {
     this.fx(hand, [], [{ id: target ? R.lightningSound : SPELL_INFO.lightning.sounds[level - 1]!, at: tuple(hand) }]);
     const chain: Chain = { owner: caster, level, values, left: R.lightningStrikes[level - 1] ?? 1, next: 0, last: null, hit: new Set() };
     // A creature's bolt goes to its brain's target (0x004BD7C0: controller +0x40), wherever it is.
-    if (target && this.host.alive(target)) {
+    if (target && this.host.alive(target) && !this.globed(target)) {
       this.strike(chain, target);
       if (chain.left > 0) this.chains.push(chain);
       return;
@@ -508,7 +510,7 @@ export class SpellRuntime {
     let first: SpellTarget | null = null;
     let best = Infinity;
     for (const c of this.host.characters()) {
-      if (!this.host.alive(c) || !this.host.hostile(caster, c)) continue;
+      if (!this.host.alive(c) || !this.host.hostile(caster, c) || this.globed(c)) continue;
       const m = mid(c);
       const to = { x: m.x - hand.x, y: m.y - hand.y, z: m.z - hand.z };
       const d = len(to);
@@ -561,7 +563,7 @@ export class SpellRuntime {
       let next: SpellTarget | null = null;
       let best = R.lightningRange;
       for (const t of this.host.characters()) {
-        if (c.hit.has(t.entityId) || !this.host.alive(t) || !this.host.hostile(c.owner, t)) continue;
+        if (c.hit.has(t.entityId) || !this.host.alive(t) || !this.host.hostile(c.owner, t) || this.globed(t)) continue;
         const d = len({ x: mid(t).x - from.x, y: mid(t).y - from.y, z: mid(t).z - from.z });
         if (d < best && lineOfSight(this.host.mw, from, mid(t), 0)) {
           best = d;
@@ -648,7 +650,8 @@ export class SpellRuntime {
   private soulDrinker(caster: SpellTarget, level: number, values: SpellLevel, hand: V3, aim: V3): void {
     const R = SPELL_RULES;
     const target = this.aimed(caster, hand, aim, R.soulCone, R.soulRange);
-    if (!target) return;
+    // A Force Globe turns it away (0x004C17D0).
+    if (!target || this.globed(target)) return;
     // Against the unholy the flow turns: they drink the caster (SOULDRINKER_*_UNDEAD).
     const unholy = UNHOLY_TYPES.has(this.host.creatureType(target));
     const victim = unholy ? caster : target;
@@ -665,7 +668,7 @@ export class SpellRuntime {
   private stepDrains(): void {
     for (let i = this.drains.length - 1; i >= 0; i--) {
       const d = this.drains[i]!;
-      if (!this.host.alive(d.victim) || !this.host.alive(d.receiver)) {
+      if (!this.host.alive(d.victim) || !this.host.alive(d.receiver) || this.globed(d.victim === d.owner ? d.receiver : d.victim)) {
         this.stopDrain(i);
         continue;
       }
@@ -683,6 +686,15 @@ export class SpellRuntime {
   }
 
   // ---- Statuses ----
+
+  /**
+   * Behind a Force Globe (GLOB, stats +0x1F4 bit 8): explosions, fire balls, the lightning chain,
+   * the ice storm and soul drinker pass it by (0x004BEA10, 0x004BEE90, 0x004BF380, 0x004C1370,
+   * 0x004C17D0).
+   */
+  globed(c: SpellTarget): boolean {
+    return c.statuses.has('GLOB');
+  }
 
   /** Starts (or replaces) a timed effect on a character. */
   setStatus(c: SpellTarget, s: ActiveStatus): void {

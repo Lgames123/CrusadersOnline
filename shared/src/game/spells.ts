@@ -267,6 +267,40 @@ export const CREATURE_SPELLS: Readonly<Partial<Record<number, CreatureSpell>>> =
   7: { spell: 'fireball', level: 3, values: lv(0, 2, 2, 0), cooldown: 3 },
 };
 
+/** Necros (type 0x96). */
+export const NECROS_TYPE = 150;
+/** Mask bit of Necros's Force Globe (class 15, 0x00441110). */
+export const FORCE_GLOBE_BIT = 8;
+/**
+ * The Force Globe (factory 0x00440E70, update 0x004C1E20): model 5 wearing `eglobe` round its
+ * caster for 10 s (+0x64 = 10000 ms), blinking out at the end. While it is up (stats +0x1F4 bit 8)
+ * every spell passes the caster by: explosions (0x004BEA10), fire balls (0x004BEE90), the
+ * lightning chain (0x004BF380), the ice storm (0x004C1370) and soul drinker (0x004C17D0). Blows
+ * still land. The brain raises it again whenever it is down (0x004096A0 choice 7, not twice in a row).
+ */
+export const FORCE_GLOBE_SECONDS = 10;
+/**
+ * Necros's values (0x004BD7C0, his branch): a difficulty factor (settings +0x85: 0.5 easy, 1.0
+ * medium, 1.2 hard) times 10 for soul drinker (value2 20) and every fire ball bit (5, 6, 7 and
+ * 9), which all throw the triple ball; unholy wrath 20 x the factor for 4 s. Cooldowns
+ * (0x0040EBE0): soul drinker 1 s, the rest 1 ms. Bit 8 is the Force Globe.
+ */
+export function necrosSpell(bit: number, difficulty: 'easy' | 'medium' | 'hard'): CreatureSpell | undefined {
+  const f = difficulty === 'easy' ? 0.5 : difficulty === 'hard' ? 1.2 : 1;
+  switch (bit) {
+    case 1: return { spell: 'lightning', level: 1, values: lv(0, 1, 10 * f, 0), cooldown: 0.001 };
+    case 2: return { spell: 'soul_drinker', level: 1, values: lv(0, 1, 10 * f, 20), cooldown: 1 };
+    case 3: return { spell: 'holy_wrath', level: 1, values: lv(0, 4, 20 * f, 20), cooldown: 0.001 };
+    case 5: case 6: case 7: case 9: return { spell: 'fireball', level: 3, values: lv(0, 2, 10 * f, 0), cooldown: 0.001 };
+    default: return undefined;
+  }
+}
+
+/** A creature's spell for a mask bit (Necros has his own values; the Force Globe is no spell here). */
+export function creatureSpell(type: number, bit: number, difficulty: 'easy' | 'medium' | 'hard' = 'medium'): CreatureSpell | undefined {
+  return type === NECROS_TYPE ? necrosSpell(bit, difficulty) : CREATURE_SPELLS[bit];
+}
+
 /** Spell masks of the creature template table (the fourth dword of each 0x30-byte record). */
 export const CREATURE_SPELL_MASKS: Readonly<Record<number, number>> = {
   134: 0x40, // Deceiver
@@ -293,6 +327,8 @@ export const CREATURE_CAST = {
   closeRoll: 700,
   facing: (45 * Math.PI) / 180,
   pause: 2,
+  /** Necros stands 0.2 s after a cast (0x0040EC70). */
+  necrosPause: 0.2,
 } as const;
 
 /**
@@ -301,6 +337,17 @@ export const CREATURE_CAST = {
  * event, so their cast never takes effect. Clip length in 30 fps frames.
  */
 const THROW_FALLBACK: Readonly<Record<number, number>> = { 134: 29, 136: 33, 137: 33, 138: 33 };
+
+/**
+ * Throw clips that carry the creature forward: the elementals' ASM_THROW_ITEM is icewalk, their
+ * walk (8.26 ft of root motion in 33 frames, as m18a01ice_w_fw), so each empty "fire ball" walks
+ * them 8 ft nearer, and with the 2 s stand after it they lumber in until the melee brain takes
+ * over within 8 ft. The Deceiver's M37P02_thw_at has none: it stands.
+ */
+const THROW_WALKS: ReadonlySet<number> = new Set([136, 137, 138]);
+export function creatureCastWalks(type: number, spell: SpellId): boolean {
+  return spell === 'fireball' && THROW_WALKS.has(type);
+}
 
 /** Seconds of a creature's cast clip: to its SPELL event (null = it has none) and to its end. */
 export function creatureSpellClipSeconds(type: number, spell: SpellId): { release: number | null; end: number } {
@@ -313,7 +360,7 @@ export function creatureSpellClipSeconds(type: number, spell: SpellId): { releas
 export function creatureSpellBits(type: number, group: number): number[] {
   const mask = (CREATURE_SPELL_MASKS[type] ?? 0) & group;
   const out: number[] = [];
-  for (let b = 0; b < 12; b++) if (mask & (1 << b) && CREATURE_SPELLS[b]) out.push(b);
+  for (let b = 0; b < 12; b++) if (mask & (1 << b) && creatureSpell(type, b)) out.push(b);
   return out;
 }
 
@@ -330,7 +377,8 @@ export function creatureSpellBits(type: number, group: number): number[] {
 export type StatusTag =
   | 'SPED' | 'SLOW' | 'FRZE' | 'HERO' | 'STON' | 'SLTI' | 'THAW'
   | 'RFIR' | 'RAIR' | 'REAR' | 'RWAT'
-  | 'BMIG' | 'BINT' | 'BEND' | 'BSPD';
+  | 'BMIG' | 'BINT' | 'BEND' | 'BSPD'
+  | 'GLOB';
 
 /** Status tags shown on a character (SC.SPELL_EVENT `status`): its look and the HUD. */
 export const STATUS_NAMES: Readonly<Record<StatusTag, string>> = {
@@ -349,6 +397,7 @@ export const STATUS_NAMES: Readonly<Record<StatusTag, string>> = {
   BINT: 'Intelligence',
   BEND: 'Endurance',
   BSPD: 'Speed',
+  GLOB: 'Force Globe',
 };
 
 /** The status a BOOST_PROTECTION potion of a damage type sets (the types the potions use). */

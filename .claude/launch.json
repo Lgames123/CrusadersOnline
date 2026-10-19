@@ -165,6 +165,42 @@
         "GAME_SERVER_URL": "http://127.0.0.1:8191"
       },
       "port": 3101
+    },
+    {
+      "name": "monsters-server",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/server",
+        "start"
+      ],
+      "env": {
+        "SERVER_PORT": "8192",
+        "ARENA": "level:ca1b",
+        "DATABASE_URL": "pglite:local/pgdata-monsters",
+        "DEV_GUEST_SPAWN": "813.05,309.4,-588.17",
+        "DEV_GUEST_XP": "60000",
+        "DEV_GUEST_SPELLS": "fireball:2,lightning:2,holy_wrath:1",
+        "DEV_GUEST_ITEMS": "greater_healing_potion:5"
+      },
+      "port": 8192
+    },
+    {
+      "name": "monsters-client",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/client",
+        "exec",
+        "vite",
+        "--port",
+        "3102",
+        "--strictPort"
+      ],
+      "env": {
+        "GAME_SERVER_URL": "http://127.0.0.1:8192"
+      },
+      "port": 3102
     }
   ]
 }

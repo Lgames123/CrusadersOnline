@@ -180,6 +180,8 @@ async function main(): Promise<void> {
     if (!def) return null;
     const kind = def.archetype as AvatarKind;
     const avatar = originals?.(kind, placementLooks.get(placement)?.held) ?? new ProceduralAvatar(kind);
+    const scale = placementLooks.get(placement)?.scale;
+    if (scale) avatar.setScale?.(scale);
     avatar.object.position.set(def.x, def.y, def.z);
     avatar.object.rotation.y = def.yaw ?? 0;
     avatar.setState(ANIM.IDLE, 0);
@@ -307,14 +309,15 @@ async function main(): Promise<void> {
    * What each placed creature holds (the cap's inventory header: Captain Ursan nothing, a skeleton
    * its own weapon) and the gesture it talks with, by placement; their models are loaded first.
    */
-  const placementLooks = new Map<number, { held?: HeldOverride; talkState?: string }>();
+  const placementLooks = new Map<number, { held?: HeldOverride; talkState?: string; scale?: number }>();
   remotes.placementLook = (placement) => placementLooks.get(placement);
   const loadPlacementLooks = async (def: ArenaDef) => {
     placementLooks.clear();
     const files = new Set<string>();
     for (const sp of [...def.mobSpawns, ...(def.puppets ?? [])]) {
       if (sp.placement === undefined) continue;
-      const look: { held?: HeldOverride; talkState?: string } = {};
+      const look: { held?: HeldOverride; talkState?: string; scale?: number } = {};
+      if ('scale' in sp && sp.scale !== undefined) look.scale = sp.scale;
       if (sp.weapon !== undefined || sp.shield !== undefined) {
         const outfit = await outfitFor({ ...(sp.weapon ? { weapon: sp.weapon } : {}), ...(sp.shield ? { shield: sp.shield } : {}) });
         look.held = { right: outfit.right ?? null, left: outfit.left ?? null };

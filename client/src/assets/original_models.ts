@@ -219,6 +219,15 @@ const MODELS: Record<string, { file: string; texture?: string; clips: ClipMap | 
   ice_titan: { file: 'male02', texture: 'male02icetitan', clips: null, equipment: { right: 'bluntclub' } },
   black_knight: { file: 'male01b', texture: 'male01bblackknight', clips: null, equipment: { right: 'broadsword03', left: 'metalshield02' } },
   deceiver: { file: 'deceiver', clips: null, equipment: { right: 'standardmace' } },
+  // Elementals: IceElemental.mdl (models.ctx 46) in its texture by template (ice / stoneelemental /
+  // fireelemental); unarmed. Their clips from its B lines (stateClips).
+  ice_elemental: { file: 'iceelemental', texture: 'ice', clips: null },
+  rock_elemental: { file: 'iceelemental', texture: 'stoneelemental', clips: null },
+  lava_elemental: { file: 'iceelemental', texture: 'fireelemental', clips: null },
+  // Necros (type 150): NecrosAftercollision.mdl (models.ctx 33), necros_aft, unarmed.
+  necros: { file: 'necrosaftercollision', texture: 'necros_aft', clips: null },
+  // Ghost Father (type 156): Male04b in Male04bGhostFather, his placement's Longsword of the Crusader.
+  ghost_father: { file: 'male04b', texture: 'male04bghostfather', clips: null, equipment: { right: 'longsword' } },
   // The Spectral Ally spell's creature (type 155: Male04b, texture Male04bGhost; Long Sword, Wooden Shield).
   spectral_ally: { file: 'male04b', texture: 'male04bghost', clips: null, equipment: BASIC_EQUIPMENT },
   skeleton_warrior: {
@@ -230,7 +239,13 @@ const MODELS: Record<string, { file: string; texture?: string; clips: ClipMap | 
 
 class OriginalAvatar implements Avatar {
   readonly object = new THREE.Group();
-  readonly headHeight: number;
+  headHeight: number;
+
+  setScale(scale: number): void {
+    const was = this.object.scale.x || 1;
+    this.object.scale.setScalar(scale);
+    this.headHeight = ((this.headHeight - 0.2) / was) * scale + 0.2;
+  }
   private readonly mixer: THREE.AnimationMixer;
   private readonly clips: Map<string, THREE.AnimationClip>;
   private readonly map: ClipMap;
@@ -342,7 +357,13 @@ class OriginalAvatar implements Avatar {
     this.mixer = new THREE.AnimationMixer(model);
     this.clips = new Map(source.animations.map((c) => [c.name, c]));
     this.map = map;
-    const box = new THREE.Box3().setFromObject(model);
+    // The skinned pose's box: IceElemental.mdl keeps its vertices bone-local, so its raw
+    // geometry box is far too small (0.7 m for a 9 ft creature).
+    model.updateMatrixWorld(true);
+    model.traverse((o) => {
+      if ((o as THREE.SkinnedMesh).isSkinnedMesh) (o as THREE.SkinnedMesh).skeleton.update();
+    });
+    const box = new THREE.Box3().setFromObject(model, true);
     this.headHeight = box.max.y + 0.2;
     this.setState(ANIM.IDLE, 0);
   }
