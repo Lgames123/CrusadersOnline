@@ -1500,6 +1500,14 @@ async function main(): Promise<void> {
     } else if (!typing && e.shiftKey && !e.repeat && e.code === 'KeyC') {
       e.preventDefault();
       setInventoryOpen(!inventoryPanel.open);
+    } else if (!typing && !e.defaultPrevented && !e.ctrlKey && !e.altKey && !e.shiftKey && !chat.typing && (inventoryPanel.open || questBook.open || charSheet.open) && input.isMoveKey(e.code)) {
+      // Walking off with a window open: the windows close, the camera takes the pointer back and
+      // the step starts at once (not after the key repeat).
+      e.preventDefault();
+      closeInventoryPanels();
+      setQuestBookOpen(false);
+      setCharSheetOpen(false);
+      input.pressMove(e.code);
     } else if ((input.isKeyForAction('inventory', e.code) || e.code === 'KeyI') && !e.repeat) setInventoryOpen(!inventoryPanel.open);
     else if ((input.isKeyForAction('questBook', e.code) || e.code === 'F2') && !e.repeat) {
       e.preventDefault();

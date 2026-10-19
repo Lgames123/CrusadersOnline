@@ -161,6 +161,17 @@ export class InputManager {
     return this.compiled.bindings[code] !== undefined || this.viewCodes.has(code) || this.compiled.actionFor(code) !== null || this.compiled.hotbarFor(code) !== null;
   }
 
+  /** The key is bound to walking (forward, back, strafe). */
+  isMoveKey(code: string): boolean {
+    const flag = this.compiled.bindings[code];
+    return flag !== undefined && (flag & (INPUT.FORWARD | INPUT.BACK | INPUT.LEFT | INPUT.RIGHT)) !== 0;
+  }
+
+  /** Holds a movement key pressed while the pointer was free (its keyup lets go as usual). */
+  pressMove(code: string): void {
+    if (this.isMoveKey(code)) this.held |= this.compiled.bindings[code]!;
+  }
+
   /** Asks for pointer lock; the browser may refuse (no user gesture, just left with Esc): a click retries. */
   requestLock(): void {
     try {
