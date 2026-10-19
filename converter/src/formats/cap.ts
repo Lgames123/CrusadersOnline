@@ -8,7 +8,7 @@ import { capTypeTable, parseStory, type CapStory } from './cap_story.ts';
  * records are decoded here: marker 2D 00 00 00 CD CD CD CD, type id at +0x1C, instance name at
  * +0x40, and fields relative to the "XP block" (02 00 00 00 | xp | 0 0 0 | disposition x2):
  *   -0x200 position (3 x float32), -0x1D4 scale, -0x1B8 max HP, -0x1A8 11 unarmed damage values,
- *   -0x118 11 resist factors, +4 XP, +20 disposition.
+ *   -0x118 11 resist factors, +4 XP, +20 disposition, +0x38 spell mask.
  */
 export class CapError extends Error {}
 
@@ -37,6 +37,12 @@ export interface CapCreature {
   damage?: number[];
   /** Model scale (the render component's +0x20): Ice Titans 1.5-2, Rock Elementals 0.8. Only when not 1. */
   scale?: number;
+  /**
+   * Spell mask (stats +0x1F8, XP block +0x38): the placement's own, copied with its stats
+   * (0x00432D50); the template table's mask only reaches creatures made in code (the spectral ally,
+   * 0x0043FEF0). Ice Elementals 0, Rock 1, Shadows 4, Greater Black Knights 2...
+   */
+  spells: number;
   /** Facing (the transform's third row, x and z), original axes. */
   facing: [number, number];
   /**
@@ -307,6 +313,7 @@ export function parseCap(bytes: Uint8Array, itemNames: ReadonlySet<string> = new
       resist,
       ...(damage.every(Number.isFinite) && damage.some((d) => d !== 0) ? { damage } : {}),
       ...(Number.isFinite(scale) && scale > 0 && scale !== 1 ? { scale } : {}),
+      spells: dv.getUint32(x + 0x38, true),
       facing: facing.every(Number.isFinite) ? [Math.round(facing[0] * 1e4) / 1e4, Math.round(facing[1] * 1e4) / 1e4] : [0, 1],
     });
     a = x;

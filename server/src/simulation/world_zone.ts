@@ -680,6 +680,8 @@ interface Mob extends ActorBase {
   unarmed: DamageVector | null;
   /** Its model scale (placement): its hit lines' reach and the big-creature attack rule. */
   scale: number;
+  /** Its spell mask (stats +0x1F8): the placement's own, else the template table's. */
+  spellMask: number;
   /** Its attacks, at its scale. */
   attacks: MobAttackSet;
   /** Out of the world until a scripted sequence shows it (Necros); `hideOnRespawn`: back out when it respawns. */
@@ -1022,6 +1024,7 @@ export class WorldZone {
       stats,
       unarmed: at.damage?.length === 11 ? at.damage : archetype.unarmed ?? null,
       scale,
+      spellMask: at.spells ?? (archetype.type !== undefined ? CREATURE_SPELL_MASKS[archetype.type] ?? 0 : 0),
       attacks,
       hidden: at.hidden === true,
       hideOnRespawn: at.hidden === true,
@@ -3117,11 +3120,11 @@ export class WorldZone {
   private spellChoice(m: Mob, target: Actor, dist: number): 'close' | 'ranged' | 'globe' | null {
     const type = m.archetype.type;
     if (type === undefined) return null;
-    if ((CREATURE_SPELL_MASKS[type] ?? 0) & (1 << FORCE_GLOBE_BIT) && !m.statuses.has('GLOB') && !(m.lastPick === 'spell' && m.spellPick === 'globe')) return 'globe';
+    if (m.spellMask & (1 << FORCE_GLOBE_BIT) && !m.statuses.has('GLOB') && !(m.lastPick === 'spell' && m.spellPick === 'globe')) return 'globe';
     const band = mobBand(dist);
     if (band === 0) return null;
-    if (band <= 2 && creatureSpellBits(type, CREATURE_CAST.closeMask).length && Math.floor(this.random() * 1000) > CREATURE_CAST.closeRoll) return 'close';
-    if (creatureSpellBits(type, CREATURE_CAST.rangedMask).length && lineOfSight(this.mw, m.character.position, target.character.position, PLAYER_HEIGHT * 0.9)) return 'ranged';
+    if (band <= 2 && creatureSpellBits(type, CREATURE_CAST.closeMask, m.spellMask).length && Math.floor(this.random() * 1000) > CREATURE_CAST.closeRoll) return 'close';
+    if (creatureSpellBits(type, CREATURE_CAST.rangedMask, m.spellMask).length && lineOfSight(this.mw, m.character.position, target.character.position, PLAYER_HEIGHT * 0.9)) return 'ranged';
     return null;
   }
 
@@ -3169,7 +3172,7 @@ export class WorldZone {
       m.shieldUntil = 0;
       return true;
     }
-    let bits = creatureSpellBits(type, m.spellPick === 'close' ? CREATURE_CAST.closeMask : CREATURE_CAST.rangedMask);
+    let bits = creatureSpellBits(type, m.spellPick === 'close' ? CREATURE_CAST.closeMask : CREATURE_CAST.rangedMask, m.spellMask);
     if (UNHOLY_TYPES.has(this.creatureType(target))) bits = bits.filter((b) => creatureSpell(type, b)!.spell !== 'soul_drinker');
     if (!bits.length) return false;
     const bit = bits[Math.min(bits.length - 1, Math.floor(this.random() * bits.length))]!;

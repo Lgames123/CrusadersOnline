@@ -137,15 +137,30 @@ describe('missing monsters (brain)', () => {
     expect(hit).toBeDefined();
   });
 
-  it("an elemental at range walks in on its empty throw (icewalk's root motion), then fights", () => {
-    const t = setup({ archetype: 'ice_elemental' }, 30);
+  it("an Ice Elemental placed without spells (mask 0, the placements' own) runs straight in and punches", () => {
+    const t = setup({ archetype: 'ice_elemental', spells: 0 }, 30);
+    const start = Math.abs(t.mob().z);
+    t.run(Math.round(1 * TICK_RATE));
+    expect(t.mobAnims).toContain(ANIM.RUN);
+    expect(t.mobAnims).not.toContain(ANIM.SPELL_CAST + SPELLS.indexOf('fireball'));
+    // Its run clip: 18 ft in 20 frames (27 ft/s), far past the humanoid run.
+    expect(start - Math.abs(t.mob().z)).toBeGreaterThan(3);
+    t.run(Math.round(3 * TICK_RATE));
+    expect(t.hits().some((h) => h.attacker === t.mob().id && h.damage > 0)).toBe(true);
+  });
+
+  it("a Lava Elemental (mask 0x80) at range walks in on its empty throw (icewalk's root motion)", () => {
+    const t = setup({ archetype: 'lava_elemental', spells: 0x80 }, 30);
     const start = Math.abs(t.mob().z);
     t.run(Math.round(1.5 * TICK_RATE));
     expect(t.mobAnims).toContain(ANIM.SPELL_CAST + SPELLS.indexOf('fireball'));
     expect(t.spellEvents().some((e) => e.projectile)).toBe(false);
     expect(Math.abs(t.mob().z)).toBeLessThan(start - 1);
-    t.run(Math.round(12 * TICK_RATE));
-    expect(t.hits().some((h) => h.attacker === t.mob().id && h.damage > 0)).toBe(true);
+  });
+
+  it("uses the placement's spell mask over the template's (a Shadow with 4 drinks souls)", () => {
+    expect(creatureSpellBits(147, CREATURE_CAST.closeMask, 4)).toEqual([2]);
+    expect(creatureSpellBits(136, CREATURE_CAST.rangedMask, 0)).toEqual([]);
   });
 
   it('a hidden creature is not sent, does not think and cannot be fought', () => {

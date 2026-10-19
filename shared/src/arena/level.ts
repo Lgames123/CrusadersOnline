@@ -50,6 +50,8 @@ export interface LevelCreature {
   damage?: number[];
   /** Model scale (converter 1.30+; absent: 1). */
   scale?: number;
+  /** Its spell mask (stats +0x1F8, the placement's own; converter 1.31+, absent before: the template's). */
+  spells?: number;
 }
 
 export interface LevelObject {
@@ -658,6 +660,7 @@ function placementExtras(c: LevelCreature, s: number): Partial<ArenaDef['mobSpaw
   }
   if (c.damage?.length === 11) out.damage = c.damage;
   if (c.scale !== undefined && c.scale > 0 && c.scale !== 1) out.scale = c.scale;
+  if (c.spells !== undefined) out.spells = c.spells;
   return out;
 }
 

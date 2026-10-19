@@ -301,7 +301,11 @@ export function creatureSpell(type: number, bit: number, difficulty: 'easy' | 'm
   return type === NECROS_TYPE ? necrosSpell(bit, difficulty) : CREATURE_SPELLS[bit];
 }
 
-/** Spell masks of the creature template table (the fourth dword of each 0x30-byte record). */
+/**
+ * Spell masks of the creature template table (the fourth dword of each 0x30-byte record). Placed
+ * creatures use their own record's mask instead (stats +0x1F8, copied by 0x00432D50): these reach
+ * only creatures made in code and placements converted before 1.31.
+ */
 export const CREATURE_SPELL_MASKS: Readonly<Record<number, number>> = {
   134: 0x40, // Deceiver
   136: 0x20, // Ice Elemental
@@ -357,8 +361,8 @@ export function creatureSpellClipSeconds(type: number, spell: SpellId): { releas
 }
 
 /** The mask bits of `type` in `group` that have a creature spell. */
-export function creatureSpellBits(type: number, group: number): number[] {
-  const mask = (CREATURE_SPELL_MASKS[type] ?? 0) & group;
+export function creatureSpellBits(type: number, group: number, spells: number = CREATURE_SPELL_MASKS[type] ?? 0): number[] {
+  const mask = spells & group;
   const out: number[] = [];
   for (let b = 0; b < 12; b++) if (mask & (1 << b) && creatureSpell(type, b)) out.push(b);
   return out;

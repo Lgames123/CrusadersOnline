@@ -138,6 +138,8 @@ export interface ArenaDef {
     damage?: number[];
     /** Original levels: its model scale (absent: 1; converter 1.30+). */
     scale?: number;
+    /** Original levels: its spell mask (the placement's; absent: the template table's). */
+    spells?: number;
     /**
      * Original levels: kept out of the world until a scripted sequence makes it appear (its track
      * opens with Appear 0 and later shows it: Necros at the end of seqNecros). Not seen, not hit,
