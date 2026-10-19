@@ -199,6 +199,20 @@ export interface CapStory {
   deaths: CapDeathTrigger[];
   cameras: CapCamera[];
   sequences: CapSequence[];
+  /**
+   * The mover triggers (0x1E) of each door and gate, by brush name: how the player opens it
+   * (0x460320). Activation bit 0 = walking into the volume, bit 3 = the use key in it, 0x20 = walking
+   * into it carrying `item` (the name at +0x10; without it the trigger refuses). A door with none,
+   * or only volume-less ones, is never opened by the player (relays may still move it).
+   */
+  doors: Record<string, CapDoorUse[]>;
+}
+
+/** One way a door opens: a mover trigger's activation word, its volume, the item it asks for. */
+export interface CapDoorUse {
+  activation: number;
+  volume: CapTriggerVolume;
+  item?: string;
 }
 
 /** Context from the rest of the act: creature records and exit records by offset. */
@@ -454,11 +468,21 @@ export function parseStory(data: Uint8Array, dv: DataView, types: ReadonlyMap<nu
     if (volume) triggers.push({ id: o, kind: 'relay', activation: dv.getUint32(o + 8, true), volume, targets: [], ...extra });
     return !!volume;
   };
+  const doors: Record<string, CapDoorUse[]> = {};
   for (const o of types.get(T_MOVER) ?? []) {
-    if (!inRange(o, 0x3c) || relayed.has(o) || !inRange(ptr(o + 4), 0x40)) continue;
-    const activation = dv.getUint32(o + 8, true);
+    if (!inRange(o, 0x3c)) continue;
     const name = brushName(ptr(o + 0x38));
-    if (!name || /door|gate/i.test(name)) continue;
+    if (name && /door|gate/i.test(name)) {
+      // Relays fire these too (op 8); the player's own touch still goes through 0x460320.
+      const list = (doors[name] ??= []);
+      const activation = dv.getUint32(o + 8, true);
+      const volume = inRange(ptr(o + 4), 0x40) ? ctx.parseVolume(ptr(o + 4)) : null;
+      if (volume) list.push({ activation, volume, ...(activation & 0x20 ? { item: ascii(data, o + 0x10, 0x20) } : {}) });
+      continue;
+    }
+    if (relayed.has(o) || !inRange(ptr(o + 4), 0x40)) continue;
+    const activation = dv.getUint32(o + 8, true);
+    if (!name) continue;
     if (activation & 8) {
       if (useTrigger(o, { brushes: [name] })) useVolumes.add(ptr(o + 4));
     } else if (activation & 1 && /bridge/i.test(name)) {
@@ -562,5 +586,5 @@ export function parseStory(data: Uint8Array, dv: DataView, types: ReadonlyMap<nu
       steps,
     });
   }
-  return { triggers, messages, soundTriggers, shops, deaths, cameras, sequences };
+  return { triggers, messages, soundTriggers, shops, deaths, cameras, sequences, doors };
 }

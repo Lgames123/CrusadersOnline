@@ -1,4 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import { WorldZone } from '@crusaders/server/simulation/world_zone';
 import {
   BUILTIN_ITEMS,
@@ -19,6 +21,17 @@ import {
   emptyStoryState,
   swingKeyAwayFrom,
   wallDistance,
+  buildLevelArena,
+  doorOpensFrom,
+  doorUseAt,
+  encodeInput,
+  guardedDoor,
+  quantizeAngle,
+  INPUT,
+  INPUT_PACKET_MAX_BYTES,
+  LEVEL_UNIT_METRES,
+  type DoorUse,
+  type LevelPlacements,
   type DoorSwing,
   type ArenaDef,
   type Rapier,
@@ -30,7 +43,6 @@ beforeAll(async () => {
   rapier = await initPhysics();
 });
 
-/** A 2 x 3 m door slab 1.5 m in front of the spawn (yaw 0 faces -Z); `lock` names its key. */
 /** The original's inn / house door mover (Cs1a bDoorE_1): ±90° keys, eased, back after 4 s. */
 const SWING: DoorSwing = doorSwingFromMotion({
   flags: 0x44002008, start: 0, delayMs: 4000, types: [0x90, 0x90],
@@ -38,12 +50,22 @@ const SWING: DoorSwing = doorSwingFromMotion({
   speeds: [1 / 9000, 1 / 9000, 1 / 450, 1 / 450],
 }, 0.3048)!;
 
-function doorArena(lock?: string, swing = false): ArenaDef {
+/**
+ * A mover trigger 2 m wide and 0.6 m deep against the slab, on its spawn side (`side` 1, z > -1.5)
+ * or its far side (-1), as the converter builds them (useFrom).
+ */
+function doorTrigger(side: number, activation = 8, item?: string): DoorUse {
+  const z0 = side > 0 ? -1.4 : -2.2;
+  return { activation, trigger: { polygon: [[-1, z0], [1, z0], [1, z0 + 0.6], [-1, z0 + 0.6]], yMin: 0, yMax: 3 }, side, ...(item ? { item } : {}) };
+}
+
+/** A 2 x 3 m door slab 1.5 m in front of the spawn (yaw 0 faces -Z), opened by `useFrom` if given. */
+function doorArena(useFrom?: DoorUse[], swing = false): ArenaDef {
   const arena = createSyntheticArena();
   const b = [-1, 0, -1.6, 1, 3, -1.4] as const;
   const points: number[] = [];
   for (const x of [b[0], b[3]]) for (const y of [b[1], b[4]]) for (const z of [b[2], b[5]]) points.push(x, y, z);
-  arena.objects = [{ id: 500_000, kind: 'door', x: 0, y: 0, z: -1.5, bounds: [...b], ...(lock ? { lock } : {}) }];
+  arena.objects = [{ id: 500_000, kind: 'door', x: 0, y: 0, z: -1.5, bounds: [...b], ...(useFrom ? { useFrom, plane: { cx: 0, cz: -1.5, nx: 0, nz: 1, half: 1 } } : {}) }];
   arena.brushes = [{ name: 'bDoorE_1', points: new Float32Array(points), solid: true, door: 500_000, ...(swing ? { swing: SWING } : {}) }];
   return arena;
 }
@@ -69,17 +91,30 @@ describe('doors', () => {
     expect(catalog.has('dwarven_tome')).toBe(false);
   });
 
-  function zone(lock?: string, carry = false) {
+  function zone(useFrom?: DoorUse[], carry = false, at = { x: 0, y: 0.5, z: 0 }) {
     const items = new Map(BUILTIN_ITEMS);
     items.set('room_2_key', { id: 'room_2_key', name: 'Room 2 Key', type: 'key', width: 1, height: 1, price: 0 });
     const messages: ServerControlMsg[] = [];
-    const z = new WorldZone(rapier, 'doors', doorArena(lock), {
+    const z = new WorldZone(rapier, 'doors', doorArena(useFrom), {
       send: (_c, data) => { if (typeof data === 'string') messages.push(JSON.parse(data) as ServerControlMsg); },
     }, { items });
-    z.join(1, { name: 'Opener', characterId: null, position: { x: 0, y: 0.5, z: 0 }, ...(carry ? { inventory: [{ slot: 0, itemId: 'room_2_key', equipped: false }] } : {}) });
+    z.join(1, { name: 'Opener', characterId: null, position: at, ...(carry ? { inventory: [{ slot: 0, itemId: 'room_2_key', equipped: false }] } : {}) });
     const opened = () => messages.some((m) => m.op === SC.OBJECT_STATE && m.d.objects.some((o) => o.id === 500_000 && o.state === 'open'));
     const blocked = () => wallDistance((z as unknown as { mw: Parameters<typeof wallDistance>[0] }).mw, { x: 0, y: 0, z: 0 }, 0, 3, 1) !== null;
-    return { z, opened, blocked };
+    const buf = new DataView(new ArrayBuffer(INPUT_PACKET_MAX_BYTES));
+    const ticks = new Map<number, number>();
+    /** Player `conn` holds `flags` for `n` ticks, facing -Z (yaw 0) or +Z (yaw pi). */
+    const run = (conn: number, n: number, flags: number, yaw = 0) => {
+      for (let i = 0; i < n; i++) {
+        const tick = (ticks.get(conn) ?? 0) + 1;
+        ticks.set(conn, tick);
+        const len = encodeInput(buf, 0, [{ clientTick: tick, flags, yaw: quantizeAngle(yaw), pitch: 0 }]);
+        z.receiveInput(conn, new DataView(buf.buffer.slice(0, len)));
+        z.step();
+      }
+    };
+    const where = (conn: number) => (z as unknown as { players: Map<number, { character: { position: { x: number; y: number; z: number } } }> }).players.get(conn)!.character.position;
+    return { z, opened, blocked, messages, run, where };
   }
 
   it('the interact key opens an unlocked door in reach', () => {
@@ -180,16 +215,81 @@ describe('doors', () => {
     expect(portals).toEqual(['level:next']);
   });
 
-  it('a locked door opens only with the use key and its key carried', () => {
-    const without = zone('Room 2 Key');
-    without.z.interact(1, 500_000, true);
-    expect(without.opened()).toBe(false);
-    const t = zone('Room 2 Key', true);
+  it('a door opens only from its triggers: none on this side, no opening (0x460320)', () => {
+    // Ca1c's Glaciers door: both its use triggers on the far side.
+    const t = zone([doorTrigger(-1), doorTrigger(-1, 0x4008)], false, { x: 0, y: 0.5, z: -1.2 });
     t.z.interact(1, 500_000);
     expect(t.opened()).toBe(false);
-    t.z.interact(1, 500_000, true);
+    const sealed = zone([]); // Co*a's cell door: no trigger with a volume
+    sealed.z.interact(1, 500_000);
+    expect(sealed.opened()).toBe(false);
+    const near = zone([doorTrigger(-1), doorTrigger(1)], false, { x: 0, y: 0.5, z: -1.2 });
+    near.z.interact(1, 500_000);
+    expect(near.opened()).toBe(true);
+  });
+
+  it("an item trigger (0x20) opens its door when walked into carrying the key; without it, it refuses", () => {
+    const without = zone([doorTrigger(1, 0x220, 'Room 2 Key')], false, { x: 0, y: 0.5, z: -0.5 });
+    without.z.interact(1, 500_000, true);
+    expect(without.opened()).toBe(false);
+    expect(without.messages.some((m) => m.op === SC.CHAT_BROADCAST && /Room 2 Key/.test(JSON.stringify(m.d)))).toBe(true);
+    without.run(1, 15, INPUT.FORWARD);
+    expect(without.opened()).toBe(false);
+    const t = zone([doorTrigger(1, 0x220, 'Room 2 Key')], true, { x: 0, y: 0.5, z: -0.5 });
+    t.run(1, 15, INPUT.FORWARD);
     expect(t.opened()).toBe(true);
     expect(t.blocked()).toBe(false);
+  });
+
+  it('a door held open from its far side does not let through who could not open it from his (MMO guard)', () => {
+    const uses = [doorTrigger(-1), doorTrigger(-1, 0x4008)];
+    expect(guardedDoor(doorArena(uses).objects![0]!)).toBe(true);
+    expect(guardedDoor(doorArena([doorTrigger(-1), doorTrigger(1)]).objects![0]!)).toBe(false);
+    const t = zone(uses, false, { x: 0, y: 0.5, z: -0.6 });
+    t.z.join(2, { name: 'Returning', characterId: null, position: { x: 0.3, y: 0.5, z: -2.0 } });
+    t.z.interact(2, 500_000); // opened from the far side
+    expect(t.opened()).toBe(true);
+    t.run(1, 60, INPUT.FORWARD); // walks at the open doorway
+    expect(t.where(1).z).toBeGreaterThan(-1.5);
+    // Who came through from the far side may go back the same way later.
+    t.run(2, 40, INPUT.FORWARD, Math.PI);
+    expect(t.where(2).z).toBeGreaterThan(-1.5);
+    t.run(2, 40, INPUT.FORWARD);
+    expect(t.where(2).z).toBeLessThan(-1.5);
+  });
+
+  it("the original's door triggers as converted: Ca1c's Glaciers door opens from that side only, Ca3c's from the hub too, Mica's door needs its key", () => {
+    const levelsDir = path.resolve(import.meta.dirname ?? path.dirname(new URL(import.meta.url).pathname), '../../local/generated/levels');
+    if (!fs.existsSync(path.join(levelsDir, 'ca1c.placements.json'))) return;
+    const door = (act: string, brush: string) => {
+      const pl = JSON.parse(fs.readFileSync(path.join(levelsDir, `${act}.placements.json`), 'utf8')) as LevelPlacements;
+      if (!pl.story?.doors) return null;
+      const arena = buildLevelArena(`level:${act}`, fs.readFileSync(path.join(levelsDir, `${pl.mesh}.collision.bin`)), pl);
+      const b = arena.brushes!.find((q) => q.name === brush)!;
+      return arena.objects!.find((o) => o.id === b.door)!;
+    };
+    const ft = LEVEL_UNIT_METRES;
+    const none = () => false;
+    // bDoor3 at (2306, -1127) ft; the Glaciers sign stands on the hub side (z -1132..-1160).
+    const hub = { x: 2306 * ft, y: 1108 * ft, z: -1131 * ft };
+    const ca1 = door('ca1c', 'bDoor3');
+    if (!ca1) return; // converted before 1.33
+    const hubSide = Math.sign((hub.x - ca1.plane!.cx) * ca1.plane!.nx + (hub.z - ca1.plane!.cz) * ca1.plane!.nz);
+    expect(doorOpensFrom(ca1, hubSide, none)).toBe(false);
+    expect(doorOpensFrom(ca1, -hubSide, none)).toBe(true);
+    expect(doorOpensFrom(door('ca2c', 'bDoor3')!, hubSide, none)).toBe(false);
+    expect(doorOpensFrom(door('ca3c', 'bDoor3')!, hubSide, none)).toBe(true);
+    const mica = door('ca1c', 'bDoor4')!;
+    expect(mica.useFrom).toEqual([expect.objectContaining({ item: "Mica's Key" })]);
+    const at = { x: 2043 * ft, y: 1108 * ft, z: -1294.5 * ft };
+    expect(doorUseAt(mica, at, none)).toEqual({ needs: "Mica's Key" });
+    expect(doorUseAt(mica, at, () => true)).toEqual({ open: true, walk: true });
+    expect(door('ca3c', 'bDoor4')!.useFrom).toEqual([]);
+    // The keys' doors as the original has them (the hand-made table had train's and the inn's wrong).
+    expect(door('train', 'bmetaldoor_left')!.useFrom![0]).toMatchObject({ item: "Fain's Key" });
+    expect(door('train', 'bfinaldoor')!.useFrom![0]!.item).toBeUndefined();
+    expect(door('cs1b-inn', 'bDoorE_3')!.useFrom![0]).toMatchObject({ item: 'Room 3 Key' });
+    expect(door('cs1b-inn', 'bDoorE_5')!.useFrom!.every((u) => !u.item)).toBe(true);
   });
 
   it('the original door mover: hinge keys, eased swing of ~1.42 s, opens away from the player', () => {

@@ -50,15 +50,42 @@ export interface WorldObjectDef {
   loose?: boolean;
   /** Chests. */
   contents?: { name: string; quantity: number }[];
-  /** Doors: bounds (metres, [min x, y, z, max x, y, z]) and the key that unlocks it, if locked. */
+  /** Doors: bounds (metres, [min x, y, z, max x, y, z]). */
   bounds?: [number, number, number, number, number, number];
-  lock?: string;
+  /**
+   * Doors: the original's mover triggers that open it (level.ts doorUseAt). Absent in levels
+   * converted before 1.33 (any side opens it); empty = the player never opens it by hand.
+   */
+  useFrom?: DoorUse[];
+  /** Doors with `useFrom`: the shut slab in x/z, to tell its two sides apart (doorSide). */
+  plane?: DoorPlane;
   /** Doors opened by a lever only (not by hand); also brushes only the story moves (Ca*a's bPlat rings). */
   byLever?: boolean;
   /** Levers: the doors (object ids) pulling it opens. */
   opens?: number[];
   /** Doors: Sound.ctx ids played at the hinge by the use key (the original's sound actions). */
   sounds?: number[];
+}
+
+/**
+ * One mover trigger of a door (0x460320): activation bit 0 = walking in, bit 3 = the use key,
+ * 0x20 = walking in carrying `item`. `side` is the door side its volume lies on (doorSide).
+ */
+export interface DoorUse {
+  activation: number;
+  /** Metres. */
+  trigger: { polygon: [number, number][]; yMin: number; yMax: number };
+  item?: string;
+  side: number;
+}
+
+/** A shut door slab in x/z (metres): centre, unit normal, unit length axis and half its length. */
+export interface DoorPlane {
+  cx: number;
+  cz: number;
+  nx: number;
+  nz: number;
+  half: number;
 }
 
 /**
@@ -104,6 +131,8 @@ export interface PortalDef {
   fixedEntry?: boolean;
   /** Taken only by a script, never by walking in (no volume, same mesh as the destination). */
   scripted?: boolean;
+  /** Fired only by learning a spell in its volume (exit activation 0x10000; Gl3c's Revelation pad). */
+  onLearn?: boolean;
 }
 
 export interface ArenaDef {

@@ -63,7 +63,7 @@ the original's skeletons followed past 75 m), zone workers.
 | Portal fallback cylinder | radius / height for portals without a volume | most portals carry their volume (decoded); rare |
 | Lightmap gain | texture × lightmap × 2 (by eye, approved by the user) | the D3D driver (gfx_d3d.dll) only sets MODULATE (×1) and DESTCOLOR × ZERO blending: the ×2 must come from how the lightmap texels are uploaded; find that conversion |
 | Starting equipment | Axe + Wooden Shield | the first act's start |
-| Locked doors | a hand-made list (train door, inn rooms); key in the potion slot + Z, as in the original | the acts' door scripting (sequence scripts) |
+| Locked doors | the doors' own mover triggers (side, item: 0x460320), converter 1.33 | — |
 | NPC lines | each NPC cycles its voice role's lines | the acts' sequence scripts (HermitLadySeq13 ...) |
 | Citizens' strolls | 4 m around their place, pauses 4-12 s | wander capture covered only a few citizens |
 | How long frightened citizens stay wary | 60 s | capture ended first |

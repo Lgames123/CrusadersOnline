@@ -210,6 +210,15 @@ export interface LevelStory {
   deaths?: StoryDeath[];
   cameras: StoryCamera[];
   sequences: StorySequence[];
+  /** Each door's mover triggers by brush name (converter 1.33; absent before). */
+  doors?: Record<string, StoryDoorUse[]>;
+}
+
+/** A door's mover trigger (0x460320): activation, volume, the item a 0x20 one asks for. */
+export interface StoryDoorUse {
+  activation: number;
+  volume: StoryVolume;
+  item?: string;
 }
 
 /** First actor index of a sequence (0 = the player, 1 = the stand-in, as step references use them). */

@@ -49,6 +49,12 @@ import {
   type DoorMotion,
   type DoorSwing,
   inPortal,
+  doorUseAt,
+  DOOR_USE_SLACK,
+  doorSide,
+  inDoorway,
+  doorOpensFrom,
+  guardedDoor,
   UNARMED,
   PORTAL_OBJECT_BASE,
   PORTAL_USE_REACH,
@@ -628,6 +634,8 @@ interface Player extends ActorBase {
   storyFlags: Set<string>;
   /** Walk-in sound triggers the player stands in (each plays on entering). */
   insideSounds: Set<number>;
+  /** Doors whose walk-in trigger the player stands in (each opens it on entering). */
+  insideDoors: Set<number>;
   /** The shop visit in progress: this visit's copy of its items (0x46D3D0). */
   shop: { id: number; stock: ShopEntry[]; openedAt: number; gift: boolean } | null;
   /** A scripted sequence the client is playing; the server finishes it by `until` at the latest. */
@@ -816,6 +824,10 @@ export class WorldZone {
   private readonly scratchFrames: InputFrame[] = Array.from({ length: MAX_INPUT_FRAMES }, createInputFrame);
   private readonly frame = createInputFrame();
   private readonly objects = new Map<number, WorldObject>();
+  /** Doors with a walk-in trigger (walkIntoDoors). */
+  private readonly walkDoors: WorldObject[] = [];
+  /** Doors that do not open from both sides for everyone (guardDoors). */
+  private readonly guardedDoors: WorldObject[] = [];
   private nextDynamicObjectId = DYNAMIC_OBJECT_BASE;
   /** Dropped item IDs per player (oldest to newest, capped at MAX_DROPPED_ITEMS_PER_PLAYER). */
   private readonly playerDroppedItems = new Map<string, number[]>();
@@ -858,6 +870,11 @@ export class WorldZone {
       const o = b.door !== undefined ? this.objects.get(b.door) : undefined;
       if (o && b.swing) o.swing = { def: b.swing, points: b.points, hull: hullXZ(b.points), motion: null, blocked: false };
       else if (o && b.mover) o.mover = { def: b.mover, motion: shutMover() };
+    }
+    for (const o of this.objects.values()) {
+      if (o.def.kind !== 'door' || o.def.byLever || !o.def.useFrom) continue;
+      if (o.def.useFrom.some((u) => u.activation & 0x21)) this.walkDoors.push(o);
+      if (guardedDoor(o.def)) this.guardedDoors.push(o);
     }
     this.host = this.spellHost();
     this.magic = new SpellRuntime(this.host);
@@ -1238,6 +1255,7 @@ export class WorldZone {
       story: opts.story ? { flags: [...opts.story.flags], quests: structuredClone(opts.story.quests) } : emptyStoryState(),
       storyFlags: new Set(opts.story?.flags ?? []),
       insideSounds: new Set(),
+      insideDoors: new Set(),
       shop: null,
       cutscene: null,
     };
@@ -1274,9 +1292,9 @@ export class WorldZone {
 
   /**
    * Picks up a ground item, opens a chest or a door (CS_INTERACT): within reach, still there,
-   * alive. A locked door opens only with `key` (the use key) and its key in the bag.
+   * alive. Doors open from their triggers (openDoor); `_key` (Z rather than Tab) changes nothing.
    */
-  interact(connId: number, id: number, key = false): void {
+  interact(connId: number, id: number, _key = false): void {
     const p = this.players.get(connId);
     if (p && id >= PORTAL_OBJECT_BASE && id < DYNAMIC_OBJECT_BASE) {
       // A door exit in reach (its trigger, widened by PORTAL_USE_REACH).
@@ -1291,7 +1309,7 @@ export class WorldZone {
     const reopens = o?.swing?.motion?.phase === 'closing' || o?.mover?.motion.state === MOVER_PARKED;
     if (!p || !o || !alive(p) || !this.sees(p, o) || (this.stateFor(p, o) !== 'present' && !reopens) || o.def.kind === 'breakable') return;
     if (o.def.kind === 'door' || o.def.kind === 'lever') {
-      this.openDoor(p, o, key);
+      this.openDoor(p, o);
       return;
     }
     if (p.cutscene) return;
@@ -1331,20 +1349,23 @@ export class WorldZone {
   }
 
   /**
-   * Opens a door in reach (its bounds); a locked one needs its key carried and the use key, a
-   * lever-operated one its lever. Pulling a lever opens its doors. Swinging doors swing shut
-   * after their delay (stepDoors); the others stay open.
+   * Opens a door from where the original lets the player (its mover triggers, doorUseAt: the
+   * side, an item a trigger asks for), a lever-operated one by its lever only. Doors of levels
+   * converted before 1.33 open from anywhere in reach. Pulling a lever opens its doors. Swinging
+   * doors swing shut after their delay (stepDoors); the others stay open.
    */
-  private openDoor(p: Player, o: WorldObject, key: boolean): void {
+  private openDoor(p: Player, o: WorldObject): void {
     const b = o.def.bounds;
     if (!b || o.def.byLever) return;
     const pos = p.character.position;
-    const dx = Math.max(b[0] - pos.x, 0, pos.x - b[3]);
-    const dz = Math.max(b[2] - pos.z, 0, pos.z - b[5]);
-    if (Math.hypot(dx, dz) > DOOR_INTERACT_RANGE || pos.y < b[1] - INTERACT_HEIGHT || pos.y > b[4]) return;
-    if (o.def.lock) {
-      const keyId = itemSlug(o.def.lock);
-      if (!key || !p.inventory.some((e) => e.itemId === keyId)) return;
+    if (o.def.useFrom) {
+      const use = doorUseAt(o.def, pos, (item) => this.carries(p, item), DOOR_USE_SLACK);
+      if (!use) return;
+      if ('needs' in use) return this.notify(p, 'error', `The door is locked. You need ${use.needs}.`);
+    } else {
+      const dx = Math.max(b[0] - pos.x, 0, pos.x - b[3]);
+      const dz = Math.max(b[2] - pos.z, 0, pos.z - b[5]);
+      if (Math.hypot(dx, dz) > DOOR_INTERACT_RANGE || pos.y < b[1] - INTERACT_HEIGHT || pos.y > b[4]) return;
     }
     const changes: ObjectChange[] = [];
     for (const target of [o, ...(o.def.opens ?? []).map((id) => this.objects.get(id))]) {
@@ -1376,6 +1397,62 @@ export class WorldZone {
       changes.push({ id: target.def.id, state: 'open', by: p.entityId });
     }
     this.broadcastObjects(changes);
+  }
+
+  /** Whether the player carries an item (a door key, by its items.ctx name). */
+  private carries(p: Player, name: string): boolean {
+    const id = itemSlug(name);
+    return p.inventory.some((e) => e.itemId === id);
+  }
+
+  /**
+   * Walk-in door triggers (activation 1, or 0x20 with its item): entering one opens its door, as
+   * the original's touch does (Train's gates, Ca*c's bDoor1, the inn rooms with their keys).
+   */
+  private walkIntoDoors(p: Player): void {
+    const pos = p.character.position;
+    for (const o of this.walkDoors) {
+      const use = doorUseAt(o.def, pos, (item) => this.carries(p, item));
+      const inside = !!use && 'open' in use && use.walk;
+      if (inside === p.insideDoors.has(o.def.id)) continue;
+      if (!inside) {
+        p.insideDoors.delete(o.def.id);
+        continue;
+      }
+      p.insideDoors.add(o.def.id);
+      const reopens = o.swing?.motion?.phase === 'closing' || o.mover?.motion.state === MOVER_PARKED;
+      if (o.state === 'present' || reopens) this.openDoor(p, o);
+    }
+  }
+
+  /**
+   * Not original (an MMO guard): the world's doors are shared, so one held open by a player who
+   * came from its far side would let another through where the original would not (Ca1c's
+   * Glaciers door opens only from the Glaciers' side in acts 1-2, its Mica door only with the
+   * key). Crossing a guarded door from a side the player could not open it from himself is
+   * undone, unless he has crossed it before (a way he has already earned, kept as a story flag).
+   */
+  private guardDoors(p: Player, before: { x: number; y: number; z: number }): void {
+    if (!this.guardedDoors.length) return;
+    const act = this.act ?? this.arena.name;
+    const pos = p.character.position;
+    for (const o of this.guardedDoors) {
+      const pl = o.def.plane!;
+      if (Math.hypot(pos.x - pl.cx, pos.z - pl.cz) > pl.half + 3) continue;
+      const from = doorSide(o.def, before);
+      if (doorSide(o.def, pos) === from || !(inDoorway(o.def, pos) || inDoorway(o.def, before))) continue;
+      const flag = `${act}-door:${o.def.id}`;
+      if (p.storyFlags.has(flag)) continue;
+      if (doorOpensFrom(o.def, from, (item) => this.carries(p, item))) {
+        p.storyFlags.add(flag);
+        p.story.flags.push(flag);
+        continue;
+      }
+      p.character.position.x = before.x;
+      p.character.position.y = before.y;
+      p.character.position.z = before.z;
+      return;
+    }
   }
 
   /** Catalog item of a ground grant: a dropped item by its id, a level item by its name. */
@@ -1440,7 +1517,30 @@ export class WorldZone {
     }
     p.statsDirty = true;
     this.notify(p, 'spell', known ? `${SPELL_NAMES[spell]} is now level ${known.level}.` : `You learn ${SPELL_NAMES[spell]}.`);
+    this.learnedHere(p);
     return true;
+  }
+
+  /**
+   * GRANT_SPELL's use (0x4013F0) sets the player's stats +0x200 bit 0, latched into +0x1FC for a
+   * frame (0x44D9B0); triggers with activation 0x10000 fire only then (0x460320). Gl3c: taking
+   * the Revelation book on its pad fires relay 72827 (quest + exit to Gl4c).
+   */
+  private learnedHere(p: Player): void {
+    const story = this.arena.story;
+    if (!story || p.cutscene) return;
+    const pos = p.character.position;
+    const x = pos.x / LEVEL_UNIT_METRES, y = pos.y / LEVEL_UNIT_METRES, z = pos.z / LEVEL_UNIT_METRES;
+    for (const t of story.triggers) if (t.activation & 0x10000 && t.volume && inStoryVolume(t.volume, x, y, z)) this.fireTrigger(p, t, 0, false, true);
+  }
+
+  /** An `onLearn` exit is walked into only by those whose learning already fired it (a way back). */
+  private learnedExit(p: Player, portal: PortalDef): boolean {
+    const act = this.act;
+    const target = portal.target.slice(LEVEL_PREFIX.length);
+    return !!act && (this.arena.story?.triggers ?? []).some(
+      (t) => !!(t.activation & 0x10000) && p.storyFlags.has(storyFlag(act, t.id)) && !!t.targets?.some((r) => 'exit' in r && r.exit.toLowerCase() === target && r.exitNumber === portal.exit),
+    );
   }
 
   /** Selects the spell the cast key casts (CS_SELECT_SPELL). */
@@ -2145,6 +2245,7 @@ export class WorldZone {
     const pos = p.character.position;
     for (const portal of portals) {
       if (portal.use || portal.scripted) continue; // door exits: the interact key (interact); act changes: scripts
+      if (portal.onLearn && !this.learnedExit(p, portal)) continue; // learning a spell there (learnedHere)
       const inside = inPortal(portal, pos);
       if (!inside) {
         p.inPortal.delete(portal.id);
@@ -2562,8 +2663,9 @@ export class WorldZone {
         // During a scripted sequence the player's character stands where it was (the stand-in plays).
         if (!alive(p) || p.cutscene || this.held(p)) this.frame.flags = 0;
         p.pitch = dequantizePitch(this.frame.pitch);
-        const before = { x: p.character.position.x, z: p.character.position.z };
+        const before = { x: p.character.position.x, y: p.character.position.y, z: p.character.position.z };
         stepCharacter(this.mw, p.character, this.frame, p.moveStats, TICK_DT);
+        if (alive(p) && !p.cutscene) this.guardDoors(p, before);
         p.lastProcessedInput = this.frame.clientTick;
         if (alive(p) && !p.cutscene) p.yaw = this.frame.yaw;
         if (!p.cutscene) this.checkPortals(p);
@@ -2591,7 +2693,10 @@ export class WorldZone {
       if (alive(p)) this.updateMagic(p);
       if (p.cutscene) {
         if (tick >= p.cutscene.until) this.finishCutscene(p);
-      } else if (alive(p)) this.checkStory(p);
+      } else if (alive(p)) {
+        this.checkStory(p);
+        this.walkIntoDoors(p);
+      }
     }
     this.runPendingRelays();
 

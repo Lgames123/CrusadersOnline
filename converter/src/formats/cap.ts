@@ -108,6 +108,12 @@ export interface CapPortal {
   position: [number, number, number];
   /** Flag 8 of the record (-0x2C): a door exit, used rather than walked into (cell doors, inns, gates). */
   use: boolean;
+  /**
+   * Flag 0x10000 alone: fires only while the player's stats +0x1FC bit 0 is set (0x460320), the
+   * frame latch (0x44D9B0) of +0x200 bit 0, which GRANT_SPELL's use sets (0x4013F0): learning a
+   * spell in its volume. Gl3c's Revelation book on its pad (relay 72827 fires it then).
+   */
+  onLearn?: boolean;
   /** Trigger volume: a convex x/z polygon (original units) between two heights, when linked. */
   trigger?: { polygon: [number, number][]; yMin: number; yMax: number };
   /**
@@ -351,9 +357,11 @@ function parsePortals(data: Uint8Array, dv: DataView, exitAt?: Map<number, { tar
     const position: [number, number, number] = [dv.getFloat32(o + 0x10, true), dv.getFloat32(o + 0x14, true), dv.getFloat32(o + 0x18, true)];
     if (!position.every((v) => Number.isFinite(v) && Math.abs(v) < 1e5)) continue;
     const trigger = parseTrigger(data, dv, dv.getUint32(o - 0x30, true) - CAP_BASE);
-    const use = (dv.getUint32(o - 0x2c, true) & 8) !== 0;
+    const activation = dv.getUint32(o - 0x2c, true);
+    const use = (activation & 8) !== 0;
+    const onLearn = (activation & 0x10009) === 0x10000;
     exitAt?.set(o, { target, exit: dv.getUint16(o + 4, true) });
-    out.push({ exit: dv.getUint16(o + 4, true), target, position, use, entry: data[o - 0x34 + 0xf]!, flags: data[o - 0x34 + 0xe]!, ...(trigger ? { trigger } : {}) });
+    out.push({ exit: dv.getUint16(o + 4, true), target, position, use, ...(onLearn ? { onLearn } : {}), entry: data[o - 0x34 + 0xf]!, flags: data[o - 0x34 + 0xe]!, ...(trigger ? { trigger } : {}) });
   }
   return out;
 }

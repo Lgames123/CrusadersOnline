@@ -2,7 +2,7 @@ import { doorSwingFromMotion, type LevelBrushMotion } from './door_swing.ts';
 import { moverFromMotion } from './mover.ts';
 import { CREATURE_TEMPLATES, npcArchetypeId } from '../game/creatures.ts';
 import { itemSlug } from '../game/items.ts';
-import type { ArenaDef, BrushDef, PortalDef, TriMeshDef, WorldObjectDef } from './types.ts';
+import type { ArenaDef, BrushDef, DoorPlane, DoorUse, PortalDef, TriMeshDef, WorldObjectDef } from './types.ts';
 import { SEQUENCE_ACTOR_BASE, type LevelStory } from '../game/story.ts';
 import { PLAYER_HEIGHT, PLAYER_RADIUS } from '../constants.ts';
 import type { Difficulty } from '../game/ruleset.ts';
@@ -119,6 +119,8 @@ export interface LevelPortal {
   flags?: number;
   /** No volume and the destination shares this act's mesh: only a script takes it (ScriptedSequenceDone). */
   scripted?: boolean;
+  /** Exit activation 0x10000: only learning a spell in its volume fires it (converter 1.33). */
+  onLearn?: boolean;
 }
 
 /** World-object ids of door exits (interact key): this base + the portal id. */
@@ -192,16 +194,82 @@ export function inVolume(v: { polygon: [number, number][]; yMin: number; yMax: n
   }
   return inside;
 }
+/** Slack around a door trigger's volume for the use key (metres): Tab's reach is a guess. */
+export const DOOR_USE_SLACK = 0.3;
+
+/** Activation bits a player's touch answers (0x460320): walking in, the use key, walking in with an item. */
+const DOOR_WALK = 0x01;
+const DOOR_USE = 0x08;
+const DOOR_ITEM = 0x20;
+
 /**
- * Locked doors and their keys. Not the original's door scripting (not decoded): the keys placed
- * in the acts paired with the door they most plausibly open (Fain's Key next to the train's
- * final door; the inn's room keys).
+ * How the player at `pos` (feet, metres) may open a door, from the original's mover triggers whose
+ * volume he touches (the body test of inPortal, `margin` metres wider): `open` (with `walk` when
+ * walking in does it), the item a trigger here asks for and he lacks, or null when no trigger of
+ * it reaches him (wrong side, or none). Doors of levels converted before 1.33 open from anywhere.
  */
-export const DOOR_LOCKS: readonly { act: RegExp; brush: string; key: string }[] = [
-  { act: /^train$/, brush: 'bfinaldoor', key: "Fain's Key" },
-  { act: /^cs1b-inn$/, brush: 'bDoorE_4', key: 'Room 2 Key' },
-  { act: /^cs1b-inn$/, brush: 'bDoorE_5', key: 'Room 3 Key' },
-];
+export function doorUseAt(def: WorldObjectDef, pos: { x: number; y: number; z: number }, carries: (item: string) => boolean, margin = 0): { open: true; walk: boolean } | { needs: string } | null {
+  if (!def.useFrom) return { open: true, walk: false };
+  let needs: string | null = null;
+  let open = false;
+  let walk = false;
+  // A volume is never touched through the shut slab (some lie a foot from it).
+  const side = doorSide(def, pos);
+  for (const u of def.useFrom) {
+    if (!(u.activation & (DOOR_WALK | DOOR_USE | DOOR_ITEM)) || (u.side && side && u.side !== side) || !inTrigger(u.trigger, pos, margin)) continue;
+    if (u.activation & DOOR_ITEM && u.item && !carries(u.item)) {
+      needs ??= u.item;
+      continue;
+    }
+    open = true;
+    if (u.activation & (DOOR_WALK | DOOR_ITEM)) walk = true;
+  }
+  return open ? { open: true, walk } : needs ? { needs } : null;
+}
+
+/** The side of a door's shut slab (`plane`) that `pos` is on: 1 or -1 (0 without a plane). */
+export function doorSide(def: WorldObjectDef, pos: { x: number; z: number }): number {
+  const p = def.plane;
+  if (!p) return 0;
+  return (pos.x - p.cx) * p.nx + (pos.z - p.cz) * p.nz >= 0 ? 1 : -1;
+}
+
+/** Whether `pos` lies across the doorway: within its slab's length (plus the body) and height. */
+export function inDoorway(def: WorldObjectDef, pos: { x: number; y: number; z: number }): boolean {
+  const p = def.plane;
+  const b = def.bounds;
+  if (!p || !b || pos.y + PLAYER_HEIGHT < b[1] || pos.y > b[4]) return false;
+  return Math.abs((pos.x - p.cx) * -p.nz + (pos.z - p.cz) * p.nx) <= p.half + PLAYER_RADIUS;
+}
+
+/**
+ * Whether the player could open a door himself from `side` (a trigger there he satisfies). A door
+ * that opens from both sides without an item needs no guard; one that does not is a way the
+ * original lets through in one direction only, or with a key (Ca1c's Glaciers and Mica doors).
+ */
+export function doorOpensFrom(def: WorldObjectDef, side: number, carries: (item: string) => boolean): boolean {
+  if (!def.useFrom) return true;
+  return def.useFrom.some((u) => u.side === side && u.activation & (DOOR_WALK | DOOR_USE | DOOR_ITEM) && (!(u.activation & DOOR_ITEM) || !u.item || carries(u.item)));
+}
+
+/** A door the crossing guard watches: it does not open from both sides for everyone. */
+export function guardedDoor(def: WorldObjectDef): boolean {
+  const none = () => false;
+  return !!def.useFrom && !!def.plane && !(doorOpensFrom(def, 1, none) && doorOpensFrom(def, -1, none));
+}
+
+/** The shut slab of a door brush (metres, x/z): its thin axis is the normal. */
+function doorPlane(points: Float32Array): DoorPlane {
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (let k = 0; k < points.length; k += 3) {
+    x0 = Math.min(x0, points[k]!);
+    x1 = Math.max(x1, points[k]!);
+    z0 = Math.min(z0, points[k + 2]!);
+    z1 = Math.max(z1, points[k + 2]!);
+  }
+  const alongX = x1 - x0 >= z1 - z0;
+  return { cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, nx: alongX ? 0 : 1, nz: alongX ? 1 : 0, half: (alongX ? x1 - x0 : z1 - z0) / 2 };
+}
 
 export interface LevelPlacements {
   /** Lower-case mesh name, e.g. "ca_a". */
@@ -244,6 +312,11 @@ export const PORTAL_HEIGHT = 2.5;
 export function inPortal(portal: PortalDef, pos: { x: number; y: number; z: number }, margin = 0): boolean {
   const t = portal.trigger;
   if (!t) return Math.hypot(portal.x - pos.x, portal.z - pos.z) <= PORTAL_RADIUS + margin && Math.abs(portal.y - pos.y) <= PORTAL_HEIGHT;
+  return inTrigger(t, pos, margin);
+}
+
+/** The body test of a trigger volume (metres, 0x4394F0): feet below its top, head above its bottom, radius to the edges. */
+function inTrigger(t: { polygon: [number, number][]; yMin: number; yMax: number }, pos: { x: number; y: number; z: number }, margin = 0): boolean {
   if (pos.y > t.yMax || pos.y + PLAYER_HEIGHT < t.yMin) return false;
   // Crossing test, then the margin as distance to the nearest edge.
   let inside = false;
@@ -760,9 +833,9 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
     ...(p.flags && p.flags & 4 ? { fixedEntry: true } : {}),
     ...(p.scripted ? { scripted: true } : {}),
     ...(p.use ? { use: true } : {}),
+    ...(p.onLearn ? { onLearn: true } : {}),
     ...(p.trigger ? { trigger: { polygon: p.trigger.polygon.map(([x, z]) => [x * s, z * s] as [number, number]), yMin: p.trigger.yMin * s, yMax: p.trigger.yMax * s } } : {}),
   }));
-  const act = name.slice(LEVEL_PREFIX.length);
   // Brushes the story moves (mover triggers: Ca*a's bPlat rings...) are world objects too, so their
   // mover and collider run; they move only so, never by hand.
   const storyBrushes = new Set<string>((placements.story?.triggers ?? []).flatMap((t) => t.brushes ?? []));
@@ -795,7 +868,22 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
         max[k % 3] = Math.max(max[k % 3]!, points[k]!);
       }
       const id = DOOR_OBJECT_BASE + i;
-      const lock = DOOR_LOCKS.find((l) => l.act.test(act) && l.brush === b.name)?.key;
+      // The original's own triggers decide where it opens from (converter 1.33: story.doors).
+      const doorUses = placements.story?.doors;
+      let useFrom: DoorUse[] | undefined;
+      let plane: DoorPlane | undefined;
+      if (door && doorUses) {
+        plane = doorPlane(points);
+        const pl = plane;
+        useFrom = (doorUses[b.name] ?? []).map((u) => {
+          const trigger = { polygon: u.volume.polygon.map(([x, z]) => [x * s, z * s] as [number, number]), yMin: u.volume.yMin * s, yMax: u.volume.yMax * s };
+          const n = trigger.polygon.length || 1;
+          const cx = trigger.polygon.reduce((a, q) => a + q[0], 0) / n;
+          const cz = trigger.polygon.reduce((a, q) => a + q[1], 0) / n;
+          const d = (cx - pl.cx) * pl.nx + (cz - pl.cz) * pl.nz;
+          return { activation: u.activation, trigger, ...(u.item ? { item: u.item } : {}), side: Math.abs(d) < 0.05 ? 0 : Math.sign(d) };
+        });
+      }
       objects.push({
         id,
         kind: lever ? 'lever' : 'door',
@@ -803,7 +891,8 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
         y: min[1]!,
         z: (min[2]! + max[2]!) / 2,
         bounds: [min[0]!, min[1]!, min[2]!, max[0]!, max[1]!, max[2]!],
-        ...(lock ? { lock } : {}),
+        ...(useFrom ? { useFrom } : {}),
+        ...(plane ? { plane } : {}),
         ...(b.sounds?.length ? { sounds: b.sounds } : {}),
         ...(!door && !lever ? { byLever: true } : {}),
       });

@@ -31,6 +31,8 @@ import {
   PORTAL_OBJECT_BASE,
   PORTAL_USE_REACH,
   inPortal,
+  doorUseAt,
+  DOOR_USE_SLACK,
   MESSAGE_MS,
   inStoryVolume,
   type StoryMessage,
@@ -1128,10 +1130,11 @@ async function main(): Promise<void> {
       if ((door.state !== 'present' && !door.swing) || door.def.byLever || p.y < b[1] - 2 || p.y > b[4]) continue;
       const d = Math.hypot(Math.max(b[0] - p.x, 0, p.x - b[3]), Math.max(b[2] - p.z, 0, p.z - b[5]));
       if (d > DOOR_RANGE || (best && best.d < d)) continue;
-      const lock = door.def.lock;
-      const hasKey = !!lock && (session.inventory?.items ?? []).some((i) => i.name === lock);
-      const label = door.def.kind === 'lever' ? 'Tab — pull lever' : !lock ? 'Tab — open door' : hasKey ? `Z — unlock door (${lock})` : `Locked — needs ${lock}`;
-      best = { id, label, d, ...(lock ? { key: true } : {}) };
+      // Only from where the original's triggers open it (the server checks the same).
+      const use = doorUseAt(door.def, p, (item) => (session.inventory?.items ?? []).some((i) => i.name === item), DOOR_USE_SLACK);
+      if (!use) continue;
+      const label = door.def.kind === 'lever' ? 'Tab — pull lever' : 'needs' in use ? `Locked — needs ${use.needs}` : 'Tab — open door';
+      best = { id, label, d };
     }
     for (const [id, v] of levelView.objects) {
       if (v.state !== 'present' || (v.def.kind !== 'item' && v.def.kind !== 'chest')) continue;

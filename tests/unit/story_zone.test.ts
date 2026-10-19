@@ -325,3 +325,51 @@ describe('relay ops (0x463CC0)', () => {
     expect(away.sounds(1)).toEqual([]);
   });
 });
+
+describe('an exit fired by learning a spell (activation 0x10000, Gl3c)', () => {
+  /** Gl3c: the Revelation book lies on the exit pad; relay 72827 (0x10000) fires the exit to Gl4c. */
+  function padZone() {
+    const arena = createSyntheticArena();
+    arena.name = 'level:gl3c';
+    const pad: [number, number][] = [[-3, -3], [3, -3], [3, 3], [-3, 3]];
+    arena.portals = [{ id: 0, target: 'level:gl4c', x: 0, y: 0.5, z: 0, exit: 119, onLearn: true, trigger: { polygon: pad, yMin: -1, yMax: 3 } }];
+    arena.story = {
+      triggers: [{ id: 72827, kind: 'relay', activation: 0x10000, volume: { polygon: pad.map(([x, z]) => [x * FT, z * FT] as [number, number]), yMin: -10, yMax: 10 * FT }, targets: [{ exit: 'gl4c', exitNumber: 119 }] }],
+      cameras: [],
+      sequences: [],
+    };
+    const portals: string[] = [];
+    const zone = new WorldZone(rapier, arena.name, arena, { send: () => {}, portal: (_c, target) => portals.push(target), persist: () => {} }, { random: () => 0.5 });
+    zone.join(1, { name: 'Tester', characterId: 'c1', position: { x: 0, y: 0.5, z: 5 } });
+    const buf = new DataView(new ArrayBuffer(INPUT_PACKET_MAX_BYTES));
+    let tick = 0;
+    const run = (ticks: number, flags = 0, yaw = 0) => {
+      for (let i = 0; i < ticks; i++) {
+        const len = encodeInput(buf, 0, [{ clientTick: ++tick, flags, yaw: quantizeAngle(yaw), pitch: 0 }]);
+        zone.receiveInput(1, new DataView(buf.buffer.slice(0, len)));
+        zone.step();
+      }
+    };
+    const internals = zone as unknown as { players: Map<number, unknown>; learnSpell(p: unknown, spell: string): boolean };
+    return { zone, portals, run, learn: () => internals.learnSpell(internals.players.get(1), 'revelation') };
+  }
+
+  it('walking onto the pad does nothing; learning the spell there takes the exit', () => {
+    const t = padZone();
+    t.run(30, INPUT.FORWARD); // onto the pad and past it
+    t.run(20, INPUT.FORWARD, Math.PI); // back onto it
+    expect(t.portals).toEqual([]);
+    t.learn();
+    expect(t.portals).toEqual(['level:gl4c']);
+  });
+
+  it('who already learned it there walks in again (a way back)', () => {
+    const t = padZone();
+    t.run(13, INPUT.FORWARD);
+    t.learn();
+    t.portals.length = 0;
+    t.run(40, INPUT.FORWARD); // off the pad
+    t.run(30, INPUT.FORWARD, Math.PI); // and back onto it
+    expect(t.portals).toContain('level:gl4c');
+  });
+});
