@@ -135,6 +135,7 @@ import {
   setDoorOpen,
   decodeInput,
   dequantizeAngle,
+  movementAxes,
   encodeSnapshot,
   inMeleeArc,
   forwardXZ,
@@ -195,6 +196,7 @@ import {
   quantizePosition,
   removeCharacter,
   setCharacterState,
+  rayDistance,
   snapshotMaxBytes,
   stepCharacter,
   yawTowards,
@@ -454,6 +456,15 @@ const FALL_MARGIN = 20;
 /** Seconds between two Unstucks of a player (not original: the options menu's way out of a wedge). */
 const UNSTUCK_COOLDOWN = 30;
 
+/**
+ * Creatures and holes (not original; the original's creature ledge handling is not decoded). A
+ * creature does not step where the floor 0.9 m ahead lies more than 2 m down (a ledge); one that
+ * still falls (pushed, knocked back) dies on landing after more than 8 m, or below the level.
+ */
+const LEDGE_PROBE = 0.9;
+const LEDGE_DROP = 2;
+const DEEP_FALL = 8;
+
 /** Saved positions outside these bounds are discarded (fell out of the world, corrupt data). */
 const MIN_VALID_Y = -50;
 const MAX_VALID_COORD = 10_000;
@@ -573,6 +584,8 @@ interface Player extends ActorBase {
 interface Mob extends ActorBase {
   kind: 'mob';
   archetype: MobArchetype;
+  /** Height it left the floor at while falling (deep falls kill it on landing); absent on the floor. */
+  fallFrom?: number;
   weapon: ItemDef;
   shield: ItemDef | null;
   /** Original levels: what its corpse gives (placement inventory); absent: the archetype's gold and loot. */
@@ -2361,7 +2374,11 @@ export class WorldZone {
     this.runPendingRelays();
 
     // 2. Mobs think and move.
-    for (const a of this.actors.values()) if (a.kind === 'mob' && alive(a)) this.updateMob(a);
+    for (const a of this.actors.values()) {
+      if (a.kind !== 'mob' || !alive(a)) continue;
+      this.updateMob(a);
+      this.mobFall(a);
+    }
 
     // 3. Swings: hit windows, recovery, combo buffering.
     for (const a of this.actors.values()) if (a.swing && alive(a)) this.updateSwing(a);
@@ -2411,6 +2428,35 @@ export class WorldZone {
       if (p.statsDirty) this.sendStats(p);
       this.sendSnapshot(p, tick);
     }
+  }
+
+  /** Distance from a point down to the floor, within a ledge's drop, or null (a hole). */
+  private floorBelow(at: { x: number; y: number; z: number }): number | null {
+    return rayDistance(this.mw, { x: at.x, y: at.y + 0.5, z: at.z }, { x: 0, y: -1, z: 0 }, 0.5 + LEDGE_DROP);
+  }
+
+  /** Whether the way a creature's input moves it leads off a ledge (no floor LEDGE_PROBE ahead). */
+  private dropAhead(m: Mob): boolean {
+    const [fwd, right] = movementAxes(m.input.flags);
+    const yaw = dequantizeAngle(m.input.yaw);
+    // Yaw 0 faces -Z; right is +X there.
+    let dx = -Math.sin(yaw) * fwd + Math.cos(yaw) * right;
+    let dz = -Math.cos(yaw) * fwd - Math.sin(yaw) * right;
+    const len = Math.hypot(dx, dz);
+    if (!len) return false;
+    dx /= len;
+    dz /= len;
+    const at = m.character.position;
+    return this.floorBelow({ x: at.x + dx * LEDGE_PROBE, y: at.y, z: at.z + dz * LEDGE_PROBE }) === null;
+  }
+
+  /** A creature that fell more than DEEP_FALL dies as it lands, as does one below the level. */
+  private mobFall(m: Mob): void {
+    const c = m.character;
+    if (!c.grounded) m.fallFrom ??= c.position.y;
+    const deep = c.grounded && m.fallFrom !== undefined && m.fallFrom - c.position.y > DEEP_FALL;
+    if (c.grounded) delete m.fallFrom;
+    if (deep || c.position.y < this.fallLimit) this.loseHp(m, m, m.hp);
   }
 
   private updateMob(m: Mob): void {
@@ -2500,8 +2546,15 @@ export class WorldZone {
     // Lunges, leaping strikes, bashes and hit reactions are timed actions of the shared step
     // (their clips' root motion); other input is ignored meanwhile.
     if (m.hitUntil > this.tick) m.input.flags = 0;
-    const before = { x: m.character.position.x, z: m.character.position.z };
+    // A ledge ahead: it stops rather than walks into the hole.
+    if (m.character.grounded && m.input.flags & MOVE_MASK && this.dropAhead(m)) m.input.flags &= ~MOVE_MASK;
+    const before = { x: m.character.position.x, y: m.character.position.y, z: m.character.position.z };
+    const wasGrounded = m.character.grounded;
     stepCharacter(this.mw, m.character, m.input, moveStats, TICK_DT);
+    // A lunge or a bash carried it over the edge: back onto the ledge (its action goes on).
+    if (wasGrounded && !m.character.grounded && this.floorBelow(m.character.position) === null) {
+      setCharacterState(m.character, before, 0, true, m.character.rollDir, m.character.rollTicks);
+    }
     if (m.character.rollDir === ACTION_BASH) this.rushContact(m, before);
     this.separate(m);
     m.anim = m.hitUntil > this.tick
