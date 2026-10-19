@@ -132,6 +132,8 @@ export interface LevelBrush {
   motion?: LevelBrushMotion;
   /** Sound.ctx ids the use key plays at its hinge (door opening sounds). */
   sounds?: number[];
+  /** Difficulty mask (cap record +8), when not every difficulty has it; not applied (see SOLID_BRUSH). */
+  difficulty?: number;
 }
 
 /** Door world-object ids start here (placement indices stay below). */
@@ -144,8 +146,46 @@ const LEVER_GATE = /gate/i;
 /** Props that do not block movement: foliage (plants, the pines' branch canopies), bottles. */
 const NON_SOLID_PROP = /plant|brnch|branch|bottle|grass|flower|bush|debris/i;
 
-/** Brushes that block movement: doors and the walkable pieces. */
-const SOLID_BRUSH = /door|gate|bridge|plat/i;
+/**
+ * Brushes that block movement: doors and the walkable pieces (Ca*b's planks between the pillars,
+ * bWhiteMenCantJump1-4, placed by the original on easy only; here on every difficulty).
+ */
+const SOLID_BRUSH = /door|gate|bridge|plat|cantjump/i;
+
+/** A volume in original units, Z mirrored (as placements): an x/z polygon between two heights. */
+type FeetVolume = { polygon: [number, number][]; yMin: number; yMax: number };
+
+/**
+ * Pits a fallen player cannot climb out of (not original: the original's kill zones are not
+ * decoded). Falling into `pit` puts him back at his respawn spot, unhurt; walking onto a
+ * checkpoint's volume makes its spot his respawn spot. Keyed by mesh: acts of one mesh share it.
+ * Original units, Z mirrored.
+ */
+export const FALL_CATCHES: Readonly<Record<string, { pit: FeetVolume; checkpoints: { volume: FeetVolume; spot: [number, number, number] }[] }>> = {
+  // The Catacombs' pillar crossing: tops and planks at 1128-1134 ft, the closed pit floor at
+  // 768-840 ft (x 2560-3622, z -2866..-2512); nothing else in the box stands below 1100 ft.
+  ca_b: {
+    pit: { polygon: [[2540, -2880], [3640, -2880], [3640, -2500], [2540, -2500]], yMin: 600, yMax: 1080 },
+    checkpoints: [
+      // The ledge before the first plank (from Ca*a), and the platform after the last (from Ca*c).
+      { volume: { polygon: [[2590, -2690], [2684, -2690], [2684, -2645], [2590, -2645]], yMin: 1120, yMax: 1160 }, spot: [2620, 1128, -2667] },
+      { volume: { polygon: [[3268, -2835], [3345, -2835], [3345, -2735], [3268, -2735]], yMin: 1120, yMax: 1160 }, spot: [3310, 1128, -2785] },
+    ],
+  },
+};
+
+/** Whether `pos` (feet, metres) is inside a volume (metres): polygon in x/z, yMin <= y <= yMax. */
+export function inVolume(v: { polygon: [number, number][]; yMin: number; yMax: number }, pos: { x: number; y: number; z: number }): boolean {
+  if (pos.y < v.yMin || pos.y > v.yMax) return false;
+  let inside = false;
+  const poly = v.polygon;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, zi] = poly[i]!;
+    const [xj, zj] = poly[j]!;
+    if (zi > pos.z !== zj > pos.z && pos.x < ((xj - xi) * (pos.z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
 /**
  * Locked doors and their keys. Not the original's door scripting (not decoded): the keys placed
  * in the acts paired with the door they most plausibly open (Fain's Key next to the train's
@@ -743,8 +783,13 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
     for (const g of gates) g.byLever = true;
     for (const l of levers) l.opens = gates.map((g) => g.id);
   }
+  const catches = FALL_CATCHES[placements.mesh];
+  const volume = (v: FeetVolume) => ({ polygon: v.polygon.map(([x, z]) => [x * s, z * s] as [number, number]), yMin: v.yMin * s, yMax: v.yMax * s });
   return {
     name, boxes: [], meshes: [mesh], spawnPoints: spawnPoints(mesh, hostiles, 8), mobSpawns, objects, portals, brushes, solids,
+    ...(catches
+      ? { fallCatch: { pit: volume(catches.pit), checkpoints: catches.checkpoints.map((c) => ({ volume: volume(c.volume), spot: { x: c.spot[0] * s, y: c.spot[1] * s + 0.1, z: c.spot[2] * s } })) } }
+      : {}),
     ...(placements.story ? { story: placements.story } : {}),
     ...(puppets.length ? { puppets } : {}),
     // Mirrored, the original's facing (sin h, cos h) becomes (sin h, -cos h): yaw -h (0 = -Z).

@@ -152,6 +152,8 @@ export interface CapBrush {
    * (the door opening sound; one door also has a guard's line).
    */
   sounds?: number[];
+  /** Difficulty mask (record +8), only when not every difficulty has it (Ca*b's easy-only boards). */
+  difficulty?: number;
 }
 
 /**
@@ -374,7 +376,8 @@ function parseBrushes(data: Uint8Array, dv: DataView): CapBrush[] {
   let pointers: Map<number, number[]> | null = null;
   for (let a = 0; a + 0x40 < data.length; a++) {
     if (data[a] !== 0x31 || data[a + 1] !== 0 || data[a + 2] !== 0 || data[a + 3] !== 0) continue;
-    if (dv.getUint32(a + 8, true) !== 0x3f || dv.getUint32(a + 12, true) !== 2) continue;
+    const mask = dv.getUint32(a + 8, true);
+    if ((mask & ~ALL_DIFFICULTIES) !== 0 || dv.getUint32(a + 12, true) !== 2) continue;
     const np = dv.getUint32(a + 0x14, true) - CAP_BASE;
     if (np <= a || np >= data.length) continue;
     const name = ascii(data, np, 40);
@@ -394,11 +397,12 @@ function parseBrushes(data: Uint8Array, dv: DataView): CapBrush[] {
       if (!ok) continue;
       const motion = parseBrushMotion(data, dv, a - 0x18);
       const sounds = motion ? hingeSounds(data, dv, (pointers ??= pointerIndex(data, dv)), motion) : [];
-      out.push({ name, points, faces: parseBrushFaces(data, dv, ptr - CAP_BASE, nf, points), ...(motion ? { motion } : {}), ...(sounds.length ? { sounds } : {}) });
+      out.push({ name, points, faces: parseBrushFaces(data, dv, ptr - CAP_BASE, nf, points), ...(motion ? { motion } : {}), ...(sounds.length ? { sounds } : {}), ...(mask !== ALL_DIFFICULTIES ? { difficulty: mask } : {}) });
       break;
     }
   }
-  return out;
+  // Brushes of only some difficulties after the others: door ids count brush indices.
+  return [...out.filter((b) => b.difficulty === undefined), ...out.filter((b) => b.difficulty !== undefined)];
 }
 
 /** Every offset holding a pointer into the act, by the offset it points to. */

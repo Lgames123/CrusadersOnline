@@ -155,4 +155,12 @@ export interface ArenaDef {
   story?: LevelStory;
   /** Original levels: the mesh the act is built on (acts of one mesh share its coordinates). */
   mesh?: string;
+  /**
+   * A pit a fall cannot leave (FALL_CATCHES, metres): falling into `pit` puts the player at his
+   * respawn spot; a checkpoint's volume makes its spot his respawn spot.
+   */
+  fallCatch?: {
+    pit: { polygon: [number, number][]; yMin: number; yMax: number };
+    checkpoints: { volume: { polygon: [number, number][]; yMin: number; yMax: number }; spot: { x: number; y: number; z: number } }[];
+  };
 }

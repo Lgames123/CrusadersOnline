@@ -12,6 +12,7 @@ import {
   LEVEL_PREFIX,
   LEVEL_UNIT_METRES,
   floorAt,
+  inVolume,
   applyQuestAction,
   emptyStoryState,
   estimateSequenceMs,
@@ -1795,11 +1796,18 @@ export class WorldZone {
   }
 
   /**
-   * A player below the level (fell off an open edge the edge walls missed) is put back where he
-   * would respawn: the beginning of the area.
+   * A player below the level, or in a pit he cannot climb out of (arena.fallCatch), is put back
+   * where he would respawn: the beginning of the area, or the last checkpoint he walked onto.
    */
   private catchFall(p: Player): void {
-    if (p.character.position.y >= this.fallLimit) return;
+    const at = p.character.position;
+    const c = this.arena.fallCatch;
+    if (c && alive(p)) {
+      // Not original: a checkpoint before a pit becomes the respawn spot; the pit gives him back there.
+      for (const k of c.checkpoints) if (inVolume(k.volume, at)) p.respawnSpot = k.spot;
+      if (inVolume(c.pit, at)) return this.toRespawnSpot(p);
+    }
+    if (at.y >= this.fallLimit) return;
     this.toRespawnSpot(p);
   }
 
@@ -3650,7 +3658,7 @@ export class WorldZone {
   }
 
   /** Debug/test view of every actor. */
-  inspect(): { id: number; kind: Actor['kind']; hp: number; alive: boolean; state?: Mob['state']; brain?: Mob['brain']; swinging: boolean; anim: number; shield: boolean; flags: number; x: number; z: number; yaw: number }[] {
+  inspect(): { id: number; kind: Actor['kind']; hp: number; alive: boolean; state?: Mob['state']; brain?: Mob['brain']; swinging: boolean; anim: number; shield: boolean; flags: number; x: number; y: number; z: number; yaw: number }[] {
     return [...this.actors.values()].map((a) => ({
       id: a.entityId,
       kind: a.kind,
@@ -3663,6 +3671,7 @@ export class WorldZone {
       flags: this.states.get(a.entityId)?.flags ?? 0,
       yaw: dequantizeAngle(a.yaw),
       x: a.character.position.x,
+      y: a.character.position.y,
       z: a.character.position.z,
     }));
   }
