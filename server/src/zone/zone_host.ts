@@ -130,6 +130,10 @@ export class ZoneHost {
     this.post({ t: 'cutsceneDone', connId, sequence });
   }
 
+  unstuck(connId: number): void {
+    this.post({ t: 'unstuck', connId });
+  }
+
   useItem(connId: number, slot: number): void {
     this.post({ t: 'use', connId, slot });
   }

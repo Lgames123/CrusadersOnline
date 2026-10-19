@@ -451,6 +451,9 @@ const ALLY_LEASH = 25;
 /** Metres below the lowest level geometry at which a falling player is caught. */
 const FALL_MARGIN = 20;
 
+/** Seconds between two Unstucks of a player (not original: the options menu's way out of a wedge). */
+const UNSTUCK_COOLDOWN = 30;
+
 /** Saved positions outside these bounds are discarded (fell out of the world, corrupt data). */
 const MIN_VALID_Y = -50;
 const MAX_VALID_COORD = 10_000;
@@ -503,6 +506,8 @@ interface Player extends ActorBase {
   characterId: string | null;
   /** Where he comes back after dying: the beginning of the area he entered by (respawnPoint). */
   respawnSpot: { x: number; y: number; z: number };
+  /** Tick of his last Unstuck (the options menu), for its cooldown. */
+  unstuckTick: number;
   queue: InputQueue;
   lastProcessedInput: number;
   ackTick: number;
@@ -1006,6 +1011,7 @@ export class WorldZone {
       entityId: this.nextEntityId++,
       characterId: opts.characterId,
       respawnSpot,
+      unstuckTick: -Infinity,
       name: opts.name,
       character: createCharacter(this.mw, spawn),
       moveStats: { ...this.playerStats, clipRate: originalSpeedMultiplier(rules.attributes, level) },
@@ -1809,6 +1815,24 @@ export class WorldZone {
     }
     if (at.y >= this.fallLimit) return;
     this.toRespawnSpot(p);
+  }
+
+  /**
+   * CS_UNSTUCK (not original): a player wedged in the level asks to be put back where he would
+   * respawn, the beginning of the area or his last checkpoint. Alive, outside sequences, not held,
+   * once every UNSTUCK_COOLDOWN seconds.
+   */
+  unstuck(connId: number): void {
+    const p = this.players.get(connId);
+    if (!p || !alive(p) || p.cutscene || this.held(p)) return;
+    const left = Math.ceil((p.unstuckTick + UNSTUCK_COOLDOWN * TICK_RATE - this.tick) / TICK_RATE);
+    if (left > 0) return this.notify(p, 'error', `You can use Unstuck again in ${left} s.`);
+    p.unstuckTick = this.tick;
+    p.swing = null;
+    p.queuedAttack = false;
+    p.cast = null;
+    this.toRespawnSpot(p);
+    this.notify(p, 'info', 'You have been moved to a safe place.');
   }
 
   /** Puts a player at his respawn spot; the triggers there count as entered (never fired). */

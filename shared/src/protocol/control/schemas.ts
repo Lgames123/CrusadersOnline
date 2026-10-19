@@ -147,6 +147,12 @@ export const CutsceneDonePacketSchema = z.object({
   d: z.object({ sequence: z.string().min(1).max(64) }),
 });
 
+export const UnstuckPacketSchema = z.object({
+  op: z.literal(CS.UNSTUCK),
+  seq: z.number().int().positive(),
+  d: z.object({}),
+});
+
 export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   AuthTicketPacketSchema,
   SelectCharacterPacketSchema,
@@ -167,6 +173,7 @@ export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   ChatMessagePacketSchema,
   PingPacketSchema,
   CutsceneDonePacketSchema,
+  UnstuckPacketSchema,
 ]);
 
 export type ClientControlPacket = z.infer<typeof ClientControlPacketSchema>;

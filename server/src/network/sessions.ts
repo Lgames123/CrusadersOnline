@@ -299,6 +299,9 @@ export class SessionManager implements TransportHandlers {
       case CS.CUTSCENE_DONE:
         if (s.state === 'in_world') this.zoneOf(s)?.cutsceneDone(conn.id, msg.d.sequence);
         return;
+      case CS.UNSTUCK:
+        if (s.state === 'in_world') this.zoneOf(s)?.unstuck(conn.id);
+        return;
       case CS.CHAT_MESSAGE:
         this.chat(s, msg.d.channel, msg.d.text, msg.d.to);
         return;

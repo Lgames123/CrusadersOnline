@@ -25,6 +25,8 @@ export const CS = {
   SHOP_OPEN: 0x13,
   SHOP_BUY: 0x14,
   SHOP_SELL: 0x15,
+  /** Asks to be put back where the player would respawn (the options menu's Unstuck). */
+  UNSTUCK: 0x16,
 } as const;
 
 /** Server -> client opcodes. */

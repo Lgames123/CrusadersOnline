@@ -356,6 +356,12 @@ export class ClientSession {
     this.sendJson({ op: CS.CHAT_MESSAGE, seq: ++this.seq, d: { channel, text, ...(to ? { to } : {}) } });
   }
 
+  /** Asks the server to put the character back where it would respawn (stuck in the level). */
+  unstuck(): void {
+    if (!this.connected || this.dead) return;
+    this.sendJson({ op: CS.UNSTUCK, seq: ++this.seq, d: {} });
+  }
+
   /** The scripted sequence `sequence` has been played (or skipped). */
   cutsceneDone(sequence: string): void {
     if (!this.connected) return;

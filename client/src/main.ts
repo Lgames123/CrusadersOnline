@@ -1302,6 +1302,7 @@ async function main(): Promise<void> {
   play();
   // Back to the character screen: the account session stays, the world is left.
   const navButtonsRow = document.getElementById('nav-buttons-row')!;
+  const unstuckButton = document.getElementById('btn-unstuck')!;
   const characterButton = document.getElementById('btn-characters')!;
   const logoutButton = document.getElementById('btn-logout')!;
   const confirmBox = document.getElementById('confirm-box')!;
@@ -1309,7 +1310,7 @@ async function main(): Promise<void> {
   const confirmYes = document.getElementById('btn-confirm-yes')!;
   const confirmCancel = document.getElementById('btn-confirm-cancel')!;
 
-  let pendingAction: 'characters' | 'logout' | null = null;
+  let pendingAction: 'unstuck' | 'characters' | 'logout' | null = null;
 
   const resetConfirm = () => {
     pendingAction = null;
@@ -1318,13 +1319,20 @@ async function main(): Promise<void> {
   };
   resetOverlayConfirm = resetConfirm;
 
-  const showConfirm = (action: 'characters' | 'logout', prompt: string) => {
+  const showConfirm = (action: 'unstuck' | 'characters' | 'logout', prompt: string) => {
     pendingAction = action;
     confirmPrompt.textContent = prompt;
     confirmYes.className = action === 'logout' ? 'btn-danger' : 'btn-warn';
     navButtonsRow.hidden = true;
     confirmBox.hidden = false;
   };
+
+  // Online only: the server puts the character back where it would respawn.
+  unstuckButton.hidden = !session;
+  unstuckButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showConfirm('unstuck', 'Move to the start of the area (or your last checkpoint)?');
+  });
 
   if (auth.kind === 'account') {
     characterButton.hidden = false;
@@ -1351,7 +1359,10 @@ async function main(): Promise<void> {
 
   confirmYes.addEventListener('click', async (e) => {
     e.stopPropagation();
-    if (pendingAction === 'characters') {
+    if (pendingAction === 'unstuck') {
+      session?.unstuck();
+      setOptionsOpen(false);
+    } else if (pendingAction === 'characters') {
       session?.close();
       try {
         sessionStorage.setItem(CHARACTER_SCREEN_FLAG, 'characters');

@@ -23,6 +23,7 @@ export type ToZone =
   | { t: 'shopSell'; connId: number; shop: number; slot: number; itemId?: string }
   | { t: 'use'; connId: number; slot: number }
   | { t: 'cutsceneDone'; connId: number; sequence: string }
+  | { t: 'unstuck'; connId: number }
   /** Remove the player for a zone transfer; answered with 'transferred'. */
   | { t: 'transfer'; connId: number }
   | { t: 'stop' };

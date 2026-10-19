@@ -140,6 +140,10 @@ port.on('message', (msg: ToZone) => {
       zone.cutsceneDone(msg.connId, msg.sequence);
       flush();
       break;
+    case 'unstuck':
+      zone.unstuck(msg.connId);
+      flush();
+      break;
     case 'transfer': {
       flush();
       const r = zone.leaveForTransfer(msg.connId);
