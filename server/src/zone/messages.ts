@@ -1,5 +1,5 @@
 import type { CustomSpawnSpec, ExitCrossing, SpellId, WorldRates } from '@crusaders/shared';
-import type { JoinOptions, PersistReason, PersistRecord, TransferState, ZoneAdminReport } from '../simulation/world_zone.ts';
+import type { JoinOptions, LootEvent, PersistReason, PersistRecord, TransferState, ZoneAdminReport } from '../simulation/world_zone.ts';
 import type { AttackKind } from '@crusaders/shared';
 
 /** Main thread <-> zone worker messages (ADR-009). Binary payloads are transferred, not copied. */
@@ -61,6 +61,8 @@ export type FromZone =
   | { t: 'persist'; reason: PersistReason; records: PersistRecord[] }
   /** A player entered a portal trigger (the main thread decides whether to transfer). */
   | { t: 'portal'; connId: number; target: string; keep?: { x: number; y: number; z: number; mesh: string }; via?: ExitCrossing }
+  /** A chest opened or found with the bag too full (the main thread logs it). */
+  | { t: 'loot'; event: LootEvent }
   | { t: 'transferred'; connId: number; record: PersistRecord | null; state: TransferState | null }
   | { t: 'reply'; reqId: number; reply: ZoneReply }
   | { t: 'stopped' };

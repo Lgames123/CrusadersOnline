@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { WorldZone } from '@crusaders/server/simulation/world_zone';
+import { WorldZone, type LootEvent } from '@crusaders/server/simulation/world_zone';
 import {
   BUILTIN_ITEMS,
   QUEST_ACTION,
@@ -32,10 +32,12 @@ function zone(items = new Map(BUILTIN_ITEMS), carries?: { name: string; quantity
   if (carries) arena.mobSpawns[0]!.carries = carries;
   arena.objects = [{ id: CHEST, kind: 'chest', x: 0, y: 0, z: -0.5, contents: [{ name: 'Long Sword', quantity: 1 }, { name: 'Gold Pieces', quantity: 5 }] }];
   const messages = new Map<number, ServerControlMsg[]>();
+  const loot: LootEvent[] = [];
   const z = new WorldZone(rapier, 'inventory', arena, {
     send: (c, data) => {
       if (typeof data === 'string') messages.set(c, [...(messages.get(c) ?? []), JSON.parse(data) as ServerControlMsg]);
     },
+    loot: (e) => loot.push(e),
   }, { items });
   const internal = z as unknown as Internal;
   const join = (connId: number, inventory?: InventoryEntry[]) => {
@@ -46,7 +48,7 @@ function zone(items = new Map(BUILTIN_ITEMS), carries?: { name: string; quantity
   const errors = (connId: number) => sent(connId).filter((m) => m.op === SC.ERROR);
   const updates = (connId: number) => sent(connId).filter((m) => m.op === SC.INVENTORY_UPDATE).length;
   const dynamic = () => [...internal.objects].filter(([id]) => id >= 2_000_000);
-  return { z, internal, join, sent, errors, updates, dynamic };
+  return { z, internal, join, sent, errors, updates, dynamic, loot };
 }
 
 const count = (inv: readonly InventoryEntry[], itemId: string) => inv.filter((e) => e.itemId === itemId).reduce((n, e) => n + (e.quantity ?? 1), 0);
@@ -158,6 +160,11 @@ describe('inventory authority in the zone', () => {
     expect(count(p.inventory, 'long_sword')).toBe(1);
     expect((p as unknown as { gold: number }).gold).toBe(5);
     expect(chest()).toEqual([expect.objectContaining({ state: 'open', loot: ['Long Sword', '5 Gold Pieces'] })]);
+    // Both attempts reach the server log.
+    expect(t.loot).toEqual([
+      { connId: 1, character: 'P1', chest: CHEST, outcome: 'bag_full', items: ['Long Sword', '5 Gold Pieces'] },
+      { connId: 1, character: 'P1', chest: CHEST, outcome: 'looted', items: ['Long Sword', '5 Gold Pieces'] },
+    ]);
   });
 
   it('a door key goes to the key items even with a full bag, and cannot be dropped', () => {

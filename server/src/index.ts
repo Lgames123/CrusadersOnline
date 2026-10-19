@@ -65,6 +65,8 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
       persist: (records, reason) => save(records, reason),
       portal: (arena, connId, target, keep, via) => sessions?.onPortal(arena, connId, target, keep, via),
       transferred: (arena, connId, record, state) => sessions?.onTransferred(arena, connId, record, state),
+      loot: (arena, { connId, character, chest, outcome, items }) =>
+        log.info({ conn: connId, character, zone: arena, chest, items }, outcome === 'looted' ? 'chest looted' : 'chest not looted: inventory full'),
     },
   );
   if (!zones.available(config.arena)) throw new Error(`ARENA ${config.arena} is not available (convert the level into ${config.generatedDir})`);

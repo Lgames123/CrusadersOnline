@@ -260,6 +260,17 @@ export interface ZoneOutbox {
    * `via`: the exit taken and where the player crossed it (where he arrives, see exitArrival).
    */
   portal?(connId: number, target: string, keep?: { x: number; y: number; z: number; mesh: string }, via?: ExitCrossing): void;
+  /** A chest was opened, or left shut for a bag too full to take it all (the server log). */
+  loot?(event: LootEvent): void;
+}
+
+/** A chest opened (`items`: what was taken) or found with the bag too full (`items`: what it holds). */
+export interface LootEvent {
+  connId: number;
+  character: string;
+  chest: number;
+  outcome: 'looted' | 'bag_full';
+  items: string[];
 }
 
 export interface JoinOptions {
@@ -1289,8 +1300,10 @@ export class WorldZone {
     const grants: GroundGrant[] = (o.def.kind === 'item' ? (o.def.item ? [o.def.item] : []) : (o.def.contents ?? []))
       .filter((g) => !this.groundItemDef(g)?.questItem); // quest items come only from the story
     // All or nothing: a bag that cannot hold everything takes nothing, and it all stays there.
+    const chest = o.def.kind === 'chest';
     if (!this.fitsAll(p, grants)) {
       this.sendJson(connId, { op: SC.ERROR, d: { code: 'bag_full', message: 'Inventory full.' } });
+      if (chest) this.outbox.loot?.({ connId, character: p.name, chest: id, outcome: 'bag_full', items: grants.map((g) => (g.quantity > 1 ? `${g.quantity} ${g.name}` : g.name)) });
       return;
     }
     const loot: string[] = [];
@@ -1298,6 +1311,7 @@ export class WorldZone {
       const got = this.grantItem(p, g.name, g.quantity, g.itemId);
       if (got > 0) loot.push(got > 1 ? `${got} ${g.name}` : g.name);
     }
+    if (chest) this.outbox.loot?.({ connId, character: p.name, chest: id, outcome: 'looted', items: loot });
     if (o.def.kind === 'item' && grants.length && !loot.length) {
       return; // unknown item, or a book already known
     } else if (o.dynamic) {

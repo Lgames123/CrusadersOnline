@@ -1,6 +1,6 @@
 import { Worker } from 'node:worker_threads';
 import type { ExitCrossing, SpellId, WorldRates } from '@crusaders/shared';
-import type { JoinOptions, PersistReason, PersistRecord, TransferState } from '../simulation/world_zone.ts';
+import type { JoinOptions, LootEvent, PersistReason, PersistRecord, TransferState } from '../simulation/world_zone.ts';
 import type { AttackKind } from '@crusaders/shared';
 import type { FromZone, ToZone, ZoneMetrics, ZoneReply, ZoneRequest, ZoneWorkerData } from './messages.ts';
 
@@ -11,6 +11,7 @@ export interface ZoneHostEvents {
   error?(err: Error): void;
   portal?(connId: number, target: string, keep?: { x: number; y: number; z: number; mesh: string }, via?: ExitCrossing): void;
   transferred?(connId: number, record: PersistRecord | null, state: TransferState | null): void;
+  loot?(event: LootEvent): void;
 }
 
 /** Main-thread handle for one zone worker. */
@@ -50,6 +51,9 @@ export class ZoneHost {
             break;
           case 'portal':
             events.portal?.(msg.connId, msg.target, msg.keep, msg.via);
+            break;
+          case 'loot':
+            events.loot?.(msg.event);
             break;
           case 'transferred':
             events.transferred?.(msg.connId, msg.record, msg.state);

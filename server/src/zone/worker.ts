@@ -59,6 +59,9 @@ const zone = new WorldZone(rapier, zoneName, loadArena(arenaName), {
   portal(connId, target, keep, via) {
     post({ t: 'portal', connId, target, ...(keep ? { keep } : {}), ...(via ? { via } : {}) });
   },
+  loot(event) {
+    post({ t: 'loot', event });
+  },
 }, { difficulty, features: gameplayFeatures(features ?? []), items: loadItems(itemRulesPath), spells: loadSpells(generatedDir) });
 if (rates) zone.setRates(rates);
 
