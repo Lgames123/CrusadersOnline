@@ -725,6 +725,12 @@ export class SpellRuntime {
     this.host.emit(p, { status: [{ target: c.entityId, tag: s.tag, on: true, seconds: Math.max(0, (s.until - this.host.tick()) / TICK_RATE), level: s.level }] });
   }
 
+  /** A status carried from another zone (a zone transfer): slow time slows the world round him again. */
+  restoreStatus(c: SpellTarget, s: ActiveStatus): void {
+    if (s.tag === 'SLTI') this.timeSlows.push({ owner: c, until: s.until });
+    this.setStatus(c, s);
+  }
+
   private endStatus(c: SpellTarget, tag: StatusTag): void {
     if (!c.statuses.delete(tag)) return;
     this.host.statusChanged(c);

@@ -287,6 +287,21 @@ export interface JoinOptions {
   arrivingMesh?: string;
   /** Story progress: triggers fired and the quest book (story.ts). */
   story?: StoryState;
+  /** Timers running when he left his last zone (a zone transfer only; logins start clean). */
+  carried?: CarriedTimers;
+}
+
+/**
+ * Timers carried across a zone transfer (not original: the original has one level at a time):
+ * seconds left when the old zone let him go at `at` (Date.now), so the load in between counts.
+ */
+export interface CarriedTimers {
+  at: number;
+  statuses: (Omit<ActiveStatus, 'until'> & { seconds: number })[];
+  light: { radius: number; level: number; seconds: number } | null;
+  /** potionCooldown group -> seconds left. */
+  potionCooldowns: Record<string, number>;
+  unstuck: number;
 }
 
 /** Player state carried across a zone transfer (everything but the position). */
@@ -1227,6 +1242,7 @@ export class WorldZone {
         ...(Object.keys(enabledFeatures(this.features)).length ? { features: enabledFeatures(this.features) } : {}),
       },
     });
+    if (opts.carried) this.restoreTimers(p, opts.carried);
     this.sendStats(p);
     this.sendInventory(p);
     this.sendJson(connId, { op: SC.QUEST_LOG, d: { log: p.story.quests } });
@@ -2081,9 +2097,32 @@ export class WorldZone {
       spells: p.spells.map((s) => ({ ...s })),
       selectedSpell: p.selectedSpell,
       story: { flags: [...p.story.flags], quests: structuredClone(p.story.quests) },
+      carried: this.carriedTimers(p),
     };
     const record = this.leave(connId);
     return { record, state };
+  }
+
+  /** The spell effects, torch light and cooldowns still running, as seconds left (see CarriedTimers). */
+  private carriedTimers(p: Player): CarriedTimers {
+    const left = (until: number) => Math.max(0, (until - this.tick) / TICK_RATE);
+    return {
+      at: Date.now(),
+      statuses: alive(p) ? [...p.statuses.values()].filter((s) => s.until > this.tick).map(({ until, ...s }) => structuredClone({ ...s, seconds: left(until) })) : [],
+      light: alive(p) && p.light && p.light.until > this.tick ? { radius: p.light.radius, level: p.light.level, seconds: left(p.light.until) } : null,
+      potionCooldowns: Object.fromEntries([...p.potionCooldowns].filter(([, end]) => end > this.tick).map(([g, end]) => [g, left(end)])),
+      unstuck: left(p.unstuckTick + UNSTUCK_COOLDOWN * TICK_RATE),
+    };
+  }
+
+  /** Restarts what carriedTimers kept, less the time spent between zones. */
+  private restoreTimers(p: Player, c: CarriedTimers): void {
+    const gone = Math.max(0, (Date.now() - c.at) / 1000);
+    const end = (seconds: number) => this.tick + Math.round((seconds - gone) * TICK_RATE);
+    for (const [group, seconds] of Object.entries(c.potionCooldowns)) if (seconds > gone) p.potionCooldowns.set(group, end(seconds));
+    if (c.unstuck > gone) p.unstuckTick = end(c.unstuck) - UNSTUCK_COOLDOWN * TICK_RATE;
+    if (c.light && c.light.seconds > gone) p.light = { radius: c.light.radius, level: c.light.level, until: end(c.light.seconds) };
+    for (const { seconds, ...s } of c.statuses) if (seconds > gone) this.magic.restoreStatus(p, { ...s, until: end(seconds) });
   }
 
   private checkPortals(p: Player): void {
