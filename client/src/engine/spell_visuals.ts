@@ -5,6 +5,7 @@ import type { EffectHandle, Effects } from './effects.ts';
 import type { SoundBank } from '../audio/sound_bank.ts';
 import { dynamicLights } from './dynamic_lights.ts';
 import type { Avatar } from '../entities/avatar.ts';
+import { BoomerVisuals } from './boomer_visuals.ts';
 
 /**
  * What the spells look and sound like (SC.SPELL_EVENT): the original's effects.stg effects at
@@ -150,9 +151,13 @@ export class SpellVisuals {
   private readonly textures = new Map<string, Promise<THREE.Texture | null>>();
   private ringGeometry: Promise<THREE.BufferGeometry | null> | null = null;
 
+  /** Boomer Axes in flight (not a spell, but sent with them). */
+  private readonly boomer: BoomerVisuals;
+
   constructor(scene: THREE.Scene, host: SpellVisualHost) {
     this.scene = scene;
     this.host = host;
+    this.boomer = new BoomerVisuals(scene, host);
   }
 
   /** One SC.SPELL_EVENT. */
@@ -176,6 +181,7 @@ export class SpellVisuals {
     if (d.light) dynamicLights.flash(new THREE.Vector3(...d.light.at), new THREE.Color(d.light.color[0] / 255, d.light.color[1] / 255, d.light.color[2] / 255), 2.2, d.light.radius, d.light.seconds);
     for (const b of d.bolts ?? []) this.bolt(new THREE.Vector3(...b.from), new THREE.Vector3(...b.to));
     if (d.projectile) this.projectile(d.projectile);
+    if (d.axe) this.boomer.handle(d.axe);
     if (d.burst) this.burst(d.burst);
     if (d.drain) this.drain(d.drain);
     for (const s of d.status ?? []) this.setStatus(s.target, s.tag, s.on, s.level, s.seconds);
@@ -198,6 +204,7 @@ export class SpellVisuals {
     for (const id of [...this.statusOf.keys()]) this.forget(id);
     for (const w of this.windups) w.handle.stop();
     this.windups.length = 0;
+    this.boomer.clear();
     for (const [id, p] of this.projectiles) {
       if (p.sprite) this.scene.remove(p.sprite);
       p.carried?.stop();
@@ -214,6 +221,7 @@ export class SpellVisuals {
 
   update(dt: number): void {
     const fx = this.host.effects();
+    this.boomer.update(dt);
     for (const p of this.projectiles.values()) {
       p.pos.addScaledVector(p.vel, dt);
       p.sprite?.position.copy(p.pos);

@@ -135,6 +135,12 @@ export interface SpellEventMsg {
     /** A flying spell (fire ball, slow, snap freeze): its state; `end` when it is gone. */
     /** `look`: the effect it carries when not its spell's own (a creature's FIREBALL_PROJ_EVIL). */
     projectile?: { id: number; spell: SpellId; level: number; pos: V3; vel: V3; look?: string; end?: boolean };
+    /**
+     * The Boomer Axe's thrown axe (type-3 object, 0x0043EAE0): its state (sent at the throw, when it
+     * turns back and every few ticks on the curve home); `owner`'s right hand is empty meanwhile.
+     * `end` when it is caught (the weapon is back in the hand).
+     */
+    axe?: { id: number; owner: number; pos: V3; vel: V3; end?: boolean };
     /** A growing area (explosions, holy wrath, revelation): to `radius` over `seconds`; `dark`: a creature's unholy wrath. */
     burst?: { spell: SpellId; level: number; at: V3; radius: number; seconds: number; dark?: boolean };
     /** Lightning bolts. */

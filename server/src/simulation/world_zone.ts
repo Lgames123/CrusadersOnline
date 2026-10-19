@@ -238,6 +238,7 @@ import {
 } from '@crusaders/shared';
 import { InputQueue } from './input_queue.ts';
 import { BODY_MID, SpellRuntime, type ActiveStatus, type SpellHost } from './spell_runtime.ts';
+import { BoomerAxes } from './boomer_axe.ts';
 
 /** Snapshots older than this are not used as delta baselines (full snapshot instead). */
 const MAX_BASELINE_AGE = 20;
@@ -792,6 +793,9 @@ export class WorldZone {
   private readonly magic: SpellRuntime;
   /** What the spell runtime may do (drain and heal are shared with the soul-drinking items). */
   private readonly host: SpellHost;
+  /** Boomer Axes in flight (executable-analysis §23.1); a creature's thrown weapon until it is caught. */
+  private readonly boomer: BoomerAxes;
+  private readonly thrownWeapons = new Map<number, ItemDef>();
   /** Event rate multipliers set from the admin panel (not original; 1 = the original's). */
   private rates: WorldRates = { ...DEFAULT_RATES };
 
@@ -825,6 +829,18 @@ export class WorldZone {
     }
     this.host = this.spellHost();
     this.magic = new SpellRuntime(this.host);
+    this.boomer = new BoomerAxes({
+      mw: this.mw,
+      random: () => this.random(),
+      characters: () => this.actors.values(),
+      alive: (a) => alive(a as Actor),
+      present: (a) => this.actors.get(a.entityId) === a,
+      hostile: (a, b) => this.hostile(a as Actor, b as Actor),
+      shieldStops: (a, from) => this.host.shieldStops(a, from, 'MELEE'),
+      damage: (a, t, vector, push) => this.host.damage(a, t, vector, push),
+      emit: (at, d) => this.host.emit(at, d),
+      caught: (a) => this.boomerCaught(a as Actor),
+    });
   }
 
   /** What the spell runtime may do to the zone's characters. */
@@ -961,6 +977,7 @@ export class WorldZone {
   private removeMob(m: Mob): void {
     if (!this.actors.has(m.entityId)) return;
     this.magic.forget(m);
+    this.thrownWeapons.delete(m.entityId);
     removeCharacter(this.mw, m.character);
     this.grid.remove(m.entityId);
     this.states.delete(m.entityId);
@@ -1721,9 +1738,9 @@ export class WorldZone {
     if (!list.length) this.playerDroppedItems.delete(o.ownerKey);
   }
 
-  /** Bag changes wait for a free player: not dead, swinging or in a scripted sequence. */
+  /** Bag changes wait for a free player: not dead, swinging, in a scripted sequence or with his Boomer Axe in flight. */
   private inventoryBusy(p: Player): boolean {
-    return !alive(p) || !!p.swing || !!p.cutscene;
+    return !alive(p) || !!p.swing || !!p.cutscene || this.boomer.flying(p);
   }
 
   /** The entry in `slot`, unless the client named another item (its view of the slot is stale). */
@@ -1753,7 +1770,8 @@ export class WorldZone {
       this.sendInventory(p);
       return;
     }
-    if (p.swing) {
+    // A thrown Boomer Axe is not in the hand: gear changes wait for its catch, as for a swing.
+    if (p.swing || this.boomer.flying(p)) {
       p.pendingEquip = { slot, equip, ...(itemId !== undefined ? { itemId } : {}), ...(to ? { to } : {}) };
       return;
     }
@@ -1873,7 +1891,8 @@ export class WorldZone {
 
   private applyEquipment(p: Player): void {
     const eq = equipmentOf(p.inventory, this.items);
-    p.weapon = eq.weapon;
+    // While a Boomer Axe flies the hand is empty.
+    p.weapon = this.boomer.flying(p) ? UNARMED : eq.weapon;
     p.shield = eq.shield;
     p.armor = eq.armor;
     p.gearProtection = eq.protection;
@@ -2508,6 +2527,7 @@ export class WorldZone {
 
     // 3b. Spell objects (projectiles, explosions, storms, lightning, drains) and timed effects.
     this.magic.step();
+    this.boomer.step();
 
     // 4. Deaths and respawns (actors and world objects).
     if (this.objects.size && tick % 20 === 0) {
@@ -3511,8 +3531,10 @@ export class WorldZone {
           continue;
         }
         this.applyDamage(a, target, this.rollDamage(a, s.combo), a.kind === 'mob' && a.archetype.knocksDown === true);
-        // The weapon's use runs on every landed blow (0x0044D59A): Blade of Hunger, Rod of Necros.
+        // The weapon's use runs on every landed blow (0x0044D59A): Blade of Hunger, Rod of Necros;
+        // the Boomer Axe leaves the hand as its magic axe.
         this.soulDrink(a, target, a.weapon.soulDrink);
+        if (a.weapon.boomer) this.throwBoomer(a);
         if (alive(target)) this.shove(a, target, s, false);
         if (!alive(a)) return;
       }
@@ -3521,7 +3543,7 @@ export class WorldZone {
     if (elapsed >= t.startup + t.active + t.recovery) {
       a.swing = null;
       if (a.kind === 'player') {
-        if (a.pendingEquip) {
+        if (a.pendingEquip && !this.boomer.flying(a)) {
           const { slot, equip, itemId, to } = a.pendingEquip;
           a.pendingEquip = null;
           this.applyEquipRequest(a, slot, equip, itemId, to);
@@ -3571,6 +3593,36 @@ export class WorldZone {
   private shieldStops(p: Actor, attacker: Actor): boolean {
     const mask = p.shield?.blocks ?? (USE_MASK.MELEE | USE_MASK.PROJECTILE);
     return (mask & (this.giant(attacker) ? USE_MASK.GIANTS : USE_MASK.MELEE)) !== 0;
+  }
+
+  /**
+   * BOOMER (0x00401000 → 0x0043EAE0): the weapon leaves the hand (0x0046B150) as a pooled magic
+   * axe thrown from the hand node along the facing (the player: his view, pitch included); with
+   * all eight in flight it stays in the hand. The wielder fights unarmed until it is caught.
+   */
+  private throwBoomer(a: Actor): void {
+    const yaw = dequantizeAngle(a.yaw);
+    const dir = a.kind === 'player' ? this.aimOf(a) : { x: -Math.sin(yaw), y: 0, z: -Math.cos(yaw) };
+    if (!this.boomer.throw(a, this.magic.hand(a), dir)) return;
+    if (a.kind === 'mob') this.thrownWeapons.set(a.entityId, a.weapon);
+    a.weapon = UNARMED;
+    if (a.kind === 'player') this.sendInventory(a);
+  }
+
+  /** The axe is back in the hand (0x0046B000): wielded again; a gear change asked for meanwhile follows. */
+  private boomerCaught(a: Actor): void {
+    if (a.kind === 'mob') {
+      a.weapon = this.thrownWeapons.get(a.entityId) ?? a.weapon;
+      this.thrownWeapons.delete(a.entityId);
+      return;
+    }
+    this.applyEquipment(a);
+    this.sendInventory(a);
+    if (a.pendingEquip && !a.swing && alive(a)) {
+      const { slot, equip, itemId, to } = a.pendingEquip;
+      a.pendingEquip = null;
+      this.applyEquipRequest(a, slot, equip, itemId, to);
+    }
   }
 
   /**

@@ -82,6 +82,11 @@ export interface ItemDef {
    * the GIANTS bit (Blade of Hunger 1 + GIANTS, Rod of Necros 5, Vampiric Shield 3).
    */
   soulDrink?: { amount: number; giants: boolean };
+  /**
+   * `Use BOOMER` (Boomer Axe, 0x00401000): each landed blow throws the weapon itself as a magic
+   * axe (0x0043EAE0) that flies back to the wielder's hand (executable-analysis §23).
+   */
+  boomer?: boolean;
   /** Armour: Drake's body while worn (items.ctx `SetArmorSkin(model, texture)`, models.ctx 121 / 124). */
   armorSkin?: { model: number; texture: number };
   price: number;
@@ -272,6 +277,7 @@ export function catalogFromItemRules(rules: { items: readonly ItemRule[] }): Ite
         const { mask, amount } = useMask(useParams);
         def = { ...def, soulDrink: { amount: amount ?? DEFAULT_SOUL_DRINK, giants: (mask & USE_MASK.GIANTS) !== 0 } };
       }
+      if (use === 'BOOMER') def = { ...def, boomer: true };
       def = withEquipBoost(def, r.fields['Equip'], calls);
     } else if (type === 'SHIELD') {
       def = shield(r.name, price);

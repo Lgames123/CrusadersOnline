@@ -87,8 +87,8 @@ export interface SpellHost {
   /** Soul drinker: HP drawn out (no flinch); returns what was taken. */
   drain(attacker: SpellTarget, victim: SpellTarget, amount: number): number;
   heal(a: SpellTarget, amount: number): void;
-  /** A raised shield facing `from` whose use mask takes this kind (FIREBALL: explosions, LIGHTNING: bolts). */
-  shieldStops(a: SpellTarget, from: V3, kind: 'FIREBALL' | 'LIGHTNING'): boolean;
+  /** A raised shield facing `from` whose use mask takes this kind (FIREBALL: explosions, LIGHTNING: bolts, MELEE: the Boomer Axe's axe). */
+  shieldStops(a: SpellTarget, from: V3, kind: 'FIREBALL' | 'LIGHTNING' | 'MELEE'): boolean;
   /** Its shield's use is REFLECT (Reflective Shield). */
   reflects(a: SpellTarget): boolean;
   /** Sends to every player near `at`. */
