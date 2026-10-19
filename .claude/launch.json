@@ -234,6 +234,40 @@
         "GAME_SERVER_URL": "http://127.0.0.1:8193"
       },
       "port": 3103
+    },
+    {
+      "name": "boomer-server",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/server",
+        "start"
+      ],
+      "env": {
+        "SERVER_PORT": "8194",
+        "ARENA": "synthetic-arena",
+        "DATABASE_URL": "pglite:local/pgdata-boomer",
+        "DEV_GUEST_ITEMS": "boomer_axe:1",
+        "DEV_GUEST_XP": "8000"
+      },
+      "port": 8194
+    },
+    {
+      "name": "boomer-client",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/client",
+        "exec",
+        "vite",
+        "--port",
+        "3104",
+        "--strictPort"
+      ],
+      "env": {
+        "GAME_SERVER_URL": "http://127.0.0.1:8194"
+      },
+      "port": 3104
     }
   ]
 }

@@ -48,6 +48,8 @@ export class BoomerVisuals {
   constructor(scene: THREE.Scene, host: BoomerVisualHost) {
     this.scene = scene;
     this.host = host;
+    // Loaded ahead: a throw lasts a second or two, the model must not arrive after it.
+    void ItemThumbnails.get().loadModel(AXE_MODEL, AXE_TEXTURE);
   }
 
   handle(a: NonNullable<SpellEventMsg['d']['axe']>): void {

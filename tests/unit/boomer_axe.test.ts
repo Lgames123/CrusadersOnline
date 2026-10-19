@@ -121,6 +121,17 @@ describe('the Boomer Axe in flight (0x004C06B0)', () => {
     expect(r2.caught()).toBe(1);
   });
 
+  it('passes the creature it is thrown from inside of (the blow victim) and meets it on the way back', () => {
+    const v = rig().target(2, 0, -2.5 * FT);
+    const r = rig([v]);
+    r.axes.throw(r.owner, { x: 0, y: 1.3, z: -0.45 }, { x: 0, y: 0, z: -1 });
+    for (let i = 0; i < 400 && r.caught() === 0; i++) r.axes.step();
+    const farthest = Math.max(...r.axeMsgs().map((m) => -m.pos[2]));
+    expect(farthest / FT).toBeGreaterThan(55);
+    expect(r.damage.map((d) => d.target)).toEqual([2]);
+    expect(r.caught()).toBe(1);
+  });
+
   it('a wall turns it back with sparks, a scorch and sound 328 / 206', () => {
     const r = rig([], () => 0);
     // The synthetic arena's wall is 20 m away along -z: aim at the pillar at (-8, -8) instead, 8.5 m off.

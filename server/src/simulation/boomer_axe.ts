@@ -110,6 +110,11 @@ interface Axe {
   keys: V3[];
   /** Characters met (each once a throw: turned back at one, it would meet it again at once). */
   hit: Set<number>;
+  /**
+   * Characters it was launched inside of (the blow's own victim, a step in front): a swept body
+   * meets what it moves into, not what it starts in, so these are passed until it is clear of them.
+   */
+  inside: Set<SpellTarget>;
   sendIn: number;
 }
 
@@ -152,7 +157,8 @@ export class BoomerAxes {
   throw(owner: SpellTarget, hand: V3, dir: V3): boolean {
     if (this.axes.length >= BOOMER_RULES.pool || this.flying(owner)) return false;
     const s = BOOMER_RULES.speed;
-    const axe: Axe = { id: this.nextId++, owner, pos: { ...hand }, vel: { x: dir.x * s, y: dir.y * s, z: dir.z * s }, out: BOOMER_RULES.outSeconds, t: 0, pace: 0, keys: [], hit: new Set(), sendIn: BOOMER_RULES.sendEvery };
+    const axe: Axe = { id: this.nextId++, owner, pos: { ...hand }, vel: { x: dir.x * s, y: dir.y * s, z: dir.z * s }, out: BOOMER_RULES.outSeconds, t: 0, pace: 0, keys: [], hit: new Set(), inside: new Set(), sendIn: BOOMER_RULES.sendEvery };
+    for (const c of this.host.characters()) if (c !== owner && this.touches(c, axe.pos)) axe.inside.add(c);
     this.axes.push(axe);
     this.send(axe);
     return true;
@@ -186,6 +192,7 @@ export class BoomerAxes {
 
   /** Out (0x004C06B0 with +0x3C clear): straight on until something stops it or its time runs out. */
   private stepOut(axe: Axe): void {
+    for (const c of axe.inside) if (!this.touches(c, axe.pos)) axe.inside.delete(c);
     const travel = len(axe.vel) * TICK_DT;
     const dir = norm(axe.vel);
     const wall = rayDistance(this.host.mw, axe.pos, dir, travel);
@@ -275,7 +282,7 @@ export class BoomerAxes {
     let best: { c: SpellTarget; at: V3 } | null = null;
     let bestAlong = Infinity;
     for (const c of this.host.characters()) {
-      if (c === axe.owner || axe.hit.has(c.entityId) || !this.host.alive(c) || !this.host.hostile(axe.owner, c)) continue;
+      if (c === axe.owner || axe.hit.has(c.entityId) || axe.inside.has(c) || !this.host.alive(c) || !this.host.hostile(axe.owner, c)) continue;
       const cp = c.character.position;
       const feet = { x: cp.x, y: cp.y + reach, z: cp.z };
       const head = { x: cp.x, y: cp.y + PLAYER_HEIGHT - reach, z: cp.z };
@@ -290,6 +297,13 @@ export class BoomerAxes {
       }
     }
     return best;
+  }
+
+  /** Whether the axe at `p` overlaps a character's body (axis from the feet to the head). */
+  private touches(c: SpellTarget, p: V3): boolean {
+    const cp = c.character.position;
+    const y = Math.max(cp.y, Math.min(cp.y + PLAYER_HEIGHT, p.y));
+    return Math.hypot(p.x - cp.x, p.y - y, p.z - cp.z) <= PLAYER_RADIUS + BOOMER_RULES.radius;
   }
 
   /**
