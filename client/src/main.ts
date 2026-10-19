@@ -847,7 +847,6 @@ async function main(): Promise<void> {
     chat.visible = false;
     cutsceneUi.hidden = false;
     prompt.hidden = true;
-    clickHint.hidden = true;
     cutscene = new Cutscene({
       story: levelView.arena.story,
       sequence,
@@ -897,7 +896,6 @@ async function main(): Promise<void> {
       chase.snap();
       outro = { camera: c.camera, from: c.camera.position.clone(), fromQ: c.camera.quaternion.clone(), fromFov: c.camera.fov, t: 0 };
     }
-    updateHint();
     // A sequence that faded out comes back once the next act (or the same place) is shown.
     window.setTimeout(() => fade(false, 800), 600);
     if (pendingOutfitItems) {
@@ -983,17 +981,15 @@ async function main(): Promise<void> {
     }
   };
 
-  // Options menu (Esc): settings, controls, re-import, log out. Playing needs pointer lock: a
-  // click on the world takes it; leaving it (Esc) opens the menu, except when the inventory or
-  // the quest book released it.
-  const clickHint = document.getElementById('click-hint')!;
+  // Options menu (Esc): settings, controls, re-import, log out. Playing needs pointer lock:
+  // the game takes it back by itself whenever nothing needs the cursor (no "click to play"), or
+  // on a key or click if the browser refused; leaving it (Esc) opens the menu, except when the
+  // inventory or the quest book released it.
   let releasing = false;
   /** Alt held: the cursor is out for the UI; letting go takes the camera back. */
   let altFree = false;
   let optionsAt = 0;
-  const updateHint = () => {
-    clickHint.hidden = input.locked || altFree || chat.typing || optionsOpen || inventoryPanel.open || questBook.open || charSheet.open || !!cutscene;
-  };
+  input.wantsLock = () => !(altFree || chat.typing || optionsOpen || inventoryPanel.open || questBook.open || charSheet.open || cutscene);
   const play = () => {
     sounds?.unlock();
     music.unlock();
@@ -1016,7 +1012,6 @@ async function main(): Promise<void> {
         document.exitPointerLock();
       }
     } else play();
-    updateHint();
   };
   renderer.domElement.addEventListener('click', () => {
     if (!input.locked && !optionsOpen && !cutscene) play();
@@ -1034,7 +1029,6 @@ async function main(): Promise<void> {
     altFree = false;
     // A page that let go of the lock itself may take it back without a click (Pointer Lock 2.0).
     if (!optionsOpen && !chat.typing && !inventoryPanel.open && !questBook.open && !charSheet.open && !cutscene) input.requestLock();
-    updateHint();
   });
   // The chat line takes the keyboard (Enter): the camera lets go of the pointer, and takes it
   // back without a click when the line closes, unless a window was open before.
@@ -1049,11 +1043,9 @@ async function main(): Promise<void> {
       chatTookLock = false;
       if (!optionsOpen && !inventoryPanel.open && !questBook.open && !charSheet.open && !cutscene) input.requestLock();
     }
-    updateHint();
   };
   window.addEventListener('blur', () => {
     altFree = false;
-    updateHint();
   });
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) setOptionsOpen(false);
@@ -1308,7 +1300,6 @@ async function main(): Promise<void> {
   hotbar.visible = !!session;
   chat.visible = !!session;
   gameFiles.visible = false;
-  updateHint();
   play();
   // Back to the character screen: the account session stays, the world is left.
   const navButtonsRow = document.getElementById('nav-buttons-row')!;
@@ -1396,7 +1387,6 @@ async function main(): Promise<void> {
     }
     // Esc released the pointer: the options (sequences play to their end, as in the original).
     if (!locked && !ours && !inventoryPanel.open && !questBook.open && !charSheet.open && !cutscene) setOptionsOpen(true);
-    updateHint();
   };
 
   // Inventory window (online only); the ground window opens beside it (and opens it).
@@ -1408,7 +1398,6 @@ async function main(): Promise<void> {
       releasing = true;
       document.exitPointerLock();
     } else if (!open && !inventoryPanel.open && !optionsOpen) input.requestLock();
-    updateHint();
   }
   function setInventoryOpen(open: boolean): void {
     setInventoryPanelOpen('inventory', open);
@@ -1417,7 +1406,6 @@ async function main(): Promise<void> {
     if (!inventoryPanel.open) return;
     inventoryPanel.closeAll();
     if (!optionsOpen) input.requestLock();
-    updateHint();
   }
   inventoryPanel.onEquip = (slot, itemId, wear, to) => {
     const item = session?.inventory?.items.find((i) => i.slot === slot && i.itemId === itemId);
@@ -1455,7 +1443,6 @@ async function main(): Promise<void> {
       }
       sounds?.play(SFX.turnPage);
     } else if (!swapping && !optionsOpen) input.requestLock();
-    updateHint();
   }
   questBook.onClose = () => setQuestBookOpen(false);
   // Character statistics (F1, the original's key), online only; F1 and F2 take each other's place.
@@ -1469,7 +1456,6 @@ async function main(): Promise<void> {
         document.exitPointerLock();
       }
     } else if (!swapping && !optionsOpen) input.requestLock();
-    updateHint();
   }
   charSheet.onClose = () => setCharSheetOpen(false);
   questBook.onTurn = () => sounds?.play(SFX.turnPage);

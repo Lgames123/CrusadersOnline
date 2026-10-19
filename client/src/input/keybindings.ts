@@ -227,7 +227,7 @@ export function actionFor(code: string): Action | null {
   return null;
 }
 
-/** Help line shown on the "click to play" screen. */
+/** Help line shown in the options menu. */
 export const CONTROLS_HELP =
   'WASD move · Mouse look · Wheel camera distance · Space jump · Click attack · Right click block · ' +
   'R cast spell · T next spell · Tab interact / open · Z use item · H potion · I inventory · 1-9 / Shift+1-9 hotbar · F1 statistics · F2 quest log · Esc options';

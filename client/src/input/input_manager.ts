@@ -37,6 +37,9 @@ export class InputManager {
   attackHeld = false;
   /** One-shot action keys (interact, potion...) while the pointer is locked. */
   onAction: (action: Action) => void = () => {};
+  /** The game is in play (no menu, window, chat line or sequence): the pointer should be locked. */
+  wantsLock: () => boolean = () => false;
+  private retryTimer = 0;
   /** A hotbar key (also with the cursor free, outside text fields); the slot index. */
   onHotbar: (slot: number) => void = () => {};
   private readonly view = new Set<string>();
@@ -57,7 +60,13 @@ export class InputManager {
           if (!e.repeat) this.onHotbar(slot);
         }
       }
-      if (!this.locked) return;
+      if (!this.locked) {
+        // In play without the pointer (the browser refused it): any key is the gesture that takes it.
+        const t = e.target as HTMLElement | null;
+        const typing = t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || !!t?.isContentEditable;
+        if (!typing && e.code !== 'Escape' && this.wantsLock()) this.requestLock();
+        return;
+      }
       const flag = this.compiled.bindings[e.code];
       if (flag !== undefined) {
         e.preventDefault();
@@ -172,12 +181,23 @@ export class InputManager {
     if (this.isMoveKey(code)) this.held |= this.compiled.bindings[code]!;
   }
 
-  /** Asks for pointer lock; the browser may refuse (no user gesture, just left with Esc): a click retries. */
-  requestLock(): void {
+  /**
+   * Asks for pointer lock. The browser refuses it for about a second after the player left it
+   * with Esc (Chrome): it is asked again while the game still wants it, inside the gesture's
+   * activation window; past that, any key or click takes it.
+   */
+  requestLock(tries = 8): void {
+    window.clearTimeout(this.retryTimer);
+    const retry = () => {
+      if (tries > 1 && !this.locked) this.retryTimer = window.setTimeout(() => {
+        if (!this.locked && this.wantsLock()) this.requestLock(tries - 1);
+      }, 300);
+    };
     try {
-      Promise.resolve(this.element.requestPointerLock()).catch(() => {});
+      Promise.resolve(this.element.requestPointerLock()).catch(retry);
     } catch {
       // Older engines throw instead of rejecting.
+      retry();
     }
   }
 
