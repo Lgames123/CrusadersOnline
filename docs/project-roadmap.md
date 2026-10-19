@@ -35,6 +35,18 @@ The CrusadersOnline roadmap is organized into dependency-ordered phases. Work st
 [ Phase 10: Production Deployment & Hardened Ops ]
 ```
 
+### Current position (2026-10-19)
+
+| Phase | State |
+|---|---|
+| 1–7 (M00–M08) | Done. The vertical slice runs on the original levels. |
+| 8 (M09) | Far along: movement, combat, spells, creatures, items and the main story are in. See `PROJECT_STATUS.md` §2.1 for what is left. |
+| 9 (M10) | Tests and a 100-bot run are in place; the tick p99 and bandwidth targets are not met yet. |
+| 10 (M11) | Runs locally in Docker; no real domain or TLS yet. |
+| 11, campaign completion (new) | Ending after Necros with a post-game state (all story areas open, completion reward), intro movie option at character creation, waypoints later. |
+| 12, MMO systems (new) | Staged plan in `game-design/mmo/11-implementation-roadmap.md`. Stage 1 is mostly in place; Stage 2 needs a party system. |
+| Side quests (feature) | Cut from the original. Inventory in `game-design/side-quests.md`; to be implemented later behind `sideQuests`. |
+
 ---
 
 ## 2. Phase-by-Phase Timeline & Deliverables

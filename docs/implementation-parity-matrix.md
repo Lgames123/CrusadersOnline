@@ -16,21 +16,29 @@ Every mechanic from the original 1999 game is tracked against our clean-room imp
 
 ## 2. Parity Tracking Table
 
+Updated 2026-10-19. The system-by-system evidence is in `reverse-engineering/parity-audit.md`; this
+table only gives the state.
+
 | Subsystem | Mechanic | Original 1999 Behavior | MMORPG Reconstruction | Status | Notes |
 |---|---|---|---|---|---|
-| **Movement** | ESDF (moved to WASD) / Strafe | Root-motion driven: run 15.6 ft/s, retreat 3.9, sidestep 10.3, careful walk 5.2 / 3.8 (executable-analysis.md §11) | Shared Rapier controller with the per-direction original speeds (averaged per loop) | `IMPLEMENTED` | Jump impulse and speed multiplier pending (UNK-012) |
-| **Movement** | Jump Impulse | Upward arc with gravity | Fixed $+6.5 \text{ m/s}$ impulse at 20Hz | `SPECIFIED` | Parity with Drake height |
-| **Movement** | Ledge Clamber | Drake pulls up on ledges | Deferred to Phase 8 | `SPECIFIED` | Complex animation blend |
-| **Camera** | 3rd-Person Chase | Rig 4 ft + 2.2 ft up, 7 ft back, aim 8 ft ahead, distance-proportional smoothing, 79.6° horizontal FOV (executable-analysis.md §10) | `ClassicCamera` (default) + optional `ChaseCamera` "Modern" (player setting) | `IMPLEMENTED` | Turn/look rates provisional (UNK-011) |
-| **Combat** | Sword Slash 1 | Right-to-left sweep (150ms active) | Server-authoritative capsule sweep | `SPECIFIED` | Standardized hitboxes |
-| **Combat** | 3-Hit Combo | Timing window chains 3 attacks | Server buffers attack sequence index | `SPECIFIED` | Multipliers 1.0, 1.25, 1.6 |
-| **Combat** | Shield Block | Blocks forward arc, drains stamina | Reduces incoming damage by 70% | `SPECIFIED` | Shield durability added |
-| **Magic** | Fireball Spell | Straight projectile with explosion | Server projectile with spatial AoE | `SPECIFIED` | Mana cost enforced |
-| **Magic** | Lesser Heal | Restores health over cast time | Cast bar + server heal packet | `SPECIFIED` | Interruptible on hit |
-| **AI** | Skeleton Patrol | Waypoint walk within home anchor | Server spatial hash patrol routine | `SPECIFIED` | Leash distance 25m |
-| **AI** | Enemy Aggro | Line-of-sight visual detection | 12m detection radius + threat table | `CHANGED_FOR_MULTIPLAYER` | Threat divided by party |
-| **Inventory** | Item Slots | Grid bag with equipped paperdoll | PostgreSQL transactional inventory | `CHANGED_FOR_MULTIPLAYER` | Anti-duplication locks |
-| **Progression** | Leveling & XP | Kill XP advances Drake stats | Server XP curve advances character | `CHANGED_FOR_MULTIPLAYER` | Synced to database |
-| **World** | Checkpoint Save | Shrines save local file to disk | Real-time PostgreSQL WAL persistence | `CHANGED_FOR_MULTIPLAYER` | No offline save files |
-| **Graphics** | Direct3D 7 | 640x480 / 800x600 Direct3D HAL | WebGL2 / Three.js 1080p+ 60FPS | `CHANGED_FOR_MULTIPLAYER` | Modern browser canvas |
-| **Audio** | Miles Sound System | 2D/3D wav effects + mp3 music | Web Audio API + Howler spatial cues | `CHANGED_FOR_MULTIPLAYER` | Pure web standards |
+| **Movement** | Run / retreat / sidestep / diagonals | Root-motion speeds, sideways key picks the state (executable-analysis §11) | Shared Rapier controller at the original speeds | `VERIFIED` | WASD instead of ESDF; turned-body diagonals = feature `diagonalMoves` |
+| **Movement** | Jump, gravity, air control | 78.4 ft/s², 50.45 ft/s, hold-lift, drag (§13) | Same in the shared step | `IMPLEMENTED` | Air velocity in world axes (original: body frame) |
+| **Movement** | Rolls | C + direction | Same, back to back | `IMPLEMENTED` | |
+| **Movement** | Ledge grab | ASM_LOW_MOUNT onto a ledge (0x004916A0) | Same | `IMPLEMENTED` | Climbing / hanging not done |
+| **Camera** | 3rd-person | Classic rig (§10) | `ClassicCamera` default, "Modern" option | `VERIFIED` | |
+| **Combat** | Melee combo | Five steps (0x0042CA20), side and air swings, wall jab | Same, clip-event timing | `VERIFIED` | |
+| **Combat** | Shield | ±81° cone stops the whole hit; rush; use masks | Same | `VERIFIED` | No stamina in the original |
+| **Combat** | Damage / resists / hit reactions | 11-type vector, armour, HP-loss rule (§8, §15) | Same | `VERIFIED` | |
+| **Magic** | Spells | 11 spells (Torch Light … Holy Wrath) | All 11, server-authoritative | `IMPLEMENTED` | Some status looks are stand-ins |
+| **AI** | Skeleton | Distance bands, stance, chains (Frida) | Same | `VERIFIED` | |
+| **AI** | Other creatures | Per-type brains | The skeleton's, plus casters' spell choice | `IMPLEMENTED` | Unverified: no captures; aggro radius is a stand-in |
+| **AI** | Creature vs creature | Guards fight hostiles; Ws5a fight | Not done | `SPECIFIED` | |
+| **Inventory** | Bag, paper doll, rings | Grid bag, worn slots | MU-style window, authoritative server | `CHANGED_FOR_MULTIPLAYER` | |
+| **Items** | Ground items and chests | Once per game | Once per character | `CHANGED_FOR_MULTIPLAYER` | |
+| **Story** | Main quests and cutscenes | 29 sequences, 10 main quests | Same, per character | `IMPLEMENTED` | Ending after Necros not wired |
+| **Story** | Side quests | 26 records, never offered (cut) | Not done; planned as feature `sideQuests` | `SPECIFIED` | Records decoded: `game-design/side-quests.md` |
+| **World** | Doors, levers, movers | Mover triggers, relays | Doors, levers, Catacombs floor and bridges | `IMPLEMENTED` | Wheels, crushers, chandeliers, gears at rest |
+| **World** | Save | Save files | Continuous PostgreSQL persistence | `CHANGED_FOR_MULTIPLAYER` | |
+| **Graphics** | Direct3D 7 | 640×480 HAL | WebGL2 / Three.js | `CHANGED_FOR_MULTIPLAYER` | Grass, object shadows, dynamic lights optional |
+| **Audio** | Miles | wav + mp3 | Web Audio | `CHANGED_FOR_MULTIPLAYER` | |
+| **Video** | Intro movies | Two .bik movies | Not done; to be offered at character creation | `SPECIFIED` | |

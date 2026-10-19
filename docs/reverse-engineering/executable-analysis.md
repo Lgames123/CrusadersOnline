@@ -634,7 +634,7 @@ A `.cap` creature record is the creature as the level editor left it, so its sta
 
 **Sound triggers walked into** (type 0x0B, activation bit 0, a volume; 0x200 once): the sound plays at its points (0x461490). Fourteen carry dialogue: Ci1b's guard line CG2_03_01 "Celestia is expecting you." by the throne-room doors, Drake's remarks (Ci4a, Gl2a) and train's prisoners. CG1_03_01 "Ursan sent word of your arrival" is referenced by nothing.
 
-**Side quests.** The quest manager's 26 side quests (§17.2: offer, reminder and completion lines, items) are never offered: no shipped placement has a talk trigger, no quest trigger names a side quest, and the givers (Nai, Sir Marik, Raven, …) are not placed in any act. Shops are not NPCs but level triggers (§19).
+**Side quests.** The quest manager's 26 side quests (§17.2: offer, reminder and completion lines, items) are never offered: no shipped placement has a talk trigger, no quest trigger names a side quest, and the givers (Nai, Sir Marik, Raven, …) are not placed in any act. Record layout, talk / item-check handlers (0x497170 / 0x4974A0) and the full list: `docs/game-design/side-quests.md`. Shops are not NPCs but level triggers (§19).
 
 ## 19. Shops (decompiled, 2026-10-16)
 

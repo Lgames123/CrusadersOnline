@@ -67,5 +67,4 @@ the original's skeletons followed past 75 m), zone workers.
 | NPC lines | each NPC cycles its voice role's lines | the acts' sequence scripts (HermitLadySeq13 ...) |
 | Citizens' strolls | 4 m around their place, pauses 4-12 s | wander capture covered only a few citizens |
 | How long frightened citizens stay wary | 60 s | capture ended first |
-| Spells other than Torch Light | not implemented | captures per spell |
 | Script interpreter argument evaluator (0x415300) | not decompiled | local/PASSADA_REA_GAPS.md §7 |

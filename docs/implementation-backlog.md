@@ -34,7 +34,7 @@ Status values:
 | **ARC-002** | Execute inventory scan against `Crusaders of Might and Magic` local installation | P0 | ARC-001 | Low | **VERIFIED** | [file-inventory.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/reverse-engineering/file-inventory.md) | `local/inventory.json` |
 | **ARC-003** | Dissect `crusaders.exe` headers, DLL imports, DirectX 7 subsystem, and string tables | P1 | ARC-002 | Medium | **IN PROGRESS** | [executable-analysis.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/reverse-engineering/executable-analysis.md) | `tools/analyze_pe.py` |
 | **ARC-004** | Dissect `.mdl` 3D model format header, vertex layout, and bone tables | P1 | ARC-002 | High | **VERIFIED** (265/267 files; spec in asset-format-discovery.md §3) | [asset-format-discovery.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/reverse-engineering/asset-format-discovery.md) | `tools/` probes → `converter/src/formats/mdl.ts` |
-| **ARC-005** | Dissect `.ctx` texture container format and compression headers | P1 | ARC-002 | Medium | **NEEDS INVESTIGATION** | [asset-format-discovery.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/reverse-engineering/asset-format-discovery.md) | `tools/` probes → `converter/src/formats/ctx.ts` |
+| **ARC-005** | Dissect `.ctx` texture container format and compression headers | P1 | ARC-002 | Medium | **VERIFIED** (textures, models.ctx, items.ctx, Sound.ctx, messages.ctx read by the converter) | [asset-format-discovery.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/reverse-engineering/asset-format-discovery.md) | `tools/` probes → `converter/src/formats/ctx.ts` |
 
 ---
 
@@ -42,14 +42,14 @@ Status values:
 | Task ID | Description | Priority | Dependencies | Complexity | Status | Doc Link | Source Files |
 |---|---|---|---|---|---|---|---|
 | **AST-001** | Build synthetic procedural assets and arena collider export (`pnpm gen:synthetic`) | P0 | ENV-003 | Low | **IN PROGRESS** (runtime factory done; collider export pending) | [asset-pipeline.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/asset-pipeline.md) | `client/src/assets/synthetic_factory.ts`, `shared/src/arena/synthetic.ts` |
-| **AST-002** | Converter package skeleton + TGA→WebP + `.ctx`→rules.json, with Node CLI host | P2 | ARC-005 | Medium | **IMPLEMENTED** (default.ctx only; items/models.ctx pending) | [asset-pipeline.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/asset-pipeline.md) | `converter/src/formats/`, `converter/src/hosts/node.ts` |
+| **AST-002** | Converter package skeleton + TGA→WebP + `.ctx`→rules.json, with Node CLI host | P2 | ARC-005 | Medium | **VERIFIED** (default/items/models/Sound/messages .ctx, exe string table) | [asset-pipeline.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/asset-pipeline.md) | `converter/src/formats/`, `converter/src/hosts/node.ts` |
 | **AST-003** | `.mdl` + `.ani` → skinned/animated glTF via `@gltf-transform/core` | P2 | ARC-004 | High | **IN PROGRESS** (247 models → skinned GLB in bind pose with textures, collision spheres and weapon lines; 1,501 animation clips with root motion and events) — **VERIFIED** in the dev viewer |
 | **ARC-006** | Decode `.ani` animation tracks (UNK-005) | P1 | ARC-004 | High | **VERIFIED** (1,499/1,501 pairs; engine evaluator in Ghidra) |
 | **ARC-008** | World unit + movement/physics constants from the executable (UNK-007) | P1 | ARC-006 | Medium | **IN PROGRESS** (locomotion/jump model and derived-stat formulas recovered) |
 | **ARC-009** | Damage application, resists, armour (UNK-008) | P1 | ARC-008 | High | **IMPLEMENTED** (formulas + items.json; wiring into server combat pending) |
 | **CMB-001** | Switch server combat to the original formulas (attributes, items.json weapons/armour, resists, flinch, block) | P1 | ARC-009 | Medium | **IMPLEMENTED** (attributes, HP, weapon hit, attack modes, resists, flinch, shield block, inventory-driven equipment, creature loadouts, XP curve) |
-| **ARC-007** | Decode `.msh` level geometry and `.cap` collision | P1 | ARC-002 | High | **NOT STARTED** | [asset-formats.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/asset-formats.md) | `converter/src/formats/mdl.ts`, `converter/src/emit/gltf.ts` |
-| **AST-004** | Browser Web Worker host for the converter (OPFS output) | P2 | AST-002 | Medium | **NOT STARTED** | [asset-pipeline.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/asset-pipeline.md) | `converter/src/hosts/worker.ts` |
+| **ARC-007** | Decode `.msh` level geometry and `.cap` collision | P1 | ARC-002 | High | **VERIFIED** (superseded by ARC-011) | [asset-formats.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/asset-formats.md) | `converter/src/formats/mdl.ts`, `converter/src/emit/gltf.ts` |
+| **AST-004** | Browser Web Worker host for the converter (OPFS output) | P2 | AST-002 | Medium | **VERIFIED** (Web Worker + Cache Storage + service worker; import panel) | [asset-pipeline.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/asset-pipeline.md) | `converter/src/hosts/worker.ts` |
 
 ---
 
@@ -79,7 +79,7 @@ Status values:
 | **SRV-001** | Build WebSocket server gateway with connection tracking and heartbeats | P0 | ENG-002 | Medium | **VERIFIED** | [mmorpg-architecture.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/mmorpg-architecture.md) | `server/src/network/gateway.ts` |
 | **SRV-002** | Zone worker (`worker_thread`) with monotonic fixed-step 20Hz clock | P0 | ENG-001 | Low | **VERIFIED** | [engine-design.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/engine-design.md) | `server/src/zone/`, `server/src/simulation/clock.ts` |
 | **SRV-003** | Input-only movement: input queue (1 per tick), shared controller, `lastProcessedInput` in snapshots | P0 | SRV-002, ENG-004 | Medium | **VERIFIED** | [security.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/security.md) | `server/src/simulation/movement.ts` |
-| **SRV-004** | Kysely + `pg` pool, plain-SQL migrations (accounts, sessions, characters, inventory) | P1 | SRV-001 | Medium | **VERIFIED** (PGlite in dev/tests; real PostgreSQL pending) | [database-schema.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/database-schema.md) | `server/src/persistence/` |
+| **SRV-004** | Kysely + `pg` pool, plain-SQL migrations (accounts, sessions, characters, inventory) | P1 | SRV-001 | Medium | **VERIFIED** (PGlite in dev/tests; PostgreSQL 18 in CI and Docker) | [database-schema.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/database-schema.md) | `server/src/persistence/` |
 
 ---
 
@@ -98,7 +98,7 @@ Status values:
 ### Phase 8+: Expanded Systems & Testing
 | Task ID | Description | Priority | Dependencies | Complexity | Status | Doc Link | Source Files |
 |---|---|---|---|---|---|---|---|
-| **TST-001** | Implement Vitest suite for math, packet parsing, and movement validation | P1 | ENG-001 | Low | **IN PROGRESS** (40 tests incl. 10 integration tests) | [testing-strategy.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/testing-strategy.md) | `tests/unit/` |
+| **TST-001** | Implement Vitest suite for math, packet parsing, and movement validation | P1 | ENG-001 | Low | **VERIFIED** (unit + integration suites, run in CI) | [testing-strategy.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/testing-strategy.md) | `tests/unit/` |
 | **TST-002** | Playwright multi-client end-to-end synchronization tests | P1 | VRT-001 | Medium | **VERIFIED** (move, combat number, despawn across two tabs; runs in CI) |
 | **ARC-010** | `.cap`/`.msh` DCL compression and `.cap` creature records (UNK-009) | P1 | ARC-009 | High | **VERIFIED** (`tools/re/pkware_dcl.py`, `tools/re/cap_creatures.py`) |
 | **ARC-011** | `.msh` level geometry, textures, lightmaps → GLB + collision; `.cap` placements | P0 | ARC-010 | High | **VERIFIED** (24/25 levels; client renders, server and client collide; skeletons at original placements) |
@@ -106,3 +106,26 @@ Status values:
 | **OPS-002** | Scheduled database backups and restore procedure | P1 | SRV-004 | Low | **VERIFIED** (local restore drill) |
 | **OPS-003** | TLS on a real domain with HSTS | P1 | DEP-001 | Low | **READY** (config in place; needs a domain) | [testing-strategy.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/testing-strategy.md) | `tests/e2e/` |
 | **OPS-001** | Dockerize server, client, and PostgreSQL with single-command compose | P1 | VRT-005 | Low | **VERIFIED** (local Docker Desktop; TLS/backups pending) | [deployment.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/deployment.md) | `deployment/` |
+
+---
+
+### Phase 9+: Campaign Completion, Features and MMO Systems (added 2026-10-19)
+Current priorities and the user's decisions are in `PROJECT_STATUS.md` §2–3.
+
+| Task ID | Description | Priority | Dependencies | Complexity | Status | Notes |
+|---|---|---|---|---|---|---|
+| **CMP-001** | Ending after Necros's death: send Drake to the start of the game, open every story-gated area for him (post-game state), completion reward (title / cape, TBD) | P0 | Necros fight | Medium | **NOT STARTED** | Not original; bs1a has no death trigger |
+| **CMP-002** | Waypoints: teleport to areas and maps the character has unlocked | P2 | CMP-001 | Medium | **NOT STARTED** | Not original |
+| **CMP-003** | Intro movies (.bik): option at character creation to watch the introduction | P1 | Bink conversion in the importer | Medium | **NOT STARTED** | |
+| **CMP-004** | Walk-in movers: wheels, Gl\*b crushers (with damage), chandeliers, Bs1a gears | P1 | — | Medium | **NOT STARTED** | |
+| **CMP-005** | Creature against creature (guards vs hostiles, Ws5a fight) | P1 | — | High | **NOT STARTED** | |
+| **CMP-006** | Relay ops still unconverted (0/1, 2/3, 0x0A–0x0E) | P2 | — | Medium | **NEEDS INVESTIGATION** | |
+| **CMP-007** | Climbing and hanging (0x0042C310, 0x00490E80) | P2 | Climbable surfaces | High | **NEEDS INVESTIGATION** | |
+| **SQ-001** | Side quests as a feature (`sideQuests`, off by default): records, NPC placements, objectives, rewards | P2 | CMP-001 | High | **NOT STARTED** | Cut content; spec in `game-design/side-quests.md` |
+| **QOL-001** | Chat ignore list, kept in the browser and applied on display | P3 | — | Low | **NOT STARTED** | Chat history: not wanted |
+| **MMO-001** | Party system | P1 | — | Medium | **NOT STARTED** | Needed by MMO Stage 2 |
+| **MMO-002** | MMO Stage 1 remainder: item instances (UUID + affix payload) | P1 | — | Medium | **NOT STARTED** | Renumber the spec's migration 006 (taken by admin bans) |
+| **OPS-004** | Load targets: tick p99 < 15 ms with 100 bots, ~5 KB/s per client | P1 | — | High | **IN PROGRESS** | Now 13–24 ms, ~29 KB/s |
+
+Decided, no task: cooldowns and timers reset on relog (fine for now); the hotbar layout stays per browser (by design).
+
