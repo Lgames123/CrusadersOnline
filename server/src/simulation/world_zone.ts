@@ -32,6 +32,7 @@ import {
   TICK_MS,
   setDoorPose,
   setBrushPose,
+  carryOnBrush,
   stepDoorMotion,
   useMover,
   stepMover,
@@ -1645,6 +1646,7 @@ export class WorldZone {
       if (mv && mv.motion.state !== MOVER_SHUT && mv.motion.state !== MOVER_PARKED && mv.motion.state !== MOVER_DONE) {
         const m = mv.motion;
         const { state, key, progress } = m;
+        const from = moverPose(mv.def, m);
         const wasBlocked = !!m.blocked;
         // A mover does not run into a character: it holds until the way is clear (the original
         // pushes Drake or stops, flags 0x200 / 0x80).
@@ -1656,6 +1658,9 @@ export class WorldZone {
         if (m.progress !== progress || m.key !== key) {
           const pose = moverPose(mv.def, m);
           setBrushPose(this.mw, o.def.id, pose.t, pose.q);
+          // Characters standing on it ride along (Ca*b's swinging bridges).
+          const collider = this.mw.doors.get(o.def.id);
+          if (collider) for (const a of this.actors.values()) carryOnBrush(this.mw, a.character, collider, from, pose);
         }
         if (m.state !== state || m.key !== key || m.blocked !== wasBlocked) {
           o.state = m.state === MOVER_SHUT ? 'present' : 'open';
@@ -2177,6 +2182,7 @@ export class WorldZone {
       const seq = this.arena.story?.sequences.find((q) => q.trigger === t.id);
       if (seq) this.startCutscene(p, seq);
     }
+    if (worldTrigger(t)) return; // no flag, nothing to save (walk-in ones fire every tick inside)
     const record = this.persistRecord(p);
     if (record) this.outbox.persist?.([record], 'progress');
   }

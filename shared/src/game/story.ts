@@ -219,10 +219,13 @@ export const SEQUENCE_ACTOR_BASE = 2;
  * A use-key relay without the once bit (0x200) that only moves brushes and plays sounds (Ca*a's
  * lever and floor rings, Ws1a/9a's gate levers): it fires on every press, as the original; the
  * movers' own state keeps a done ring still. Not a story step, so no per-character flag: one saved
- * would leave the floor shut for that character once the zone restarts.
+ * would leave the floor shut for that character once the zone restarts. A walk-in one that only
+ * moves brushes (Ca*b's swinging bridges) likewise fires on every touch: a moving mover ignores it.
  */
 export function worldTrigger(t: StoryTrigger): boolean {
-  return t.kind === 'relay' && (t.activation & 0x209) === 8 && !t.delay && !t.targets?.length && !t.creatureOps?.length && !!(t.brushes?.length || t.sounds?.length);
+  if (t.kind !== 'relay' || t.delay || t.targets?.length || t.creatureOps?.length) return false;
+  if ((t.activation & 0x209) === 8) return !!(t.brushes?.length || t.sounds?.length);
+  return (t.activation & 0x209) === 1 && !!t.brushes?.length && !t.sounds?.length;
 }
 
 /** Whether a point (original units, Z mirrored) is inside a story volume. */

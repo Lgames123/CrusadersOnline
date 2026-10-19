@@ -11,7 +11,8 @@ import type { Difficulty } from '../game/ruleset.ts';
 import { createMovementWorld, disposeMovementWorld, setBrushPose, setDoorOpen, setDoorPose, type MovementWorld, type Rapier } from '../movement/physics.ts';
 import { stepDoorMotion, swingPose, type DoorMotion, type DoorSwing } from '../arena/door_swing.ts';
 import { MOVER_BACK, MOVER_FORWARD, moverPose, shutMover, stepMover, type MoverDef, type MoverMotion } from '../arena/mover.ts';
-import { createCharacter, setCharacterState, stepCharacter, type Character } from '../movement/character.ts';
+import { carryOnBrush, createCharacter, moveCharacterBy, setCharacterState, stepCharacter, type Character } from '../movement/character.ts';
+import type { Vec3 } from '../math/vec3.ts';
 
 const INPUT_HISTORY = 64;
 const SNAPSHOT_HISTORY = 32;
@@ -120,6 +121,8 @@ export class ClientSession {
   private readonly events: ClientSessionEvents;
   private clientTick = 0;
   private readonly inputs: InputFrame[] = Array.from({ length: INPUT_HISTORY }, createInputFrame);
+  /** The carry by a moving brush each predicted tick had (replayed with its input), or null. */
+  private readonly carries: (Vec3 | null)[] = Array.from({ length: INPUT_HISTORY }, () => null);
   private readonly sendBuf = new DataView(new ArrayBuffer(INPUT_PACKET_MAX_BYTES));
   private readonly snapshots = new Map<number, Map<number, EntityState>>();
   private latestTick = 0;
@@ -484,12 +487,20 @@ export class ClientSession {
       if (!stepDoorMotion(d.def, d.motion, TICK_MS)) d.motion = null;
       if (!d.motion || d.motion.progress !== before) this.poseDoor(id);
     }
+    let carry: Vec3 | null = null;
     for (const [id, d] of this.movers) {
       if (d.motion.state !== MOVER_FORWARD && d.motion.state !== MOVER_BACK) continue;
       const { key, progress } = d.motion;
+      const from = moverPose(d.def, d.motion);
       stepMover(d.def, d.motion, TICK_MS);
-      if (d.motion.progress !== progress || d.motion.key !== key) this.poseMover(id);
+      if (d.motion.progress === progress && d.motion.key === key) continue;
+      this.poseMover(id);
+      // Standing on it rides along, as the server does (Ca*b's swinging bridges).
+      const collider = this.mw.doors.get(id);
+      const moved = collider ? carryOnBrush(this.mw, c, collider, from, moverPose(d.def, d.motion)) : null;
+      if (moved) carry = carry ? { x: carry.x + moved.x, y: carry.y + moved.y, z: carry.z + moved.z } : moved;
     }
+    this.carries[t % INPUT_HISTORY] = carry;
     stepCharacter(this.mw, c, slot, this.moveStats, TICK_DT);
 
     const frames: InputFrame[] = [];
@@ -545,6 +556,8 @@ export class ClientSession {
     );
     const from = Math.max(header.lastProcessedInput + 1, this.clientTick - INPUT_HISTORY + 1);
     for (let t = from; t <= this.clientTick; t++) {
+      const carry = this.carries[t % INPUT_HISTORY];
+      if (carry && c.grounded) moveCharacterBy(c, carry);
       stepCharacter(this.mw, c, this.inputs[t % INPUT_HISTORY]!, this.moveStats, TICK_DT);
     }
     const dx = c.position.x - bx, dy = c.position.y - by, dz = c.position.z - bz;

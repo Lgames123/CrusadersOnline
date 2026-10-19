@@ -268,6 +268,39 @@
         "GAME_SERVER_URL": "http://127.0.0.1:8194"
       },
       "port": 3104
+    },
+    {
+      "name": "bridge-server",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/server",
+        "start"
+      ],
+      "env": {
+        "SERVER_PORT": "8195",
+        "ARENA": "level:ca1b",
+        "DATABASE_URL": "pglite:local/pgdata-bridge",
+        "DEV_GUEST_SPAWN": "1024.1,348.5,-828.4"
+      },
+      "port": 8195
+    },
+    {
+      "name": "bridge-client",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/client",
+        "exec",
+        "vite",
+        "--port",
+        "3105",
+        "--strictPort"
+      ],
+      "env": {
+        "GAME_SERVER_URL": "http://127.0.0.1:8195"
+      },
+      "port": 3105
     }
   ]
 }

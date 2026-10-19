@@ -455,9 +455,17 @@ export function parseStory(data: Uint8Array, dv: DataView, types: ReadonlyMap<nu
     return !!volume;
   };
   for (const o of types.get(T_MOVER) ?? []) {
-    if (!inRange(o, 0x3c) || relayed.has(o) || !(dv.getUint32(o + 8, true) & 8) || !inRange(ptr(o + 4), 0x40)) continue;
+    if (!inRange(o, 0x3c) || relayed.has(o) || !inRange(ptr(o + 4), 0x40)) continue;
+    const activation = dv.getUint32(o + 8, true);
     const name = brushName(ptr(o + 0x38));
-    if (name && !/door|gate/i.test(name) && useTrigger(o, { brushes: [name] })) useVolumes.add(ptr(o + 4));
+    if (!name || /door|gate/i.test(name)) continue;
+    if (activation & 8) {
+      if (useTrigger(o, { brushes: [name] })) useVolumes.add(ptr(o + 4));
+    } else if (activation & 1 && /bridge/i.test(name)) {
+      // Walked into (Ca*b's swinging bridges bBridgePiece4/5, activation 1): the same one-op relay.
+      // Other walk-in movers (wheels, crushers, chandeliers, gears) are left at rest.
+      useTrigger(o, { brushes: [name] });
+    }
   }
   for (const o of types.get(T_SOUND) ?? []) {
     if (!inRange(o, 0x48) || relayed.has(o) || !(dv.getUint32(o + 8, true) & 8) || !useVolumes.has(ptr(o + 4))) continue;

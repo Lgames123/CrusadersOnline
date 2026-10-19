@@ -5,6 +5,7 @@ import { dequantizeAngle } from '../math/quantize.ts';
 import { INPUT, INPUT_ATTACK_SHIFT } from '../protocol/opcodes.ts';
 import type { InputFrame } from '../protocol/binary/input.ts';
 import { CHARACTER_GROUPS, type MovementWorld } from './physics.ts';
+import { rotate, type MoverPose } from '../arena/mover.ts';
 
 /**
  * A kinematic player capsule. `position` is the feet position in metres.
@@ -406,6 +407,38 @@ export function stepCharacter(
     air.kind ? undefined : locoNext,
   );
   c.settled = still && grounded && Math.abs(moved.x) < 0.0005 && Math.abs(moved.y) < 0.0005 && Math.abs(moved.z) < 0.0005;
+}
+
+/**
+ * Carries a character standing on a moving brush (its collider `brush`, already at pose `to`)
+ * from pose `from` to `to`: the feet go where the brush point under them went; the facing stays.
+ * The original's mover collision (0x48E370) is not traced: needed for Ca*b's swinging bridges,
+ * whose deck travels ~7 m sideways. Returns the move made, or null when not standing on it.
+ */
+export function carryOnBrush(mw: MovementWorld, c: Character, brush: RAPIER.Collider, from: Readonly<MoverPose>, to: Readonly<MoverPose>): Vec3 | null {
+  if (!c.grounded) return null;
+  const p = c.position;
+  const ray = new mw.rapier.Ray({ x: p.x, y: p.y + CARRY_PROBE_UP, z: p.z }, { x: 0, y: -1, z: 0 });
+  const hit = mw.world.castRay(ray, CARRY_PROBE_UP + CARRY_PROBE_DOWN, true, undefined, CHARACTER_GROUPS);
+  if (!hit || hit.collider.handle !== brush.handle) return null;
+  // The feet in the brush's own frame at `from`, then back to the world at `to`.
+  const local = rotate([-from.q[0], -from.q[1], -from.q[2], from.q[3]], [p.x - from.t[0], p.y - from.t[1], p.z - from.t[2]]);
+  const w = rotate(to.q, local);
+  const d = { x: w[0] + to.t[0] - p.x, y: w[1] + to.t[1] - p.y, z: w[2] + to.t[2] - p.z };
+  moveCharacterBy(c, d);
+  return d;
+}
+/** How far above / below the feet a carrying brush is looked for, metres. */
+const CARRY_PROBE_UP = 0.5;
+const CARRY_PROBE_DOWN = 0.4;
+
+/** Moves a character by `d` without collision (a carry), keeping its motion state. */
+export function moveCharacterBy(c: Character, d: Readonly<Vec3>): void {
+  c.position.x = snapMm(c.position.x + d.x);
+  c.position.y = snapMm(c.position.y + d.y);
+  c.position.z = snapMm(c.position.z + d.z);
+  c.collider.setTranslation({ x: c.position.x, y: c.position.y + HALF_HEIGHT, z: c.position.z });
+  c.settled = false;
 }
 
 /**

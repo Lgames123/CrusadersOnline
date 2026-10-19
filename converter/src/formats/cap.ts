@@ -407,7 +407,8 @@ function parseBrushes(data: Uint8Array, dv: DataView): CapBrush[] {
       const nv = dv.getUint32(o, true);
       const nf = dv.getUint32(o + 4, true);
       const ptr = dv.getUint32(o + 8, true);
-      if (nv < 4 || nv > 512 || nf < 4 || nf > 512 || ptr < CAP_BASE || ptr > CAP_BASE + data.length) continue;
+      // Up to 1024: Ca*b's swinging bridges (bBridgePiece4/5, deck and chains) have 887 / 894.
+      if (nv < 4 || nv > 1024 || nf < 4 || nf > 1024 || ptr < CAP_BASE || ptr > CAP_BASE + data.length) continue;
       if (dv.getUint32(o + 12, true) !== 0) continue;
       const v0 = o + 16;
       if (v0 + nv * 12 > data.length) continue;

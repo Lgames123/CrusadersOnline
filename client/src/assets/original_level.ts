@@ -149,28 +149,16 @@ function texturedBrushMesh(brush: LevelBrush, texture: (name: string) => { map: 
   const s = LEVEL_UNIT_METRES;
   const byTex = new Map<string, { pos: number[]; uv: number[] }>();
   // Faces are drawn from their outer side only, as the original culls back faces: a see-through
-  // grate's far side does not show through its near side. Brushes are convex: a face looks away
-  // from the brush's centre (its winding is not kept by the Z mirror, so it is set here).
-  const centre = [0, 0, 0];
-  for (const p of brush.points) for (let k = 0; k < 3; k++) centre[k]! += p[k]! / brush.points.length;
+  // grate's far side does not show through its near side. Once Z-mirrored, every face's index
+  // order runs clockwise seen from outside (all 438 faces of the acts' simple slabs), so it is
+  // reversed for three.js. Not judged from the brush's centre: Ca*b's bridges (deck under 800
+  // chain vertices) and Ca*a's rings are not convex.
   for (const f of faces) {
     const tex = texture(f.texture);
     if (!tex) return null;
     let g = byTex.get(f.texture);
     if (!g) byTex.set(f.texture, (g = { pos: [], uv: [] }));
-    const n = [0, 0, 0];
-    const mid = [0, 0, 0];
-    f.indices.forEach((vi, i) => {
-      const a = brush.points[vi]!, b = brush.points[f.indices[(i + 1) % f.indices.length]!]!;
-      n[0]! += (a[1] - b[1]) * (a[2] + b[2]);
-      n[1]! += (a[2] - b[2]) * (a[0] + b[0]);
-      n[2]! += (a[0] - b[0]) * (a[1] + b[1]);
-      for (let k = 0; k < 3; k++) mid[k]! += a[k]! / f.indices.length;
-    });
-    // Newell's normal points the way the polygon winds counter-clockwise (glTF / three.js front).
-    const outward = n[0]! * (mid[0]! - centre[0]!) + n[1]! * (mid[1]! - centre[1]!) + n[2]! * (mid[2]! - centre[2]!) >= 0;
-    const order = f.indices.map((_, i) => i);
-    if (!outward) order.reverse();
+    const order = f.indices.map((_, i) => i).reverse();
     const vert = (j: number) => {
       const i = order[j]!;
       const p = brush.points[f.indices[i]!]!;
