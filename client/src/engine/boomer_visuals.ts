@@ -103,6 +103,12 @@ export class BoomerVisuals {
     return sounds ? sounds.play(LOOP_SOUND, at, { loop: true, maxDistance: sounds.reach(LOOP_SOUND) }) : () => {};
   }
 
+  /** Whether `owner`'s axe is in flight (its hand is empty). */
+  out(owner: number): boolean {
+    for (const v of this.axes.values()) if (v.owner === owner) return true;
+    return false;
+  }
+
   update(dt: number): void {
     for (const v of this.axes.values()) {
       v.pos.addScaledVector(v.vel, dt);

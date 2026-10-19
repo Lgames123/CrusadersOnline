@@ -188,6 +188,8 @@ export interface InventoryItemView {
   attributes?: Partial<Attributes>;
   /** What else it does, as tooltip lines (soul drinking, what a shield also stops, reflection). */
   effects?: string[];
+  /** A Boomer Axe (Use BOOMER): an attack throws it instead of swinging it. */
+  boomer?: boolean;
   /** What a merchant pays for it (items.ctx Price × count); absent = it takes no item without a price. */
   value?: number;
 }
@@ -385,7 +387,15 @@ export const ANIM = {
 } as const;
 
 /** Clip seconds of the item actions (Drake's clips at 30 fps: PK12 60 frames, PJ01 49, PP01 30, PT01 38). */
+/**
+ * Throwing the Boomer Axe (not original for Drake: he only swings it, §23.1). ASM_THROW_ITEM has no
+ * clip on Drake and falls back to its group's state, ASM_SPELL_FIRE_BALL (0x00428220, table
+ * 0x004EBD18): the fire ball's clip (29 frames), the axe leaving the hand at its frame 12.
+ */
+export const BOOMER_THROW = { anim: ANIM.SPELL_CAST + 1, release: 12 / 30, end: 29 / 30 } as const;
+
 export const ITEM_ACTION_SECONDS: Readonly<Record<number, number>> = {
+  [BOOMER_THROW.anim]: BOOMER_THROW.end,
   [ANIM.USE_POTION]: 60 / 30,
   [ANIM.USE_CRYSTAL]: 49 / 30,
   [ANIM.READY_WEAPON]: 30 / 30,

@@ -160,6 +160,11 @@ export class SpellVisuals {
     this.boomer = new BoomerVisuals(scene, host);
   }
 
+  /** Whether a character's Boomer Axe is in flight. */
+  axeOut(id: number): boolean {
+    return this.boomer.out(id);
+  }
+
   /** One SC.SPELL_EVENT. */
   handle(d: SpellEventMsg['d']): void {
     const fx = this.host.effects();

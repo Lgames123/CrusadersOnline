@@ -5,6 +5,7 @@ import { WorldZone } from '@crusaders/server/simulation/world_zone';
 import {
   DAMAGE_TYPES,
   INPUT_PACKET_MAX_BYTES,
+  BOOMER_THROW,
   SC,
   TICK_DT,
   catalogFromItemRules,
@@ -145,7 +146,7 @@ describe('the Boomer Axe in flight (0x004C06B0)', () => {
   });
 });
 
-describe('a landed Boomer Axe blow throws it (0x0044D59A → 0x00401000)', () => {
+describe('attacking with the Boomer Axe throws it', () => {
   const RULES: Parameters<typeof catalogFromItemRules>[0] = { items: [
     { name: 'Axe', parent: null, fields: { Type: 'WEAPON', SubType: 'MELEE', Model: 71, Width: 1, Height: 3, Price: 100, Speed: 1.1 }, damage: { SLASH: 5, BASH: 5 }, protection: {}, calls: [] },
     { name: 'Boomer Axe', parent: 'Axe', fields: { Type: 'WEAPON', SubType: 'THROWABLE', Model: 71, Texture: 1, Width: 1, Height: 3, Price: 1600, Speed: 1.2, Use: 'BOOMER' }, damage: { SLASH: 20 }, protection: {}, calls: [] },
@@ -157,9 +158,10 @@ describe('a landed Boomer Axe blow throws it (0x0044D59A → 0x00401000)', () =>
     expect(items.get('axe')!.boomer).toBeUndefined();
   });
 
-  it('the axe leaves the hand, strikes and comes back to be wielded again', () => {
+  /** A player holding the Boomer Axe at the origin facing -z; a skeleton `mobZ` metres off (null: none). */
+  function zoneWith(mobZ: number | null) {
     const arena = createSyntheticArena();
-    arena.mobSpawns = [{ x: 0, y: 0.5, z: -5 * FT, yaw: Math.PI, archetype: 'skeleton_warrior', shield: null }];
+    arena.mobSpawns = mobZ === null ? [] : [{ x: 0, y: 0.5, z: mobZ, yaw: Math.PI, archetype: 'skeleton_warrior', shield: null }];
     const messages: ServerControlMsg[] = [];
     const zone = new WorldZone(rapier, 'boomer', arena, {
       send: (_c, data) => { if (typeof data === 'string') messages.push(JSON.parse(data) as ServerControlMsg); },
@@ -168,27 +170,57 @@ describe('a landed Boomer Axe blow throws it (0x0044D59A → 0x00401000)', () =>
     const me = zone.join(1, { name: 'Tester', characterId: null, position: { x: 0, y: 0.5, z: 0 }, experience: 0, inventory });
     const buf = new DataView(new ArrayBuffer(INPUT_PACKET_MAX_BYTES));
     let clientTick = 0;
-    const axes = () => messages.flatMap((m) => (m.op === SC.SPELL_EVENT ? [(m as SpellEventMsg).d.axe] : [])).filter((a): a is AxeMsg => !!a);
-    const speeds = () => messages.flatMap((m) => (m.op === SC.INVENTORY_UPDATE ? [m.d.weaponSpeed] : []));
-    let thrownAt = -1;
-    for (let i = 0; i < 400; i++) {
+    const step = () => {
       const len = encodeInput(buf, 0, [{ clientTick: ++clientTick, flags: 0, yaw: quantizeAngle(0), pitch: 0 }]);
       zone.receiveInput(1, new DataView(buf.buffer.slice(0, len)));
-      if (thrownAt < 0 && i % 25 === 0) zone.attack(1);
       zone.step();
-      if (thrownAt < 0 && axes().length) thrownAt = i;
-      if (axes().some((a) => a.end)) break;
+    };
+    const axes = () => messages.flatMap((m) => (m.op === SC.SPELL_EVENT ? [(m as SpellEventMsg).d.axe] : [])).filter((a): a is AxeMsg => !!a);
+    const speeds = () => messages.flatMap((m) => (m.op === SC.INVENTORY_UPDATE ? [m.d.weaponSpeed] : []));
+    const swings = () => zone.inspect().find((a) => a.id === me)!.swinging;
+    // Landed on the floor first: a throw needs the feet down.
+    for (let i = 0; i < 10; i++) step();
+    return { zone, me, messages, step, axes, speeds, swings };
+  }
+
+  it('an attack throws it with no foe near, at the throw clip release, and it is caught again', () => {
+    const z = zoneWith(null);
+    z.zone.attack(1);
+    let thrownAt = -1;
+    let swung = false;
+    for (let i = 0; i < 400; i++) {
+      z.step();
+      swung ||= z.swings();
+      if (thrownAt < 0 && z.axes().length) thrownAt = i + 1;
+      if (z.axes().some((a) => a.end)) break;
     }
-    expect(thrownAt).toBeGreaterThanOrEqual(0);
-    const all = axes();
-    expect(all[0]!.end).toBeUndefined();
+    expect(swung).toBe(false);
+    // Released at frame 12 of the 30 fps clip (0.4 s).
+    expect(thrownAt * TICK_DT).toBeCloseTo(BOOMER_THROW.release, 1);
+    const all = z.axes();
+    expect(Math.max(...all.map((a) => -a.pos[2])) / FT).toBeGreaterThan(55);
     expect(all.at(-1)!.end).toBe(true);
-    // Unarmed while it flew (the inventory tells the client the fists' speed), the axe's again once caught.
-    expect(speeds()).toContain(1);
-    expect(speeds().at(-1)).toBe(1.2);
-    // The magic axe's own SLASH 5 + AIR 5 reached the skeleton after the blow itself.
-    const hits = messages.flatMap((m) => (m.op === SC.COMBAT_EVENT && m.d.damage > 0 && m.d.attacker === me ? [m.d] : []));
-    expect(hits.length).toBeGreaterThanOrEqual(2);
-    expect(hits[1]!.damage).toBeLessThan(hits[0]!.damage);
+    // Unarmed while it flew (the fists' speed sent), the axe's again once caught.
+    expect(z.speeds()).toContain(1);
+    expect(z.speeds().at(-1)).toBe(1.2);
+  });
+
+  it('attacks while it flies are no throws', () => {
+    const z = zoneWith(null);
+    z.zone.attack(1);
+    for (let i = 0; i < 30; i++) z.step();
+    expect(z.axes().length).toBeGreaterThan(0);
+    z.zone.attack(1);
+    for (let i = 0; i < 30; i++) z.step();
+    expect(new Set(z.axes().map((a) => a.id)).size).toBe(1);
+  });
+
+  it('strikes a creature in its path with SLASH 5 + AIR 5', () => {
+    const z = zoneWith(-8);
+    z.zone.attack(1);
+    for (let i = 0; i < 400 && !z.axes().some((a) => a.end); i++) z.step();
+    const hits = z.messages.flatMap((m) => (m.op === SC.COMBAT_EVENT && m.d.damage > 0 && m.d.attacker === z.me ? [m.d] : []));
+    expect(hits.length).toBeGreaterThanOrEqual(1);
+    expect(hits[0]!.damage).toBeLessThan(10.01);
   });
 });

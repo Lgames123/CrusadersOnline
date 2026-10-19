@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
   ANIM,
+  BOOMER_THROW,
   DEFAULT_MOVEMENT_STATS,
   MOB_ARCHETYPES,
   INPUT,
@@ -964,6 +965,12 @@ async function main(): Promise<void> {
     // The movement key held with the click picks the attack (original controls).
     // Holding C (ducked) ignores clicks, as in the original.
     if (input.heldFlags & INPUT.DUCK) return;
+    // The Boomer Axe in hand is thrown (BOOMER_THROW), not swung; while it flies Drake punches.
+    const held = session?.inventory?.items.find((i) => i.equipped && i.type === 'weapon');
+    if (held?.boomer && live && !spellVisuals.axeOut(live.entityId)) {
+      if (local.startItemAction(BOOMER_THROW.anim)) session?.attack('normal');
+      return;
+    }
     let kind = attackKindFor(input.heldFlags, local.character.grounded);
     // A plain click with a wall within 5 ft ahead plays the jab instead (combo routine).
     const feet = local.character.position;

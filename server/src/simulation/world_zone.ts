@@ -61,6 +61,7 @@ import {
   potionCooldown,
   isManaCrystals,
   ITEM_ACTION_SECONDS,
+  BOOMER_THROW,
   addItem,
   mergeInventoryStacks,
   splitInventoryStack,
@@ -578,6 +579,8 @@ interface Player extends ActorBase {
   potionCooldowns: Map<string, number>;
   /** Drinking a potion or readying gear just worn: its ANIM until `until` (played while standing). */
   itemAction: { anim: number; until: number } | null;
+  /** A Boomer Axe throw playing: the tick the axe leaves the hand (BOOMER_THROW.release). */
+  boomerThrowAt: number;
   /** Equipment change requested mid-swing, applied when the swing ends. */
   pendingEquip: { slot: number; equip: boolean; itemId?: string; to?: { x: number; y: number } } | null;
   weapon: ItemDef;
@@ -1192,6 +1195,7 @@ export class WorldZone {
       inventoryDirty: saved.length === 0,
       potionCooldowns: new Map(),
       itemAction: null,
+      boomerThrowAt: 0,
       pendingEquip: null,
       weapon: eq.weapon,
       armor: eq.armor,
@@ -1918,6 +1922,7 @@ export class WorldZone {
       ...(def.heal ? { heal: def.heal } : {}),
       ...(potionCooldown(def) ? { cooldown: potionCooldown(def)!.seconds } : {}),
       ...(itemEffects(def).length ? { effects: itemEffects(def) } : {}),
+      ...(def.boomer ? { boomer: true } : {}),
     };
   }
 
@@ -2427,6 +2432,11 @@ export class WorldZone {
     const p = this.players.get(connId);
     if (!p || !alive(p) || p.hitUntil > this.tick || p.cast) return;
     p.blocking = false; // swinging lowers the shield until the next input re-raises it
+    // The Boomer Axe in hand is thrown, near a foe or not (not original: Drake swings it).
+    if (p.weapon.boomer && !p.swing) {
+      this.startBoomerThrow(p);
+      return;
+    }
     if (p.swing) {
       // Upper-body swings: clicks are dropped until the layer frees (no queue). Feature
       // sideSwingRetrigger: a side swing re-triggers 0.3 s in (the client alternates the side).
@@ -2502,6 +2512,10 @@ export class WorldZone {
         if (p.cast) {
           if (tick < p.cast.clipAt) p.anim = ANIM.SPELL_CONJURE;
           else if (!p.cast.upper) p.anim = ANIM.SPELL_CAST + SPELLS.indexOf(p.cast.spell);
+        }
+        if (p.boomerThrowAt && tick >= p.boomerThrowAt) {
+          p.boomerThrowAt = 0;
+          if (alive(p) && p.hitUntil <= tick && p.weapon.boomer) this.throwBoomer(p);
         }
         if (p.itemAction) {
           if (tick >= p.itemAction.until || !alive(p)) p.itemAction = null;
@@ -3607,6 +3621,18 @@ export class WorldZone {
     if (a.kind === 'mob') this.thrownWeapons.set(a.entityId, a.weapon);
     a.weapon = UNARMED;
     if (a.kind === 'player') this.sendInventory(a);
+  }
+
+  /**
+   * An attack with the Boomer Axe in hand: the throw clip (BOOMER_THROW, the fire ball's), the axe
+   * leaving at its release frame; one at a time, and not while it is out.
+   */
+  private startBoomerThrow(p: Player): void {
+    if (p.boomerThrowAt || p.itemAction || this.boomer.flying(p) || !p.character.grounded) return;
+    const rate = p.moveStats.clipRate ?? 1;
+    p.boomerThrowAt = this.tick + Math.max(1, Math.round((BOOMER_THROW.release / rate) * TICK_RATE));
+    p.itemAction = { anim: BOOMER_THROW.anim, until: this.tick + Math.max(1, Math.round((BOOMER_THROW.end / rate) * TICK_RATE)) };
+    p.queuedAttack = false;
   }
 
   /** The axe is back in the hand (0x0046B000): wielded again; a gear change asked for meanwhile follows. */
