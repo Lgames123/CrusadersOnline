@@ -76,6 +76,8 @@ export const SC = {
   TRADE_UPDATE: 0x56,
   /** Auction house listings and the player's mailbox (MMO Stage 4). */
   AUCTION: 0x57,
+  /** A warning drawn on the floor before a boss's attack lands there (MMO Stage 5). */
+  TELEGRAPH: 0x58,
 } as const;
 
 /** Input flag bits carried in CS_PLAYER_INPUT. */

@@ -28,6 +28,11 @@ export interface GameplayFeatures {
    * gets, refinement materials dropped by creatures, refinement +1..+10 at merchants.
    */
   mmoItems: boolean;
+  /**
+   * MMO dungeons (docs/game-design/mmo/06, dungeons.ts): instanced runs with a boss, entered from
+   * a waypoint crystal by a finished character and his party.
+   */
+  mmoDungeons: boolean;
 }
 
 export const ORIGINAL_FEATURES: Readonly<GameplayFeatures> = {
@@ -35,6 +40,7 @@ export const ORIGINAL_FEATURES: Readonly<GameplayFeatures> = {
   sideSwingRetrigger: false,
   diagonalMoves: false,
   mmoItems: false,
+  mmoDungeons: false,
 };
 
 export type FeatureName = keyof GameplayFeatures;

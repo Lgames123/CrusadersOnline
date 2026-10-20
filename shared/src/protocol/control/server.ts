@@ -345,6 +345,12 @@ export interface AuctionMsg {
   d: { listings: AuctionListingView[]; mail: MailView[] };
 }
 
+/** A boss's attack about to land: a circle on the floor for `seconds` (red: dodge it). */
+export interface TelegraphMsg {
+  op: typeof SC.TELEGRAPH;
+  d: { at: [number, number, number]; radius: number; seconds: number; color: 'red' | 'yellow' };
+}
+
 export interface TradeUpdateMsg {
   op: typeof SC.TRADE_UPDATE;
   /** `pending`: `partner` asks this player; `open`: both offers; `closed`: over (`message` says why). */
@@ -386,6 +392,7 @@ export type ServerControlMsg =
   | PartyUpdateMsg
   | TradeUpdateMsg
   | AuctionMsg
+  | TelegraphMsg
   | PlayerStatsMsg
   | CombatEventMsg
   | InventoryUpdateMsg

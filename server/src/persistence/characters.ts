@@ -198,7 +198,8 @@ export class CharacterRepository {
             pos_x: r.resetPosition ? null : r.x,
             pos_y: r.resetPosition ? null : r.y,
             pos_z: r.resetPosition ? null : r.z,
-            ...(r.zone ? { zone_id: r.zone.slice(0, 32) } : {}),
+            // A dungeon instance is saved as its act (the instance ends with its run).
+            ...(r.zone ? { zone_id: r.zone.replace(/@.*/, '').slice(0, 32) } : {}),
             yaw: r.yaw,
             level: r.level,
             experience_points: r.experience,

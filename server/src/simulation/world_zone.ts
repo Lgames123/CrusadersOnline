@@ -193,6 +193,11 @@ import {
   MOB_TOUCH_SENSE_RANGE,
   KILL_SHARE,
   MATERIAL_DROPS,
+  splitInstance,
+  dungeonLockFlag,
+  dungeonById,
+  DUNGEON_ENTRY_PREFIX,
+  type DungeonDef,
   rollMods,
   withMods,
   nextRefine,
@@ -316,6 +321,8 @@ export interface ZoneOutbox {
   loot?(event: LootEvent): void;
   /** Auction custody, payments and undelivered mail, for the main thread's market (MMO Stage 4). */
   economy?(event: EconomyEvent): void;
+  /** A player at a waypoint crystal asks to take his party into a dungeon (MMO Stage 5). */
+  dungeon?(connId: number, dungeon: string): void;
 }
 
 /** A chest opened (`items`: what was taken) or found with the bag too full (`items`: what it holds). */
@@ -847,6 +854,8 @@ interface Mob extends ActorBase {
    * after death, and when it is removed (ms since epoch).
    */
   custom?: { id: string; damage: number; respawn: boolean; expiresAt: number };
+  /** A dungeon's boss (its dungeon id): its death clears the run; loot once a day (dungeons.ts). */
+  bossOf?: string;
 }
 
 type Actor = Player | Mob;
@@ -926,6 +935,19 @@ export class WorldZone {
   private readonly states = new Map<number, EntityState>();
   private nextEntityId = 1;
   private spawnIndex = 0;
+  /** This zone's dungeon (an instance "level:ca1d@crypt-3"), and its run once started. */
+  private readonly dungeon: DungeonDef | null;
+  private run: {
+    anchor: { x: number; y: number; z: number; yaw: number };
+    bossId: number | null;
+    adds: Set<number>;
+    engagedAt: number | null;
+    nextSlam: number;
+    slams: { at: { x: number; y: number; z: number }; hitAt: number }[];
+    phase: 1 | 2 | 3;
+    cleared: boolean;
+    enraged: number;
+  } | null = null;
   /** Direct trades between players of this zone (MMO Stage 4). */
   private readonly trades = new TradeDesk();
   /** The act's waypoint crystal (undefined until first asked). */
@@ -966,6 +988,7 @@ export class WorldZone {
     this.name = name;
     this.arena = arena;
     this.outbox = outbox;
+    this.dungeon = splitInstance(name).dungeon;
     this.random = opts.random ?? Math.random;
     this.difficulty = opts.difficulty ?? 'medium';
     this.features = gameplayFeatures({ ...opts.features, ...(opts.reactiveBlock ? { reactiveBlock: true } : {}) });
@@ -2258,6 +2281,129 @@ export class WorldZone {
     }
   }
 
+  // --- Dungeon instances (MMO Stage 5, not original; dungeons.ts) ---------------------------
+
+  /** Places the boss at the act's far end: the hostile placement farthest from where the party arrives. */
+  private startDungeon(): void {
+    const def = this.dungeon;
+    if (!def || this.run) return;
+    const arrival = this.waypoint?.arrival ?? this.arena.starts?.[0] ?? { ...this.arena.spawnPoints[0]!, yaw: 0 };
+    let anchor = { x: arrival.x, y: arrival.y, z: arrival.z, yaw: 0 };
+    let far = -1;
+    for (const m of this.arena.mobSpawns) {
+      if ((m.disposition ?? 3) < 3) continue;
+      const d = Math.hypot(m.x - arrival.x, m.z - arrival.z);
+      if (d > far) {
+        far = d;
+        anchor = { x: m.x, y: m.y, z: m.z, yaw: m.yaw ?? 0 };
+      }
+    }
+    this.run = { anchor, bossId: null, adds: new Set(), engagedAt: null, nextSlam: 0, slams: [], phase: 1, cleared: false, enraged: 0 };
+    this.spawnBoss();
+  }
+
+  private spawnBoss(): void {
+    const run = this.run!;
+    const b = this.dungeon!.boss;
+    const [id] = this.spawnCustom({
+      id: `dungeon-${this.dungeon!.id}`, archetype: b.archetype, name: b.name, count: 1, scale: b.scale, hp: b.hp, xp: b.xp,
+      goldMin: b.gold[0], goldMax: b.gold[1], damage: b.damage, speed: 1, respawn: false, aggressive: false,
+      at: run.anchor, expiresAt: Number.MAX_SAFE_INTEGER,
+    } as CustomSpawnSpec);
+    run.bossId = id ?? null;
+    run.phase = 1;
+    run.engagedAt = null;
+    run.enraged = 0;
+    run.slams = [];
+    const boss = id !== undefined ? this.actors.get(id) : undefined;
+    if (boss?.kind === 'mob') boss.bossOf = this.dungeon!.id;
+  }
+
+  /** Each tick of a dungeon run: phases, adds, slams, enrage, a wipe's reset. */
+  private stepDungeon(): void {
+    const run = this.run;
+    const def = this.dungeon;
+    if (!run || !def || run.cleared || run.bossId === null) return;
+    const boss = this.actors.get(run.bossId);
+    if (boss?.kind !== 'mob' || !alive(boss)) return;
+    const b = def.boss;
+    const frac = boss.hp / boss.maxHp;
+    if (run.engagedAt === null && boss.hp < boss.maxHp) {
+      run.engagedAt = this.tick;
+      this.zoneNotice(`${b.name} awakens!`);
+    }
+    if (run.engagedAt === null) return;
+    // A wipe: everyone here is dead. The boss heals and its adds go.
+    const players = [...this.players.values()];
+    if (players.length && players.every((p) => !alive(p))) {
+      for (const id of run.adds) {
+        const a = this.actors.get(id);
+        if (a?.kind === 'mob') this.removeMob(a);
+      }
+      run.adds.clear();
+      this.removeMob(boss);
+      this.spawnBoss();
+      this.zoneNotice(`${b.name} stands whole again.`);
+      return;
+    }
+    if (run.phase === 1 && frac <= b.addsBelow) {
+      run.phase = 2;
+      const at = boss.character.position;
+      const ids = this.spawnCustom({
+        id: `dungeon-${def.id}-adds`, archetype: b.adds.archetype, count: b.adds.count, scale: 1, speed: 1, damage: 1, respawn: false, aggressive: true,
+        at: { x: at.x, y: at.y + 0.2, z: at.z, yaw: 0 }, expiresAt: Number.MAX_SAFE_INTEGER,
+      } as CustomSpawnSpec);
+      for (const id of ids) run.adds.add(id);
+      this.zoneNotice(`${b.name} calls the dead to its side!`);
+    }
+    if (run.phase === 2 && frac <= b.slamBelow) {
+      run.phase = 3;
+      run.nextSlam = this.tick + TICK_RATE * 2;
+      this.zoneNotice(`${b.name} shakes the crypt: keep moving!`);
+    }
+    // Phase 3: a slam on a player in reach, shown on the floor first (red: unblockable).
+    if (run.phase === 3 && this.tick >= run.nextSlam) {
+      run.nextSlam = this.tick + Math.round(b.slam.every * TICK_RATE);
+      const near = players.filter((p) => alive(p) && Math.hypot(p.character.position.x - boss.character.position.x, p.character.position.z - boss.character.position.z) < 30);
+      const target = near[Math.floor(this.random() * near.length)];
+      if (target) {
+        const at = { ...target.character.position };
+        run.slams.push({ at, hitAt: this.tick + Math.round(b.slam.windup * TICK_RATE) });
+        for (const p of players) this.sendJson(p.connId, { op: SC.TELEGRAPH, d: { at: [at.x, at.y, at.z], radius: b.slam.radius, seconds: b.slam.windup, color: 'red' } });
+      }
+    }
+    for (let i = run.slams.length - 1; i >= 0; i--) {
+      const s = run.slams[i]!;
+      if (this.tick < s.hitAt) continue;
+      run.slams.splice(i, 1);
+      for (const p of players) {
+        const q = p.character.position;
+        if (alive(p) && Math.hypot(q.x - s.at.x, q.z - s.at.z) <= b.slam.radius && Math.abs(q.y - s.at.y) < 3) this.loseHp(boss, p, Math.round(b.slam.damage * (1 + run.enraged)));
+      }
+    }
+    // Soft enrage: +step damage every 30 s past `after`.
+    const fought = (this.tick - run.engagedAt) / TICK_RATE;
+    const enraged = fought > b.enrage.after ? Math.floor((fought - b.enrage.after) / 30 + 1) * b.enrage.step : 0;
+    if (enraged > run.enraged) {
+      run.enraged = enraged;
+      if (boss.custom) boss.custom.damage = b.damage * (1 + enraged);
+      this.zoneNotice(`${b.name} grows furious (+${Math.round(enraged * 100)} % damage).`);
+    }
+  }
+
+  /** The boss is dead: the run is cleared. */
+  private dungeonCleared(boss: Mob): void {
+    if (!this.run || boss.entityId !== this.run.bossId) return;
+    this.run.cleared = true;
+    this.run.slams = [];
+    this.zoneNotice(`${this.dungeon!.boss.name} is defeated! The crystal here takes you home.`);
+  }
+
+  /** A line for everyone in this zone (the classic message line, the Server tab). */
+  private zoneNotice(text: string): void {
+    for (const p of this.players.values()) this.notify(p, 'info', text);
+  }
+
   // --- Auction house custody and mail (MMO Stage 4; the main thread holds the market) --------
 
   /** A listing's item and deposit leave the bag (escrow); the main thread then lists it. */
@@ -2588,6 +2734,13 @@ export class WorldZone {
     if (p.story.completedAt === undefined) return this.notify(p, 'error', 'The crystal is dormant.');
     const at = p.character.position;
     if (Math.hypot(at.x - spot.crystal.x, at.z - spot.crystal.z) > WAYPOINT_REACH + 0.5 || Math.abs(at.y - spot.crystal.y) > 2.5) return;
+    // A dungeon (MMO): the session takes him and his party into a new instance of it.
+    if (act.startsWith(DUNGEON_ENTRY_PREFIX)) {
+      const def = dungeonById(act.slice(DUNGEON_ENTRY_PREFIX.length));
+      if (!def || !this.features.mmoDungeons) return;
+      this.outbox.dungeon?.(p.connId, def.id);
+      return;
+    }
     if (!isWaypointAct(act) || act === this.act) return;
     p.swing = null;
     p.queuedAttack = false;
@@ -3301,6 +3454,10 @@ export class WorldZone {
 
   step(): void {
     const tick = ++this.tick;
+    if (this.dungeon) {
+      if (!this.run) this.startDungeon();
+      this.stepDungeon();
+    }
 
     // 1. Players: at most one input per tick. No input => no movement this tick, so the
     //    authoritative state always equals "state after lastProcessedInput". Dead players
@@ -4745,6 +4902,7 @@ export class WorldZone {
         target.threat.clear();
         // Necros's death ends the game for everyone who hurt him (0x0044C6A0 -> 0x0044F7B0).
         if (target.archetype.type === NECROS_TYPE && target.ally === undefined) this.necrosFalls(target);
+        if (target.bossOf) this.dungeonCleared(target);
         target.hurtBy.clear();
         // A spectral ally's kills are its owner's.
         const credit = attacker.kind === 'player' ? attacker : attacker.ally !== undefined ? this.actors.get(attacker.ally) : undefined;
@@ -4801,6 +4959,17 @@ export class WorldZone {
     const r = this.rates;
     const xp = share.xp;
     this.addExperience(p, xp);
+    // A dungeon boss pays its gold and items once a day per character (dungeons.ts lockout).
+    if (mob.bossOf) {
+      const flag = dungeonLockFlag(mob.bossOf);
+      if (p.storyFlags.has(flag)) {
+        this.notify(p, 'info', "You have already claimed this boss's treasure today.");
+        p.statsDirty = true;
+        return { xp, gold: 0 };
+      }
+      p.storyFlags.add(flag);
+      p.story.flags.push(flag);
+    }
     let grants: GroundGrant[];
     if (mob.carries) grants = mob.carries;
     else {
@@ -4817,7 +4986,17 @@ export class WorldZone {
       for (const m of MATERIAL_DROPS) if (this.random() < Math.min(1, m.chance * r.drops)) grants.push({ name: this.items.get(m.itemId)?.name ?? m.itemId, quantity: 1, itemId: m.itemId });
     }
     let gold = 0;
-    const loot: { def: ItemDef; quantity: number }[] = [];
+    const loot: { def: ItemDef; quantity: number; mods?: ItemMods }[] = [];
+    // A dungeon boss also leaves one fine piece of gear (Tempered or better with mmoItems).
+    if (mob.bossOf) {
+      const pool = ['broad_sword', 'war_hammer', 'battle_axe', 'banded_armor', 'metal_shield'].map((id) => this.items.get(id)).filter((d): d is ItemDef => !!d);
+      const def = pool[Math.floor(this.random() * pool.length)];
+      if (def) {
+        let first = true;
+        const mods = this.features.mmoItems ? rollMods(def, () => (first ? ((first = false), this.random() * 0.05) : this.random())) : undefined;
+        loot.push({ def, quantity: 1, ...(mods ? { mods } : {}) });
+      }
+    }
     for (const g of grants) {
       let n = Math.max(1, g.quantity);
       if (g.name === GOLD_ITEM) {
@@ -4848,11 +5027,11 @@ export class WorldZone {
    * taken by the killer only (`onlyFor`), gone after KILL_LOOT_LIFETIME_TICKS. Taken one by one
    * like any ground item (Tab or the ground panel).
    */
-  private dropKillLoot(p: Player, mob: Mob, loot: { def: ItemDef; quantity: number }[]): void {
+  private dropKillLoot(p: Player, mob: Mob, loot: { def: ItemDef; quantity: number; mods?: ItemMods }[]): void {
     const onlyFor = this.playerKey(p);
     const at = mob.character.position;
     const changes: ObjectChange[] = [];
-    loot.forEach(({ def, quantity }, i) => {
+    loot.forEach(({ def, quantity, mods }, i) => {
       const id = this.nextDynamicObjectId++;
       // Golden-angle steps from the creature's heading: a ring of items that never overlap.
       const a = dequantizeAngle(mob.yaw) + i * 2.4;
@@ -4863,7 +5042,7 @@ export class WorldZone {
         y: at.y,
         z: at.z + Math.cos(a) * KILL_LOOT_SPREAD,
         loose: true,
-        item: { name: def.name, quantity, itemId: def.id, ...(def.model !== undefined ? { model: def.model } : {}), ...(def.texture !== undefined ? { texture: def.texture } : {}) },
+        item: { name: def.name, quantity, itemId: def.id, ...(def.model !== undefined ? { model: def.model } : {}), ...(def.texture !== undefined ? { texture: def.texture } : {}), ...(mods ? { mods, uid: globalThis.crypto.randomUUID() } : {}) },
       };
       this.objects.set(id, { def: objDef, state: 'present', hp: 0, respawnAt: 0, dynamic: true, onlyFor, expiresAt: this.tick + KILL_LOOT_LIFETIME_TICKS });
       changes.push({ id, state: 'present', def: objDef });

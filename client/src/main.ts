@@ -111,6 +111,7 @@ import { PartyFrame } from './ui/party_frame.ts';
 import { WeaponGlow } from './engine/weapon_glow.ts';
 import { TradeWindow } from './ui/trade_window.ts';
 import { AuctionWindow } from './ui/auction_window.ts';
+import { Telegraphs } from './engine/telegraphs.ts';
 import { CRYSTAL_LIGHT_COLOR, WaypointCrystal } from './engine/waypoint_crystal.ts';
 import { CharacterSheet } from './ui/character_sheet.ts';
 import { Cutscene, type Puppet } from './story/cutscene.ts';
@@ -230,6 +231,8 @@ async function main(): Promise<void> {
   const tradeWindow = new TradeWindow();
   /** The auction house (MMO Stage 4). */
   const auctionWindow = new AuctionWindow();
+  /** Boss attack warnings on the floor (MMO Stage 5). */
+  const telegraphs = new Telegraphs(scene);
   /** The local player's refined weapon glows (MMO items). */
   const weaponGlow = new WeaponGlow();
   // This act's waypoint crystal (SC_WORLD_ENTER; not original): shown once the story is finished.
@@ -438,7 +441,9 @@ async function main(): Promise<void> {
     foliage?.setDistance(s.foliageDistance);
     foliage?.setAmounts(foliageAmounts(s));
   });
-  const showArena = async (name: string, difficulty: Difficulty = 'medium'): Promise<ArenaDef | null> => {
+  const showArena = async (zoneName: string, difficulty: Difficulty = 'medium'): Promise<ArenaDef | null> => {
+    // A dungeon instance ("level:ca1d@crypt-3") shows its act.
+    const name = zoneName.replace(/@.*/, '');
     let next: ArenaDef;
     let view: OriginalLevel | null = null;
     if (name.startsWith(LEVEL_PREFIX)) {
@@ -772,6 +777,8 @@ async function main(): Promise<void> {
             errorBox.textContent = '';
             crystalAt = d.waypoint ?? null;
             inventoryPanel.refining = d.features?.mmoItems === true;
+            waypointMap.dungeons = d.features?.mmoDungeons === true;
+            telegraphs.clear();
             setWaypointMapOpen(false);
             refreshCrystal();
             enterYaw = d.yaw ?? null;
@@ -834,6 +841,7 @@ async function main(): Promise<void> {
             sounds?.play(SFX.turnPage);
           },
           auction: (d) => auctionWindow.update(d),
+          telegraph: (d) => telegraphs.show(d.at, d.radius, d.seconds, d.color),
           trade: (d) => {
             const was = tradeWindow.open;
             if (d.state === 'open') tradeWindow.setBag(session?.inventory?.items ?? []);
@@ -1841,6 +1849,7 @@ async function main(): Promise<void> {
         return null;
       });
     }
+    telegraphs.update(dt);
     if (crystal) {
       crystal.update(dt);
       dynamicLights.set(WAYPOINT_LIGHT_KEY, crystal.lightPosition(crystalLight), CRYSTAL_LIGHT_COLOR, 2.2, 7, 0.05);

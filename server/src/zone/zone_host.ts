@@ -13,6 +13,7 @@ export interface ZoneHostEvents {
   transferred?(connId: number, record: PersistRecord | null, state: TransferState | null): void;
   loot?(event: LootEvent): void;
   economy?(event: EconomyEvent): void;
+  dungeon?(connId: number, dungeon: string): void;
 }
 
 /** Main-thread handle for one zone worker. */
@@ -55,6 +56,9 @@ export class ZoneHost {
             break;
           case 'economy':
             events.economy?.(msg.event);
+            break;
+          case 'dungeon':
+            events.dungeon?.(msg.connId, msg.dungeon);
             break;
           case 'loot':
             events.loot?.(msg.event);

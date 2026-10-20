@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_RATES, LEVEL_PREFIX, type ExitCrossing, type WorldRates } from '@crusaders/shared';
+import { splitInstance, DEFAULT_RATES, LEVEL_PREFIX, type ExitCrossing, type WorldRates } from '@crusaders/shared';
 import type { EconomyEvent, LootEvent, PersistReason, PersistRecord, TransferState } from '../simulation/world_zone.ts';
 import type { ZoneMetrics, ZoneWorkerData } from './messages.ts';
 import { ZoneHost } from './zone_host.ts';
@@ -14,6 +14,7 @@ export interface ZoneManagerEvents {
   error?(arena: string, err: Error): void;
   loot?(arena: string, event: LootEvent): void;
   economy?(arena: string, event: EconomyEvent): void;
+  dungeon?(arena: string, connId: number, dungeon: string): void;
 }
 
 export interface ZoneManagerOptions {
@@ -97,6 +98,12 @@ export class ZoneManager {
   /** Whether an arena can be run: the synthetic arena, or a level act converted in generatedDir. */
   available(arena: string): boolean {
     if (arena === 'synthetic-arena') return true;
+    // A dungeon instance: a known dungeon on its own act ("level:ca1d@crypt-3").
+    const inst = splitInstance(arena);
+    if (inst.instance !== null) {
+      if (!inst.dungeon || !/^[a-z]+-[a-z0-9]{1,16}$/.test(inst.instance) || inst.base !== `${LEVEL_PREFIX}${inst.dungeon.act}`) return false;
+      arena = inst.base;
+    }
     if (!arena.startsWith(LEVEL_PREFIX)) return false;
     const act = arena.slice(LEVEL_PREFIX.length);
     if (!/^[a-z0-9_-]+$/.test(act)) return false;
@@ -131,6 +138,7 @@ export class ZoneManager {
           error: (err) => this.events.error?.(arena, err),
           loot: (event) => this.events.loot?.(arena, event),
           economy: (event) => this.events.economy?.(arena, event),
+          dungeon: (connId, dungeon) => this.events.dungeon?.(arena, connId, dungeon),
         },
       );
       p = host.whenReady().then(() => {

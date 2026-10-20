@@ -1,4 +1,6 @@
 import {
+  DUNGEONS,
+  DUNGEON_ENTRY_PREFIX,
   WAYPOINT_CHAPTERS,
   WAYPOINT_REGIONS,
   WAYPOINT_ROADS,
@@ -46,6 +48,8 @@ const STYLE = `
 #waypoint-map .wm-area:hover:not(:disabled) { border-color: #8fd0ff; background: rgba(40,90,150,.8); }
 #waypoint-map .wm-area:disabled { opacity: .55; cursor: default; }
 #waypoint-map .wm-area small { float: right; color: #a9c7e8; }
+#waypoint-map .wm-dungeons { margin-top: 12px; }
+#waypoint-map .wm-dungeons[hidden] { display: none; }
 `;
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
@@ -56,6 +60,7 @@ export class WaypointMap {
   private readonly tabs: HTMLElement;
   private readonly svg: SVGSVGElement;
   private readonly list: HTMLElement;
+  private readonly dungeonBar: HTMLElement;
   private current: string | null = null;
   private chapter = 1;
   private region: WaypointRegion | null = null;
@@ -80,6 +85,10 @@ export class WaypointMap {
     this.tabs = this.root.querySelector('.wm-tabs')!;
     this.svg = this.root.querySelector('svg')!;
     this.list = this.root.querySelector('.wm-list')!;
+    this.dungeonBar = document.createElement('div');
+    this.dungeonBar.className = 'wm-list wm-dungeons';
+    this.dungeonBar.hidden = true;
+    this.root.querySelector('.wm-panel')!.append(this.dungeonBar);
     this.root.querySelector('.wm-close')!.addEventListener('click', () => this.onClose());
     this.root.addEventListener('click', (e) => e.target === this.root && this.onClose());
     for (const c of WAYPOINT_CHAPTERS) {
@@ -101,6 +110,23 @@ export class WaypointMap {
   }
 
   /** Opens on the chapter and region of the act the player stands in. */
+  /** MMO dungeons (the server's `mmoDungeons`): entries under the map. */
+  set dungeons(on: boolean) {
+    this.dungeonBar.hidden = !on;
+    this.dungeonBar.replaceChildren();
+    if (!on) return;
+    const h = document.createElement('h3');
+    h.textContent = 'Dungeons (your party comes with you)';
+    this.dungeonBar.append(h);
+    for (const d of DUNGEONS) {
+      const b = document.createElement('button');
+      b.className = 'wm-area';
+      b.innerHTML = `${d.name}<small>up to ${d.maxParty}</small>`;
+      b.addEventListener('click', () => this.onTravel(`${DUNGEON_ENTRY_PREFIX}${d.id}`));
+      this.dungeonBar.append(b);
+    }
+  }
+
   show(act: string): void {
     this.current = act;
     this.chapter = waypointChapter(act)?.act ?? 1;

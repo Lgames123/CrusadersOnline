@@ -2,7 +2,7 @@ import { parentPort, workerData } from 'node:worker_threads';
 import { performance } from 'node:perf_hooks';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { BUILTIN_ITEMS, LEVEL_PREFIX, buildLevelArena, catalogFromItemRules, gameplayFeatures, createSyntheticArena, initPhysics, spellTableFromRules, type ArenaDef, type ItemCatalog, type LevelPlacements, type SpellTable } from '@crusaders/shared';
+import { splitInstance, BUILTIN_ITEMS, LEVEL_PREFIX, buildLevelArena, catalogFromItemRules, gameplayFeatures, createSyntheticArena, initPhysics, spellTableFromRules, type ArenaDef, type ItemCatalog, type LevelPlacements, type SpellTable } from '@crusaders/shared';
 import { SimulationClock, TickStats } from '../simulation/clock.ts';
 import { WorldZone } from '../simulation/world_zone.ts';
 import type { FromZone, ToZone, ZoneReply, ZoneWorkerData } from './messages.ts';
@@ -43,7 +43,8 @@ const post = (msg: FromZone, transfer: ArrayBuffer[] = []) => port.postMessage(m
 const rapier = await initPhysics();
 let batch: [number, ArrayBuffer | string][] = [];
 let transfer: ArrayBuffer[] = [];
-const zone = new WorldZone(rapier, zoneName, loadArena(arenaName), {
+// A dungeon instance ("level:ca1d@crypt-3") runs its base act.
+const zone = new WorldZone(rapier, zoneName, loadArena(splitInstance(arenaName).base), {
   send(connId, data) {
     if (typeof data === 'string') {
       batch.push([connId, data]);
@@ -61,6 +62,9 @@ const zone = new WorldZone(rapier, zoneName, loadArena(arenaName), {
   },
   economy(event) {
     post({ t: 'economy', event });
+  },
+  dungeon(connId, dungeon) {
+    post({ t: 'dungeon', connId, dungeon });
   },
   loot(event) {
     post({ t: 'loot', event });

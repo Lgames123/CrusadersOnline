@@ -71,6 +71,7 @@ export type FromZone =
   /** A chest opened or found with the bag too full (the main thread logs it). */
   | { t: 'loot'; event: LootEvent }
   | { t: 'economy'; event: EconomyEvent }
+  | { t: 'dungeon'; connId: number; dungeon: string }
   | { t: 'transferred'; connId: number; record: PersistRecord | null; state: TransferState | null }
   | { t: 'reply'; reqId: number; reply: ZoneReply }
   | { t: 'stopped' };

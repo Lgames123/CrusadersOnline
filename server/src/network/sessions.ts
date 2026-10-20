@@ -1,5 +1,5 @@
 import type { Logger } from 'pino';
-import { CS, LEVEL_PREFIX, MAX_STACK, PERMANENT_UNTIL, SC, SPELLS, decodeSpells, emptyStoryState, encodeSpells, parseClientControl, startingInventory, type Difficulty, type InventoryEntry, type ExitCrossing, type ItemCatalog, type KnownSpell, type ServerControlMsg } from '@crusaders/shared';
+import { dungeonById, CS, LEVEL_PREFIX, MAX_STACK, PERMANENT_UNTIL, SC, SPELLS, decodeSpells, emptyStoryState, encodeSpells, parseClientControl, startingInventory, type Difficulty, type InventoryEntry, type ExitCrossing, type ItemCatalog, type KnownSpell, type ServerControlMsg } from '@crusaders/shared';
 import type { Account, TicketStore } from '../auth/tickets.ts';
 import type { CharacterPersistRecord, CharacterRepository } from '../persistence/characters.ts';
 import { auctionDeposit, type EconomyEvent, type JoinOptions, type PersistRecord, type TransferState } from '../simulation/world_zone.ts';
@@ -578,6 +578,31 @@ export class SessionManager implements TransportHandlers {
         mail: mail.map((m) => ({ id: m.id, sender: m.sender, subject: m.subject, gold: m.gold, ...(m.item ? { item: { ...m.item, ...look(m.item.itemId) } } : {}) })),
       },
     });
+  }
+
+  // --- Dungeons (MMO Stage 5, not original; dungeons.ts) ----------------------------------
+
+  private nextInstance = 1;
+
+  /**
+   * A finished character at a crystal takes his party into a new instance of a dungeon: the
+   * leader asks; every member in the world comes along (up to the dungeon's size), arriving
+   * beside the act's crystal.
+   */
+  onDungeon(arena: string, connId: number, dungeonId: string): void {
+    const s = this.sessions.get(connId);
+    const def = dungeonById(dungeonId);
+    if (!s || s.state !== 'in_world' || s.zone !== arena || !def) return;
+    const tell = (o: Session, text: string, kind: 'info' | 'error' = 'info') => this.send(o, { op: SC.CHAT_BROADCAST, d: { channel: 'system', kind, text } });
+    const party = this.parties.of(s.name);
+    if (party && party.members[0]!.toLowerCase() !== s.name.toLowerCase()) return tell(s, 'Only the party leader can lead the party into a dungeon.', 'error');
+    const instance = `${LEVEL_PREFIX}${def.act}@${def.id}-${(this.nextInstance++).toString(36)}`;
+    const group = party ? party.members.map((m) => this.sessionNamed(m)).filter((o): o is Session => !!o && o.state === 'in_world').slice(0, def.maxParty) : [s];
+    for (const o of group) {
+      tell(o, `${s.name} leads the way into ${def.name}.`);
+      this.onPortal(o.zone, o.conn.id, instance, undefined, undefined, true);
+    }
+    this.log.info({ leader: s.name, instance, members: group.map((o) => o.name) }, 'dungeon run');
   }
 
   // --- Parties (MMO Stage 2, not original) -----------------------------------------------
