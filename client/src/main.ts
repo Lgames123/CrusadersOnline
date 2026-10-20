@@ -118,6 +118,9 @@ const MAX_FRAME_MS = 250;
 const LEVEL_TORCH_KEY = 'level-torch:';
 const LEVEL_TORCH_COLOR = 0xff9a40;
 const WAYPOINT_LIGHT_KEY = 'waypoint';
+/** Sound.ctx thuds of a body hitting the ground (clip events HEAVYTHUD 0xCE / LIGHTTHUD 0xCF). */
+const SFX_HEAVY_THUD = 0xce;
+const SFX_LIGHT_THUD = 0xcf;
 const LEVEL_TORCH_INTENSITY = 1.2;
 const LEVEL_TORCH_RADIUS = 8;
 const MY_TORCH_KEY = 'torch:me';
@@ -499,6 +502,8 @@ async function main(): Promise<void> {
    * their entity, probed from where they are then; `decal`: their weapon's mark).
    */
   const wallChecks: { t: number; yaw: number; id?: number; reach?: number; decal?: DecalKind | null }[] = [];
+  /** Footprints, thuds and bloodstains from clip events (set once the level's decals exist below). */
+  let bodyEvent: ((obj: THREE.Object3D, name: string, dead: boolean) => boolean) | null = null;
   /** The swing counter seen per remote entity (a new swing schedules a wall check). */
   const remoteSwings = new Map<number, number>();
   /** Remote characters' weapon marks: creatures' by placement or archetype; other players' sword. */
@@ -557,6 +562,7 @@ async function main(): Promise<void> {
           spawn: (id, _name, info) => {
             remotes.spawn(id, info);
             const e = remotes.byId.get(id);
+            if (e) e.avatar.onEvent = (name) => void bodyEvent?.(e.avatar.object, name, e.hp <= 0);
             if (e) lighting.track(id, e.avatar.object, PLAYER_RADIUS * 1.3, false, true);
             if (info.statuses?.length) spellVisuals.syncStatuses(id, info.statuses);
           },
@@ -1062,10 +1068,34 @@ async function main(): Promise<void> {
     }
     if (effects) effects.scale = s.smallEffects ? SMALL_EFFECTS_SCALE : EFFECTS_SCALE;
   });
+  /**
+   * Marks a character's clip events leave (the event table 0x4E0F90): LEFT / RIGHTFOOTSTEP
+   * (0x00457890) stamp L_ / R_FOOTPRINT under that foot along the heading; HEAVYTHUD / LIGHTTHUD
+   * (0x004577F0) play their thud (206 / 207) and, on a dead body, stamp a BLOODSTAIN under it.
+   * Returns true for a thud (handled here).
+   */
+  const stepAt = new THREE.Vector3();
+  const stepDir = new THREE.Vector3();
+  bodyEvent = (obj: THREE.Object3D, name: string, dead: boolean): boolean => {
+    const yaw = obj.rotation.y;
+    if (name.includes('THUD')) {
+      sounds?.play(name.includes('HEAVY') ? SFX_HEAVY_THUD : SFX_LIGHT_THUD, obj.position);
+      if (dead) decals?.stamp('BLOODSTAIN', stepAt.copy(obj.position).setY(obj.position.y + 0.05));
+      return true;
+    }
+    if (name.includes('FOOTSTEP')) {
+      const right = name.includes('RIGHT');
+      // The foot dummies (0x18 / 0x1C) stand about a hand's width either side of the body.
+      stepAt.set(obj.position.x + Math.cos(yaw) * (right ? 0.12 : -0.12), obj.position.y + 0.05, obj.position.z - Math.sin(yaw) * (right ? 0.12 : -0.12));
+      decals?.stamp(right ? 'R_FOOTPRINT' : 'L_FOOTPRINT', stepAt, stepDir.set(-Math.sin(yaw), 0, -Math.cos(yaw)));
+    }
+    return false;
+  };
   // Footsteps on the original clips' own LEFT/RIGHT FOOTSTEP events, in step with the animation,
   // with the step sound of the surface underfoot.
   const stepSounds = (): readonly number[] => SFX.footsteps[levelView?.surfaceAt(local.object.position) ?? 'stone'];
   local.avatar.onEvent = (name) => {
+    if (bodyEvent?.(local.object, name, !!session?.playerStats?.dead)) return;
     if (!sounds || !name.includes('FOOTSTEP') || !local.character.grounded) return;
     const foot = name.includes('RIGHT') ? 1 : 0;
     sounds.play(stepSounds()[foot]!, local.object.position, { volume: name.includes('SOFT') ? 0.2 : 0.35 });
