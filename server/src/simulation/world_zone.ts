@@ -91,6 +91,7 @@ import {
   startingInventory,
   INVENTORY_SLOTS,
   type InventoryEntry,
+  type ItemMods,
   type InventoryItemView,
   type ShopItemView,
   type ItemCatalog,
@@ -440,7 +441,7 @@ interface WorldObject {
   onlyFor?: string;
 }
 
-type GroundGrant = { name: string; quantity: number; itemId?: string };
+type GroundGrant = { name: string; quantity: number; itemId?: string; uid?: string; mods?: ItemMods };
 
 /** One change in an OBJECT_STATE message. */
 interface ObjectChange {
@@ -1466,7 +1467,7 @@ export class WorldZone {
     }
     const loot: string[] = [];
     for (const g of grants) {
-      const got = this.grantItem(p, g.name, g.quantity, g.itemId);
+      const got = this.grantItem(p, g.name, g.quantity, g.itemId, g.uid || g.mods ? { ...(g.uid ? { uid: g.uid } : {}), ...(g.mods ? { mods: g.mods } : {}) } : undefined);
       if (got > 0) loot.push(got > 1 ? `${got} ${g.name}` : g.name);
     }
     if (chest) this.outbox.loot?.({ connId, character: p.name, chest: id, outcome: 'looted', items: loot });
@@ -1622,7 +1623,7 @@ export class WorldZone {
    * Gold goes to the purse; known items to the bag (stacking potions). Returns how many were
    * taken: a stack is taken whole or not at all, single items one by one until the bag is full.
    */
-  private grantItem(p: Player, name: string, quantity: number, itemId?: string): number {
+  private grantItem(p: Player, name: string, quantity: number, itemId?: string, instance?: { uid?: string; mods?: ItemMods }): number {
     const n = Math.max(1, quantity);
     if (name === GOLD_ITEM) {
       p.gold += n;
@@ -1636,7 +1637,19 @@ export class WorldZone {
     if (def.type === 'spellbook' && def.spell) return this.learnSpell(p, def.spell) ? n : 0;
     let added = 0;
     if (def.stackable) added = addItem(p.inventory, def.id, n, this.items) === null ? 0 : n;
-    else while (added < n && addItem(p.inventory, def.id, 1, this.items) !== null) added++;
+    else {
+      while (added < n) {
+        const slot = addItem(p.inventory, def.id, 1, this.items);
+        if (slot === null) break;
+        // One instance keeps its identity and mods (a dropped item picked up again, a rolled drop).
+        const entry = instance && added === 0 ? p.inventory.find((e) => e.slot === slot) : undefined;
+        if (entry) {
+          if (instance!.uid && !p.inventory.some((e) => e.uid === instance!.uid)) entry.uid = instance!.uid;
+          if (instance!.mods) entry.mods = structuredClone(instance!.mods);
+        }
+        added++;
+      }
+    }
     if (added) {
       p.inventoryDirty = true;
       this.sendInventory(p);
@@ -2140,7 +2153,7 @@ export class WorldZone {
       x: pos.x,
       y: pos.y,
       z: pos.z,
-      item: { name: def.name, quantity: entry.quantity ?? 1, itemId: def.id },
+      item: { name: def.name, quantity: entry.quantity ?? 1, itemId: def.id, ...(entry.uid ? { uid: entry.uid } : {}), ...(entry.mods ? { mods: entry.mods } : {}) },
     };
     this.objects.set(id, {
       def: objDef,
@@ -2220,6 +2233,7 @@ export class WorldZone {
   }
 
   private sendInventory(p: Player): void {
+    this.stampUids(p);
     const items: InventoryItemView[] = [];
     for (const e of p.inventory) {
       const def = this.items.get(e.itemId);
@@ -2234,6 +2248,8 @@ export class WorldZone {
         ...(!def.keyItem && !e.equipped && e.x !== undefined && e.y !== undefined ? { x: e.x, y: e.y } : {}),
 
         ...(e.quantity && e.quantity > 1 ? { quantity: e.quantity } : {}),
+        ...(e.uid ? { uid: e.uid } : {}),
+        ...(e.mods ? { mods: e.mods } : {}),
         ...(value ? { value } : {}),
         ...this.cooldownLeft(p, def),
       });
@@ -2325,8 +2341,14 @@ export class WorldZone {
     return this.arena.spawnPoints[this.spawnIndex++ % this.arena.spawnPoints.length]!;
   }
 
+  /** Gives every item instance without one its identity (MMO Stage 1): new items, split stacks. */
+  private stampUids(p: Player): void {
+    for (const e of p.inventory) if (!e.uid) e.uid = globalThis.crypto.randomUUID();
+  }
+
   private persistRecord(p: Player): PersistRecord | null {
     if (!p.characterId) return null;
+    this.stampUids(p);
     const pos = p.character.position;
     return {
       characterId: p.characterId,

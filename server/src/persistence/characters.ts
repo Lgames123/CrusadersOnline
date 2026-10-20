@@ -4,7 +4,9 @@ import {
   MAX_CHARACTERS,
   NEW_GAME_ACT,
   decodeSpells,
+  ITEM_UID,
   encodeSpells,
+  sanitizeMods,
   sanitizeStoryState,
   startingInventory,
   type CharacterDetails,
@@ -82,7 +84,7 @@ export class CharacterRepository {
     if (!r) return null;
     const items = await this.db
       .selectFrom('inventory_items')
-      .select(['item_id', 'slot_index', 'grid_x', 'grid_y', 'is_equipped', 'quantity'])
+      .select(['id', 'item_id', 'slot_index', 'grid_x', 'grid_y', 'is_equipped', 'quantity', 'mods'])
       .where('character_id', '=', characterId)
       .orderBy('slot_index')
       .execute();
@@ -101,7 +103,10 @@ export class CharacterRepository {
       spells: decodeSpells(r.spells),
       selectedSpell: decodeSpells(r.selected_spell ? `${r.selected_spell}:1` : '')[0]?.spell ?? null,
       story: parseStory(r.story),
-      inventory: items.map((i) => ({ slot: i.slot_index, itemId: i.item_id, equipped: i.is_equipped, ...(i.grid_x !== null && i.grid_y !== null && !i.is_equipped ? { x: i.grid_x, y: i.grid_y } : {}), ...(i.quantity > 1 ? { quantity: i.quantity } : {}) })),
+      inventory: items.map((i) => {
+        const mods = sanitizeMods(typeof i.mods === 'string' ? safeJson(i.mods) : i.mods);
+        return { slot: i.slot_index, itemId: i.item_id, equipped: i.is_equipped, uid: i.id, ...(i.grid_x !== null && i.grid_y !== null && !i.is_equipped ? { x: i.grid_x, y: i.grid_y } : {}), ...(i.quantity > 1 ? { quantity: i.quantity } : {}), ...(mods ? { mods } : {}) };
+      }),
     };
   }
 
@@ -214,12 +219,25 @@ export class CharacterRepository {
           if (r.inventory.length > 0) {
             await trx
               .insertInto('inventory_items')
-              .values(r.inventory.map((e) => ({ character_id: r.characterId, item_id: e.itemId, slot_index: e.slot, is_equipped: e.equipped, grid_x: e.equipped ? null : e.x ?? null, grid_y: e.equipped ? null : e.y ?? null, quantity: e.quantity ?? 1 })))
+              .values(r.inventory.map((e) => ({
+                // The instance keeps its identity across saves (MMO Stage 1).
+                ...(e.uid && ITEM_UID.test(e.uid) ? { id: e.uid } : {}),
+                character_id: r.characterId, item_id: e.itemId, slot_index: e.slot, is_equipped: e.equipped, grid_x: e.equipped ? null : e.x ?? null, grid_y: e.equipped ? null : e.y ?? null, quantity: e.quantity ?? 1,
+                mods: e.mods ? JSON.stringify(e.mods) : null,
+              })))
               .execute();
           }
         }
       }
     });
+  }
+}
+
+function safeJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
   }
 }
 

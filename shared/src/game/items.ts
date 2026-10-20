@@ -359,6 +359,35 @@ export function potionCooldown(def: ItemDef): { group: string; seconds: number }
 
 export const UNARMED: Readonly<ItemDef> = { id: 'unarmed', name: 'Unarmed', type: 'weapon', width: 1, height: 1, damage: damageVector({}), speed: 1, price: 0 };
 
+/**
+ * Item rarity tiers (MMO, not original; docs/game-design/mmo/03): an item without mods is the
+ * original's own, Battle-worn.
+ */
+export const RARITIES = ['worn', 'mundane', 'tempered', 'legendary'] as const;
+export type Rarity = (typeof RARITIES)[number];
+
+/** One rolled affix: a named bonus of a stat ("attr:might", "dmg:FIRE", "res:EARTH", "hp", "mana"). */
+export interface ItemAffix {
+  id: string;
+  /** Rolled magnitude (attribute points, damage points, resist fraction, hit points). */
+  value: number;
+}
+
+/**
+ * What makes one item instance differ from its catalogue entry (MMO, not original): rarity,
+ * affixes, refinement (+0..+10) with its failstack pity, binding. Absent = the plain item.
+ */
+export interface ItemMods {
+  rarity?: Rarity;
+  affixes?: ItemAffix[];
+  /** Refinement level 0..10 (docs/game-design/mmo/04). */
+  plus?: number;
+  /** Failed refinement attempts since the last success (pity). */
+  failstacks?: number;
+  /** Bound to its owner: cannot be traded or listed. */
+  bound?: boolean;
+}
+
 /** One occupied inventory slot. */
 export interface InventoryEntry {
   slot: number;
@@ -369,6 +398,33 @@ export interface InventoryEntry {
   equipped: boolean;
   /** Stack size for stackable items (absent = 1). */
   quantity?: number;
+  /** This instance's stable identity (a UUID; the inventory row's id since migration 007). */
+  uid?: string;
+  /** Its own rarity, affixes and refinement (MMO): never on stackable items. */
+  mods?: ItemMods;
+}
+
+export const ITEM_UID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const MAX_PLUS = 10;
+const AFFIX_ID = /^(attr:(might|intelligence|endurance|speed)|dmg:[A-Z]{3,6}|res:[A-Z]{3,6}|hp|mana)$/;
+
+/** Item mods from untrusted storage, or undefined when there is nothing valid. */
+export function sanitizeMods(raw: unknown): ItemMods | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const o = raw as Record<string, unknown>;
+  const out: ItemMods = {};
+  if (typeof o.rarity === 'string' && (RARITIES as readonly string[]).includes(o.rarity) && o.rarity !== 'worn') out.rarity = o.rarity as Rarity;
+  if (Array.isArray(o.affixes)) {
+    const affixes = o.affixes
+      .filter((a): a is ItemAffix => !!a && typeof a === 'object' && typeof (a as ItemAffix).id === 'string' && AFFIX_ID.test((a as ItemAffix).id) && Number.isFinite((a as ItemAffix).value))
+      .slice(0, 6)
+      .map((a) => ({ id: a.id, value: Math.round(a.value * 1000) / 1000 }));
+    if (affixes.length) out.affixes = affixes;
+  }
+  if (Number.isInteger(o.plus) && (o.plus as number) > 0) out.plus = Math.min(MAX_PLUS, o.plus as number);
+  if (Number.isInteger(o.failstacks) && (o.failstacks as number) > 0) out.failstacks = Math.min(1000, o.failstacks as number);
+  if (o.bound === true) out.bound = true;
+  return Object.keys(out).length ? out : undefined;
 }
 
 /** Engine name of the currency item; picked up as gold, never stored in the inventory. */
@@ -555,6 +611,7 @@ export function sanitizeInventory(inv: readonly InventoryEntry[], catalog: ItemC
   const out: InventoryEntry[] = [];
   const slots = new Set<number>();
   const equipped = new Map<ItemType, number>();
+  const uids = new Set<string>();
   for (const e of [...inv].sort((a, b) => a.slot - b.slot)) {
     const def = catalog.get(e.itemId);
     if (!def || !Number.isInteger(e.slot) || e.slot < 0 || e.slot >= INVENTORY_SLOTS || slots.has(e.slot)) continue;
@@ -564,7 +621,11 @@ export function sanitizeInventory(inv: readonly InventoryEntry[], catalog: ItemC
     const q = Math.floor(e.quantity ?? 1);
     const grid = !eq && !def.keyItem && Number.isInteger(e.x)
  && Number.isInteger(e.y) && e.x! >= 0 && e.y! >= 0 ? { x: e.x!, y: e.y! } : {};
-    out.push(def.stackable && q > 1 ? { slot: e.slot, itemId: e.itemId, equipped: eq, quantity: Math.min(MAX_STACK, q), ...grid } : { slot: e.slot, itemId: e.itemId, equipped: eq, ...grid });
+    const uid = typeof e.uid === 'string' && ITEM_UID.test(e.uid) && !uids.has(e.uid.toLowerCase()) ? e.uid.toLowerCase() : undefined;
+    if (uid) uids.add(uid);
+    const mods = def.stackable ? undefined : sanitizeMods(e.mods);
+    const extra = { ...(uid ? { uid } : {}), ...(mods ? { mods } : {}) };
+    out.push(def.stackable && q > 1 ? { slot: e.slot, itemId: e.itemId, equipped: eq, quantity: Math.min(MAX_STACK, q), ...grid, ...extra } : { slot: e.slot, itemId: e.itemId, equipped: eq, ...grid, ...extra });
   }
   return out;
 }

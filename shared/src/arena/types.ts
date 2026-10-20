@@ -1,6 +1,7 @@
 import type { DoorSwing } from './door_swing.ts';
 import type { MoverDef } from './mover.ts';
 import type { LevelStory } from '../game/story.ts';
+import type { ItemMods } from '../game/items.ts';
 
 /**
  * Static level description shared by renderer (client) and collision world (client + server).
@@ -45,7 +46,8 @@ export interface WorldObjectDef {
    * Ground items (`itemId`: catalog id of a dropped item, so it is picked up as itself; `model` /
    * `texture`: its items.ctx Model and Texture, to draw a `loose` one).
    */
-  item?: { name: string; quantity: number; itemId?: string; model?: number; texture?: number };
+  /** `uid` / `mods`: a dropped item instance keeps its identity and its own stats (MMO). */
+  item?: { name: string; quantity: number; itemId?: string; model?: number; texture?: number; uid?: string; mods?: ItemMods };
   /** Dynamic ground items drawn as themselves (a kill's loot), not in the chest of player drops. */
   loose?: boolean;
   /** Chests. */

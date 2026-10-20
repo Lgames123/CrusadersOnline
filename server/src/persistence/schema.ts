@@ -68,6 +68,8 @@ export interface InventoryItemsTable {
   is_equipped: Generated<boolean>;
   quantity: Generated<number>;
   durability: Generated<number>;
+  /** Migration 007: the instance's ItemMods (JSONB), null = plain. */
+  mods: unknown | null;
 }
 
 export interface AdminEventsTable {

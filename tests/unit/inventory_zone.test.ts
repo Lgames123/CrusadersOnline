@@ -67,6 +67,20 @@ describe('inventory authority in the zone', () => {
     expect(t.dynamic()).toHaveLength(0);
   });
 
+  it('an item instance keeps its identity and mods through a drop and a pick-up (MMO Stage 1)', () => {
+    const t = zone();
+    const uid = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const a = t.join(1, [{ slot: 0, itemId: 'long_sword', equipped: false, uid, mods: { rarity: 'tempered', plus: 4 } }]);
+    const b = t.join(2, [{ slot: 0, itemId: 'healing_potion', equipped: false }]);
+    t.z.dropInventoryItem(1, 0, 'long_sword');
+    expect(a.inventory.some((e) => e.uid === uid)).toBe(false);
+    const [[id]] = t.dynamic() as [[number, unknown]];
+    t.z.interact(2, id);
+    expect(b.inventory.find((e) => e.itemId === 'long_sword')).toMatchObject({ uid, mods: { rarity: 'tempered', plus: 4 } });
+    // Every instance has an identity once the client hears of it.
+    expect(b.inventory.every((e) => !!e.uid)).toBe(true);
+  });
+
   it('a repeated drop of the same slot spawns one ground item and resyncs the client', () => {
     const t = zone();
     t.join(1);
@@ -83,7 +97,7 @@ describe('inventory authority in the zone', () => {
     t.z.dropInventoryItem(1, 0, 'long_sword');
     t.z.moveInventoryItem(1, 0, 5, 5, 'long_sword');
     t.z.equip(1, 0, true, 'long_sword');
-    expect(p.inventory).toEqual([{ slot: 0, itemId: 'healing_potion', equipped: false, x: 0, y: 0 }]);
+    expect(p.inventory).toEqual([{ slot: 0, itemId: 'healing_potion', equipped: false, x: 0, y: 0, uid: expect.any(String) }]);
     expect(t.dynamic()).toHaveLength(0);
   });
 

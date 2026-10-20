@@ -5,7 +5,7 @@ import { JUMP_KINDS } from '../../constants.ts';
 import { INPUT, SC } from '../opcodes.ts';
 import type { SpellId, StatusTag } from '../../game/spells.ts';
 import type { DecalKind } from '../../game/decals.ts';
-import type { ItemType } from '../../game/items.ts';
+import type { ItemMods, ItemType } from '../../game/items.ts';
 import type { GameplayFeatures } from '../../game/features.ts';
 import type { QuestLog } from '../../game/story.ts';
 import type { Attributes } from '../../game/original_stats.ts';
@@ -178,6 +178,9 @@ export interface InventoryItemView {
   x?: number;
   y?: number;
   equipped: boolean;
+  /** The instance's identity and its own rarity / affixes / refinement (MMO Stage 1). */
+  uid?: string;
+  mods?: ItemMods;
   /** A door key: shown on the Key Items page, takes no bag cell, cannot be dropped. */
   keyItem?: boolean;
   quantity?: number;
