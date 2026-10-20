@@ -33,6 +33,8 @@ export interface GameplayFeatures {
    * a waypoint crystal by a finished character and his party.
    */
   mmoDungeons: boolean;
+  /** MMO soft skills (docs/game-design/mmo/07, crafting.ts): ore veins, smithing, salvaging. */
+  mmoCrafting: boolean;
 }
 
 export const ORIGINAL_FEATURES: Readonly<GameplayFeatures> = {
@@ -41,6 +43,7 @@ export const ORIGINAL_FEATURES: Readonly<GameplayFeatures> = {
   diagonalMoves: false,
   mmoItems: false,
   mmoDungeons: false,
+  mmoCrafting: false,
 };
 
 export type FeatureName = keyof GameplayFeatures;

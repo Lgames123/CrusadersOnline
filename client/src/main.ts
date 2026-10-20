@@ -20,6 +20,7 @@ import {
   PLAYER_REACH,
   attackTiming,
   LEVEL_PREFIX,
+  ORES,
   GROUND_REACH,
   WAYPOINT_REACH,
   MAIN_QUESTS,
@@ -112,6 +113,8 @@ import { WeaponGlow } from './engine/weapon_glow.ts';
 import { TradeWindow } from './ui/trade_window.ts';
 import { AuctionWindow } from './ui/auction_window.ts';
 import { Telegraphs } from './engine/telegraphs.ts';
+import { OreVeins } from './engine/ore_veins.ts';
+import { CraftWindow } from './ui/craft_window.ts';
 import { CRYSTAL_LIGHT_COLOR, WaypointCrystal } from './engine/waypoint_crystal.ts';
 import { CharacterSheet } from './ui/character_sheet.ts';
 import { Cutscene, type Puppet } from './story/cutscene.ts';
@@ -233,6 +236,9 @@ async function main(): Promise<void> {
   const auctionWindow = new AuctionWindow();
   /** Boss attack warnings on the floor (MMO Stage 5). */
   const telegraphs = new Telegraphs(scene);
+  /** Soft skills (MMO Stage 6): ore veins and the anvil. */
+  const oreVeins = new OreVeins(scene);
+  const craftWindow = new CraftWindow();
   /** The local player's refined weapon glows (MMO items). */
   const weaponGlow = new WeaponGlow();
   // This act's waypoint crystal (SC_WORLD_ENTER; not original): shown once the story is finished.
@@ -597,6 +603,7 @@ async function main(): Promise<void> {
           correction: (dx, dy, dz) => player?.correct(dx, dy, dz),
           stats: (s) => {
             hud.stats(s);
+            craftWindow.setStats(s);
             if (!!crystal !== (!!s.storyComplete && !!crystalAt)) refreshCrystal();
             charSheet.update(s);
             if (live) spellVisuals.syncStatuses(live.entityId, (s.statuses ?? []).map((x) => x.tag));
@@ -752,6 +759,7 @@ async function main(): Promise<void> {
             hotbar.setInventory(inv.items);
             tradeWindow.setBag(inv.items);
             auctionWindow.setBag(inv.items);
+            craftWindow.setBag(inv.items);
             player?.setWeaponSpeed(inv.weaponSpeed);
             const w = inv.items.find((i) => i.type === 'weapon' && i.equipped);
             myEdge = w?.damage && w.damage[0]! > w.damage[1]! ? 'sharp' : 'blunt';
@@ -778,7 +786,9 @@ async function main(): Promise<void> {
             crystalAt = d.waypoint ?? null;
             inventoryPanel.refining = d.features?.mmoItems === true;
             waypointMap.dungeons = d.features?.mmoDungeons === true;
+            inventoryPanel.anvil = d.features?.mmoCrafting === true;
             telegraphs.clear();
+            oreVeins.clear();
             setWaypointMapOpen(false);
             refreshCrystal();
             enterYaw = d.yaw ?? null;
@@ -842,6 +852,7 @@ async function main(): Promise<void> {
           },
           auction: (d) => auctionWindow.update(d),
           telegraph: (d) => telegraphs.show(d.at, d.radius, d.seconds, d.color),
+          oreVeins: (d) => oreVeins.set(d),
           trade: (d) => {
             const was = tradeWindow.open;
             if (d.state === 'open') tradeWindow.setBag(session?.inventory?.items ?? []);
@@ -1194,7 +1205,7 @@ async function main(): Promise<void> {
   /** Alt held: the cursor is out for the UI; letting go takes the camera back. */
   let altFree = false;
   let optionsAt = 0;
-  input.wantsLock = () => !(altFree || chat.typing || optionsOpen || inventoryPanel.open || questBook.open || charSheet.open || waypointMap.open || tradeWindow.open || auctionWindow.open || inScene());
+  input.wantsLock = () => !(altFree || chat.typing || optionsOpen || inventoryPanel.open || questBook.open || charSheet.open || waypointMap.open || tradeWindow.open || auctionWindow.open || craftWindow.open || inScene());
   const play = () => {
     sounds?.unlock();
     music.unlock();
@@ -1242,7 +1253,7 @@ async function main(): Promise<void> {
     if (!isAlt(e) || !altFree) return;
     altFree = false;
     // A page that let go of the lock itself may take it back without a click (Pointer Lock 2.0).
-    if (!optionsOpen && !chat.typing && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !tradeWindow.open && !auctionWindow.open && !inScene()) input.requestLock();
+    if (!optionsOpen && !chat.typing && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !tradeWindow.open && !auctionWindow.open && !craftWindow.open && !inScene()) input.requestLock();
   });
   // The chat line takes the keyboard (Enter): the camera lets go of the pointer, and takes it
   // back without a click when the line closes, unless a window was open before.
@@ -1269,6 +1280,24 @@ async function main(): Promise<void> {
   auctionWindow.onClose = () => setAuctionOpen(false);
   inventoryPanel.onAuction = () => setAuctionOpen(!auctionWindow.open);
   chat.onAuction = () => setAuctionOpen(true);
+  const setCraftOpen = (open: boolean) => {
+    if (open === craftWindow.open) return;
+    if (open) {
+      craftWindow.setBag(session?.inventory?.items ?? []);
+      if (session?.playerStats) craftWindow.setStats(session.playerStats);
+      craftWindow.show();
+      if (input.locked) {
+        releasing = true;
+        document.exitPointerLock();
+      }
+    } else {
+      craftWindow.hide();
+      if (!optionsOpen && !inventoryPanel.open) input.requestLock();
+    }
+  };
+  craftWindow.onAction = (d) => session?.craft(d);
+  craftWindow.onClose = () => setCraftOpen(false);
+  inventoryPanel.onAnvil = () => setCraftOpen(!craftWindow.open);
   partyFrame.onWhisper = (name) => chat.whisper(name);
   chat.onTyping = (typing) => {
     if (typing && input.locked) {
@@ -1277,7 +1306,7 @@ async function main(): Promise<void> {
       document.exitPointerLock();
     } else if (!typing && chatTookLock) {
       chatTookLock = false;
-      if (!optionsOpen && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !tradeWindow.open && !auctionWindow.open && !inScene()) input.requestLock();
+      if (!optionsOpen && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !tradeWindow.open && !auctionWindow.open && !craftWindow.open && !inScene()) input.requestLock();
     }
   };
   window.addEventListener('blur', () => {
@@ -1342,7 +1371,7 @@ async function main(): Promise<void> {
   const DOOR_RANGE = 1.6;
   const nearestInteractable = () => {
     if (!levelView || !session) return null;
-    let best: { id: number; label: string; d: number; key?: boolean; shop?: boolean; waypoint?: boolean } | null = null;
+    let best: { id: number; label: string; d: number; key?: boolean; shop?: boolean; waypoint?: boolean; vein?: number } | null = null;
     // In a shop's volume (the merchant's counter): Tab trades.
     const shop = shopHere();
     if (shop) best = { id: shop.id, label: 'Tab — trade', d: 0.5, shop: true };
@@ -1352,6 +1381,9 @@ async function main(): Promise<void> {
       const d = Math.hypot(crystalAt.x - p.x, crystalAt.z - p.z);
       if (d <= WAYPOINT_REACH && Math.abs(crystalAt.y - p.y) < 2.5 && (!best || best.d > d)) best = { id: 0, label: 'Tab — waypoint crystal', d, waypoint: true };
     }
+    // An ore vein (mmoCrafting): Tab mines it.
+    const vein = oreVeins.nearest(p, 2.5);
+    if (vein && (!best || best.d > vein.d)) best = { id: 0, label: vein.ready ? `Tab — mine ${ORES[vein.kind].name.toLowerCase()} (Mining ${ORES[vein.kind].level})` : `${ORES[vein.kind].name} — worked out`, d: vein.d, ...(vein.ready ? { vein: vein.id } : {}) };
     // Peaceful creatures within reach: Tab talks.
     for (const [id, e] of remotes.byId) {
       if (!e.visible || e.hp <= 0 || !e.info.archetype?.startsWith('npc_') || talkLine(e) === null) continue;
@@ -1516,6 +1548,7 @@ async function main(): Promise<void> {
       if (sign) showMessage(sign);
       const target = nearestInteractable();
       if (target?.waypoint) setWaypointMapOpen(true);
+      else if (target?.vein !== undefined) session?.craft({ action: 'mine', vein: target.vein });
       else if (target?.shop) session?.shopOpen(target.id);
       else if (target && target.id < 0) talk(-target.id);
       else if (target && !target.key) {
@@ -1636,7 +1669,7 @@ async function main(): Promise<void> {
       chat.blur();
     }
     // Esc released the pointer: the options (sequences play to their end, as in the original).
-    if (!locked && !ours && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !tradeWindow.open && !auctionWindow.open && !inScene()) setOptionsOpen(true);
+    if (!locked && !ours && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !tradeWindow.open && !auctionWindow.open && !craftWindow.open && !inScene()) setOptionsOpen(true);
   };
 
   // Inventory window (online only); the ground window opens beside it (and opens it).
@@ -1748,6 +1781,7 @@ async function main(): Promise<void> {
       else if (waypointMap.open) setWaypointMapOpen(false);
       else if (tradeWindow.open) session?.trade({ action: 'cancel' });
       else if (auctionWindow.open) setAuctionOpen(false);
+      else if (craftWindow.open) setCraftOpen(false);
       else setOptionsOpen(true);
       return;
     }

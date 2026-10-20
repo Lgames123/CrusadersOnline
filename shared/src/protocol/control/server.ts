@@ -88,6 +88,8 @@ export interface PlayerStatsMsg {
     damage: number[];
     /** The character finished the story (ending.ts): every door opens for him, from either side. */
     storyComplete?: true;
+    /** Soft skills XP (MMO Stage 6): mining, smithing, salvaging. */
+    skills?: Partial<Record<'mining' | 'smithing' | 'salvaging', number>>;
   };
 }
 
@@ -346,6 +348,12 @@ export interface AuctionMsg {
 }
 
 /** A boss's attack about to land: a circle on the floor for `seconds` (red: dodge it). */
+/** The zone's ore veins (MMO Stage 6). */
+export interface OreVeinsMsg {
+  op: typeof SC.ORE_VEINS;
+  d: { veins: { id: number; kind: 'iron' | 'stone' | 'mithril'; at: [number, number, number]; ready: boolean }[] };
+}
+
 export interface TelegraphMsg {
   op: typeof SC.TELEGRAPH;
   d: { at: [number, number, number]; radius: number; seconds: number; color: 'red' | 'yellow' };
@@ -393,6 +401,7 @@ export type ServerControlMsg =
   | TradeUpdateMsg
   | AuctionMsg
   | TelegraphMsg
+  | OreVeinsMsg
   | PlayerStatsMsg
   | CombatEventMsg
   | InventoryUpdateMsg

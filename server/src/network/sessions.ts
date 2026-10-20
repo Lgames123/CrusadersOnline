@@ -388,6 +388,9 @@ export class SessionManager implements TransportHandlers {
       case CS.AUCTION:
         if (s.state === 'in_world') this.auctionAction(s, msg.d);
         return;
+      case CS.CRAFT:
+        if (s.state === 'in_world') this.zoneOf(s)?.craft(conn.id, msg.d);
+        return;
       case CS.TRADE:
         if (s.state === 'in_world') this.zoneOf(s)?.trade(conn.id, msg.d);
         return;
@@ -775,6 +778,7 @@ export class SessionManager implements TransportHandlers {
           spells: saved.spells,
           selectedSpell: saved.selectedSpell,
           story: saved.story,
+          skills: saved.skills,
         });
       }
       this.log.info({ conn: s.conn.id, character: name, zone: s.zone, guest: account.guest }, 'entering world');

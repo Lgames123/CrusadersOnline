@@ -193,6 +193,21 @@ import {
   MOB_TOUCH_SENSE_RANGE,
   KILL_SHARE,
   MATERIAL_DROPS,
+  oreNodes,
+  sanitizeSkills,
+  skillLevel,
+  salvageYield,
+  smithRarityBonus,
+  ORES,
+  RECIPES,
+  NODE_CHARGES,
+  NODE_RESPAWN_SECONDS,
+  NODE_REACH,
+  HARVEST_SECONDS,
+  type OreKind,
+  type OreNodeSpot,
+  type Skill,
+  type SkillXp,
   splitInstance,
   dungeonLockFlag,
   dungeonById,
@@ -300,6 +315,18 @@ export interface EscrowItem {
   mods?: ItemMods;
 }
 
+/** Takes `n` of a stackable item from a bag, smallest stacks first. */
+function takeCount(inv: InventoryEntry[], itemId: string, n: number): void {
+  let left = n;
+  for (const e of [...inv].filter((x) => x.itemId === itemId).sort((a, b) => (a.quantity ?? 1) - (b.quantity ?? 1))) {
+    const take = Math.min(left, e.quantity ?? 1);
+    left -= take;
+    if ((e.quantity ?? 1) - take <= 0) inv.splice(inv.indexOf(e), 1);
+    else e.quantity = (e.quantity ?? 1) - take;
+    if (left <= 0) return;
+  }
+}
+
 /** A listing's deposit (persistence/economy.ts AUCTION): 5 % of the price × 1 / 1.5 / 2 for 12 / 24 / 48 h. */
 export function auctionDeposit(price: number, hours: number): number {
   return Math.max(1, Math.floor(price * 0.05 * ({ 12: 1, 24: 1.5, 48: 2 } as Record<number, number>)[hours]!));
@@ -359,6 +386,8 @@ export interface JoinOptions {
   arrivingMesh?: string;
   /** The player's party (MMO Stage 2; sessions.ts), null = none. */
   party?: string | null;
+  /** Soft skills XP (MMO Stage 6). */
+  skills?: SkillXp;
   /** A waypoint teleport (not original): arrive beside this act's crystal (waypoints.ts). */
   arrivingWaypoint?: boolean;
   /** Story progress: triggers fired and the quest book (story.ts). */
@@ -406,6 +435,8 @@ export interface PersistRecord {
   /** Forget the saved position (zone transfer: spawn at the destination's arrival point). */
   resetPosition?: boolean;
   story: StoryState;
+  /** Soft skills XP (MMO Stage 6). */
+  skills?: SkillXp;
 }
 
 export interface WorldZoneOptions {
@@ -658,6 +689,9 @@ interface Player extends ActorBase {
   unstuckTick: number;
   /** His party (MMO Stage 2; sessions.ts), null = none. */
   party: string | null;
+  /** Soft skills XP and the tick his next harvest may start (MMO Stage 6). */
+  skills: SkillXp;
+  craftReadyTick: number;
   /** Tick of his last active input (movement, attack, block, cast): kill rewards ask for one within ACTIVE_WINDOW. */
   activeTick: number;
   queue: InputQueue;
@@ -935,6 +969,8 @@ export class WorldZone {
   private readonly states = new Map<number, EntityState>();
   private nextEntityId = 1;
   private spawnIndex = 0;
+  /** Ore veins (mmoCrafting), set up on first use. */
+  private oreVeins: Map<number, { spot: OreNodeSpot; charges: number; respawnAt: number }> | null = null;
   /** This zone's dungeon (an instance "level:ca1d@crypt-3"), and its run once started. */
   private readonly dungeon: DungeonDef | null;
   private run: {
@@ -1399,6 +1435,8 @@ export class WorldZone {
       respawnSpot,
       unstuckTick: -Infinity,
       party: opts.party ?? null,
+      skills: sanitizeSkills(opts.skills),
+      craftReadyTick: 0,
       activeTick: this.tick,
       name: opts.name,
       character: createCharacter(this.mw, spawn),
@@ -1475,6 +1513,7 @@ export class WorldZone {
       },
     });
     if (opts.carried) this.restoreTimers(p, opts.carried);
+    if (this.features.mmoCrafting && this.veins.size) this.sendJson(connId, { op: SC.ORE_VEINS, d: { veins: this.veinViews() } });
     this.sendStats(p);
     this.sendInventory(p);
     this.sendJson(connId, { op: SC.QUEST_LOG, d: { log: p.story.quests } });
@@ -2281,6 +2320,133 @@ export class WorldZone {
     }
   }
 
+  // --- Soft skills (MMO Stage 6, not original; crafting.ts) ------------------------------------
+
+  /** This act's ore veins (with mmoCrafting), set up once. */
+  private get veins(): Map<number, { spot: OreNodeSpot; charges: number; respawnAt: number }> {
+    if (!this.oreVeins) {
+      this.oreVeins = new Map();
+      const act = this.act;
+      if (this.features.mmoCrafting && act) {
+        for (const spot of oreNodes(act, this.arena)) this.oreVeins.set(spot.id, { spot, charges: this.veinCharges(), respawnAt: 0 });
+      }
+    }
+    return this.oreVeins;
+  }
+
+  private veinCharges(): number {
+    return NODE_CHARGES[0] + Math.floor(this.random() * (NODE_CHARGES[1] - NODE_CHARGES[0] + 1));
+  }
+
+  private veinViews(): { id: number; kind: OreKind; at: [number, number, number]; ready: boolean }[] {
+    return [...this.veins.values()].map((v) => ({ id: v.spot.id, kind: v.spot.kind, at: [v.spot.x, v.spot.y, v.spot.z] as [number, number, number], ready: v.charges > 0 }));
+  }
+
+  private broadcastVeins(): void {
+    const d = { veins: this.veinViews() };
+    for (const p of this.players.values()) this.sendJson(p.connId, { op: SC.ORE_VEINS, d });
+  }
+
+  /** Depleted veins come back after their time (faster with more players here, 07 §4.1). */
+  private stepVeins(): void {
+    if (!this.oreVeins) return;
+    let changed = false;
+    for (const v of this.oreVeins.values()) {
+      if (v.charges > 0 || this.tick < v.respawnAt) continue;
+      v.charges = this.veinCharges();
+      changed = true;
+    }
+    if (changed) this.broadcastVeins();
+  }
+
+  private gainSkill(p: Player, skill: Skill, xp: number): void {
+    const before = skillLevel(p.skills[skill] ?? 0);
+    p.skills[skill] = (p.skills[skill] ?? 0) + xp;
+    const after = skillLevel(p.skills[skill]!);
+    p.statsDirty = true;
+    if (after > before) this.notify(p, 'level', `Your ${skill} is now level ${after}.`);
+  }
+
+  /** CS_CRAFT: mine a vein in reach, smith a recipe or salvage a piece of gear at a merchant. */
+  craft(connId: number, d: { action: 'mine' | 'smith' | 'salvage'; vein?: number; recipe?: string; slot?: number; itemId?: string }): void {
+    const p = this.players.get(connId);
+    if (!p) return;
+    if (!this.features.mmoCrafting) return this.notify(p, 'error', 'Crafting is not offered on this server.');
+    if (!alive(p) || this.inventoryBusy(p)) return;
+    if (d.action === 'mine') {
+      const v = d.vein !== undefined ? this.veins.get(d.vein) : undefined;
+      if (!v) return;
+      const at = p.character.position;
+      if (Math.hypot(at.x - v.spot.x, at.z - v.spot.z) > NODE_REACH + 0.5 || Math.abs(at.y - v.spot.y) > 2.5) return;
+      const ore = ORES[v.spot.kind];
+      if (v.charges <= 0) return this.notify(p, 'error', `The ${ore.name.toLowerCase()} is worked out for now.`);
+      if (skillLevel(p.skills.mining ?? 0) < ore.level) return this.notify(p, 'error', `Mining ${ore.level} is needed for a ${ore.name.toLowerCase()}.`);
+      if (this.tick < p.craftReadyTick) return;
+      // A harvest takes its time, with a little jitter (07 §5: a fixed-rate macro drifts).
+      p.craftReadyTick = this.tick + Math.round((HARVEST_SECONDS + (this.random() - 0.5) * 0.6) * TICK_RATE);
+      const def = this.items.get(ore.item);
+      const n = ore.min + Math.floor(this.random() * (ore.max - ore.min + 1));
+      if (!def || !this.fitsAll(p, [{ name: def.name, quantity: n, itemId: def.id }])) return this.notify(p, 'error', 'Your bag is full.');
+      this.grantItem(p, def.name, n, def.id);
+      this.gainSkill(p, 'mining', ore.xp);
+      v.charges--;
+      if (v.charges <= 0) {
+        const [lo, hi] = NODE_RESPAWN_SECONDS;
+        const base = lo + this.random() * (hi - lo);
+        v.respawnAt = this.tick + Math.round((base / Math.max(1, Math.sqrt(this.players.size / 10))) * TICK_RATE);
+        this.broadcastVeins();
+      }
+      this.inventoryChanged(p);
+      return;
+    }
+    if (!p.shop) return this.notify(p, 'error', 'Smithing and salvaging need a merchant\'s anvil: stand at a merchant.');
+    if (d.action === 'smith') {
+      const r = RECIPES.find((x) => x.id === d.recipe);
+      if (!r) return;
+      if (skillLevel(p.skills.smithing ?? 0) < r.level) return this.notify(p, 'error', `Smithing ${r.level} is needed.`);
+      const count = (id: string) => p.inventory.filter((e) => e.itemId === id).reduce((n, e) => n + (e.quantity ?? 1), 0);
+      const missing = r.inputs.find((i) => count(i.itemId) < i.count);
+      if (missing) return this.notify(p, 'error', `You need ${missing.count} × ${this.items.get(missing.itemId)?.name ?? missing.itemId}.`);
+      if (p.gold < r.gold) return this.notify(p, 'error', `The smith wants ${r.gold} gold for the forge.`);
+      const out = this.items.get(r.output.itemId);
+      if (!out) return;
+      // Room for the result once the inputs are gone: tried on a copy.
+      const trial = structuredClone(p.inventory);
+      for (const i of r.inputs) takeCount(trial, i.itemId, i.count);
+      if (addItem(trial, out.id, r.output.count, this.items) === null) return this.notify(p, 'error', 'Your bag is full.');
+      for (const i of r.inputs) takeCount(p.inventory, i.itemId, i.count);
+      p.gold -= r.gold;
+      const level = skillLevel(p.skills.smithing ?? 0);
+      // A smith's gear rolls its rarity like a find, better with his level (mmoItems).
+      const mods = this.features.mmoItems && moddable(out) ? rollMods(out, ((first) => () => (first ? ((first = false), Math.max(0, this.random() - smithRarityBonus(level))) : this.random()))(true)) : undefined;
+      this.grantItem(p, out.name, r.output.count, out.id, mods ? { mods } : undefined);
+      this.gainSkill(p, 'smithing', r.xp);
+      this.notify(p, 'loot', `You forge ${r.output.count > 1 ? `${r.output.count} × ` : ''}${out.name}.`);
+      this.inventoryChanged(p);
+      return;
+    }
+    if (d.action === 'salvage') {
+      const entry = d.slot !== undefined ? this.inventoryEntry(p, d.slot, d.itemId) : undefined;
+      const def = entry && this.items.get(entry.itemId);
+      if (!entry || !def || !moddable(def)) return;
+      const why = untradable(entry, this.items);
+      if (why) return this.notify(p, 'error', why);
+      const y = salvageYield(entry.mods, this.random());
+      const got = this.items.get(y.itemId);
+      if (!got) return;
+      p.inventory.splice(p.inventory.indexOf(entry), 1);
+      if (!this.fitsAll(p, [{ name: got.name, quantity: y.count, itemId: got.id }])) {
+        p.inventory.push(entry);
+        return this.notify(p, 'error', 'Your bag is full.');
+      }
+      this.grantItem(p, got.name, y.count, got.id);
+      this.gainSkill(p, 'salvaging', y.xp);
+      if (entry.equipped) this.applyEquipment(p);
+      this.notify(p, 'loot', `You break ${def.name} down into ${y.count} × ${got.name}.`);
+      this.inventoryChanged(p);
+    }
+  }
+
   // --- Dungeon instances (MMO Stage 5, not original; dungeons.ts) ---------------------------
 
   /** Places the boss at the act's far end: the hostile placement farthest from where the party arrives. */
@@ -2795,6 +2961,7 @@ export class WorldZone {
       selectedSpell: p.selectedSpell,
       zone: this.arena.name,
       story: cloneStoryState(p.story),
+      ...(Object.keys(p.skills).length ? { skills: { ...p.skills } } : {}),
       ...(this.takeInventoryChange(p)),
     };
   }
@@ -2836,6 +3003,7 @@ export class WorldZone {
       spells: p.spells.map((s) => ({ ...s })),
       selectedSpell: p.selectedSpell,
       story: cloneStoryState(p.story),
+      skills: { ...p.skills },
       carried: this.carriedTimers(p),
     };
     const record = this.leave(connId);
@@ -3458,6 +3626,7 @@ export class WorldZone {
       if (!this.run) this.startDungeon();
       this.stepDungeon();
     }
+    if (tick % TICK_RATE === 0) this.stepVeins();
 
     // 1. Players: at most one input per tick. No input => no movement this tick, so the
     //    authoritative state always equals "state after lastProcessedInput". Dead players
@@ -5123,6 +5292,7 @@ export class WorldZone {
         resist: p.resist.map((r, t) => r * (p.gearProtection[t] ?? 1) * this.magic.incomingMultiplier(p, t)),
         damage: [...(p.weapon.damage ?? [])],
         ...(p.story.completedAt !== undefined ? { storyComplete: true } : {}),
+        ...(this.features.mmoCrafting ? { skills: { ...p.skills } } : {}),
       },
     });
   }

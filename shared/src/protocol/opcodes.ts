@@ -37,6 +37,8 @@ export const CS = {
   TRADE: 0x1a,
   /** Auction house and mailbox (MMO Stage 4): search, list, buy, cancel, mail, claim. */
   AUCTION: 0x1b,
+  /** Soft skills (MMO Stage 6): mine a vein, smith a recipe, salvage gear. */
+  CRAFT: 0x1c,
 } as const;
 
 /** Server -> client opcodes. */
@@ -78,6 +80,8 @@ export const SC = {
   AUCTION: 0x57,
   /** A warning drawn on the floor before a boss's attack lands there (MMO Stage 5). */
   TELEGRAPH: 0x58,
+  /** The zone's ore veins and whether each can be mined (MMO Stage 6). */
+  ORE_VEINS: 0x59,
 } as const;
 
 /** Input flag bits carried in CS_PLAYER_INPUT. */

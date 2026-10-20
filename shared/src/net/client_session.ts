@@ -5,7 +5,7 @@ import { dequantizeAngle, dequantizePosition } from '../math/quantize.ts';
 import { CS, SC } from '../protocol/opcodes.ts';
 import { INPUT_PACKET_MAX_BYTES, MAX_INPUT_FRAMES, createInputFrame, encodeInput, type InputFrame } from '../protocol/binary/input.ts';
 import { decodeSnapshot, type EntityState } from '../protocol/binary/snapshot.ts';
-import type { AttackKind, ChatBroadcastMsg, CombatEventMsg, CutsceneMsg, EndingMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PartyUpdateMsg, PlayerStatsMsg, TradeUpdateMsg, AuctionMsg, TelegraphMsg, QuestLogMsg, ServerControlMsg, ShopMsg, SpellEventMsg, StorySoundMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
+import type { AttackKind, ChatBroadcastMsg, CombatEventMsg, CutsceneMsg, EndingMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PartyUpdateMsg, PlayerStatsMsg, TradeUpdateMsg, AuctionMsg, TelegraphMsg, OreVeinsMsg, QuestLogMsg, ServerControlMsg, ShopMsg, SpellEventMsg, StorySoundMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
 import type { ArenaDef } from '../arena/types.ts';
 import type { Difficulty } from '../game/ruleset.ts';
 import { createMovementWorld, disposeMovementWorld, setBrushPose, setDoorOpen, setDoorPose, type MovementWorld, type Rapier } from '../movement/physics.ts';
@@ -51,6 +51,8 @@ export interface ClientSessionEvents {
   auction?(d: AuctionMsg['d']): void;
   /** A boss's attack about to land (MMO Stage 5). */
   telegraph?(d: TelegraphMsg['d']): void;
+  /** The zone's ore veins (MMO Stage 6). */
+  oreVeins?(d: OreVeinsMsg['d']): void;
   spawn?(id: number, name: string, info: EntityInfo): void;
   stats?(stats: PlayerStats): void;
   combat?(event: CombatEvent): void;
@@ -377,6 +379,9 @@ export class ClientSession {
       case SC.TELEGRAPH:
         this.events.telegraph?.(msg.d);
         break;
+      case SC.ORE_VEINS:
+        this.events.oreVeins?.(msg.d);
+        break;
     }
   }
 
@@ -384,6 +389,12 @@ export class ClientSession {
   questLog: QuestLogMsg['d']['log'] | null = null;
 
   /** Says `text` on a chat channel (`to`: the character a private line goes to). */
+  /** A soft-skill action (MMO Stage 6): mine a vein, smith a recipe, salvage gear. */
+  craft(d: { action: 'mine' | 'smith' | 'salvage'; vein?: number; recipe?: string; slot?: number; itemId?: string }): void {
+    if (!this.connected) return;
+    this.sendJson({ op: CS.CRAFT, seq: ++this.seq, d });
+  }
+
   /** An auction house action (MMO Stage 4). */
   auction(d: { action: 'search' | 'list' | 'buy' | 'cancel' | 'mail' | 'claim'; q?: string; id?: string; slot?: number; itemId?: string; price?: number; hours?: number }): void {
     if (!this.connected) return;

@@ -189,6 +189,10 @@ export class ZoneHost {
     this.post({ t: 'deliverMail', connId, gold, items });
   }
 
+  craft(connId: number, d: { action: 'mine' | 'smith' | 'salvage'; vein?: number; recipe?: string; slot?: number; itemId?: string }): void {
+    this.post({ t: 'craft', connId, d });
+  }
+
   trade(connId: number, d: { action: string; name?: string; uids?: string[]; gold?: number }): void {
     this.post({ t: 'trade', connId, d });
   }

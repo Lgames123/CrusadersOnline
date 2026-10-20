@@ -41,6 +41,8 @@ export interface CharactersTable {
   selected_spell: string | null;
   /** Story progress, story.ts StoryState as JSON (003_story.sql). */
   story: Generated<string>;
+  /** Migration 009: soft skills XP (crafting.ts SkillXp). */
+  skills: ColumnType<unknown, string | undefined, string>;
   might: Generated<number>;
   intelligence: Generated<number>;
   endurance: Generated<number>;

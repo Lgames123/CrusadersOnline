@@ -34,3 +34,4 @@ export * from './game/waypoints.ts';
 export * from './game/rewards.ts';
 export * from './game/item_mods.ts';
 export * from './game/dungeons.ts';
+export * from './game/crafting.ts';

@@ -199,6 +199,18 @@ export const AuctionPacketSchema = z.object({
   }),
 });
 
+export const CraftPacketSchema = z.object({
+  op: z.literal(CS.CRAFT),
+  seq: z.number().int().positive(),
+  d: z.object({
+    action: z.enum(['mine', 'smith', 'salvage']),
+    vein: z.number().int().min(1).max(64).optional(),
+    recipe: z.string().min(1).max(32).optional(),
+    slot: z.number().int().min(0).max(255).optional(),
+    itemId: z.string().min(1).max(64).optional(),
+  }),
+});
+
 export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   AuthTicketPacketSchema,
   SelectCharacterPacketSchema,
@@ -225,6 +237,7 @@ export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   RefinePacketSchema,
   TradePacketSchema,
   AuctionPacketSchema,
+  CraftPacketSchema,
 ]);
 
 export type ClientControlPacket = z.infer<typeof ClientControlPacketSchema>;

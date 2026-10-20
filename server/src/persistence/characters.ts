@@ -5,6 +5,8 @@ import {
   NEW_GAME_ACT,
   decodeSpells,
   ITEM_UID,
+  sanitizeSkills,
+  type SkillXp,
   encodeSpells,
   sanitizeMods,
   sanitizeStoryState,
@@ -38,6 +40,7 @@ export interface CharacterSpawnState {
   spells: KnownSpell[];
   selectedSpell: SpellId | null;
   story: StoryState;
+  skills: SkillXp;
 }
 
 /** Live state flushed from a zone (periodic, on leave, after progress and on shutdown). */
@@ -64,6 +67,8 @@ export interface CharacterPersistRecord {
   resetPosition?: boolean;
   /** Story progress; omitted = unchanged. */
   story?: StoryState;
+  /** Soft skills XP (MMO); omitted = unchanged. */
+  skills?: SkillXp;
 }
 
 export class CharacterRepository {
@@ -77,7 +82,7 @@ export class CharacterRepository {
   async loadOwned(accountId: string, characterId: string): Promise<CharacterSpawnState | null> {
     const r = await this.db
       .selectFrom('characters')
-      .select(['id', 'name', 'zone_id', 'pos_x', 'pos_y', 'pos_z', 'yaw', 'level', 'experience_points', 'gold', 'current_hp', 'current_mana', 'spells', 'selected_spell', 'story'])
+      .select(['id', 'name', 'zone_id', 'pos_x', 'pos_y', 'pos_z', 'yaw', 'level', 'experience_points', 'gold', 'current_hp', 'current_mana', 'spells', 'selected_spell', 'story', 'skills'])
       .where('id', '=', characterId)
       .where('account_id', '=', accountId)
       .executeTakeFirst();
@@ -103,6 +108,7 @@ export class CharacterRepository {
       spells: decodeSpells(r.spells),
       selectedSpell: decodeSpells(r.selected_spell ? `${r.selected_spell}:1` : '')[0]?.spell ?? null,
       story: parseStory(r.story),
+      skills: sanitizeSkills(typeof r.skills === 'string' ? safeJson(r.skills) : r.skills),
       inventory: items.map((i) => {
         const mods = sanitizeMods(typeof i.mods === 'string' ? safeJson(i.mods) : i.mods);
         return { slot: i.slot_index, itemId: i.item_id, equipped: i.is_equipped, uid: i.id, ...(i.grid_x !== null && i.grid_y !== null && !i.is_equipped ? { x: i.grid_x, y: i.grid_y } : {}), ...(i.quantity > 1 ? { quantity: i.quantity } : {}), ...(mods ? { mods } : {}) };
@@ -211,6 +217,7 @@ export class CharacterRepository {
             spells: encodeSpells(r.spells),
             selected_spell: r.selectedSpell,
             ...(r.story ? { story: JSON.stringify(r.story) } : {}),
+            ...(r.skills ? { skills: JSON.stringify(r.skills) } : {}),
             last_saved_at: now,
           })
           .where('id', '=', r.characterId)

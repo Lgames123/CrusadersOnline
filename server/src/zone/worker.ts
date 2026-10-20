@@ -170,6 +170,10 @@ port.on('message', (msg: ToZone) => {
       zone.deliverMail(msg.connId, msg.gold, msg.items);
       flush();
       break;
+    case 'craft':
+      zone.craft(msg.connId, msg.d);
+      flush();
+      break;
     case 'trade':
       zone.trade(msg.connId, msg.d);
       flush();

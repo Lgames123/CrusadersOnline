@@ -28,6 +28,7 @@ export type ToZone =
   | { t: 'party'; connId: number; party: string | null }
   | { t: 'refine'; connId: number; slot: number; itemId?: string }
   | { t: 'trade'; connId: number; d: { action: string; name?: string; uids?: string[]; gold?: number } }
+  | { t: 'craft'; connId: number; d: { action: 'mine' | 'smith' | 'salvage'; vein?: number; recipe?: string; slot?: number; itemId?: string } }
   | { t: 'auctionEscrow'; connId: number; slot: number; itemId?: string; price: number; hours: number }
   | { t: 'auctionCharge'; connId: number; amount: number; ref: string }
   | { t: 'deliverMail'; connId: number; gold: number; items: EscrowItem[] }
