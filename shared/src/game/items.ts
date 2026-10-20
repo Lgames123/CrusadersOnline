@@ -2,6 +2,7 @@ import { DAMAGE_TYPES, type Attributes } from './original_stats.ts';
 import { damageVector, type DamageType, type DamageVector } from './ruleset.ts';
 import { SPELL_BOOK_PARAMS, type SpellId } from './spells.ts';
 import { canPlaceGrid, firstFreeGridPosition, INVENTORY_GRID, layoutInventoryGrid } from './inventory_grid.ts';
+import { withMods } from './item_mods.ts';
 
 /**
  * Equipment items. The built-in catalog holds the numbers of the items the slice uses, recorded
@@ -9,7 +10,7 @@ import { canPlaceGrid, firstFreeGridPosition, INVENTORY_GRID, layoutInventoryGri
  * `rules/items.json` (converter/src/formats/items_ctx.ts) can replace it with the full table via
  * catalogFromItemRules().
  */
-export type ItemType = 'weapon' | 'shield' | 'armor' | 'potion' | 'spellbook' | 'key' | AccessoryType;
+export type ItemType = 'weapon' | 'shield' | 'armor' | 'potion' | 'spellbook' | 'key' | 'material' | AccessoryType;
 
 /**
  * Worn pieces besides weapon, shield and armour. items.ctx has RING and BOOTS (rings with
@@ -40,6 +41,9 @@ export interface ItemDef {
   protection?: DamageVector;
   /** Worn: added to the attributes (a ring's `Equip BOOST_ATTRIBUTE`, the placeholder accessories). */
   attributes?: Partial<Attributes>;
+  /** Worn, with MMO mods (item_mods.ts): extra maximum hit points / mana. */
+  bonusHp?: number;
+  bonusMana?: number;
   /** Potions with `Use HEAL`: hit points restored (items.ctx `UseParameters`). */
   heal?: number;
   /** Potions with `Use RESTORE_MANA`: mana restored (items.ctx `UseParameters`). */
@@ -164,6 +168,19 @@ const accessory = (name: string, type: AccessoryType, width: number, height: num
 const key = (name: string, price: number, model?: number, keyItem = false): ItemDef =>
   ({ id: itemSlug(name), name, type: 'key', width: 1, height: 1, price, ...(model !== undefined ? { model } : {}), ...(keyItem ? { keyItem } : {}) });
 
+/**
+ * Refinement materials (MMO): new catalogue items, stackable, drawn with existing models. They
+ * drop from creatures with `mmoItems` on (item_mods.ts MATERIAL_DROPS).
+ */
+export const MATERIAL_ITEMS: readonly ItemDef[] = [
+  { id: 'iron_scrap', name: 'Iron Scrap', type: 'material', width: 1, height: 1, price: 10, stackable: true, model: 105 },
+  { id: 'polishing_stone', name: 'Polishing Stone', type: 'material', width: 1, height: 1, price: 25, stackable: true, model: 110 },
+  { id: 'mithril_crystal', name: 'Mithril Crystal', type: 'material', width: 1, height: 1, price: 60, stackable: true, model: 69 },
+  { id: 'enchanted_dust', name: 'Enchanted Dust', type: 'material', width: 1, height: 1, price: 120, stackable: true, model: 141, texture: 1 },
+  { id: 'celestial_gem', name: 'Celestial Gem', type: 'material', width: 1, height: 1, price: 900, stackable: true, model: 198 },
+  { id: 'divine_catalyst', name: 'Divine Catalyst', type: 'material', width: 1, height: 1, price: 2500, stackable: true, model: 138, texture: 3 },
+];
+
 export const BUILTIN_ITEMS: ItemCatalog = new Map(
   [
     weapon('Axe', { SLASH: 5, BASH: 5 }, 1.1, 100, 71),
@@ -194,6 +211,7 @@ export const BUILTIN_ITEMS: ItemCatalog = new Map(
     accessory('Leather Gloves', 'gloves', 2, 2, 50, { speed: 1, might: 1 }),
     accessory('Leather Belt', 'belt', 2, 1, 50, { speed: 1, might: 1 }),
     accessory('Leather Boots', 'boots', 2, 2, 50, { speed: 1, might: 1 }),
+    ...MATERIAL_ITEMS,
   ].map((d) => [d.id, d]),
 );
 
@@ -451,6 +469,9 @@ export interface Equipment {
   protection: DamageVector;
   /** Every worn item's attribute bonus, summed. */
   attributes: Partial<Attributes>;
+  /** MMO mods (item_mods.ts): extra maximum hit points and mana from worn items. */
+  bonusHp: number;
+  bonusMana: number;
 }
 
 /** Removes one item from the stack in `slot` (the entry goes away at zero). Returns its definition. */
@@ -467,11 +488,15 @@ export function takeOne(inv: InventoryEntry[], slot: number, catalog: ItemCatalo
 }
 
 export function equipmentOf(inv: readonly InventoryEntry[], catalog: ItemCatalog): Equipment {
-  const eq: Equipment = { weapon: UNARMED, shield: null, armor: null, accessories: [], protection: damageVector({}, 1), attributes: {} };
+  const eq: Equipment = { weapon: UNARMED, shield: null, armor: null, accessories: [], protection: damageVector({}, 1), attributes: {}, bonusHp: 0, bonusMana: 0 };
   for (const e of inv) {
     if (!e.equipped) continue;
-    const def = catalog.get(e.itemId);
-    if (!def) continue;
+    const base = catalog.get(e.itemId);
+    if (!base) continue;
+    // Its own rarity, affixes and refinement (MMO; the plain item without mods).
+    const def = withMods(base, e.mods);
+    eq.bonusHp += def.bonusHp ?? 0;
+    eq.bonusMana += def.bonusMana ?? 0;
     if (def.type === 'weapon') eq.weapon = def;
     else if (def.type === 'shield' || def.type === 'armor') eq[def.type] = def;
     else if (isAccessory(def.type)) eq.accessories.push(def);

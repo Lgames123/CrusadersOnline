@@ -1,4 +1,4 @@
-import { BUILTIN_SPELLS, canPlaceGrid, DAMAGE_TYPES, equipCapacity, firstFreeGridPosition, isEquippable, INVENTORY_GRID, layoutItemViews, SPELL_NAMES, type GridPlacement, type Inventory, type InventoryItemView, type PlayerStats, type ShopItemView, type SpellId } from '@crusaders/shared';
+import { affixLines, modsTitle, moddable, nextRefine, refineChance, BUILTIN_ITEMS, BUILTIN_SPELLS, canPlaceGrid, DAMAGE_TYPES, equipCapacity, firstFreeGridPosition, isEquippable, INVENTORY_GRID, layoutItemViews, SPELL_NAMES, type GridPlacement, type Inventory, type InventoryItemView, type PlayerStats, type ShopItemView, type SpellId } from '@crusaders/shared';
 import { HeldItemPreview } from './held_item_preview.ts';
 import { ItemThumbnails } from './item_thumbnails.ts';
 import { itemPreviewModelFile } from '../assets/item_models.ts';
@@ -17,16 +17,16 @@ export interface GroundItemView {
 
 type ItemType = InventoryItemView['type'];
 /** A paper-doll slot: the item type it takes, the two ring slots apart. */
-type EquipSlotKind = Exclude<ItemType, 'potion' | 'spellbook' | 'key' | 'ring'> | 'ring1' | 'ring2';
+type EquipSlotKind = Exclude<ItemType, 'potion' | 'spellbook' | 'key' | 'ring' | 'material'> | 'ring1' | 'ring2';
 
 const ITEM_MARK: Record<ItemType, string> = {
   weapon: '⚔', shield: '◈', armor: '♜', potion: '⚗', spellbook: '✦', key: '⚿',
-  ring: '◯', amulet: '❖', helm: '⛑', gloves: '✋', belt: '▬', boots: '⛸',
+  ring: '◯', amulet: '❖', helm: '⛑', gloves: '✋', belt: '▬', boots: '⛸', material: '◆',
 };
 
 const TYPE_LABEL: Record<ItemType, string> = {
   weapon: 'Weapon', shield: 'Shield', armor: 'Armour', potion: 'Potion', spellbook: 'Spell book', key: 'Quest item',
-  ring: 'Ring', amulet: 'Amulet', helm: 'Helm', gloves: 'Gloves', belt: 'Belt', boots: 'Boots',
+  ring: 'Ring', amulet: 'Amulet', helm: 'Helm', gloves: 'Gloves', belt: 'Belt', boots: 'Boots', material: 'Material',
 };
 
 const ATTRIBUTE_LABEL: Record<string, string> = { might: 'Might', intellect: 'Intellect', endurance: 'Endurance', speed: 'Speed' };
@@ -151,6 +151,9 @@ export class InventoryPanels {
   private gold = 0;
 
   onEquip: (slot: number, itemId: string, equip: boolean, to?: { x: number; y: number }) => void = () => {};
+  /** MMO items: refinement offered (the server's `mmoItems`), and one attempt asked (Shift-click at a merchant). */
+  refining = false;
+  onRefine: (slot: number, itemId: string) => void = () => {};
   onUse: (slot: number, itemId: string) => void = () => {};
   onMove: (slot: number, itemId: string, x: number, y: number) => void = () => {};
   onMerge: (fromSlot: number, toSlot: number) => void = () => {};
@@ -450,15 +453,21 @@ export class InventoryPanels {
     for (const [k, v] of Object.entries(item.attributes ?? {})) if (v) lines.push(`${v > 0 ? '+' : ''}${v} ${ATTRIBUTE_LABEL[k] ?? k}`);
     if (item.heal) lines.push(`Restores ${item.heal} health`);
     for (const e of item.effects ?? []) lines.push(e);
+    for (const a of affixLines(item.mods)) if (!/damage$/.test(a) && !/^\+\d+ (Might|Intelligence|Endurance|Speed)$/.test(a)) lines.push(a);
+    if (item.mods?.failstacks) lines.push(`Failed refinements: ${item.mods.failstacks}`);
     if (item.quantity && item.quantity > 1) lines.push(`Quantity: ${item.quantity}`);
+    const refine = this.shop && this.refining && moddable({ type: item.type }) ? nextRefine(item.mods?.plus ?? 0) : undefined;
+    if (refine) lines.push(`Refine to +${(item.mods?.plus ?? 0) + 1}: ${refine.gold.toLocaleString('en-US')} gold, ${refine.count} × ${BUILTIN_ITEMS.get(refine.material)?.name ?? refine.material}, ${Math.round(refineChance(item.mods?.plus ?? 0, item.mods?.failstacks ?? 0) * 100)} %`);
     if (this.shop) lines.push(item.value ? `Sells for ${item.value.toLocaleString('en-US')} gold` : 'The merchant will not take this');
     const hints = [
       this.shop && item.value ? 'Right-click to sell' : '',
+      refine ? 'Shift-click to refine' : '',
       isEquippable(item.type) ? (item.equipped ? 'Click to unequip' : 'Click to equip') : item.type === 'potion' ? 'Click to drink' : '',
       !this.shop && item.quantity && item.quantity > 1 ? 'Right-click to split' : '',
       'Drag outside to drop',
     ].filter(Boolean);
-    return `<strong class="tt-name tt-${item.type}">${escape(item.name)}</strong>
+    const named = modsTitle(item.name, item.mods);
+    return `<strong class="tt-name tt-${item.type}"${named.color ? ` style="color:${named.color}"` : ''}>${escape(named.title)}</strong>
       <span class="tt-type">${TYPE_LABEL[item.type]} · ${width}×${height}${item.equipped ? ' · equipped' : ''}</span>
       ${lines.map((l) => `<span>${escape(l)}</span>`).join('')}
       <small>${hints.join(' · ')}</small>`;
@@ -580,6 +589,11 @@ export class InventoryPanels {
     const el = target.closest<HTMLElement>('.inv-item');
     const item = el && this.itemBySlot(Number(el.dataset['slot']));
     if (!item) return;
+    // MMO items: Shift-click at a merchant refines it.
+    if (e.shiftKey && this.shop && this.refining && moddable({ type: item.type })) {
+      this.request(() => this.onRefine(item.slot, item.itemId));
+      return;
+    }
     if (item.type === 'potion') this.request(() => this.onUse(item.slot, item.itemId));
     else if (!isEquippable(item.type)) return;
     else if (item.equipped) {

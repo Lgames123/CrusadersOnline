@@ -32,3 +32,4 @@ export * from './game/ending.ts';
 export * from './game/sequence.ts';
 export * from './game/waypoints.ts';
 export * from './game/rewards.ts';
+export * from './game/item_mods.ts';

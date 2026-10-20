@@ -108,6 +108,7 @@ import { QuestBook, loadGameStrings } from './ui/quest_book.ts';
 import { ClassicText } from './ui/classic_text.ts';
 import { WaypointMap } from './ui/waypoint_map.ts';
 import { PartyFrame } from './ui/party_frame.ts';
+import { WeaponGlow } from './engine/weapon_glow.ts';
 import { CRYSTAL_LIGHT_COLOR, WaypointCrystal } from './engine/waypoint_crystal.ts';
 import { CharacterSheet } from './ui/character_sheet.ts';
 import { Cutscene, type Puppet } from './story/cutscene.ts';
@@ -223,6 +224,8 @@ async function main(): Promise<void> {
   const charSheet = new CharacterSheet(document.getElementById('char-sheet')!, assetManifest?.textures ?? {});
   const waypointMap = new WaypointMap();
   const partyFrame = new PartyFrame();
+  /** The local player's refined weapon glows (MMO items). */
+  const weaponGlow = new WeaponGlow();
   // This act's waypoint crystal (SC_WORLD_ENTER; not original): shown once the story is finished.
   let crystalAt: { x: number; y: number; z: number } | null = null;
   let crystal: WaypointCrystal | null = null;
@@ -760,6 +763,7 @@ async function main(): Promise<void> {
           enter: (d) => {
             errorBox.textContent = '';
             crystalAt = d.waypoint ?? null;
+            inventoryPanel.refining = d.features?.mmoItems === true;
             setWaypointMapOpen(false);
             refreshCrystal();
             enterYaw = d.yaw ?? null;
@@ -1620,6 +1624,7 @@ async function main(): Promise<void> {
   inventoryPanel.onBuy = (shop, index, itemId) => session?.shopBuy(shop, index, itemId);
   inventoryPanel.onSell = (shop, slot, itemId) => session?.shopSell(shop, slot, itemId);
   inventoryPanel.onShopClosed = () => (shopAt = null);
+  inventoryPanel.onRefine = (slot, itemId) => session?.refine(slot, itemId);
   inventoryPanel.onPickup = (object) => session?.interact(object);
   inventoryPanel.onHotbar = (slot, item) => hotbar.set(slot, hotbarItemEntry(item));
   inventoryPanel.onSpellDrag = (spell, e) => hotbar.dragFrom({ kind: 'spell', spell }, e);
@@ -1788,6 +1793,7 @@ async function main(): Promise<void> {
       local.avatar.update(sceneDt);
       if (cutscene?.finished) endCutscene();
     } else local.render(acc / TICK_MS, dt);
+    weaponGlow.update(local.avatar.object, session?.inventory?.items.find((i) => i.equipped && i.type === 'weapon')?.mods?.plus ?? 0, dt);
     if (live) {
       partyFrame.update(live.arenaName, (name) => {
         const wanted = name.toLowerCase();

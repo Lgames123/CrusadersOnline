@@ -1,6 +1,6 @@
 import { DAMAGE_TYPES, type Inventory, type InventoryItemView } from '@crusaders/shared';
 
-const SLOT_LABEL: Record<InventoryItemView['type'], string> = { weapon: 'Weapon', shield: 'Shield', armor: 'Armour', potion: 'Potion', spellbook: 'Spell book', key: 'Key', ring: 'Ring', amulet: 'Amulet', helm: 'Helm', gloves: 'Gloves', belt: 'Belt', boots: 'Boots' };
+const SLOT_LABEL: Record<InventoryItemView['type'], string> = { weapon: 'Weapon', shield: 'Shield', armor: 'Armour', potion: 'Potion', spellbook: 'Spell book', key: 'Key', ring: 'Ring', amulet: 'Amulet', helm: 'Helm', gloves: 'Gloves', belt: 'Belt', boots: 'Boots', material: 'Material' };
 
 function describe(item: InventoryItemView): string {
   const parts: string[] = [];

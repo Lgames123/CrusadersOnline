@@ -168,6 +168,12 @@ export const PartyPacketSchema = z.object({
   }),
 });
 
+export const RefinePacketSchema = z.object({
+  op: z.literal(CS.REFINE),
+  seq: z.number().int().positive(),
+  d: z.object({ slot: z.number().int().min(0).max(255), itemId: z.string().min(1).max(64).optional() }),
+});
+
 export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   AuthTicketPacketSchema,
   SelectCharacterPacketSchema,
@@ -191,6 +197,7 @@ export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   UnstuckPacketSchema,
   WaypointTravelPacketSchema,
   PartyPacketSchema,
+  RefinePacketSchema,
 ]);
 
 export type ClientControlPacket = z.infer<typeof ClientControlPacketSchema>;

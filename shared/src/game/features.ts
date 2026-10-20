@@ -23,12 +23,18 @@ export interface GameplayFeatures {
    * (0x42AFC0) lets a sideways key override forward / back: a diagonal is a sidestep.
    */
   diagonalMoves: boolean;
+  /**
+   * MMO items (docs/game-design/mmo/03, 04): rarity and affixes rolled on equipment a player
+   * gets, refinement materials dropped by creatures, refinement +1..+10 at merchants.
+   */
+  mmoItems: boolean;
 }
 
 export const ORIGINAL_FEATURES: Readonly<GameplayFeatures> = {
   reactiveBlock: false,
   sideSwingRetrigger: false,
   diagonalMoves: false,
+  mmoItems: false,
 };
 
 export type FeatureName = keyof GameplayFeatures;

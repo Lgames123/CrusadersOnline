@@ -192,6 +192,13 @@ import {
   MOB_NEAR_SENSE_RANGE,
   MOB_TOUCH_SENSE_RANGE,
   KILL_SHARE,
+  MATERIAL_DROPS,
+  rollMods,
+  withMods,
+  nextRefine,
+  refineOnce,
+  refineChance,
+  moddable,
   shareKill,
   type KillCandidate,
   type KillShare,
@@ -674,6 +681,9 @@ interface Player extends ActorBase {
   /** Everything worn: damage-taken multipliers (armour, rings) and attribute bonus (rings, accessories). */
   gearProtection: DamageVector;
   gearAttributes: Partial<Attributes>;
+  /** MMO mods: extra maximum hit points and mana from worn items. */
+  gearHp: number;
+  gearMana: number;
   damageMultiplier: number;
   shield: ItemDef | null;
   /** Portals whose trigger the player is standing in (fires on entry only). */
@@ -1061,8 +1071,8 @@ export class WorldZone {
    */
   private refreshDerived(p: Player): void {
     const a = this.effectiveAttributesOf(p);
-    p.maxHp = playerMaxHp(a, p.level);
-    p.maxMana = originalMaxMana(a, p.level);
+    p.maxHp = playerMaxHp(a, p.level) + p.gearHp;
+    p.maxMana = originalMaxMana(a, p.level) + p.gearMana;
     p.damageMultiplier = originalDamageMultiplier(a, p.level);
     p.baseClipRate = originalSpeedMultiplier(a, p.level);
     p.moveStats = { ...p.moveStats, clipRate: p.baseClipRate * this.playerRate(p) };
@@ -1327,9 +1337,9 @@ export class WorldZone {
     const inventory = saved.length > 0 ? saved : startingInventory();
     const eq = equipmentOf(inventory, this.items);
     const worn = effectiveAttributes(rules.attributes, eq.attributes);
-    const maxHp = playerMaxHp(worn, level);
+    const maxHp = playerMaxHp(worn, level) + eq.bonusHp;
     const hp = opts.hp !== undefined && opts.hp > 0 ? Math.min(opts.hp, maxHp) : maxHp;
-    const maxMana = originalMaxMana(worn, level);
+    const maxMana = originalMaxMana(worn, level) + eq.bonusMana;
     const spells = (opts.spells ?? []).map((s) => ({ ...s }));
     // Known from the start (0x004BC980); characters saved without it get it too.
     for (const s of [...STARTING_SPELLS].reverse()) if (!spells.some((k) => k.spell === s.spell)) spells.unshift({ ...s });
@@ -1389,6 +1399,8 @@ export class WorldZone {
       armor: eq.armor,
       gearProtection: eq.protection,
       gearAttributes: eq.attributes,
+      gearHp: eq.bonusHp,
+      gearMana: eq.bonusMana,
       damageMultiplier: originalDamageMultiplier(worn, level),
       hitUntil: 0,
       shield: eq.shield,
@@ -1656,11 +1668,15 @@ export class WorldZone {
       while (added < n) {
         const slot = addItem(p.inventory, def.id, 1, this.items);
         if (slot === null) break;
-        // One instance keeps its identity and mods (a dropped item picked up again, a rolled drop).
-        const entry = instance && added === 0 ? p.inventory.find((e) => e.slot === slot) : undefined;
-        if (entry) {
-          if (instance!.uid && !p.inventory.some((e) => e.uid === instance!.uid)) entry.uid = instance!.uid;
-          if (instance!.mods) entry.mods = structuredClone(instance!.mods);
+        const entry = p.inventory.find((e) => e.slot === slot);
+        // One instance keeps its identity and mods (a dropped item picked up again).
+        if (entry && instance && added === 0) {
+          if (instance.uid && !p.inventory.some((e) => e.uid === instance.uid)) entry.uid = instance.uid;
+          if (instance.mods) entry.mods = structuredClone(instance.mods);
+        } else if (entry && this.features.mmoItems) {
+          // MMO items: a new piece of equipment rolls its rarity and affixes (item_mods.ts).
+          const mods = rollMods(def, this.random);
+          if (mods) entry.mods = mods;
         }
         added++;
       }
@@ -2069,6 +2085,44 @@ export class WorldZone {
     return entry && (itemId === undefined || entry.itemId === itemId) ? entry : undefined;
   }
 
+  /**
+   * CS_REFINE (MMO items, item_mods.ts): one refinement attempt on a piece of gear, at a merchant
+   * (a shop open). Gold and materials go either way; a failure only adds a failstack.
+   */
+  refine(connId: number, slot: number, itemId?: string): void {
+    const p = this.players.get(connId);
+    if (!p) return;
+    if (!this.features.mmoItems) return this.notify(p, 'error', 'Refinement is not offered on this server.');
+    if (!p.shop) return this.notify(p, 'error', 'Refine your gear at a merchant.');
+    const entry = this.inventoryBusy(p) ? undefined : this.inventoryEntry(p, slot, itemId);
+    const def = entry && this.items.get(entry.itemId);
+    if (!entry || !def || !moddable(def)) return this.sendInventory(p);
+    const next = nextRefine(entry.mods?.plus ?? 0);
+    if (!next) return this.notify(p, 'error', `${def.name} cannot be refined further.`);
+    const have = p.inventory.filter((e) => e.itemId === next.material).reduce((n, e) => n + (e.quantity ?? 1), 0);
+    const material = this.items.get(next.material)?.name ?? next.material;
+    if (p.gold < next.gold) return this.notify(p, 'error', `Refining needs ${next.gold} gold.`);
+    if (have < next.count) return this.notify(p, 'error', `Refining needs ${next.count} × ${material} (you have ${have}).`);
+    p.gold -= next.gold;
+    let left = next.count;
+    for (const e of [...p.inventory].filter((x) => x.itemId === next.material).sort((a, b) => (a.quantity ?? 1) - (b.quantity ?? 1))) {
+      const take = Math.min(left, e.quantity ?? 1);
+      left -= take;
+      if ((e.quantity ?? 1) - take <= 0) p.inventory.splice(p.inventory.indexOf(e), 1);
+      else e.quantity = (e.quantity ?? 1) - take;
+      if (left <= 0) break;
+    }
+    const chance = refineChance(entry.mods?.plus ?? 0, entry.mods?.failstacks ?? 0);
+    const r = refineOnce(entry.mods, this.random());
+    entry.mods = r.mods;
+    if (entry.equipped) this.applyEquipment(p);
+    p.statsDirty = true;
+    this.inventoryChanged(p);
+    this.notify(p, r.success ? 'loot' : 'error', r.success
+      ? `${def.name} is now +${r.mods.plus}.`
+      : `The refinement fails (${Math.round(chance * 100)} %). ${def.name} stays +${r.mods.plus ?? 0}; next try ${Math.round(refineChance(r.mods.plus ?? 0, r.mods.failstacks ?? 0) * 100)} %.`);
+  }
+
   /** A change that went through: the client's copy and the save follow. */
   private inventoryChanged(p: Player): void {
     p.inventoryDirty = true;
@@ -2217,6 +2271,8 @@ export class WorldZone {
     p.armor = eq.armor;
     p.gearProtection = eq.protection;
     p.gearAttributes = eq.attributes;
+    p.gearHp = eq.bonusHp;
+    p.gearMana = eq.bonusMana;
     if (!p.shield) p.blocking = false;
     this.refreshDerived(p);
   }
@@ -2256,7 +2312,7 @@ export class WorldZone {
       if (!def) continue;
       const value = merchantBuys(def) ? tradePrice(def, e.quantity ?? 1) : 0;
       items.push({
-        ...this.itemFacts(def),
+        ...this.itemFacts(withMods(def, e.mods)),
         itemId: e.itemId,
         slot: e.slot,
         equipped: e.equipped,
@@ -4553,6 +4609,11 @@ export class WorldZone {
         const def = this.random() < Math.min(1, drop.chance * r.drops) ? this.items.get(drop.itemId) : undefined;
         if (def) grants.push({ name: def.name, quantity: (drop as { quantity?: number }).quantity ?? 1, itemId: def.id });
       }
+    }
+    // MMO items: refinement materials, a roll each for every player sharing the kill.
+    if (this.features.mmoItems) {
+      grants = [...grants];
+      for (const m of MATERIAL_DROPS) if (this.random() < Math.min(1, m.chance * r.drops)) grants.push({ name: this.items.get(m.itemId)?.name ?? m.itemId, quantity: 1, itemId: m.itemId });
     }
     let gold = 0;
     const loot: { def: ItemDef; quantity: number }[] = [];

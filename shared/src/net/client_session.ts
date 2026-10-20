@@ -369,6 +369,12 @@ export class ClientSession {
   questLog: QuestLogMsg['d']['log'] | null = null;
 
   /** Says `text` on a chat channel (`to`: the character a private line goes to). */
+  /** One refinement attempt on the gear in `slot` (MMO items; at a merchant). */
+  refine(slot: number, itemId?: string): void {
+    if (!this.connected) return;
+    this.sendJson({ op: CS.REFINE, seq: ++this.seq, d: { slot, ...(itemId ? { itemId } : {}) } });
+  }
+
   /** A party action (MMO Stage 2): invite / kick / promote name a character. */
   party(action: 'invite' | 'accept' | 'decline' | 'leave' | 'kick' | 'promote', name?: string): void {
     if (!this.connected) return;

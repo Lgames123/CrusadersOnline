@@ -31,6 +31,8 @@ export const CS = {
   WAYPOINT_TRAVEL: 0x17,
   /** Party actions (MMO Stage 2): invite, accept, decline, leave, kick, promote. */
   PARTY: 0x18,
+  /** One refinement attempt on a piece of gear at a merchant (MMO items). */
+  REFINE: 0x19,
 } as const;
 
 /** Server -> client opcodes. */

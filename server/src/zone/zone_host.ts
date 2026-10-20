@@ -169,6 +169,10 @@ export class ZoneHost {
     this.post({ t: 'unstuck', connId });
   }
 
+  refine(connId: number, slot: number, itemId?: string): void {
+    this.post({ t: 'refine', connId, slot, ...(itemId ? { itemId } : {}) });
+  }
+
   setParty(connId: number, party: string | null): void {
     this.post({ t: 'party', connId, party });
   }

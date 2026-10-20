@@ -26,6 +26,7 @@ export type ToZone =
   | { t: 'unstuck'; connId: number }
   | { t: 'waypoint'; connId: number; act: string }
   | { t: 'party'; connId: number; party: string | null }
+  | { t: 'refine'; connId: number; slot: number; itemId?: string }
   /** Remove the player for a zone transfer; answered with 'transferred'. */
   | { t: 'transfer'; connId: number }
   /** Admin panel: event rates for every zone. */

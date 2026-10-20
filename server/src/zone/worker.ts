@@ -151,6 +151,10 @@ port.on('message', (msg: ToZone) => {
     case 'party':
       zone.setParty(msg.connId, msg.party);
       break;
+    case 'refine':
+      zone.refine(msg.connId, msg.slot, msg.itemId);
+      flush();
+      break;
     case 'waypoint':
       zone.waypointTravel(msg.connId, msg.act);
       flush();

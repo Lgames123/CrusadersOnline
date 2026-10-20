@@ -371,6 +371,9 @@ export class SessionManager implements TransportHandlers {
       case CS.UNSTUCK:
         if (s.state === 'in_world') this.zoneOf(s)?.unstuck(conn.id);
         return;
+      case CS.REFINE:
+        if (s.state === 'in_world') this.zoneOf(s)?.refine(conn.id, msg.d.slot, msg.d.itemId);
+        return;
       case CS.PARTY:
         if (s.state === 'in_world' || s.state === 'zoning') this.partyAction(s, msg.d.action, msg.d.name);
         return;
