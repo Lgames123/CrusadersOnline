@@ -15,9 +15,9 @@ import { BoomerVisuals } from './boomer_visuals.ts';
  * of timed effects on characters. Explosions, slow bursts and ice storms have no model in the
  * original (their objects carry none): only their effects show.
  *
- * Stand-ins (not decoded): soul drinker's line, snap freeze's flying glow, and the timed effects
- * as a tinted shell round the body (the original swaps the model's look: frozen flag 4 + model
- * +0x54, stone skin texture variants 6 / 8 / 10).
+ * Soul drinker and snap freeze objects draw nothing of their own (pool types 7 / 4 have no
+ * render component): only their effects show. The energy's path along the drain is a reading,
+ * not traced (who spawns SOULDRINKER_TARGET / CASTER / ENERGY is not found).
  */
 
 type V3 = [number, number, number];
@@ -60,8 +60,10 @@ const PROJECTILE_LOOK: Partial<Record<SpellId, { carried: string | null; core: n
   // The fire ball and slow objects draw nothing of their own: their carried effect is the look.
   fireball: { carried: 'FIREBALL_PROJ', core: null, light: 0xff8a30 },
   slow: { carried: 'SLOW_PROJ', core: null, light: 0x9060ff },
-  // Stand-in: snap freeze's flying look is not decoded (its object has component 0x004C1000).
-  freeze: { carried: null, core: 0xa8e0ff, light: 0x80c8ff },
+  // Snap freeze flies unseen: its object (pool type 4, factory 0x0043EC80) has no render
+  // component and carries no effect; it shows SNAPFREEZE_TARGET where it ends (0x004C10D0) and
+  // SNAPFREEZE_FIZZLE on the level (0x004C12E0). Its light is the enhanced-lighting option's.
+  freeze: { carried: null, core: null, light: 0x80c8ff },
 };
 
 /**
@@ -549,6 +551,9 @@ export class SpellVisuals {
     if (old) return;
     const geo = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
     const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xd04060, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }));
+    // Only the segment the energy flows along: the soul drinker object (pool type 7, factory
+    // 0x0043F700) has no render component, so nothing draws the line itself.
+    line.visible = false;
     this.scene.add(line);
     this.drains.set(d.id, { from: d.from, to: d.to, level: d.level, left: d.seconds, spawnIn: 0, line });
   }
