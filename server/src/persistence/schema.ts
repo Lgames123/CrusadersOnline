@@ -94,6 +94,50 @@ export interface AdminActionsTable {
   detail: string | null;
 }
 
+/** Migration 008: BIGINT columns come back as strings from pg, numbers from PGlite. */
+type BigIntColumn = ColumnType<string | number, number, number>;
+
+export interface AuctionListingsTable {
+  id: Generated<string>;
+  seller_character_id: string;
+  seller_name: string;
+  item_id: string;
+  item_uid: string | null;
+  quantity: Generated<number>;
+  mods: unknown | null;
+  price: BigIntColumn;
+  deposit: BigIntColumn;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  status: Generated<'open' | 'sold' | 'expired' | 'cancelled'>;
+  buyer_character_id: string | null;
+}
+
+export interface MailboxTable {
+  id: Generated<string>;
+  character_id: string;
+  sender: Generated<string>;
+  subject: string;
+  gold: ColumnType<string | number, number | undefined, number>;
+  item_id: string | null;
+  item_uid: string | null;
+  quantity: Generated<number>;
+  mods: unknown | null;
+  created_at: Generated<Timestamp>;
+}
+
+export interface EconomyAuditTable {
+  id: Generated<string>;
+  kind: string;
+  character_id: string | null;
+  other_character_id: string | null;
+  gold: ColumnType<string | number, number | undefined, number>;
+  item_id: string | null;
+  item_uid: string | null;
+  detail: ColumnType<unknown, string | undefined, string>;
+  created_at: Generated<Timestamp>;
+}
+
 export interface DB {
   accounts: AccountsTable;
   sessions: SessionsTable;
@@ -101,4 +145,7 @@ export interface DB {
   inventory_items: InventoryItemsTable;
   admin_events: AdminEventsTable;
   admin_actions: AdminActionsTable;
+  auction_listings: AuctionListingsTable;
+  mailbox: MailboxTable;
+  economy_audit: EconomyAuditTable;
 }

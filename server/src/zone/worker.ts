@@ -59,6 +59,9 @@ const zone = new WorldZone(rapier, zoneName, loadArena(arenaName), {
   portal(connId, target, keep, via, waypoint) {
     post({ t: 'portal', connId, target, ...(keep ? { keep } : {}), ...(via ? { via } : {}), ...(waypoint ? { waypoint } : {}) });
   },
+  economy(event) {
+    post({ t: 'economy', event });
+  },
   loot(event) {
     post({ t: 'loot', event });
   },
@@ -150,6 +153,18 @@ port.on('message', (msg: ToZone) => {
       break;
     case 'party':
       zone.setParty(msg.connId, msg.party);
+      break;
+    case 'auctionEscrow':
+      zone.auctionEscrow(msg.connId, msg.slot, msg.itemId, msg.price, msg.hours);
+      flush();
+      break;
+    case 'auctionCharge':
+      zone.auctionCharge(msg.connId, msg.amount, msg.ref);
+      flush();
+      break;
+    case 'deliverMail':
+      zone.deliverMail(msg.connId, msg.gold, msg.items);
+      flush();
       break;
     case 'trade':
       zone.trade(msg.connId, msg.d);

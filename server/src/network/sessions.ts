@@ -1,8 +1,9 @@
 import type { Logger } from 'pino';
-import { CS, LEVEL_PREFIX, MAX_STACK, PERMANENT_UNTIL, SC, SPELLS, decodeSpells, emptyStoryState, encodeSpells, parseClientControl, startingInventory, type Difficulty, type InventoryEntry, type ExitCrossing, type KnownSpell, type ServerControlMsg } from '@crusaders/shared';
+import { CS, LEVEL_PREFIX, MAX_STACK, PERMANENT_UNTIL, SC, SPELLS, decodeSpells, emptyStoryState, encodeSpells, parseClientControl, startingInventory, type Difficulty, type InventoryEntry, type ExitCrossing, type ItemCatalog, type KnownSpell, type ServerControlMsg } from '@crusaders/shared';
 import type { Account, TicketStore } from '../auth/tickets.ts';
 import type { CharacterPersistRecord, CharacterRepository } from '../persistence/characters.ts';
-import type { JoinOptions, PersistRecord, TransferState } from '../simulation/world_zone.ts';
+import { auctionDeposit, type EconomyEvent, type JoinOptions, type PersistRecord, type TransferState } from '../simulation/world_zone.ts';
+import type { EconomyRepository } from '../persistence/economy.ts';
 import type { ZoneHost } from '../zone/zone_host.ts';
 import type { ZoneManager } from '../zone/zone_manager.ts';
 import { TokenBucket } from './rate_limit.ts';
@@ -95,6 +96,10 @@ export class SessionManager implements TransportHandlers {
       devGuestSpells?: string | null;
       devGuestXp?: number;
       devGuestFinished?: boolean;
+      /** The auction house and mailbox (MMO Stage 4); absent: none (tests). */
+      economy?: EconomyRepository;
+      /** The item catalogue (names in the auction house). */
+      items?: ItemCatalog;
       devGuestItems?: string | null;
       persist: (records: CharacterPersistRecord[]) => void;
       /** Every player's chat line, for the admin panel's log. */
@@ -118,6 +123,13 @@ export class SessionManager implements TransportHandlers {
     this.devGuestSpells = decodeSpells(encodeSpells(this.devGuestSpells));
     this.devGuestXp = opts.devGuestXp ?? 0;
     this.devGuestFinished = opts.devGuestFinished ?? false;
+    this.economy = opts.economy ?? null;
+    this.items = opts.items ?? null;
+    // Listings past their time go back to their sellers.
+    if (this.economy) {
+      const eco = this.economy;
+      setInterval(() => void eco.expireDue().catch((err: unknown) => this.log.error({ err }, 'auction expiry failed')), 60_000).unref();
+    }
     const extra = (opts.devGuestItems ?? '').split(',').map((e) => e.trim().split(':')).filter(([id]) => !!id);
     this.devGuestItems = extra.length
       ? [...startingInventory(), ...extra.map(([itemId, n], i) => ({ slot: 2 + i, itemId: itemId!, equipped: false, ...(Number(n) > 1 ? { quantity: Math.min(MAX_STACK, Number(n)) } : {}) }))]
@@ -135,6 +147,8 @@ export class SessionManager implements TransportHandlers {
   private readonly devGuestXp: number;
   /** Development only: guests have finished the story (DEV_GUEST_FINISHED). */
   private readonly devGuestFinished: boolean;
+  private readonly economy: EconomyRepository | null;
+  private readonly items: ItemCatalog | null;
   /** Development only: the guests' inventory (DEV_GUEST_ITEMS), else the starting one. */
   private readonly devGuestItems: InventoryEntry[] | null;
 
@@ -371,6 +385,9 @@ export class SessionManager implements TransportHandlers {
       case CS.UNSTUCK:
         if (s.state === 'in_world') this.zoneOf(s)?.unstuck(conn.id);
         return;
+      case CS.AUCTION:
+        if (s.state === 'in_world') this.auctionAction(s, msg.d);
+        return;
       case CS.TRADE:
         if (s.state === 'in_world') this.zoneOf(s)?.trade(conn.id, msg.d);
         return;
@@ -446,6 +463,121 @@ export class SessionManager implements TransportHandlers {
     }
     this.send(s, { op: SC.CHAT_BROADCAST, d: { ...d, sent: true } });
     this.log.info({ conn: s.conn.id, channel, from: s.name, length: text.length }, 'chat');
+  }
+
+  // --- Auction house (MMO Stage 4, not original; persistence/economy.ts) ------------------
+
+  /** Purchases paid in a zone, waiting for the market: ref -> who buys what. */
+  private readonly pendingBuys = new Map<string, { connId: number; characterId: string; name: string; listing: string; price: number }>();
+  private nextBuyRef = 1;
+
+  private auctionAction(s: Session, d: { action: 'search' | 'list' | 'buy' | 'cancel' | 'mail' | 'claim'; q?: string; id?: string; slot?: number; itemId?: string; price?: number; hours?: number }): void {
+    const eco = this.economy;
+    const fail = (text: string) => this.send(s, { op: SC.CHAT_BROADCAST, d: { channel: 'system', kind: 'error', text } });
+    if (!eco || !s.characterId) return fail('The auction house needs a saved character.');
+    const characterId = s.characterId;
+    const run = (p: Promise<unknown>) => void p.catch((err: unknown) => {
+      this.log.error({ err, action: d.action }, 'auction failed');
+      fail('The auction house is unavailable right now.');
+    });
+    switch (d.action) {
+      case 'search':
+        return run(this.sendAuction(s, d.q));
+      case 'mail':
+        return run(this.sendAuction(s, undefined));
+      case 'list': {
+        const hours = d.hours ?? 24;
+        if (!d.price || d.price < 1 || d.slot === undefined || ![12, 24, 48].includes(hours)) return fail('List what, for how much? Price 1 or more, 12 / 24 / 48 hours.');
+        this.zoneOf(s)?.auctionEscrow(s.conn.id, d.slot, d.itemId, Math.floor(d.price), hours);
+        return;
+      }
+      case 'buy': {
+        if (!d.id) return;
+        const id = d.id;
+        return run((async () => {
+          const offer = await eco.price(id);
+          if (!offer) return fail('That item is no longer for sale.');
+          if (offer.seller === characterId) return fail('That is your own listing.');
+          const ref = `b${this.nextBuyRef++}`;
+          this.pendingBuys.set(ref, { connId: s.conn.id, characterId, name: s.name, listing: id, price: offer.price });
+          this.zoneOf(s)?.auctionCharge(s.conn.id, offer.price, ref);
+        })());
+      }
+      case 'cancel':
+        if (!d.id) return;
+        return run((async () => {
+          if (await eco.cancel(d.id!, characterId)) this.send(s, { op: SC.CHAT_BROADCAST, d: { channel: 'system', kind: 'trade', text: 'Listing cancelled: the item waits in your mailbox.' } });
+          await this.sendAuction(s, d.q);
+        })());
+      case 'claim':
+        return run((async () => {
+          const mail = await eco.claimAll(characterId);
+          if (!mail.length) return fail('Your mailbox is empty.');
+          const gold = mail.reduce((n, m) => n + m.gold, 0);
+          this.zoneOf(s)?.deliverMail(s.conn.id, gold, mail.flatMap((m) => (m.item ? [m.item] : [])));
+          setTimeout(() => run(this.sendAuction(s, undefined)), 300);
+        })());
+    }
+  }
+
+  /** The market's answer to one of its zone requests. */
+  onEconomy(e: EconomyEvent): void {
+    const eco = this.economy;
+    if (!eco) return;
+    const s = this.sessions.get(e.connId);
+    const tell = (text: string, kind: 'trade' | 'error' = 'trade') => s && this.send(s, { op: SC.CHAT_BROADCAST, d: { channel: 'system', kind, text } });
+    const guard = (p: Promise<unknown>) => void p.catch((err: unknown) => this.log.error({ err, kind: e.kind }, 'auction step failed'));
+    if (e.kind === 'escrowed') {
+      guard((async () => {
+        const r = await eco.list({ id: e.characterId, name: e.name }, e.item, e.price, e.hours).catch(() => 'error' as const);
+        if (r === 'limit' || r === 'error') {
+          // Not listed: the item comes back by mail (the deposit too: nothing was offered).
+          await eco.send(e.characterId, r === 'limit' ? 'Too many listings' : 'Listing failed', auctionDeposit(e.price, e.hours), e.item);
+          tell(r === 'limit' ? 'You already have 15 listings: the item went back to your mailbox.' : 'The listing failed: the item went back to your mailbox.', 'error');
+        } else {
+          tell(`Listed for ${e.price} gold (deposit ${auctionDeposit(e.price, e.hours)}).`);
+        }
+        if (s) await this.sendAuction(s, undefined);
+      })());
+    } else if (e.kind === 'charged') {
+      const buy = this.pendingBuys.get(e.ref);
+      this.pendingBuys.delete(e.ref);
+      if (!buy || !e.ok) return;
+      guard((async () => {
+        const r = await eco.buy(buy.listing, { id: buy.characterId, name: buy.name }, buy.price).catch(() => 'gone' as const);
+        if (r === 'gone') {
+          await eco.send(buy.characterId, 'Refund: no longer for sale', buy.price, null);
+          tell('Someone was quicker: your gold waits in your mailbox.', 'error');
+        } else tell('Bought: the item waits in your mailbox.');
+        if (s) await this.sendAuction(s, undefined);
+      })());
+    } else if (e.kind === 'undelivered') {
+      guard((async () => {
+        if (e.gold > 0) await eco.send(e.characterId, 'Not collected', e.gold, null);
+        for (const it of e.items) await eco.send(e.characterId, 'Not collected', 0, it);
+        if (s) await this.sendAuction(s, undefined);
+      })());
+    }
+  }
+
+  /** Listings (all, or those whose name holds `q`) and the mailbox. */
+  private async sendAuction(s: Session, q: string | undefined): Promise<void> {
+    const eco = this.economy;
+    if (!eco || !s.characterId) return;
+    const wanted = q?.trim().toLowerCase();
+    const ids = wanted ? [...(this.items?.values() ?? [])].filter((d) => d.name.toLowerCase().includes(wanted)).map((d) => d.id) : null;
+    const [found, mail] = await Promise.all([eco.search(ids, s.characterId), eco.mailFor(s.characterId)]);
+    const look = (itemId: string) => {
+      const def = this.items?.get(itemId);
+      return { name: def?.name ?? itemId, type: def?.type ?? 'key', ...(def?.model !== undefined ? { model: def.model } : {}) };
+    };
+    this.send(s, {
+      op: SC.AUCTION,
+      d: {
+        listings: found.map((l) => ({ ...l, ...look(l.itemId) })),
+        mail: mail.map((m) => ({ id: m.id, sender: m.sender, subject: m.subject, gold: m.gold, ...(m.item ? { item: { ...m.item, ...look(m.item.itemId) } } : {}) })),
+      },
+    });
   }
 
   // --- Parties (MMO Stage 2, not original) -----------------------------------------------

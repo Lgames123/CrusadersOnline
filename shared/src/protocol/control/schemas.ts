@@ -185,6 +185,20 @@ export const TradePacketSchema = z.object({
   }),
 });
 
+export const AuctionPacketSchema = z.object({
+  op: z.literal(CS.AUCTION),
+  seq: z.number().int().positive(),
+  d: z.object({
+    action: z.enum(['search', 'list', 'buy', 'cancel', 'mail', 'claim']),
+    q: z.string().max(40).optional(),
+    id: z.string().uuid().optional(),
+    slot: z.number().int().min(0).max(255).optional(),
+    itemId: z.string().min(1).max(64).optional(),
+    price: z.number().int().min(1).max(1_000_000_000).optional(),
+    hours: z.number().int().optional(),
+  }),
+});
+
 export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   AuthTicketPacketSchema,
   SelectCharacterPacketSchema,
@@ -210,6 +224,7 @@ export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   PartyPacketSchema,
   RefinePacketSchema,
   TradePacketSchema,
+  AuctionPacketSchema,
 ]);
 
 export type ClientControlPacket = z.infer<typeof ClientControlPacketSchema>;

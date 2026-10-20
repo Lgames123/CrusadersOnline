@@ -9,6 +9,7 @@ import { TicketStore } from './auth/tickets.ts';
 import { REPO_ROOT, loadConfig, type ServerConfig } from './config.ts';
 import { createApiHandler } from './http/api.ts';
 import { AccountRepository } from './persistence/accounts.ts';
+import { EconomyRepository } from './persistence/economy.ts';
 import { AdminRepository } from './persistence/admin.ts';
 import { CharacterRepository } from './persistence/characters.ts';
 import { migrateToLatest, openDatabase } from './persistence/db.ts';
@@ -65,6 +66,7 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
       persist: (records, reason) => save(records, reason),
       portal: (arena, connId, target, keep, via, waypoint) => sessions?.onPortal(arena, connId, target, keep, via, waypoint),
       transferred: (arena, connId, record, state) => sessions?.onTransferred(arena, connId, record, state),
+      economy: (_arena, event) => sessions?.onEconomy(event),
       loot: (arena, { connId, character, chest, outcome, items }) =>
         log.info({ conn: connId, character, zone: arena, chest, items }, outcome === 'looted' ? 'chest looted' : 'chest not looted: inventory full'),
     },
@@ -73,14 +75,16 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
   zones.keep(config.arena);
   await zones.get(config.arena);
   let admin: AdminService | null = null;
+  // The zones' item catalog: the character screen, the auction house's names.
+  const items = config.itemRulesPath ? catalogFromItemRules(JSON.parse(readFileSync(config.itemRulesPath, 'utf8')) as Parameters<typeof catalogFromItemRules>[0]) : BUILTIN_ITEMS;
   sessions = new SessionManager(tickets, zones, characters, log, {
+    economy: new EconomyRepository(database.db),
+    items,
     defaultArena: config.arena, difficulty: config.difficulty, devGuestSpawn: config.devGuestSpawn, devGuestSpells: config.devGuestSpells, devGuestXp: config.devGuestXp, devGuestFinished: config.devGuestFinished, devGuestItems: config.devGuestItems,
     persist: (r) => save(r, 'transfer'),
     onChat: (line) => admin?.chat(line),
     greeting: () => admin?.greeting() ?? null,
   });
-  // The zones' item catalog, here for what characters wear on the character screen.
-  const items = config.itemRulesPath ? catalogFromItemRules(JSON.parse(readFileSync(config.itemRulesPath, 'utf8')) as Parameters<typeof catalogFromItemRules>[0]) : BUILTIN_ITEMS;
   const live = sessions;
   const adminService = new AdminService({ sessions, zones, repo: new AdminRepository(database.db), items, log });
   admin = adminService;

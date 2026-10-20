@@ -151,6 +151,8 @@ export class InventoryPanels {
   private gold = 0;
 
   onEquip: (slot: number, itemId: string, equip: boolean, to?: { x: number; y: number }) => void = () => {};
+  /** The auction house button on a merchant's window (MMO Stage 4). */
+  onAuction: () => void = () => {};
   /** MMO items: refinement offered (the server's `mmoItems`), and one attempt asked (Shift-click at a merchant). */
   refining = false;
   onRefine: (slot: number, itemId: string) => void = () => {};
@@ -201,7 +203,7 @@ export class InventoryPanels {
         </div>
       </section>
       <section class="inv-window inv-shop" aria-label="Shop" hidden>
-        <header class="inv-title"><h2 class="shop-title">Merchant</h2><button type="button" class="inv-x" data-close="shop" aria-label="Close shop">×</button></header>
+        <header class="inv-title"><h2 class="shop-title">Merchant</h2><button type="button" class="inv-x shop-ah" data-auction="1" title="Auction house and mailbox" aria-label="Auction house">⚖</button><button type="button" class="inv-x" data-close="shop" aria-label="Close shop">×</button></header>
         <div class="shop-list"></div>
         <p class="inv-help">Click to buy. Right-click or drag a bag item here to sell it.</p>
       </section>
@@ -549,6 +551,10 @@ export class InventoryPanels {
       return;
     }
     const target = e.target as HTMLElement;
+    if (target.closest('[data-auction]')) {
+      this.onAuction();
+      return;
+    }
     const close = target.closest<HTMLElement>('[data-close]');
     if (close) {
       if (close.dataset['close'] === 'shop') this.closeShop();

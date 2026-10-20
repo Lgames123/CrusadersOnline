@@ -35,6 +35,8 @@ export const CS = {
   REFINE: 0x19,
   /** Direct trade (MMO Stage 4): request, accept, decline, offer, lock, confirm, cancel. */
   TRADE: 0x1a,
+  /** Auction house and mailbox (MMO Stage 4): search, list, buy, cancel, mail, claim. */
+  AUCTION: 0x1b,
 } as const;
 
 /** Server -> client opcodes. */
@@ -72,6 +74,8 @@ export const SC = {
   PARTY_UPDATE: 0x55,
   /** The player's direct trade: a request, both offers, or its end (MMO Stage 4). */
   TRADE_UPDATE: 0x56,
+  /** Auction house listings and the player's mailbox (MMO Stage 4). */
+  AUCTION: 0x57,
 } as const;
 
 /** Input flag bits carried in CS_PLAYER_INPUT. */

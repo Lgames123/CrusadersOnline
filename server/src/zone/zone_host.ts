@@ -1,6 +1,6 @@
 import { Worker } from 'node:worker_threads';
 import type { ExitCrossing, SpellId, WorldRates } from '@crusaders/shared';
-import type { JoinOptions, LootEvent, PersistReason, PersistRecord, TransferState } from '../simulation/world_zone.ts';
+import type { JoinOptions, LootEvent, PersistReason, PersistRecord, TransferState, EconomyEvent, EscrowItem } from '../simulation/world_zone.ts';
 import type { AttackKind } from '@crusaders/shared';
 import type { FromZone, ToZone, ZoneMetrics, ZoneReply, ZoneRequest, ZoneWorkerData } from './messages.ts';
 
@@ -12,6 +12,7 @@ export interface ZoneHostEvents {
   portal?(connId: number, target: string, keep?: { x: number; y: number; z: number; mesh: string }, via?: ExitCrossing, waypoint?: boolean): void;
   transferred?(connId: number, record: PersistRecord | null, state: TransferState | null): void;
   loot?(event: LootEvent): void;
+  economy?(event: EconomyEvent): void;
 }
 
 /** Main-thread handle for one zone worker. */
@@ -51,6 +52,9 @@ export class ZoneHost {
             break;
           case 'portal':
             events.portal?.(msg.connId, msg.target, msg.keep, msg.via, msg.waypoint);
+            break;
+          case 'economy':
+            events.economy?.(msg.event);
             break;
           case 'loot':
             events.loot?.(msg.event);
@@ -167,6 +171,18 @@ export class ZoneHost {
 
   unstuck(connId: number): void {
     this.post({ t: 'unstuck', connId });
+  }
+
+  auctionEscrow(connId: number, slot: number, itemId: string | undefined, price: number, hours: number): void {
+    this.post({ t: 'auctionEscrow', connId, slot, ...(itemId ? { itemId } : {}), price, hours });
+  }
+
+  auctionCharge(connId: number, amount: number, ref: string): void {
+    this.post({ t: 'auctionCharge', connId, amount, ref });
+  }
+
+  deliverMail(connId: number, gold: number, items: EscrowItem[]): void {
+    this.post({ t: 'deliverMail', connId, gold, items });
   }
 
   trade(connId: number, d: { action: string; name?: string; uids?: string[]; gold?: number }): void {

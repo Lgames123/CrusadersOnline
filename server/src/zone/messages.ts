@@ -1,5 +1,5 @@
 import type { CustomSpawnSpec, ExitCrossing, SpellId, WorldRates } from '@crusaders/shared';
-import type { JoinOptions, LootEvent, PersistReason, PersistRecord, TransferState, ZoneAdminReport } from '../simulation/world_zone.ts';
+import type { JoinOptions, LootEvent, PersistReason, PersistRecord, TransferState, ZoneAdminReport, EconomyEvent, EscrowItem } from '../simulation/world_zone.ts';
 import type { AttackKind } from '@crusaders/shared';
 
 /** Main thread <-> zone worker messages (ADR-009). Binary payloads are transferred, not copied. */
@@ -28,6 +28,9 @@ export type ToZone =
   | { t: 'party'; connId: number; party: string | null }
   | { t: 'refine'; connId: number; slot: number; itemId?: string }
   | { t: 'trade'; connId: number; d: { action: string; name?: string; uids?: string[]; gold?: number } }
+  | { t: 'auctionEscrow'; connId: number; slot: number; itemId?: string; price: number; hours: number }
+  | { t: 'auctionCharge'; connId: number; amount: number; ref: string }
+  | { t: 'deliverMail'; connId: number; gold: number; items: EscrowItem[] }
   /** Remove the player for a zone transfer; answered with 'transferred'. */
   | { t: 'transfer'; connId: number }
   /** Admin panel: event rates for every zone. */
@@ -67,6 +70,7 @@ export type FromZone =
   | { t: 'portal'; connId: number; target: string; keep?: { x: number; y: number; z: number; mesh: string }; via?: ExitCrossing; waypoint?: boolean }
   /** A chest opened or found with the bag too full (the main thread logs it). */
   | { t: 'loot'; event: LootEvent }
+  | { t: 'economy'; event: EconomyEvent }
   | { t: 'transferred'; connId: number; record: PersistRecord | null; state: TransferState | null }
   | { t: 'reply'; reqId: number; reply: ZoneReply }
   | { t: 'stopped' };

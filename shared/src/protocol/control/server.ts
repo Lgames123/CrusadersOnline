@@ -317,6 +317,34 @@ export interface TradeSideView {
   confirmed: boolean;
 }
 
+/** One auction listing as the browser shows it (MMO Stage 4). */
+export interface AuctionListingView {
+  id: string;
+  seller: string;
+  itemId: string;
+  name: string;
+  type: ItemType;
+  model?: number;
+  quantity: number;
+  mods?: ItemMods;
+  price: number;
+  expiresAt: string;
+  mine?: true | boolean;
+}
+
+export interface MailView {
+  id: string;
+  sender: string;
+  subject: string;
+  gold: number;
+  item?: { itemId: string; name: string; type: ItemType; quantity: number; mods?: ItemMods };
+}
+
+export interface AuctionMsg {
+  op: typeof SC.AUCTION;
+  d: { listings: AuctionListingView[]; mail: MailView[] };
+}
+
 export interface TradeUpdateMsg {
   op: typeof SC.TRADE_UPDATE;
   /** `pending`: `partner` asks this player; `open`: both offers; `closed`: over (`message` says why). */
@@ -357,6 +385,7 @@ export type ServerControlMsg =
   | ChatBroadcastMsg
   | PartyUpdateMsg
   | TradeUpdateMsg
+  | AuctionMsg
   | PlayerStatsMsg
   | CombatEventMsg
   | InventoryUpdateMsg

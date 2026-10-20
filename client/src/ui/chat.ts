@@ -81,6 +81,8 @@ export class ChatWindow {
   private readonly sent: string[] = [];
   private sentIndex = -1;
   onSend: (channel: SendChannel, text: string, to?: string) => void = () => {};
+  /** /ah: the auction house (at a merchant). */
+  onAuction: () => void = () => {};
   /** Trade commands (/trade <name>, /trade accept, /trade decline, /trade cancel). */
   onTrade: (action: 'request' | 'accept' | 'decline' | 'cancel', name?: string) => void = () => {};
   /** Party commands (/invite, /accept, /decline, /leave, /kick, /promote). */
@@ -403,6 +405,8 @@ export class ChatWindow {
           return void this.onParty('kick', rest.trim() || undefined);
         case 'promote': case 'leader':
           return void this.onParty('promote', rest.trim() || undefined);
+        case 'ah': case 'auction':
+          return void this.onAuction();
         case 'trade': {
           const arg = rest.trim();
           const action = arg.toLowerCase();

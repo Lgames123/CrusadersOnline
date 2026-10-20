@@ -281,6 +281,25 @@ const MOVE_MASK = INPUT.FORWARD | INPUT.BACK | INPUT.LEFT | INPUT.RIGHT;
 
 export type PersistReason = 'periodic' | 'leave' | 'shutdown' | 'progress';
 
+/** What a zone tells the main thread's auction house (MMO Stage 4). */
+export type EconomyEvent =
+  | { kind: 'escrowed'; connId: number; characterId: string; name: string; item: EscrowItem; price: number; hours: number }
+  | { kind: 'charged'; connId: number; ref: string; ok: boolean }
+  | { kind: 'undelivered'; connId: number; characterId: string; items: EscrowItem[]; gold: number };
+
+/** An item out of a bag: in a listing, in the mail (persistence/economy.ts has the same shape). */
+export interface EscrowItem {
+  itemId: string;
+  uid?: string;
+  quantity: number;
+  mods?: ItemMods;
+}
+
+/** A listing's deposit (persistence/economy.ts AUCTION): 5 % of the price × 1 / 1.5 / 2 for 12 / 24 / 48 h. */
+export function auctionDeposit(price: number, hours: number): number {
+  return Math.max(1, Math.floor(price * 0.05 * ({ 12: 1, 24: 1.5, 48: 2 } as Record<number, number>)[hours]!));
+}
+
 export interface ZoneOutbox {
   /** Binary frames are snapshots; strings are JSON control messages. */
   send(connId: number, data: Uint8Array | string): void;
@@ -295,6 +314,8 @@ export interface ZoneOutbox {
   portal?(connId: number, target: string, keep?: { x: number; y: number; z: number; mesh: string }, via?: ExitCrossing, waypoint?: boolean): void;
   /** A chest was opened, or left shut for a bag too full to take it all (the server log). */
   loot?(event: LootEvent): void;
+  /** Auction custody, payments and undelivered mail, for the main thread's market (MMO Stage 4). */
+  economy?(event: EconomyEvent): void;
 }
 
 /** A chest opened (`items`: what was taken) or found with the bag too full (`items`: what it holds). */
@@ -2235,6 +2256,70 @@ export class WorldZone {
       if (!p || !q) continue;
       this.sendJson(me, { op: SC.TRADE_UPDATE, d: { state: 'open', partner: q.name, mine: side(p, t.offers.get(me)!), theirs: side(q, t.offers.get(them)!) } });
     }
+  }
+
+  // --- Auction house custody and mail (MMO Stage 4; the main thread holds the market) --------
+
+  /** A listing's item and deposit leave the bag (escrow); the main thread then lists it. */
+  auctionEscrow(connId: number, slot: number, itemId: string | undefined, price: number, hours: number): void {
+    const p = this.players.get(connId);
+    if (!p?.characterId) return;
+    if (!p.shop) return this.notify(p, 'error', 'Use the auction house at a merchant.');
+    const entry = this.inventoryBusy(p) ? undefined : this.inventoryEntry(p, slot, itemId);
+    if (!entry) return this.sendInventory(p);
+    const why = untradable(entry, this.items);
+    if (why) return this.notify(p, 'error', why);
+    const deposit = auctionDeposit(price, hours);
+    if (p.gold < deposit) return this.notify(p, 'error', `The deposit is ${deposit} gold.`);
+    this.stampUids(p);
+    p.inventory.splice(p.inventory.indexOf(entry), 1);
+    p.gold -= deposit;
+    p.statsDirty = true;
+    this.inventoryChanged(p);
+    this.outbox.economy?.({ kind: 'escrowed', connId, characterId: p.characterId, name: p.name, item: { itemId: entry.itemId, quantity: entry.quantity ?? 1, ...(entry.uid ? { uid: entry.uid } : {}), ...(entry.mods ? { mods: entry.mods } : {}) }, price, hours });
+  }
+
+  /** The buyer pays (at a merchant) before the market hands the item over. */
+  auctionCharge(connId: number, amount: number, ref: string): void {
+    const p = this.players.get(connId);
+    const ok = !!p && !!p.characterId && !!p.shop && p.gold >= amount && amount > 0;
+    if (p && ok) {
+      p.gold -= amount;
+      p.statsDirty = true;
+      const r = this.persistRecord(p);
+      if (r) this.outbox.persist?.([r], 'progress');
+    } else if (p) this.notify(p, 'error', p.shop ? 'Not enough gold.' : 'Use the auction house at a merchant.');
+    this.outbox.economy?.({ kind: 'charged', connId, ref, ok });
+  }
+
+  /** Claimed mail: gold to the purse, items to the bag; what does not fit goes back. */
+  deliverMail(connId: number, gold: number, items: EscrowItem[]): void {
+    const p = this.players.get(connId);
+    if (!p?.characterId) return;
+    const back: EscrowItem[] = [];
+    let backGold = 0;
+    if (!p.shop) {
+      this.notify(p, 'error', 'Collect your mail at a merchant.');
+      this.outbox.economy?.({ kind: 'undelivered', connId, characterId: p.characterId, items, gold });
+      return;
+    }
+    if (gold > 0) {
+      p.gold += gold;
+      this.notify(p, 'gold', `You collect ${gold} gold.`);
+    }
+    for (const it of items) {
+      const def = this.items.get(it.itemId);
+      if (!def || !this.fitsAll(p, [{ name: def.name, quantity: it.quantity, itemId: def.id }])) {
+        back.push(it);
+        continue;
+      }
+      this.grantItem(p, def.name, it.quantity, def.id, { ...(it.uid ? { uid: it.uid } : {}), ...(it.mods ? { mods: it.mods } : {}) });
+    }
+    if (back.length) this.notify(p, 'error', `Your bag is full: ${back.length} item(s) stay in the mailbox.`);
+    backGold = 0;
+    p.statsDirty = true;
+    this.inventoryChanged(p);
+    if (back.length || backGold) this.outbox.economy?.({ kind: 'undelivered', connId, characterId: p.characterId, items: back, gold: backGold });
   }
 
   /** A change that went through: the client's copy and the save follow. */
