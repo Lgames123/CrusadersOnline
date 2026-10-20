@@ -1001,6 +1001,7 @@ export async function loadOriginalAvatars(): Promise<AvatarFactory | null> {
         const texUrl = manifest.textures[outfit.body.texture];
         texture = texUrl ? await textures.loadAsync(`/generated/${texUrl}`).catch(() => undefined) : undefined;
         if (texture) {
+          texture.name = outfit.body.texture; // the armour glow's coverage is keyed by it
           texture.flipY = false;
           texture.colorSpace = THREE.SRGBColorSpace;
           texture.wrapS = texture.wrapT = THREE.RepeatWrapping;

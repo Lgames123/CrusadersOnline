@@ -33,5 +33,6 @@ export * from './game/sequence.ts';
 export * from './game/waypoints.ts';
 export * from './game/rewards.ts';
 export * from './game/item_mods.ts';
+export * from './game/area_levels.ts';
 export * from './game/dungeons.ts';
 export * from './game/crafting.ts';

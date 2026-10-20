@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { WorldZone } from '@crusaders/server/simulation/world_zone';
-import { BUILTIN_ITEMS, DAMAGE_TYPES, REFINE_LEVELS, createSyntheticArena, equipmentOf, initPhysics, refineOnce, rollMods, rollRarity, withMods, type InventoryEntry, type Rapier } from '@crusaders/shared';
+import { AFFIX_TIERS, BUILTIN_ITEMS, DAMAGE_TYPES, REFINE_LEVELS, affixLines, affixRange, sanitizeMods, tierRollRange, tierWindow, createSyntheticArena, equipmentOf, initPhysics, refineOnce, rollMods, rollRarity, withMods, withoutAffixes, type InventoryEntry, type Rapier } from '@crusaders/shared';
 
 const sword = BUILTIN_ITEMS.get('long_sword')!;
 const SLASH = DAMAGE_TYPES.indexOf('SLASH');
@@ -28,10 +28,98 @@ describe('rarity, affixes, refinement (MMO Stage 3)', () => {
       tally[x] = (tally[x] ?? 0) + 1;
     }
     // A rolled item's affixes match its tier.
-    expect(rollMods(sword, () => 0.02)?.affixes?.length).toBe(1); // the same affix rolled 4 times adds up
+    // Each affix at most once, even when the generator keeps picking the same spot.
+    const same = rollMods(sword, () => 0.02)!.affixes!;
+    expect(same.length).toBe(4);
+    expect(new Set(same.map((a) => a.id)).size).toBe(4);
     expect(Math.abs(tally['worn']! / n - 0.7)).toBeLessThan(0.01);
     expect(Math.abs(tally['mundane']! / n - 0.25)).toBeLessThan(0.01);
     expect(Math.abs(tally['tempered']! / n - 0.049)).toBeLessThan(0.004);
+  });
+
+  it("rolls every affix inside its tier's range, once, and shows tier and range", () => {
+    const r = rng(3);
+    for (let i = 0; i < 2000; i++) {
+      const mods = rollMods(sword, r);
+      const affixes = mods?.affixes ?? [];
+      if (mods) expect(mods.ilvl).toBe(50);
+      expect(new Set(affixes.map((a) => a.id)).size).toBe(affixes.length);
+      for (const a of affixes) {
+        // iLvl 50 (the default): T2..T5.
+        expect(a.tier).toBeGreaterThanOrEqual(2);
+        expect(a.tier).toBeLessThanOrEqual(5);
+        const range = affixRange(a.id, a.tier)!;
+        expect(a.value).toBeGreaterThanOrEqual(range.min - 1e-9);
+        expect(a.value).toBeLessThanOrEqual(range.max + 1e-9);
+      }
+    }
+    expect(affixLines({ affixes: [{ id: 'hp', value: 45, tier: 5 }, { id: 'res:FIRE', value: 0.12, tier: 4 }, { id: 'attr:intelligence', value: 2, tier: 2 }] }, { ranges: true }))
+      .toEqual(['+45 hit points (T5: 41–50)', '+12 % Fire resistance (T4: 11–14)', '+2 Intellect (T2: 2)']);
+    // An affix from before tiers shows the baseline T5 range when it lies in it, else none.
+    expect(affixLines({ affixes: [{ id: 'dmg:BASH', value: 11 }] }, { ranges: true })).toEqual(['+11 Bash damage (10–12)']);
+    expect(affixLines({ affixes: [{ id: 'dmg:BASH', value: 20 }] }, { ranges: true })).toEqual(['+20 Bash damage']);
+  });
+
+  it('has 12 tiers per family, T5 the old top and T10 double it', () => {
+    for (const tiers of Object.values(AFFIX_TIERS)) {
+      expect(tiers.length).toBe(12);
+      tiers.forEach(([lo, hi], t) => {
+        expect(lo).toBeLessThanOrEqual(hi);
+        if (t > 0) expect(lo).toBeGreaterThanOrEqual(tiers[t - 1]![0]);
+      });
+    }
+    expect(tierRollRange('hp', 5)).toEqual({ min: 41, max: 50 });
+    expect(tierRollRange('hp', 10)).toEqual({ min: 91, max: 100 });
+    expect(tierRollRange('mana', 10)!.max).toBe(120);
+    expect(tierRollRange('dmg', 5)!.max).toBe(12);
+    expect(tierRollRange('res', 5)!.max).toBeCloseTo(0.18);
+    expect(tierRollRange('attr', 10)).toEqual({ min: 10, max: 10 });
+    expect(tierRollRange('hp', 12)).toBeUndefined();
+  });
+
+  it("rolls tiers in the item level's sliding window", () => {
+    expect([0, 9, 10, 39, 40, 50, 59, 89, 90, 99, 100].map((l) => tierWindow(l))).toEqual([
+      { min: 0, max: 0 }, { min: 0, max: 0 }, { min: 0, max: 1 }, { min: 0, max: 3 }, { min: 1, max: 4 }, { min: 2, max: 5 },
+      { min: 2, max: 5 }, { min: 5, max: 8 }, { min: 6, max: 9 }, { min: 6, max: 9 }, { min: 7, max: 10 },
+    ]);
+    const r = rng(7);
+    const seen = new Set<number>();
+    let hpMax = 0;
+    for (let i = 0; i < 5000; i++) {
+      const mods = rollMods(BUILTIN_ITEMS.get('scale_armor')!, r, 100);
+      for (const a of mods?.affixes ?? []) {
+        seen.add(a.tier!);
+        if (a.id === 'hp') hpMax = Math.max(hpMax, a.value);
+        expect(a.value).toBeGreaterThanOrEqual(affixRange(a.id, a.tier)!.min - 1e-9);
+      }
+    }
+    // iLvl 100: every tier from T7 to T10 and nothing else; HP up to 100.
+    expect([...seen].sort((a, b) => a - b)).toEqual([7, 8, 9, 10]);
+    expect(hpMax).toBe(100);
+    // iLvl 50 (Necros's drops): HP at most 50.
+    let necros = 0;
+    for (let i = 0; i < 5000; i++) for (const a of rollMods(BUILTIN_ITEMS.get('scale_armor')!, r, 50)?.affixes ?? []) if (a.id === 'hp') necros = Math.max(necros, a.value);
+    expect(necros).toBe(50);
+  });
+
+  it('keeps item level and tiers through storage', () => {
+    const mods = { rarity: 'tempered' as const, ilvl: 63, affixes: [{ id: 'hp', value: 55, tier: 6 }, { id: 'mana', value: 30 }] };
+    expect(sanitizeMods(mods)).toEqual(mods);
+    expect(sanitizeMods({ ilvl: 400, affixes: [{ id: 'hp', value: 5, tier: 99 }] })).toEqual({ ilvl: 100, affixes: [{ id: 'hp', value: 5 }] });
+    const tiered = { rarity: 'mundane' as const, ilvl: 70, affixes: [{ id: 'dmg:SLASH', value: 17, tier: 7 }] };
+    expect(withoutAffixes(withMods(sword, tiered), tiered).damage![SLASH]).toBeCloseTo(sword.damage![SLASH]! * 1.2);
+  });
+
+  it('splits an item back into its own numbers and its affixes', () => {
+    const mods = { rarity: 'mundane' as const, affixes: [{ id: 'dmg:SLASH', value: 9 }, { id: 'attr:intelligence', value: 2 }] };
+    const m = withMods(sword, mods);
+    expect(m.attributes).toMatchObject({ intellect: 2 });
+    expect(withoutAffixes(m, mods).damage![SLASH]).toBeCloseTo(sword.damage![SLASH]! * 1.2);
+    expect(withoutAffixes(m, mods).attributes?.intellect ?? 0).toBe(0);
+    const armour = BUILTIN_ITEMS.get('scale_armor')!;
+    const res = { affixes: [{ id: 'res:FIRE', value: 0.1 }] };
+    const FIRE = DAMAGE_TYPES.indexOf('FIRE');
+    expect(withoutAffixes(withMods(armour, res), res).protection![FIRE]).toBeCloseTo(armour.protection?.[FIRE] ?? 1, 3);
   });
 
   it('stacks rarity × refinement, then flat affixes (03 §5.1)', () => {

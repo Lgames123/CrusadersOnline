@@ -31,6 +31,7 @@ The specification is organized into 12 modular, cross-referenced design volumes:
 | [01. MMO Design Pillars](01-mmo-design-pillars.md) | Architectural Vision | Core loops, SP vs. MMO divergence, social dynamics, non-goals. |
 | [02. Loot & Reward Distribution](02-loot-and-reward-distribution.md) | Combat & Reward Lifecycle | Hybrid loot architecture, threat/damage contribution, anti-AFK thresholds, low-level scaling. |
 | [03. Item Rarity & Affixes](03-item-rarity-and-affixes.md) | Equipment Generation | 4-tier rarity, cascading roll algorithms, affix pools, stat scaling, named item identities. |
+| [Rarity system as built](rarity-system.md) | Implementation | What the code does today: tiers, roll sources, affix pool and ranges, stat pipeline, refinement, materials, tooltips, known issues. |
 | [04. Equipment Upgrading](04-equipment-upgrading.md) | Refinement & Visuals | +0 to +10 upgrade system, Failstack pity models, 3 material stages, Three.js glow shaders. |
 | [05. Player Trading & Economy](05-player-trading-and-economy.md) | Commerce & Currency | Two-phase commit direct trade, centralized Auction House, binding rules, transaction atomicity. |
 | [06. Bosses, Dungeons & Instances](06-bosses-dungeons-and-instances.md) | Group Content | Open-world world bosses, private dungeon instances, telegraphs, lockouts, disconnect handling. |

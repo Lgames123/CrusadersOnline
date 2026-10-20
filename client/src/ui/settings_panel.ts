@@ -254,6 +254,30 @@ export class SettingsPanel {
 
             <div class="opt-group opt-toggle-group">
               <label class="opt-toggle-label">
+                <input id="set-item-glow" type="checkbox" ${s.itemGlow ? 'checked' : ''} />
+                <span class="opt-toggle-box"></span>
+                <span class="opt-toggle-text">
+                  <strong>Refined Gear Glow</strong>
+                  <span class="opt-desc">Weapons, shields and armour refined to +3 and beyond glow in their tier's colour; weapons also shed star dust.</span>
+                </span>
+              </label>
+            </div>
+
+            <div class="opt-group">
+              <div class="opt-group-header">
+                <h3>Glow Intensity</h3>
+                <span class="opt-badge" id="badge-item-glow-intensity">${Math.round(s.itemGlowIntensity * 100)}%</span>
+              </div>
+              <div class="opt-slider-row">
+                <span class="opt-slider-label">Faint</span>
+                <input id="set-item-glow-intensity" type="range" min="0" max="1" step="0.05" value="${s.itemGlowIntensity}" />
+                <span class="opt-slider-label">Full</span>
+              </div>
+              <p class="opt-desc">How strongly refined gear glows.</p>
+            </div>
+
+            <div class="opt-group opt-toggle-group">
+              <label class="opt-toggle-label">
                 <input id="set-fx" type="checkbox" ${s.smallEffects ? 'checked' : ''} />
                 <span class="opt-toggle-box"></span>
                 <span class="opt-toggle-text">
@@ -466,6 +490,23 @@ export class SettingsPanel {
       });
     }
 
+    const itemGlow = this.root.querySelector<HTMLInputElement>('#set-item-glow');
+    if (itemGlow) {
+      itemGlow.addEventListener('change', () => {
+        this.store.update({ itemGlow: itemGlow.checked });
+      });
+    }
+
+    const glowIntensity = this.root.querySelector<HTMLInputElement>('#set-item-glow-intensity');
+    if (glowIntensity) {
+      glowIntensity.addEventListener('input', () => {
+        const val = Number(glowIntensity.value);
+        this.store.update({ itemGlowIntensity: val });
+        const badge = this.root.querySelector('#badge-item-glow-intensity');
+        if (badge) badge.textContent = `${Math.round(val * 100)}%`;
+      });
+    }
+
     const lighting = this.root.querySelector<HTMLInputElement>('#set-lighting');
     if (lighting) {
       lighting.addEventListener('change', () => {
@@ -566,6 +607,8 @@ export class SettingsPanel {
           objectShadows: false,
           objectShadowStrength: 0.6,
           enhancedLighting: false,
+          itemGlow: true,
+          itemGlowIntensity: 1,
           smallEffects: false,
           foliage: false,
           foliageDistance: 35,

@@ -54,7 +54,8 @@ domain yet. All six MMO stages are in, each behind its own `GAME_FEATURES` flag 
   - Waypoint crystals after the story.
   - Parties of five with kills shared by contribution.
   - Behind flags:
-    - item rarity, affixes and +10 refinement (`mmoItems`);
+    - item rarity, tiered affixes (T0–T10 by item level) and +10 refinement (`mmoItems`);
+    - area levels: creatures scaled to their act's level, Necros 50, XP curve to 100 (`mmoLevels`);
     - dungeon instances with a phased boss (`mmoDungeons`);
     - mining, smithing and salvaging (`mmoCrafting`).
   - Always on: direct trade, and the auction house with a mailbox.
@@ -124,6 +125,7 @@ All six stages are implemented (2026-10-20). Each has a context note with its nu
 | 4 | Direct trade; auction house with escrow, deposit, tax and a mailbox (migration 008) | always |
 | 5 | Dungeon instances (the Crypt under Ca1d) with a phased boss | `mmoDungeons` |
 | 6 | Mining, smithing, salvaging (migration 009) | `mmoCrafting` |
+| — | Area levels, level-scaled creatures and XP, item levels and affix tiers | `mmoLevels` (tiers: `mmoItems`) |
 
 Known gaps:
 - the auction house was not run end to end in the browser;

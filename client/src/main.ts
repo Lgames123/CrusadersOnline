@@ -109,7 +109,8 @@ import { QuestBook, loadGameStrings } from './ui/quest_book.ts';
 import { ClassicText } from './ui/classic_text.ts';
 import { WaypointMap } from './ui/waypoint_map.ts';
 import { PartyFrame } from './ui/party_frame.ts';
-import { WeaponGlow } from './engine/weapon_glow.ts';
+import { ArmorGlow, HeldGlow } from './engine/weapon_glow.ts';
+import { WeaponSparkles } from './engine/weapon_sparkles.ts';
 import { TradeWindow } from './ui/trade_window.ts';
 import { AuctionWindow } from './ui/auction_window.ts';
 import { Telegraphs } from './engine/telegraphs.ts';
@@ -240,7 +241,11 @@ async function main(): Promise<void> {
   const oreVeins = new OreVeins(scene);
   const craftWindow = new CraftWindow();
   /** The local player's refined weapon glows (MMO items). */
-  const weaponGlow = new WeaponGlow();
+  const weaponGlow = new HeldGlow('WPN RIGHT');
+  const shieldGlow = new HeldGlow('WPN LEFT');
+  const armorGlow = new ArmorGlow();
+  /** And its star dust (after Rappelz's galaxy stones), stronger with each refinement. */
+  const weaponSparkles = new WeaponSparkles(scene);
   // This act's waypoint crystal (SC_WORLD_ENTER; not original): shown once the story is finished.
   let crystalAt: { x: number; y: number; z: number } | null = null;
   let crystal: WaypointCrystal | null = null;
@@ -602,6 +607,7 @@ async function main(): Promise<void> {
           },
           correction: (dx, dy, dz) => player?.correct(dx, dy, dz),
           stats: (s) => {
+            combatUi.playerLevel = s.level;
             hud.stats(s);
             craftWindow.setStats(s);
             if (!!crystal !== (!!s.storyComplete && !!crystalAt)) refreshCrystal();
@@ -787,6 +793,7 @@ async function main(): Promise<void> {
             inventoryPanel.refining = d.features?.mmoItems === true;
             waypointMap.dungeons = d.features?.mmoDungeons === true;
             inventoryPanel.anvil = d.features?.mmoCrafting === true;
+            hud.mmoLevels = charSheet.mmoLevels = d.features?.mmoLevels === true;
             telegraphs.clear();
             oreVeins.clear();
             setWaypointMapOpen(false);
@@ -1103,12 +1110,15 @@ async function main(): Promise<void> {
   lighting.silhouettes = settings.current.silhouetteShadows;
   propShadows.enabled = settings.current.objectShadows;
   propShadows.strength = settings.current.objectShadowStrength;
+  const glowIntensity = (s: Settings) => (s.itemGlow ? s.itemGlowIntensity : 0);
+  weaponGlow.intensity = shieldGlow.intensity = armorGlow.intensity = weaponSparkles.intensity = glowIntensity(settings.current);
   dynamicLights.enabled = settings.current.enhancedLighting;
   postFx.enabled = settings.current.enhancedLighting;
   settings.onChange((s) => {
     lighting.silhouettes = s.silhouetteShadows;
     propShadows.enabled = s.objectShadows;
     propShadows.strength = s.objectShadowStrength;
+    weaponGlow.intensity = shieldGlow.intensity = armorGlow.intensity = weaponSparkles.intensity = glowIntensity(s);
     if (dynamicLights.enabled !== s.enhancedLighting) {
       dynamicLights.enabled = s.enhancedLighting;
       postFx.enabled = s.enhancedLighting;
@@ -1792,8 +1802,8 @@ async function main(): Promise<void> {
       // Enter opens the chat line; / opens it on a command.
       e.preventDefault();
       chat.focus(e.code === 'Slash' ? '/' : '');
-    } else if (!typing && (e.ctrlKey || e.shiftKey) && !e.altKey && !e.repeat && e.code === 'KeyG') {
-      // Ctrl+G (Shift+G too): the ground window beside the inventory.
+    } else if (!typing && (e.altKey ? !e.ctrlKey : e.ctrlKey || e.shiftKey) && !e.repeat && e.code === 'KeyG') {
+      // Ctrl+G (Shift+G, Alt+G too; not AltGr = Ctrl+Alt): the ground window beside the inventory.
       e.preventDefault();
       setInventoryPanelOpen('ground', !inventoryPanel.isOpen('ground'));
     } else if (!typing && e.shiftKey && !e.repeat && e.code === 'KeyC') {
@@ -1876,7 +1886,11 @@ async function main(): Promise<void> {
       local.avatar.update(sceneDt);
       if (cutscene?.finished) endCutscene();
     } else local.render(acc / TICK_MS, dt);
-    weaponGlow.update(local.avatar.object, session?.inventory?.items.find((i) => i.equipped && i.type === 'weapon')?.mods?.plus ?? 0, dt);
+    const plusOf = (type: string) => session?.inventory?.items.find((i) => i.equipped && i.type === type)?.mods?.plus ?? 0;
+    weaponGlow.update(local.avatar.object, plusOf('weapon'), dt);
+    weaponSparkles.update(local.avatar.object, plusOf('weapon'), dt);
+    shieldGlow.update(local.avatar.object, plusOf('shield'), dt);
+    armorGlow.update(local.avatar.object, plusOf('armor'), dt);
     if (live) {
       partyFrame.update(live.arenaName, (name) => {
         const wanted = name.toLowerCase();

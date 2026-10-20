@@ -7,6 +7,7 @@ import {
   createSyntheticArena,
   initPhysics,
   type InventoryEntry,
+  type ItemMods,
   type ItemDef,
   type Rapier,
   type ServerControlMsg,
@@ -27,7 +28,7 @@ interface Internal {
   objects: Map<number, { state: string; def: { item?: { itemId?: string } } }>;
 }
 
-function zone(items = new Map(BUILTIN_ITEMS), carries?: { name: string; quantity: number }[]) {
+function zone(items = new Map(BUILTIN_ITEMS), carries?: { name: string; quantity: number }[], options: object = {}) {
   const arena = createSyntheticArena();
   if (carries) arena.mobSpawns[0]!.carries = carries;
   arena.objects = [{ id: CHEST, kind: 'chest', x: 0, y: 0, z: -0.5, contents: [{ name: 'Long Sword', quantity: 1 }, { name: 'Gold Pieces', quantity: 5 }] }];
@@ -38,7 +39,7 @@ function zone(items = new Map(BUILTIN_ITEMS), carries?: { name: string; quantity
       if (typeof data === 'string') messages.set(c, [...(messages.get(c) ?? []), JSON.parse(data) as ServerControlMsg]);
     },
     loot: (e) => loot.push(e),
-  }, { items });
+  }, { items, ...options } as never);
   const internal = z as unknown as Internal;
   const join = (connId: number, inventory?: InventoryEntry[]) => {
     z.join(connId, { name: `P${connId}`, characterId: null, position: { ...AT }, ...(inventory ? { inventory } : {}) });
@@ -223,6 +224,21 @@ describe('inventory authority in the zone', () => {
     const view = t.sent(1).filter((m) => m.op === SC.INVENTORY_UPDATE).at(-1)!.d.items.find((i) => i.itemId === 'message_for_dain');
     expect(view).toMatchObject({ keyItem: true });
     expect(view!.x).toBeUndefined();
+  });
+
+  it("with mmoItems a kill's gear rolls its rarity as it drops, and the pick-up keeps it", () => {
+    // random 0.02: below 0.05 = Tempered on the rarity roll.
+    const t = zone(new Map(BUILTIN_ITEMS), [{ name: 'Long Sword', quantity: 1 }], { random: () => 0.02, features: { mmoItems: true } });
+    const p = t.join(1);
+    const internal = t.z as unknown as { actors: Map<number, { kind: string }>; grantReward(p: unknown, m: unknown, share: { id: number; xp: number; gold: number }): unknown };
+    internal.grantReward(p, [...internal.actors.values()].find((a) => a.kind === 'mob')!, { id: 0, xp: 10, gold: 1 });
+    const [id, sword] = t.dynamic().find(([, o]) => (o as unknown as { def: { item?: { itemId?: string } } }).def.item?.itemId === 'long_sword')! as unknown as [number, { def: { x: number; y: number; z: number; item: { mods?: ItemMods; uid?: string } } }];
+    expect(sword.def.item.mods?.rarity).toBe('tempered');
+    expect(sword.def.item.uid).toBeTruthy();
+    Object.assign((p as unknown as { character: { position: object } }).character.position, { x: sword.def.x, y: sword.def.y, z: sword.def.z });
+    t.z.interact(1, id);
+    const got = p.inventory.find((e) => e.uid === sword.def.item.uid);
+    expect(got?.mods).toEqual(sword.def.item.mods);
   });
 
   it("a kill's gold goes to the purse; its items lie at the corpse for the killer alone, 2 minutes", () => {

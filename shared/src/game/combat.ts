@@ -399,11 +399,66 @@ export const MAX_LEVEL = 50;
 const XP_STEP = [0, 500, 1000, 2000, 3000, 4000] as const;
 const XP_STEP_LATE = 4000;
 
-/** Total XP needed to reach `level` (engine Stats_LevelUp): 0, 500, 1500, 3500, 6500, 10500, +4000... */
-export function xpForLevel(level: number): number {
+/**
+ * Total XP needed to reach `level` (engine Stats_LevelUp): 0, 500, 1500, 3500, 6500, 10500,
+ * +4000...; with `mmo` (feature mmoLevels) the MMO curve (mmoXpForLevel).
+ */
+export function xpForLevel(level: number, mmo = false): number {
+  if (mmo) return mmoXpForLevel(level);
   let total = 0;
   for (let l = 2; l <= level; l++) total += l - 1 < XP_STEP.length ? XP_STEP[l - 1]! : XP_STEP_LATE;
   return total;
+}
+
+/** Highest level of the MMO curve (feature mmoLevels). */
+export const MMO_MAX_LEVEL = 100;
+
+/**
+ * XP from level L to L + 1 on the MMO curve (area_levels_and_affix_tiers_plan.md §2.2, not
+ * original): 350 L^1.32 + 150 through the campaign (1–44); from 45 to 49 that curve's step at 45
+ * × 1.55^(L − 44), the wall before Necros (≈ 83k, 128k, 199k, 309k, 479k: the plan's listed
+ * numbers; its formula's exponent L − 45 would make 45 → 46 no steeper than 44 → 45);
+ * 550,000 + 45,000 (L − 50) + 1,200 (L − 50)² from 50 on.
+ */
+export function mmoXpStep(level: number): number {
+  const campaign = (l: number) => Math.floor(350 * l ** 1.32 + 150);
+  if (level < 45) return campaign(Math.max(1, level));
+  if (level < 50) return Math.floor(campaign(45) * 1.55 ** (level - 44));
+  const n = level - 50;
+  return Math.floor(550_000 + 45_000 * n + 1_200 * n * n);
+}
+
+const MMO_XP_TOTAL: readonly number[] = (() => {
+  const out = [0, 0];
+  for (let l = 2; l <= MMO_MAX_LEVEL; l++) out.push(out[l - 1]! + mmoXpStep(l - 1));
+  return out;
+})();
+
+/** Total XP to reach `level` on the MMO curve (level 1: 0). */
+export function mmoXpForLevel(level: number): number {
+  return MMO_XP_TOTAL[Math.max(1, Math.min(MMO_MAX_LEVEL, Math.floor(level)))]!;
+}
+
+/** A creature's base XP at level L (MMO): 18 L^1.22 + 20. */
+export function mobBaseXp(level: number): number {
+  return Math.floor(18 * Math.max(1, level) ** 1.22 + 20);
+}
+
+/**
+ * The share of a kill's XP a player gets from the level gap Δ = his level − the creature's:
+ * whole within 3; −15 % per level beyond 3 below him (at least 2 %); +5 % per level beyond 3
+ * above him (at most +20 %).
+ */
+export function xpLevelFactor(playerLevel: number, mobLevel: number): number {
+  const d = playerLevel - mobLevel;
+  if (Math.abs(d) <= 3) return 1;
+  if (d > 3) return Math.max(0.02, 1 - 0.15 * (d - 3));
+  return Math.min(1.2, 1 + 0.05 * (-d - 3));
+}
+
+/** A kill's XP for one player (MMO): the creature's base × its rank's multiplier × the gap's factor, at least 1. */
+export function xpRewardForKill(mobLevel: number, playerLevel: number, mult = 1): number {
+  return Math.max(1, Math.round(mobBaseXp(mobLevel) * mult * xpLevelFactor(playerLevel, mobLevel)));
 }
 
 export interface MobArchetype {
@@ -630,9 +685,11 @@ const NPC_ARCHETYPES: Record<string, MobArchetype> = Object.fromEntries(
 );
 Object.assign(MOB_ARCHETYPES, NPC_ARCHETYPES);
 
-export function levelForXp(xp: number): number {
+/** The level `xp` reaches: the original curve up to MAX_LEVEL, or with `mmo` the MMO curve up to MMO_MAX_LEVEL. */
+export function levelForXp(xp: number, mmo = false): number {
+  const cap = mmo ? MMO_MAX_LEVEL : MAX_LEVEL;
   let level = 1;
-  while (level < MAX_LEVEL && xp >= xpForLevel(level + 1)) level++;
+  while (level < cap && xp >= xpForLevel(level + 1, mmo)) level++;
   return level;
 }
 

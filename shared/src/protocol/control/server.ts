@@ -52,6 +52,8 @@ export interface EntitySpawnMsg {
     ally?: boolean;
     /** Model scale of a creature that is not a level placement (an admin's custom spawn); placements' come from the level. */
     scale?: number;
+    /** A hostile creature's level (feature mmoLevels, area_levels.ts). */
+    level?: number;
   };
 }
 

@@ -40,6 +40,8 @@ export class CharacterSheet {
   private readonly root: HTMLElement;
   private readonly boxes: HTMLElement[];
   private stats: PlayerStats | null = null;
+  /** The server's feature mmoLevels: the next level's XP on the MMO curve. */
+  mmoLevels = false;
   private strings: ReadonlyMap<number, string> = new Map();
   onClose: () => void = () => {};
 
@@ -101,7 +103,7 @@ export class CharacterSheet {
     // "Drake the Crusader  " in the original: each player's own name here.
     this.boxes[0]!.textContent =
       `${st.name} the Crusader  ${s(S.LEVEL)} ${st.level}\n\n` +
-      ` ${s(S.EXPERIENCE)} ${st.xp}  ${s(S.NEXT_LEVEL)} ${xpForLevel(st.level + 1)}\n\n` +
+      ` ${s(S.EXPERIENCE)} ${st.xp}  ${s(S.NEXT_LEVEL)} ${xpForLevel(st.level + 1, this.mmoLevels)}\n\n` +
       ` ${a.might} ${s(S.MIGHT)}\n ${a.intellect} ${s(S.INTELLIGENCE)}\n ${a.endurance} ${s(S.ENDURANCE)}\n ${a.speed} ${s(S.SPEED)}\n\n`;
     this.boxes[1]!.textContent =
       `${s(S.DAMAGE_MULTIPLIER)} ${fixed(st.damageMultiplier, 1)}\n` +

@@ -35,6 +35,11 @@ export interface GameplayFeatures {
   mmoDungeons: boolean;
   /** MMO soft skills (docs/game-design/mmo/07, crafting.ts): ore veins, smithing, salvaging. */
   mmoCrafting: boolean;
+  /**
+   * MMO area levels (area_levels.ts): creatures fight at their act's level (HP and damage scaled,
+   * Necros 50), XP from the creature's level and the level gap, the MMO XP curve to level 100.
+   */
+  mmoLevels: boolean;
 }
 
 export const ORIGINAL_FEATURES: Readonly<GameplayFeatures> = {
@@ -44,6 +49,7 @@ export const ORIGINAL_FEATURES: Readonly<GameplayFeatures> = {
   mmoItems: false,
   mmoDungeons: false,
   mmoCrafting: false,
+  mmoLevels: false,
 };
 
 export type FeatureName = keyof GameplayFeatures;

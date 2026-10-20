@@ -216,6 +216,16 @@ import {
   DUNGEON_ENTRY_PREFIX,
   type DungeonDef,
   rollMods,
+  areaLevel,
+  mobLevel,
+  mobHpScale,
+  mobDamageScale,
+  mobBaseXp,
+  xpLevelFactor,
+  NECROS_LEVEL,
+  RANK_LEVEL_OFFSET,
+  RANK_XP_MULT,
+  type MobRank,
   withMods,
   nextRefine,
   refineOnce,
@@ -904,6 +914,14 @@ interface Mob extends ActorBase {
   custom?: { id: string; damage: number; respawn: boolean; expiresAt: number };
   /** A dungeon's boss (its dungeon id): its death clears the run; loot once a day (dungeons.ts). */
   bossOf?: string;
+  /**
+   * Its level and rank (MMO, area_levels.ts): its act's level plus the rank's offset, Necros 50.
+   * Always known (it is the item level of what it drops with mmoItems); with mmoLevels its HP,
+   * XP and blows (`levelDamage`) follow it.
+   */
+  level: number;
+  rank: MobRank;
+  levelDamage: number;
 }
 
 type Actor = Player | Mob;
@@ -1038,12 +1056,24 @@ export class WorldZone {
    */
   private readonly endingScene: StorySequence | null;
   private readonly endingCast: ArenaDef['mobSpawns'] = [];
+  /** This act's level (area_levels.ts; 1 for synthetic arenas). */
+  private readonly areaLevel: number;
+  /** Original XP at and above which a placement of this act is an elite (2.5 × the median hostile's). */
+  private readonly eliteXp: number;
 
   constructor(rapier: Rapier, name: string, arena: ArenaDef, outbox: ZoneOutbox, opts: WorldZoneOptions = {}) {
     this.name = name;
     this.arena = arena;
     this.outbox = outbox;
     this.dungeon = splitInstance(name).dungeon;
+    this.areaLevel = areaLevel(arena.name);
+    const xps = arena.mobSpawns
+      .map((m) => ({ a: MOB_ARCHETYPES[m.archetype], xp: m.xp }))
+      .filter(({ a }) => a && !a.passive && a.type !== NECROS_TYPE)
+      .map(({ a, xp }) => xp ?? a!.xpReward)
+      .filter((x) => x > 0)
+      .sort((a, b) => a - b);
+    this.eliteXp = xps.length ? 2.5 * xps[Math.floor(xps.length / 2)]! : Infinity;
     this.random = opts.random ?? Math.random;
     this.difficulty = opts.difficulty ?? 'medium';
     this.features = gameplayFeatures({ ...opts.features, ...(opts.reactiveBlock ? { reactiveBlock: true } : {}) });
@@ -1307,7 +1337,8 @@ export class WorldZone {
     this.grid.update(a.entityId, p.x, p.z);
   }
 
-  private spawnMob(archetypeId: string, at: ArenaDef['mobSpawns'][number]): number {
+  /** `custom`: an admin's or a dungeon's spawn, whose numbers are its own (no level scaling). */
+  private spawnMob(archetypeId: string, at: ArenaDef['mobSpawns'][number], custom = false): number {
     const base = MOB_ARCHETYPES[archetypeId];
     if (!base) throw new Error(`unknown mob archetype ${archetypeId}`);
     // Original level placements carry their own HP, XP value and resists.
@@ -1317,6 +1348,15 @@ export class WorldZone {
       ...(at.xp !== undefined ? { xpReward: at.xp } : {}),
       ...(at.resist?.length === 11 ? { resist: at.resist } : {}),
     };
+    // MMO area levels: its act's level plus its rank's offset (Necros 50). With mmoLevels its HP,
+    // blows and XP follow its level; Necros keeps his own HP and blows, custom spawns their numbers.
+    const necros = archetype.type === NECROS_TYPE;
+    const rank: MobRank = necros ? 'boss' : archetype.xpReward >= this.eliteXp ? 'elite' : 'normal';
+    const level = necros ? NECROS_LEVEL : mobLevel(this.areaLevel, rank);
+    const leveled = this.features.mmoLevels && !archetype.passive && archetypeId !== 'spectral_ally';
+    if (leveled && !custom) archetype.xpReward = mobBaseXp(level) * RANK_XP_MULT[rank];
+    if (leveled && !custom && !necros) archetype.maxHp = Math.round(archetype.maxHp * mobHpScale(level));
+    const levelDamage = leveled && !custom && !necros ? mobDamageScale(level) : 1;
     // Original placements hold what their inventory header names (null: nothing); an item this
     // catalogue lacks keeps the archetype's.
     const placed = (id: string | null | undefined) => (id === undefined ? undefined : id === null ? null : this.items.get(id));
@@ -1408,6 +1448,9 @@ export class WorldZone {
       ...(at.carries ? { carries: at.carries } : {}),
       statuses: new Map(),
       timeAcc: 0,
+      level,
+      rank,
+      levelDamage,
     };
     this.register(mob);
     return mob.entityId;
@@ -1433,7 +1476,7 @@ export class WorldZone {
         ? arr
         : validPosition(opts.position) ? resume : start ?? this.nextSpawnPoint();
     const xp = Math.max(0, Math.floor(opts.experience ?? 0));
-    const level = levelForXp(xp);
+    const level = levelForXp(xp, this.features.mmoLevels);
     const rules = playerRules(this.difficulty);
     const saved = sanitizeInventory(opts.inventory ?? [], this.items);
     const inventory = saved.length > 0 ? saved : startingInventory();
@@ -1780,8 +1823,9 @@ export class WorldZone {
           if (instance.uid && !p.inventory.some((e) => e.uid === instance.uid)) entry.uid = instance.uid;
           if (instance.mods) entry.mods = structuredClone(instance.mods);
         } else if (entry && this.features.mmoItems) {
-          // MMO items: a new piece of equipment rolls its rarity and affixes (item_mods.ts).
-          const mods = rollMods(def, this.random);
+          // MMO items: a new piece of equipment rolls its rarity and affixes (item_mods.ts), at
+          // this act's item level.
+          const mods = rollMods(def, this.random, this.areaLevel);
           if (mods) entry.mods = mods;
         }
         added++;
@@ -2438,7 +2482,7 @@ export class WorldZone {
       p.gold -= r.gold;
       const level = skillLevel(p.skills.smithing ?? 0);
       // A smith's gear rolls its rarity like a find, better with his level (mmoItems).
-      const mods = this.features.mmoItems && moddable(out) ? rollMods(out, ((first) => () => (first ? ((first = false), Math.max(0, this.random() - smithRarityBonus(level))) : this.random()))(true)) : undefined;
+      const mods = this.features.mmoItems && moddable(out) ? rollMods(out, ((first) => () => (first ? ((first = false), Math.max(0, this.random() - smithRarityBonus(level))) : this.random()))(true), Math.max(1, Math.min(100, level))) : undefined;
       this.grantItem(p, out.name, r.output.count, out.id, mods ? { mods } : undefined);
       this.gainSkill(p, 'smithing', r.xp);
       this.notify(p, 'loot', `You forge ${r.output.count > 1 ? `${r.output.count} × ` : ''}${out.name}.`);
@@ -2502,7 +2546,13 @@ export class WorldZone {
     run.enraged = 0;
     run.slams = [];
     const boss = id !== undefined ? this.actors.get(id) : undefined;
-    if (boss?.kind === 'mob') boss.bossOf = this.dungeon!.id;
+    if (boss?.kind === 'mob') {
+      boss.bossOf = this.dungeon!.id;
+      // A boss fights two levels above its act (area_levels.ts); its HP and blows are the dungeon's.
+      boss.rank = 'boss';
+      boss.level = Math.min(100, this.areaLevel + RANK_LEVEL_OFFSET.boss);
+      if (this.features.mmoLevels) boss.archetype = { ...boss.archetype, xpReward: mobBaseXp(boss.level) * RANK_XP_MULT.boss };
+    }
   }
 
   /** Each tick of a dungeon run: phases, adds, slams, enrage, a wipe's reset. */
@@ -5010,7 +5060,7 @@ export class WorldZone {
     // Creatures skip the stronger-of-slash/bash and Might rules (empty stats slot 45): their
     // unarmed damage (+0x18) plus the whole weapon vector (0x0044CCF0).
     const weapon = a.damage ?? a.weapon.damage!;
-    const k = a.custom?.damage ?? 1;
+    const k = (a.custom?.damage ?? 1) * a.levelDamage;
     return this.magic.outgoing(a, (a.unarmed ? weapon.map((v, t) => v + (a.unarmed![t] ?? 0)) : [...weapon]).map((v) => v * k));
   }
 
@@ -5146,7 +5196,8 @@ export class WorldZone {
     const arch = mob.archetype;
     // Event rates (admin panel, not original): XP and gold scaled, loot chances scaled.
     const r = this.rates;
-    const xp = share.xp;
+    // MMO area levels: the share scaled by the gap between his level and the creature's.
+    const xp = this.features.mmoLevels && share.xp > 0 ? Math.max(1, Math.round(share.xp * xpLevelFactor(p.level, mob.level))) : share.xp;
     this.addExperience(p, xp);
     // A dungeon boss pays its gold and items once a day per character (dungeons.ts lockout).
     if (mob.bossOf) {
@@ -5175,14 +5226,14 @@ export class WorldZone {
       for (const m of MATERIAL_DROPS) if (this.random() < Math.min(1, m.chance * r.drops)) grants.push({ name: this.items.get(m.itemId)?.name ?? m.itemId, quantity: 1, itemId: m.itemId });
     }
     let gold = 0;
-    const loot: { def: ItemDef; quantity: number; mods?: ItemMods }[] = [];
+    const loot: { def: ItemDef; quantity: number; mods?: ItemMods; rolled?: boolean }[] = [];
     // A dungeon boss also leaves one fine piece of gear (Tempered or better with mmoItems).
     if (mob.bossOf) {
       const pool = ['broad_sword', 'war_hammer', 'battle_axe', 'banded_armor', 'metal_shield'].map((id) => this.items.get(id)).filter((d): d is ItemDef => !!d);
       const def = pool[Math.floor(this.random() * pool.length)];
       if (def) {
         let first = true;
-        const mods = this.features.mmoItems ? rollMods(def, () => (first ? ((first = false), this.random() * 0.05) : this.random())) : undefined;
+        const mods = this.features.mmoItems ? rollMods(def, () => (first ? ((first = false), this.random() * 0.05) : this.random()), mob.level) : undefined;
         loot.push({ def, quantity: 1, ...(mods ? { mods } : {}) });
       }
     }
@@ -5201,7 +5252,15 @@ export class WorldZone {
           const want = n * r.drops;
           n = Math.floor(want) + (this.random() < want - Math.floor(want) ? 1 : 0);
         }
-        if (def && n > 0) loot.push({ def, quantity: n });
+        if (def && n > 0 && this.features.mmoItems && moddable(def)) {
+          // MMO items: gear rolls its rarity as it drops, so the ground window shows its colour
+          // (one instance each; a Battle-worn one gets a uid so the pick-up does not roll again).
+          for (let k = 0; k < n; k++) {
+            // Its item level is the creature's (area_levels.ts): it caps the affix tiers.
+            const mods = rollMods(def, this.random, mob.level);
+            loot.push({ def, quantity: 1, rolled: true, ...(mods ? { mods } : {}) });
+          }
+        } else if (def && n > 0) loot.push({ def, quantity: n });
       }
     }
     if (loot.length) this.dropKillLoot(p, mob, loot);
@@ -5216,11 +5275,11 @@ export class WorldZone {
    * taken by the killer only (`onlyFor`), gone after KILL_LOOT_LIFETIME_TICKS. Taken one by one
    * like any ground item (Tab or the ground panel).
    */
-  private dropKillLoot(p: Player, mob: Mob, loot: { def: ItemDef; quantity: number; mods?: ItemMods }[]): void {
+  private dropKillLoot(p: Player, mob: Mob, loot: { def: ItemDef; quantity: number; mods?: ItemMods; rolled?: boolean }[]): void {
     const onlyFor = this.playerKey(p);
     const at = mob.character.position;
     const changes: ObjectChange[] = [];
-    loot.forEach(({ def, quantity, mods }, i) => {
+    loot.forEach(({ def, quantity, mods, rolled }, i) => {
       const id = this.nextDynamicObjectId++;
       // Golden-angle steps from the creature's heading: a ring of items that never overlap.
       const a = dequantizeAngle(mob.yaw) + i * 2.4;
@@ -5231,7 +5290,7 @@ export class WorldZone {
         y: at.y,
         z: at.z + Math.cos(a) * KILL_LOOT_SPREAD,
         loose: true,
-        item: { name: def.name, quantity, itemId: def.id, ...(def.model !== undefined ? { model: def.model } : {}), ...(def.texture !== undefined ? { texture: def.texture } : {}), ...(mods ? { mods, uid: globalThis.crypto.randomUUID() } : {}) },
+        item: { name: def.name, quantity, itemId: def.id, ...(def.model !== undefined ? { model: def.model } : {}), ...(def.texture !== undefined ? { texture: def.texture } : {}), ...(mods ? { mods } : {}), ...(mods || rolled ? { uid: globalThis.crypto.randomUUID() } : {}) },
       };
       this.objects.set(id, { def: objDef, state: 'present', hp: 0, respawnAt: 0, dynamic: true, onlyFor, expiresAt: this.tick + KILL_LOOT_LIFETIME_TICKS });
       changes.push({ id, state: 'present', def: objDef });
@@ -5245,7 +5304,7 @@ export class WorldZone {
     p.xp += xp;
     p.statsDirty = true;
     this.notify(p, 'xp', `You gain ${xp} experience.`);
-    const level = levelForXp(p.xp);
+    const level = levelForXp(p.xp, this.features.mmoLevels);
     if (level > p.level) {
       // Engine Stats_LevelUp: derived stats are recomputed and the max-HP gain is added to HP.
       const before = p.maxHp;
@@ -5407,7 +5466,7 @@ export class WorldZone {
         op: SC.ENTITY_SPAWN,
         d: {
           id, kind, name: other.name, maxHp: other.maxHp,
-          ...(other.kind === 'mob' ? { archetype: other.archetype.id, ...(other.placement !== undefined ? { placement: other.placement } : {}), ...(other.ally !== undefined ? { ally: true } : {}), ...(other.custom && other.scale !== 1 ? { scale: other.scale } : {}) } : {}),
+          ...(other.kind === 'mob' ? { archetype: other.archetype.id, ...(other.placement !== undefined ? { placement: other.placement } : {}), ...(other.ally !== undefined ? { ally: true } : {}), ...(other.custom && other.scale !== 1 ? { scale: other.scale } : {}), ...(this.features.mmoLevels && !other.archetype.passive && other.ally === undefined ? { level: other.level } : {}) } : {}),
           ...(other.statuses.size ? { statuses: [...other.statuses.keys()] } : {}),
         },
       });
@@ -5487,7 +5546,7 @@ export class WorldZone {
       const id = this.spawnMob(spec.archetype, {
         archetype: spec.archetype, x: at.x + Math.sin(a) * r, y: at.y, z: at.z + Math.cos(a) * r, yaw: at.yaw,
         ...(spec.hp !== undefined ? { hp: spec.hp } : {}), ...(spec.xp !== undefined ? { xp: spec.xp } : {}), scale: spec.scale,
-      });
+      }, true);
       const m = this.actors.get(id) as Mob;
       const goldMin = spec.goldMin ?? m.archetype.goldMin;
       m.archetype = {

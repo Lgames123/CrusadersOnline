@@ -8,6 +8,8 @@
  *   damage or protection, and 2 / 4 / 4 affixes.
  * - Refinement +1..+10: +4 % .. +50 % on top of the rarity, at a merchant, for gold and materials;
  *   never destroys or lowers the item; each failure adds the level's failstack bonus.
+ * - Affix tiers T0..T10 (T11 masterwork, never dropped): an item's level (its creature's or its
+ *   act's, area_levels.ts) picks the window of four tiers it rolls in (tierWindow).
  * - Pipeline: (base × rarity × (1 + refinement)) + flat affixes; protection the same on the part
  *   it takes away; a resistance never above 75 %.
  */
@@ -38,49 +40,94 @@ export function moddable(def: Pick<ItemDef, 'type' | 'stackable' | 'keyItem' | '
 const ATTRS = ['might', 'intelligence', 'endurance', 'speed'] as const;
 const ELEMENTS = ['FIRE', 'AIR', 'EARTH', 'WATER', 'LIGHT', 'DARK'] as const;
 
-/** An affix pool entry: its id (or a family), the item kinds it rolls on, its range and weight. */
+export type AffixFamily = 'attr' | 'dmg' | 'res' | 'hp' | 'mana';
+
+/** An affix family: the item kinds it rolls on and its weight. */
 interface AffixKind {
-  family: 'attr' | 'dmg' | 'res' | 'hp' | 'mana';
+  family: AffixFamily;
   on: 'weapon' | 'defence' | 'any';
-  min: number;
-  max: number;
   weight: number;
-  integer: boolean;
 }
 
 const AFFIXES: readonly AffixKind[] = [
-  { family: 'attr', on: 'any', min: 1, max: 5, weight: 60, integer: true },
-  { family: 'dmg', on: 'weapon', min: 2, max: 12, weight: 80, integer: true },
-  { family: 'res', on: 'defence', min: 0.03, max: 0.18, weight: 70, integer: false },
-  { family: 'hp', on: 'defence', min: 10, max: 50, weight: 100, integer: true },
-  { family: 'mana', on: 'any', min: 15, max: 60, weight: 100, integer: true },
+  { family: 'attr', on: 'any', weight: 60 },
+  { family: 'dmg', on: 'weapon', weight: 80 },
+  { family: 'res', on: 'defence', weight: 70 },
+  { family: 'hp', on: 'defence', weight: 100 },
+  { family: 'mana', on: 'any', weight: 100 },
 ];
 
-/** Its rolled mods (rarity and affixes) for a new item instance, or undefined (Battle-worn). */
-export function rollMods(def: ItemDef, random: () => number): ItemMods | undefined {
+/**
+ * Affix tiers T0..T11 per family (area_levels_and_affix_tiers_plan.md §3): [min, max] in the
+ * stat's units, resistances in whole percent. T5 is the old single range's top (50 HP, 60 mana,
+ * 12 damage, 18 %, +5); T10 doubles it. T11 (masterwork) is never rolled by drops.
+ */
+export const AFFIX_TIERS: Readonly<Record<AffixFamily, readonly (readonly [number, number])[]>> = {
+  hp: [[1, 5], [6, 10], [11, 20], [21, 30], [31, 40], [41, 50], [51, 60], [61, 70], [71, 80], [81, 90], [91, 100], [101, 110]],
+  mana: [[2, 6], [7, 12], [13, 24], [25, 36], [37, 48], [49, 60], [61, 72], [73, 84], [85, 96], [97, 108], [109, 120], [121, 132]],
+  dmg: [[1, 1], [2, 2], [3, 4], [5, 6], [7, 9], [10, 12], [13, 15], [16, 18], [19, 21], [22, 24], [25, 27], [28, 30]],
+  res: [[1, 2], [3, 4], [5, 7], [8, 10], [11, 14], [15, 18], [19, 22], [23, 26], [27, 30], [31, 34], [35, 38], [39, 42]],
+  attr: [[1, 1], [1, 1], [2, 2], [3, 3], [4, 4], [5, 5], [6, 6], [7, 7], [8, 8], [9, 9], [10, 10], [11, 12]],
+};
+
+/** Highest tier drops roll (T10); T11 is the masterwork overcap. */
+export const MAX_ROLL_TIER = 10;
+export const MAX_TIER = 11;
+/** Tier an affix without one is shown against (the old single range's top). */
+export const BASELINE_TIER = 5;
+/** Item level of gear rolled with no level of its own. */
+export const DEFAULT_ILVL = 50;
+
+/** The tiers an item level rolls in: [max(0, top − 3), top], top = min(10, ⌊iLvl / 10⌋). */
+export function tierWindow(ilvl: number): { min: number; max: number } {
+  const max = Math.max(0, Math.min(MAX_ROLL_TIER, Math.floor(ilvl / 10)));
+  return { min: Math.max(0, max - 3), max };
+}
+
+/** A family's [min, max] at a tier, in the stat's units (resistances as fractions); undefined for no such tier. */
+export function tierRollRange(family: string, tier: number): { min: number; max: number } | undefined {
+  const t = AFFIX_TIERS[family as AffixFamily]?.[tier];
+  if (!t) return undefined;
+  return family === 'res' ? { min: t[0] / 100, max: t[1] / 100 } : { min: t[0], max: t[1] };
+}
+
+/** The range an affix rolls in at its tier (no tier: the baseline T5), or undefined for an unknown id. */
+export function affixRange(id: string, tier = BASELINE_TIER): { min: number; max: number } | undefined {
+  return tierRollRange(id.split(':')[0]!, tier);
+}
+
+/**
+ * Its rolled mods (rarity, item level and affixes) for a new item instance, or undefined
+ * (Battle-worn). Each affix at most once (as in Path of Exile): a family's weight is shared among
+ * its stats, and a stat rolled leaves the pool. Each affix rolls its tier uniformly in the item
+ * level's window (tierWindow), then its value uniformly in that tier's range.
+ */
+export function rollMods(def: ItemDef, random: () => number, ilvl = DEFAULT_ILVL): ItemMods | undefined {
   if (!moddable(def)) return undefined;
   const rarity = rollRarity(random());
   if (rarity === 'worn') return undefined;
   const kind = def.type === 'weapon' ? 'weapon' : 'defence';
-  const pool = AFFIXES.filter((a) => a.on === 'any' || a.on === kind);
-  const total = pool.reduce((n, a) => n + a.weight, 0);
+  const level = Math.max(1, Math.min(100, Math.round(ilvl)));
+  const window = tierWindow(level);
+  const pool = AFFIXES.filter((a) => a.on === 'any' || a.on === kind).flatMap((a) => {
+    const ids = a.family === 'attr' ? ATTRS.map((x) => `attr:${x}`)
+      : a.family === 'dmg' ? [`dmg:${weaponDamageType(def)}`]
+      : a.family === 'res' ? ELEMENTS.map((x) => `res:${x}`)
+      : [a.family];
+    return ids.map((id) => ({ id, kind: a, weight: a.weight / ids.length }));
+  });
   const affixes: ItemAffix[] = [];
-  for (let i = 0; i < RARITY_INFO[rarity].affixes; i++) {
+  for (let i = 0; i < RARITY_INFO[rarity].affixes && pool.length; i++) {
+    const total = pool.reduce((n, a) => n + a.weight, 0);
     let pick = random() * total;
-    const a = pool.find((x) => (pick -= x.weight) < 0) ?? pool[0]!;
-    const raw = a.min + random() * (a.max - a.min);
-    const value = a.integer ? Math.round(raw) : Math.round(raw * 100) / 100;
-    const id =
-      a.family === 'attr' ? `attr:${ATTRS[Math.floor(random() * ATTRS.length)]}`
-      : a.family === 'dmg' ? `dmg:${weaponDamageType(def)}`
-      : a.family === 'res' ? `res:${ELEMENTS[Math.floor(random() * ELEMENTS.length)]}`
-      : a.family;
-    // The same affix twice adds up.
-    const same = affixes.find((x) => x.id === id);
-    if (same) same.value = Math.round((same.value + value) * 100) / 100;
-    else affixes.push({ id, value });
+    const at = Math.max(0, pool.findIndex((x) => (pick -= x.weight) < 0));
+    const { id, kind: a } = pool.splice(at, 1)[0]!;
+    const tier = window.min + Math.min(window.max - window.min, Math.floor(random() * (window.max - window.min + 1)));
+    const [lo, hi] = AFFIX_TIERS[a.family][tier]!;
+    const v = lo + Math.min(hi - lo, Math.floor(random() * (hi - lo + 1)));
+    affixes.push({ id, value: a.family === 'res' ? v / 100 : v, tier });
   }
-  return { rarity, ...(affixes.length ? { affixes } : {}) };
+  return { rarity, ilvl: level, ...(affixes.length ? { affixes } : {}) };
 }
 
 /** The physical type a weapon mostly deals (its flat damage affix adds to it). */
@@ -134,6 +181,11 @@ export function refinePower(plus = 0): number {
   return plus > 0 ? REFINE_LEVELS[Math.min(plus, REFINE_LEVELS.length) - 1]!.power : 0;
 }
 
+/** The attribute an "attr:" affix raises (stored ids say "intelligence"; the stat is `intellect`). */
+function attrKey(what: string): keyof Attributes {
+  return what === 'intelligence' ? 'intellect' : (what as keyof Attributes);
+}
+
 /** Highest resistance any item can give one damage type (03 §4.2): taken multiplier 0.25. */
 export const MIN_PROTECTION = 0.25;
 
@@ -152,7 +204,10 @@ export function withMods(def: ItemDef, mods: ItemMods | undefined): ItemDef {
   let mana = def.bonusMana ?? 0;
   for (const a of mods.affixes ?? []) {
     const [family, what] = a.id.split(':') as [string, string | undefined];
-    if (family === 'attr' && what) attributes[what as keyof Attributes] = (attributes[what as keyof Attributes] ?? 0) + a.value;
+    if (family === 'attr' && what) {
+      const k = attrKey(what);
+      attributes[k] = (attributes[k] ?? 0) + a.value;
+    }
     else if (family === 'dmg' && what) {
       const t = DAMAGE_TYPES.indexOf(what as never);
       if (t >= 0) {
@@ -189,17 +244,55 @@ export function modsTitle(name: string, mods: ItemMods | undefined): { title: st
   return { title, color: rarity ? RARITY_INFO[rarity].color : null };
 }
 
-/** A tooltip line per affix ("+3 Might", "+12 % Fire resistance", "+30 hit points"). */
-export function affixLines(mods: ItemMods | undefined): string[] {
+/**
+ * A tooltip line per affix ("+3 Might", "+12 % Fire resistance", "+30 hit points"); with
+ * `ranges`, each followed by its tier and that tier's range ("+45 hit points (T5: 41–50)").
+ * An affix rolled before tiers shows the baseline T5 range without a tier, left out when the
+ * value lies outside it.
+ */
+export function affixLines(mods: ItemMods | undefined, opts: { ranges?: boolean } = {}): string[] {
   return (mods?.affixes ?? []).map((a) => {
     const [family, what] = a.id.split(':') as [string, string | undefined];
     const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
-    if (family === 'attr') return `+${a.value} ${cap(what ?? '')}`;
-    if (family === 'dmg') return `+${a.value} ${cap(what ?? '')} damage`;
-    if (family === 'res') return `+${Math.round(a.value * 100)} % ${cap(what ?? '')} resistance`;
-    if (family === 'hp') return `+${a.value} hit points`;
-    return `+${a.value} mana`;
+    const r = opts.ranges ? affixRange(a.id, a.tier) : undefined;
+    const pct = family === 'res';
+    const span = r && (r.min === r.max ? `${pct ? Math.round(r.min * 100) : r.min}` : `${pct ? Math.round(r.min * 100) : r.min}–${pct ? Math.round(r.max * 100) : r.max}`);
+    const range = !r ? ''
+      : a.tier !== undefined ? ` (T${a.tier}: ${span})`
+      : a.value >= r.min - 1e-9 && a.value <= r.max + 1e-9 ? ` (${span})` : '';
+    if (family === 'attr') return `+${a.value} ${cap(what === 'intelligence' ? 'intellect' : what ?? '')}${range}`;
+    if (family === 'dmg') return `+${a.value} ${cap(what ?? '')} damage${range}`;
+    if (pct) return `+${Math.round(a.value * 100)} % ${cap(what ?? '')} resistance${range}`;
+    if (family === 'hp') return `+${a.value} hit points${range}`;
+    return `+${a.value} mana${range}`;
   });
+}
+
+/**
+ * An item's own (implicit) numbers without what its affixes add: an inventory view carries them
+ * summed (withMods), the tooltip shows the two apart. Damage and attributes subtract exactly; a
+ * resistance divides back out unless the 75 % cap clipped it (then it stays as it is).
+ */
+export function withoutAffixes<T extends { damage?: number[]; protection?: number[]; attributes?: Partial<Attributes> }>(item: T, mods: ItemMods | undefined): T {
+  if (!mods?.affixes?.length) return item;
+  const out: T = { ...item };
+  const damage = item.damage && [...item.damage];
+  const protection = item.protection && [...item.protection];
+  const attributes: Partial<Attributes> = { ...item.attributes };
+  for (const a of mods.affixes) {
+    const [family, what] = a.id.split(':') as [string, string | undefined];
+    const t = what ? DAMAGE_TYPES.indexOf(what as never) : -1;
+    if (family === 'dmg' && damage && t >= 0) damage[t] = Math.round(((damage[t] ?? 0) - a.value) * 100) / 100;
+    else if (family === 'res' && protection && t >= 0 && (protection[t] ?? 1) > MIN_PROTECTION + 1e-9) protection[t] = Math.min(1, (protection[t] ?? 1) / (1 - a.value));
+    else if (family === 'attr' && what) {
+      const k = attrKey(what);
+      attributes[k] = (attributes[k] ?? 0) - a.value;
+    }
+  }
+  if (damage) out.damage = damage;
+  if (protection) out.protection = protection.map((v) => Math.round(v * 1000) / 1000);
+  if (item.attributes || Object.keys(attributes).length) out.attributes = attributes;
+  return out;
 }
 
 export const MATERIAL_DROPS: readonly { itemId: string; chance: number }[] = [

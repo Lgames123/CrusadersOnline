@@ -43,14 +43,17 @@ export class Hud {
     this.classic.visible = this.hasStats && this.style_ === 'classic';
   }
 
+  /** The server's feature mmoLevels (SC_WORLD_ENTER): the XP bar follows the MMO curve. */
+  mmoLevels = false;
+
   stats(s: PlayerStats): void {
     this.hasStats = true;
     this.show();
     this.classic.update(s);
     const hpPct = s.maxHp > 0 ? (100 * s.hp) / s.maxHp : 0;
-    // Original curve: thresholds 500, 1500, 3500, ... (xpForLevel).
-    const from = xpForLevel(s.level);
-    const span = Math.max(1, xpForLevel(s.level + 1) - from);
+    // Original curve: thresholds 500, 1500, 3500, ... (xpForLevel); the MMO one with mmoLevels.
+    const from = xpForLevel(s.level, this.mmoLevels);
+    const span = Math.max(1, xpForLevel(s.level + 1, this.mmoLevels) - from);
     const xpInto = s.xp - from;
     this.panel.innerHTML = `
       <div class="row"><span>HP</span><div class="track hp"><div class="fill" style="width:${hpPct.toFixed(0)}%"></div></div><span>${s.hp}/${s.maxHp}</span></div>

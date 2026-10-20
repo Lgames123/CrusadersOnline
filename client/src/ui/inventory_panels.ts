@@ -1,4 +1,4 @@
-import { affixLines, modsTitle, moddable, nextRefine, refineChance, BUILTIN_ITEMS, BUILTIN_SPELLS, canPlaceGrid, DAMAGE_TYPES, equipCapacity, firstFreeGridPosition, isEquippable, INVENTORY_GRID, layoutItemViews, SPELL_NAMES, type GridPlacement, type Inventory, type InventoryItemView, type ItemMods, type PlayerStats, type ShopItemView, type SpellId } from '@crusaders/shared';
+import { affixLines, modsTitle, moddable, nextRefine, refineChance, withoutAffixes, BUILTIN_ITEMS, BUILTIN_SPELLS, canPlaceGrid, DAMAGE_TYPES, equipCapacity, firstFreeGridPosition, isEquippable, INVENTORY_GRID, layoutItemViews, SPELL_NAMES, type GridPlacement, type Inventory, type InventoryItemView, type ItemMods, type PlayerStats, type ShopItemView, type SpellId } from '@crusaders/shared';
 import { HeldItemPreview } from './held_item_preview.ts';
 import { ItemThumbnails } from './item_thumbnails.ts';
 import { itemPreviewModelFile } from '../assets/item_models.ts';
@@ -71,6 +71,11 @@ function equipSlotsOf(type: ItemType): string[] {
 
 function equipSelector(type: ItemType): string {
   return equipSlotsOf(type).map((k) => `[data-equip="${k}"]`).join(', ') || ':not(*)';
+}
+
+/** "Item level: 42" under a tooltip's name (rolled gear only; area_levels.ts). */
+function itemLevelLine(mods: ItemMods | undefined): string {
+  return mods?.ilvl ? `<span class="tt-ilvl">Item level: ${mods.ilvl}</span>` : '';
 }
 
 function escape(s: string): string {
@@ -453,11 +458,9 @@ export class InventoryPanels {
   /** A ground item's tooltip: its name in the rarity's colour, its affixes, the pick-up hint. */
   private groundTooltip(item: GroundItemView): string {
     const named = modsTitle(item.name, item.mods);
-    const lines = [...affixLines(item.mods), ...(item.quantity > 1 ? [`Quantity: ${item.quantity}`] : [])];
+    const lines = [...affixLines(item.mods, { ranges: true }), ...(item.quantity > 1 ? [`Quantity: ${item.quantity}`] : [])];
     return `<strong class="tt-name"${named.color ? ` style="color:${named.color}"` : ''}>${escape(named.title)}</strong>
-      <span class="tt-type">On the ground</span>
-      ${lines.map((l) => `<span>${escape(l)}</span>`).join('')}
-      <small>Click to pick up</small>`;
+      ${itemLevelLine(item.mods)}${lines.map((l) => `<span>${escape(l)}</span>`).join('')}`;
   }
 
   // --- Tooltip
@@ -465,36 +468,51 @@ export class InventoryPanels {
   private tooltipHtml(item: InventoryItemView): string {
     if (item.keyItem) {
       return `<strong class="tt-name tt-${item.type}">${escape(item.name)}</strong>
-        <span class="tt-type">Key item</span>
-        <span>Opens a locked door</span>
-        <small>Cannot be dropped</small>`;
+        <span>Opens a locked door</span>`;
     }
-    const { width, height } = shapeOf(item);
+    // Path of Exile's order: the item's own numbers (scaled by rarity and refinement), a rule,
+    // then each rolled affix with the range it rolls in.
+    const own = withoutAffixes(item, item.mods);
+    const scaled = !!item.mods?.rarity || !!item.mods?.plus;
+    // Rarity and refinement scale damage and protection only (withMods): those show augmented.
+    const implicit: { text: string; aug?: boolean; bonus?: string }[] = [];
+    // What the affixes add to each own number, shown beside it ("Bash damage: 12 (+9)").
+    const added = new Map<string, number>();
+    for (const a of item.mods?.affixes ?? []) {
+      const id = a.id === 'attr:intelligence' ? 'attr:intellect' : a.id;
+      added.set(id, (added.get(id) ?? 0) + a.value);
+    }
+    const plus = (id: string, pct = false) => {
+      const v = added.get(id);
+      return v ? (pct ? `−${Math.round(v * 100)} %` : `+${Math.round(v * 100) / 100}`) : undefined;
+    };
+    own.damage?.forEach((v, i) => v > 0 && implicit.push({ aug: scaled, bonus: plus(`dmg:${DAMAGE_TYPES[i]}`), text: `${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} damage: ${v}` }));
+    if (item.speed !== undefined && item.speed !== 1) implicit.push({ text: `Attack speed: ${item.speed}` });
+    own.protection?.forEach((v, i) => v !== 1 && implicit.push({ aug: scaled, bonus: plus(`res:${DAMAGE_TYPES[i]}`, true), text: `${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} taken: ×${v}` }));
+    for (const [k, v] of Object.entries(own.attributes ?? {})) if (v) implicit.push({ bonus: plus(`attr:${k}`), text: `${v > 0 ? '+' : ''}${v} ${ATTRIBUTE_LABEL[k] ?? k}` });
+    if (item.heal) implicit.push({ text: `Restores ${item.heal} health` });
+    const effects = item.effects ?? [];
+    const affixes = affixLines(item.mods, { ranges: true });
     const lines: string[] = [];
-    item.damage?.forEach((v, i) => v > 0 && lines.push(`${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} damage: ${v}`));
-    if (item.speed !== undefined && item.speed !== 1) lines.push(`Attack speed: ${item.speed}`);
-    item.protection?.forEach((v, i) => v !== 1 && lines.push(`${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} taken: ×${v}`));
-    for (const [k, v] of Object.entries(item.attributes ?? {})) if (v) lines.push(`${v > 0 ? '+' : ''}${v} ${ATTRIBUTE_LABEL[k] ?? k}`);
-    if (item.heal) lines.push(`Restores ${item.heal} health`);
-    for (const e of item.effects ?? []) lines.push(e);
-    for (const a of affixLines(item.mods)) if (!/damage$/.test(a) && !/^\+\d+ (Might|Intelligence|Endurance|Speed)$/.test(a)) lines.push(a);
     if (item.mods?.failstacks) lines.push(`Failed refinements: ${item.mods.failstacks}`);
     if (item.quantity && item.quantity > 1) lines.push(`Quantity: ${item.quantity}`);
     const refine = this.shop && this.refining && moddable({ type: item.type }) ? nextRefine(item.mods?.plus ?? 0) : undefined;
     if (refine) lines.push(`Refine to +${(item.mods?.plus ?? 0) + 1}: ${refine.gold.toLocaleString('en-US')} gold, ${refine.count} × ${BUILTIN_ITEMS.get(refine.material)?.name ?? refine.material}, ${Math.round(refineChance(item.mods?.plus ?? 0, item.mods?.failstacks ?? 0) * 100)} %`);
     if (this.shop) lines.push(item.value ? `Sells for ${item.value.toLocaleString('en-US')} gold` : 'The merchant will not take this');
-    const hints = [
-      this.shop && item.value ? 'Right-click to sell' : '',
-      refine ? 'Shift-click to refine' : '',
-      isEquippable(item.type) ? (item.equipped ? 'Click to unequip' : 'Click to equip') : item.type === 'potion' ? 'Click to drink' : '',
-      !this.shop && item.quantity && item.quantity > 1 ? 'Right-click to split' : '',
-      'Drag outside to drop',
-    ].filter(Boolean);
     const named = modsTitle(item.name, item.mods);
+    const sections = [
+      [
+        ...implicit.map((l) => `<span${l.aug ? ' class="tt-aug"' : ''}>${escape(l.text)}${l.bonus ? ` <span class="tt-affix">(${escape(l.bonus)})</span>` : ''}</span>`),
+        ...effects.map((l) => `<span>${escape(l)}</span>`),
+      ],
+      affixes.map((l) => {
+        const m = /^(.*?)( \(.*\))?$/.exec(l)!;
+        return `<span class="tt-affix">${escape(m[1]!)}${m[2] ? `<span class="tt-range">${escape(m[2])}</span>` : ''}</span>`;
+      }),
+      lines.map((l) => `<span>${escape(l)}</span>`),
+    ].filter((x, i) => x.length || (i === 0 && affixes.length)); // the rule above the affixes even with no own numbers
     return `<strong class="tt-name tt-${item.type}"${named.color ? ` style="color:${named.color}"` : ''}>${escape(named.title)}</strong>
-      <span class="tt-type">${TYPE_LABEL[item.type]} · ${width}×${height}${item.equipped ? ' · equipped' : ''}</span>
-      ${lines.map((l) => `<span>${escape(l)}</span>`).join('')}
-      <small>${hints.join(' · ')}</small>`;
+      ${itemLevelLine(item.mods)}${sections.map((x) => x.join('')).join('<hr class="tt-sep" />')}`;
   }
 
   private hover(e: PointerEvent): void {
@@ -532,7 +550,6 @@ export class InventoryPanels {
   }
 
   private stockTooltip(item: ShopItemView): string {
-    const { width, height } = shapeOf(item);
     const lines: string[] = [];
     item.damage?.forEach((v, i) => v > 0 && lines.push(`${DAMAGE_TYPES[i]![0]}${DAMAGE_TYPES[i]!.slice(1).toLowerCase()} damage: ${v}`));
     if (item.speed !== undefined && item.speed !== 1) lines.push(`Attack speed: ${item.speed}`);
@@ -542,9 +559,7 @@ export class InventoryPanels {
     for (const e of item.effects ?? []) lines.push(e);
     lines.push(`Price: ${item.price.toLocaleString('en-US')} gold`);
     return `<strong class="tt-name tt-${item.type}">${escape(item.name)}</strong>
-      <span class="tt-type">${TYPE_LABEL[item.type]} · ${width}×${height}</span>
-      ${lines.map((l) => `<span>${escape(l)}</span>`).join('')}
-      <small>Click to buy</small>`;
+      ${lines.map((l) => `<span>${escape(l)}</span>`).join('')}`;
   }
 
   private hideTooltip(): void {

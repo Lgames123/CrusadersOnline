@@ -29,6 +29,10 @@ export interface Settings {
    * and characters around them. Off: the original's baked light only.
    */
   enhancedLighting: boolean;
+  /** Refined gear glows (+3 and up, MMO items; not original): on by default. */
+  itemGlow: boolean;
+  /** The glows' opacity, 0-1 of their full strength (1 by default). */
+  itemGlowIntensity: number;
   /** Hit effects at half the original's size (not original; a playtest preference). */
   smallEffects: boolean;
   /**
@@ -54,7 +58,7 @@ export interface Settings {
   optionsVersion?: number;
 }
 
-export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false, musicVolume: 0.5, silhouetteShadows: false, objectShadows: false, objectShadowStrength: 0.6, enhancedLighting: false, smallEffects: false, foliage: false, foliageDistance: 35, foliageGrass: 1, foliageBushes: 1, foliagePlants: 1, fixedPropUvs: true, hudStyle: 'classic', showStats: false };
+export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false, musicVolume: 0.5, silhouetteShadows: false, objectShadows: false, objectShadowStrength: 0.6, enhancedLighting: false, itemGlow: true, itemGlowIntensity: 1, smallEffects: false, foliage: false, foliageDistance: 35, foliageGrass: 1, foliageBushes: 1, foliagePlants: 1, fixedPropUvs: true, hudStyle: 'classic', showStats: false };
 
 const KEY = 'crusaders.settings';
 /** Bumped when a default moves back to the original, so earlier stored values reset once. */
@@ -84,6 +88,8 @@ function sanitize(raw: unknown): Settings {
     objectShadows: r.objectShadows === true,
     objectShadowStrength: typeof r.objectShadowStrength === 'number' && Number.isFinite(r.objectShadowStrength) ? Math.min(1, Math.max(0.1, r.objectShadowStrength)) : CLASSIC_SETTINGS.objectShadowStrength,
     enhancedLighting: r.enhancedLighting === true,
+    itemGlow: r.itemGlow !== false,
+    itemGlowIntensity: typeof r.itemGlowIntensity === 'number' && Number.isFinite(r.itemGlowIntensity) ? Math.min(1, Math.max(0, r.itemGlowIntensity)) : CLASSIC_SETTINGS.itemGlowIntensity,
     smallEffects: r.smallEffects === true,
     foliage: r.foliage === true,
     foliageGrass: amount(r.foliageGrass),

@@ -442,7 +442,7 @@ describe('shield block (original rule)', () => {
 
 describe('experience curve (original)', () => {
   it('uses the engine thresholds 500, 1500, 3500, 6500, 10500, then +4000', () => {
-    expect([2, 3, 4, 5, 6, 7, 8].map(xpForLevel)).toEqual([500, 1500, 3500, 6500, 10500, 14500, 18500]);
+    expect([2, 3, 4, 5, 6, 7, 8].map((l) => xpForLevel(l))).toEqual([500, 1500, 3500, 6500, 10500, 14500, 18500]);
     expect(levelForXp(0)).toBe(1);
     expect(levelForXp(499)).toBe(1);
     expect(levelForXp(500)).toBe(2);

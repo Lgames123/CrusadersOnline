@@ -10,12 +10,26 @@ interface Floater {
   age: number;
 }
 
+/**
+ * A creature's level against the player's: grey more than 3 below (its XP shrinks,
+ * xpLevelFactor), green below, yellow even, orange above, red with a skull 6 or more above.
+ */
+function levelTone(gap: number): 'trivial' | 'easy' | 'even' | 'hard' | 'deadly' {
+  if (gap < -3) return 'trivial';
+  if (gap < 0) return 'easy';
+  if (gap <= 2) return 'even';
+  if (gap <= 5) return 'hard';
+  return 'deadly';
+}
+
 /** Health bars above remote entities and floating damage numbers, as a DOM overlay. */
 export class CombatUi {
   private readonly root: HTMLElement;
   private readonly bars = new Map<number, HTMLDivElement>();
   private floaters: Floater[] = [];
   private readonly v = new THREE.Vector3();
+  /** The local player's level, against which creature levels are coloured. */
+  playerLevel = 1;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -49,7 +63,14 @@ export class CombatUi {
         bar = document.createElement('div');
         bar.className = `hpbar ${e.info.kind}`;
         bar.innerHTML = '<span class="name"></span><div class="track"><div class="fill"></div></div>';
-        (bar.querySelector('.name') as HTMLElement).textContent = e.info.name;
+        const name = bar.querySelector('.name') as HTMLElement;
+        if (e.info.level !== undefined) {
+          // A creature's level (mmoLevels), coloured by its gap to the player's.
+          const lvl = document.createElement('span');
+          lvl.className = 'lvl';
+          lvl.textContent = `[Lv.${e.info.level}] `;
+          name.append(lvl, e.info.name);
+        } else name.textContent = e.info.name;
         this.root.appendChild(bar);
         this.bars.set(e.id, bar);
       }
@@ -62,6 +83,10 @@ export class CombatUi {
       const frac = e.info.maxHp > 0 ? Math.max(0, e.hp) / e.info.maxHp : 0;
       (bar.querySelector('.fill') as HTMLElement).style.width = `${(frac * 100).toFixed(0)}%`;
       bar.classList.toggle('dead', e.hp <= 0);
+      if (e.info.level !== undefined) {
+        const tone = levelTone(e.info.level - this.playerLevel);
+        if (bar.dataset.tone !== tone) bar.dataset.tone = tone;
+      }
     }
     for (const [id, bar] of this.bars) {
       if (!remotes.byId.has(id)) {

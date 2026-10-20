@@ -389,6 +389,8 @@ export interface ItemAffix {
   id: string;
   /** Rolled magnitude (attribute points, damage points, resist fraction, hit points). */
   value: number;
+  /** Its tier 0..11 (item_mods.ts AFFIX_TIERS); absent on affixes rolled before tiers. */
+  tier?: number;
 }
 
 /**
@@ -404,6 +406,8 @@ export interface ItemMods {
   failstacks?: number;
   /** Bound to its owner: cannot be traded or listed. */
   bound?: boolean;
+  /** Item level 1..100: the level of the creature or area it came from; caps its affix tiers. */
+  ilvl?: number;
 }
 
 /** One occupied inventory slot. */
@@ -436,12 +440,13 @@ export function sanitizeMods(raw: unknown): ItemMods | undefined {
     const affixes = o.affixes
       .filter((a): a is ItemAffix => !!a && typeof a === 'object' && typeof (a as ItemAffix).id === 'string' && AFFIX_ID.test((a as ItemAffix).id) && Number.isFinite((a as ItemAffix).value))
       .slice(0, 6)
-      .map((a) => ({ id: a.id, value: Math.round(a.value * 1000) / 1000 }));
+      .map((a) => ({ id: a.id, value: Math.round(a.value * 1000) / 1000, ...(Number.isInteger(a.tier) && a.tier! >= 0 && a.tier! <= 11 ? { tier: a.tier } : {}) }));
     if (affixes.length) out.affixes = affixes;
   }
   if (Number.isInteger(o.plus) && (o.plus as number) > 0) out.plus = Math.min(MAX_PLUS, o.plus as number);
   if (Number.isInteger(o.failstacks) && (o.failstacks as number) > 0) out.failstacks = Math.min(1000, o.failstacks as number);
   if (o.bound === true) out.bound = true;
+  if (Number.isInteger(o.ilvl) && (o.ilvl as number) >= 1) out.ilvl = Math.min(100, o.ilvl as number);
   return Object.keys(out).length ? out : undefined;
 }
 
@@ -645,7 +650,7 @@ export function sanitizeInventory(inv: readonly InventoryEntry[], catalog: ItemC
     if (eq) equipped.set(def.type, (equipped.get(def.type) ?? 0) + 1);
     const q = Math.floor(e.quantity ?? 1);
     const grid = !eq && !def.keyItem && Number.isInteger(e.x)
- && Number.isInteger(e.y) && e.x! >= 0 && e.y! >= 0 ? { x: e.x!, y: e.y! } : {};
+      && Number.isInteger(e.y) && e.x! >= 0 && e.y! >= 0 ? { x: e.x!, y: e.y! } : {};
     const uid = typeof e.uid === 'string' && ITEM_UID.test(e.uid) && !uids.has(e.uid.toLowerCase()) ? e.uid.toLowerCase() : undefined;
     if (uid) uids.add(uid);
     const mods = def.stackable ? undefined : sanitizeMods(e.mods);

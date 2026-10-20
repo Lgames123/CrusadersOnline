@@ -85,7 +85,7 @@ Everything below runs on the operator's own host and domain. Nothing in the repo
    - a long random `DB_PASSWORD`;
    - `SITE_ADDRESS=<domain>`, `WEB_PORT=80`, `WEB_TLS_PORT=443`, `COOKIE_SECURE=true`;
    - `ADMIN_USERS=<your account>`, plus `ARENA` / `GENERATED_DIR` / `ITEM_RULES` from your own conversion;
-   - optional `GAME_FEATURES` (e.g. `mmoItems,mmoDungeons,mmoCrafting`) and `METRICS_TOKEN`.
+   - optional `GAME_FEATURES` (e.g. `mmoItems,mmoDungeons,mmoCrafting,mmoLevels`) and `METRICS_TOKEN`.
 4. **Start:** `docker compose -f deployment/docker-compose.yml --env-file deployment/.env up -d --build`, or pull the GHCR images. Check `https://<domain>/healthz` and that the certificate is valid.
 5. **Backups:** confirm a `backup ok` line within the first run. Set up the `offsite` profile (backup-and-recovery.md) and do one restore drill from an off-host copy into a scratch database.
 6. **Metrics:** point a Prometheus / Grafana Agent on the compose network at `server:8080/metrics`, and set the alerts from operations.md §2. Otherwise at least watch the logs for `zone tick over 45 ms` and `backup FAILED`.
