@@ -272,6 +272,7 @@ import {
 import { InputQueue } from './input_queue.ts';
 import { BODY_MID, SpellRuntime, type ActiveStatus, type SpellHost } from './spell_runtime.ts';
 import { BoomerAxes } from './boomer_axe.ts';
+import { TRADE_RANGE, TradeDesk, settleTrade, untradable, type Trade, type TradeOffer } from './trade.ts';
 
 /** Snapshots older than this are not used as delta baselines (full snapshot instead). */
 const MAX_BASELINE_AGE = 20;
@@ -904,6 +905,8 @@ export class WorldZone {
   private readonly states = new Map<number, EntityState>();
   private nextEntityId = 1;
   private spawnIndex = 0;
+  /** Direct trades between players of this zone (MMO Stage 4). */
+  private readonly trades = new TradeDesk();
   /** The act's waypoint crystal (undefined until first asked). */
   private crystalSpot: WaypointSpot | null | undefined;
   /** Respawn points by way in (respawnFor). */
@@ -2123,6 +2126,117 @@ export class WorldZone {
       : `The refinement fails (${Math.round(chance * 100)} %). ${def.name} stays +${r.mods.plus ?? 0}; next try ${Math.round(refineChance(r.mods.plus ?? 0, r.mods.failstacks ?? 0) * 100)} %.`);
   }
 
+  // --- Direct trade (MMO Stage 4, trade.ts) -------------------------------------------------
+
+  /** CS_TRADE: request / accept / decline / offer / lock / confirm / cancel. */
+  trade(connId: number, d: { action: string; name?: string; uids?: string[]; gold?: number }): void {
+    const p = this.players.get(connId);
+    if (!p) return;
+    const near = (q: Player) => {
+      const a = p.character.position, b = q.character.position;
+      return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) <= TRADE_RANGE;
+    };
+    if (d.action === 'request') {
+      const wanted = d.name?.toLowerCase();
+      const q = [...this.players.values()].find((x) => x.name.toLowerCase() === wanted);
+      if (!q) return this.notify(p, 'error', `${d.name ?? 'Nobody'} is not in this area.`);
+      if (!near(q) || !alive(p) || !alive(q)) return this.notify(p, 'error', `Stand next to ${q.name} to trade.`);
+      const why = this.trades.request(connId, q.connId, Date.now());
+      if (why) return this.notify(p, 'error', why);
+      this.notify(p, 'trade', `You ask ${q.name} to trade.`);
+      this.notify(q, 'trade', `${p.name} wants to trade. Type /trade accept or /trade decline.`);
+      this.sendJson(q.connId, { op: SC.TRADE_UPDATE, d: { state: 'pending', partner: p.name } });
+      return;
+    }
+    if (d.action === 'accept') {
+      const t = this.trades.accept(connId, Date.now());
+      if (!t) return this.notify(p, 'error', 'No trade request to accept.');
+      const other = this.players.get(t.a === connId ? t.b : t.a);
+      if (!other || !near(other)) {
+        this.trades.close(t);
+        return this.notify(p, 'error', 'You are too far apart to trade.');
+      }
+      return this.sendTrade(t);
+    }
+    if (d.action === 'decline') {
+      const from = this.trades.declined(connId);
+      const q = from !== null ? this.players.get(from) : undefined;
+      if (q) this.notify(q, 'trade', `${p.name} declines to trade.`);
+      return;
+    }
+    const t = this.trades.of(connId);
+    if (!t) return;
+    if (d.action === 'cancel') return this.endTrade(connId, `${p.name} cancels the trade.`);
+    if (d.action === 'offer') {
+      const uids = (d.uids ?? []).filter((u) => p.inventory.some((e) => e.uid === u && !untradable(e, this.items)));
+      this.trades.offer(t, connId, uids, Math.min(p.gold, d.gold ?? 0));
+      return this.sendTrade(t);
+    }
+    if (d.action === 'lock') {
+      this.trades.lock(t, connId);
+      return this.sendTrade(t);
+    }
+    if (d.action === 'confirm') {
+      if (!this.trades.confirm(t, connId)) return this.sendTrade(t);
+      const a = this.players.get(t.a), b = this.players.get(t.b);
+      if (!a || !b) return this.endTrade(connId, 'The trade fell through.');
+      if (!near(a === p ? b : a) || this.inventoryBusy(a) || this.inventoryBusy(b)) return this.endTrade(connId, 'The trade fell through: stand together and still.');
+      const offers = [t.offers.get(t.a)!, t.offers.get(t.b)!];
+      const result = settleTrade(a, b, offers[0]!, offers[1]!, this.items);
+      if ('error' in result) return this.endTrade(connId, `The trade fails: ${result.error}`);
+      this.trades.close(t);
+      a.inventory = result.a.inventory;
+      a.gold = result.a.gold;
+      b.inventory = result.b.inventory;
+      b.gold = result.b.gold;
+      const records: PersistRecord[] = [];
+      for (const q of [a, b]) {
+        const other = q === a ? b : a;
+        this.applyEquipment(q);
+        q.inventoryDirty = true;
+        q.statsDirty = true;
+        this.sendInventory(q);
+        const r = this.persistRecord(q);
+        if (r) records.push(r);
+        this.sendJson(q.connId, { op: SC.TRADE_UPDATE, d: { state: 'closed', partner: other.name, message: 'Trade complete.' } });
+        this.notify(q, 'trade', `Trade with ${other.name} complete.`);
+      }
+      // Both characters in one save (one transaction): never one side without the other.
+      if (records.length) this.outbox.persist?.(records, 'progress');
+      this.outbox.loot?.({ connId, character: `${a.name} / ${b.name}`, chest: -1, outcome: 'looted', items: offers.map((o) => `${o.uids.length} item(s), ${o.gold} gold`) });
+    }
+  }
+
+  /** Closes a player's trade, telling both why. */
+  private endTrade(connId: number, why: string): void {
+    const t = this.trades.forget(connId);
+    if (!t) return;
+    for (const c of [t.a, t.b]) {
+      const q = this.players.get(c);
+      if (!q) continue;
+      this.sendJson(c, { op: SC.TRADE_UPDATE, d: { state: 'closed', partner: '', message: why } });
+      this.notify(q, 'trade', why);
+    }
+  }
+
+  /** Both sides' view of an open trade. */
+  private sendTrade(t: Trade): void {
+    const side = (who: Player, o: TradeOffer) => ({
+      items: who.inventory.filter((e) => e.uid && o.uids.includes(e.uid)).map((e) => {
+        const def = this.items.get(e.itemId)!;
+        return { ...this.itemFacts(withMods(def, e.mods)), slot: e.slot, equipped: false, ...(e.uid ? { uid: e.uid } : {}), ...(e.mods ? { mods: e.mods } : {}), ...(e.quantity && e.quantity > 1 ? { quantity: e.quantity } : {}) };
+      }),
+      gold: o.gold,
+      locked: o.locked,
+      confirmed: o.confirmed,
+    });
+    for (const [me, them] of [[t.a, t.b], [t.b, t.a]] as const) {
+      const p = this.players.get(me), q = this.players.get(them);
+      if (!p || !q) continue;
+      this.sendJson(me, { op: SC.TRADE_UPDATE, d: { state: 'open', partner: q.name, mine: side(p, t.offers.get(me)!), theirs: side(q, t.offers.get(them)!) } });
+    }
+  }
+
   /** A change that went through: the client's copy and the save follow. */
   private inventoryChanged(p: Player): void {
     p.inventoryDirty = true;
@@ -2470,6 +2584,7 @@ export class WorldZone {
   leaveForTransfer(connId: number): { record: PersistRecord | null; state: TransferState } | null {
     const p = this.players.get(connId);
     if (!p) return null;
+    this.endTrade(connId, `${p.name} left.`);
     p.inventoryDirty = true; // always save the inventory with a transfer
     const state: TransferState = {
       name: p.name,
@@ -3009,6 +3124,7 @@ export class WorldZone {
   leave(connId: number): PersistRecord | null {
     const p = this.players.get(connId);
     if (!p) return null;
+    this.endTrade(connId, `${p.name} left.`);
     const record = this.persistRecord(p);
     this.magic.dropOwner(p);
     this.magic.forget(p);

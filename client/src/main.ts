@@ -109,6 +109,7 @@ import { ClassicText } from './ui/classic_text.ts';
 import { WaypointMap } from './ui/waypoint_map.ts';
 import { PartyFrame } from './ui/party_frame.ts';
 import { WeaponGlow } from './engine/weapon_glow.ts';
+import { TradeWindow } from './ui/trade_window.ts';
 import { CRYSTAL_LIGHT_COLOR, WaypointCrystal } from './engine/waypoint_crystal.ts';
 import { CharacterSheet } from './ui/character_sheet.ts';
 import { Cutscene, type Puppet } from './story/cutscene.ts';
@@ -224,6 +225,8 @@ async function main(): Promise<void> {
   const charSheet = new CharacterSheet(document.getElementById('char-sheet')!, assetManifest?.textures ?? {});
   const waypointMap = new WaypointMap();
   const partyFrame = new PartyFrame();
+  /** Direct trade (MMO Stage 4). */
+  const tradeWindow = new TradeWindow();
   /** The local player's refined weapon glows (MMO items). */
   const weaponGlow = new WeaponGlow();
   // This act's waypoint crystal (SC_WORLD_ENTER; not original): shown once the story is finished.
@@ -739,6 +742,7 @@ async function main(): Promise<void> {
           inventory: (inv) => {
             inventoryPanel.update(inv);
             hotbar.setInventory(inv.items);
+            tradeWindow.setBag(inv.items);
             player?.setWeaponSpeed(inv.weaponSpeed);
             const w = inv.items.find((i) => i.type === 'weapon' && i.equipped);
             myEdge = w?.damage && w.damage[0]! > w.damage[1]! ? 'sharp' : 'blunt';
@@ -824,6 +828,15 @@ async function main(): Promise<void> {
             headPos.y += player.avatar.headHeight + 0.4;
             lines.forEach((l, i) => window.setTimeout(() => gameMessage(l, headPos), i * 900));
             sounds?.play(SFX.turnPage);
+          },
+          trade: (d) => {
+            const was = tradeWindow.open;
+            if (d.state === 'open') tradeWindow.setBag(session?.inventory?.items ?? []);
+            tradeWindow.update(d);
+            if (tradeWindow.open && !was && input.locked) {
+              releasing = true;
+              document.exitPointerLock();
+            } else if (!tradeWindow.open && was && !optionsOpen) input.requestLock();
           },
           party: (d) => {
             if (d.self !== undefined) partyFrame.set(d.members, d.self);
@@ -1168,7 +1181,7 @@ async function main(): Promise<void> {
   /** Alt held: the cursor is out for the UI; letting go takes the camera back. */
   let altFree = false;
   let optionsAt = 0;
-  input.wantsLock = () => !(altFree || chat.typing || optionsOpen || inventoryPanel.open || questBook.open || charSheet.open || waypointMap.open || inScene());
+  input.wantsLock = () => !(altFree || chat.typing || optionsOpen || inventoryPanel.open || questBook.open || charSheet.open || waypointMap.open || tradeWindow.open || inScene());
   const play = () => {
     sounds?.unlock();
     music.unlock();
@@ -1216,13 +1229,15 @@ async function main(): Promise<void> {
     if (!isAlt(e) || !altFree) return;
     altFree = false;
     // A page that let go of the lock itself may take it back without a click (Pointer Lock 2.0).
-    if (!optionsOpen && !chat.typing && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !inScene()) input.requestLock();
+    if (!optionsOpen && !chat.typing && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !tradeWindow.open && !inScene()) input.requestLock();
   });
   // The chat line takes the keyboard (Enter): the camera lets go of the pointer, and takes it
   // back without a click when the line closes, unless a window was open before.
   let chatTookLock = false;
   chat.onSend = (channel, text, to) => session?.chat(channel, text, to);
   chat.onParty = (action, name) => session?.party(action, name);
+  chat.onTrade = (action, name) => session?.trade({ action, ...(name ? { name } : {}) });
+  tradeWindow.onAction = (d) => session?.trade(d);
   partyFrame.onWhisper = (name) => chat.whisper(name);
   chat.onTyping = (typing) => {
     if (typing && input.locked) {
@@ -1231,7 +1246,7 @@ async function main(): Promise<void> {
       document.exitPointerLock();
     } else if (!typing && chatTookLock) {
       chatTookLock = false;
-      if (!optionsOpen && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !inScene()) input.requestLock();
+      if (!optionsOpen && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !tradeWindow.open && !inScene()) input.requestLock();
     }
   };
   window.addEventListener('blur', () => {
@@ -1590,7 +1605,7 @@ async function main(): Promise<void> {
       chat.blur();
     }
     // Esc released the pointer: the options (sequences play to their end, as in the original).
-    if (!locked && !ours && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !inScene()) setOptionsOpen(true);
+    if (!locked && !ours && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !tradeWindow.open && !inScene()) setOptionsOpen(true);
   };
 
   // Inventory window (online only); the ground window opens beside it (and opens it).
@@ -1700,6 +1715,7 @@ async function main(): Promise<void> {
       else if (questBook.open) setQuestBookOpen(false);
       else if (charSheet.open) setCharSheetOpen(false);
       else if (waypointMap.open) setWaypointMapOpen(false);
+      else if (tradeWindow.open) session?.trade({ action: 'cancel' });
       else setOptionsOpen(true);
       return;
     }

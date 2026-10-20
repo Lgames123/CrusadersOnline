@@ -169,6 +169,10 @@ export class ZoneHost {
     this.post({ t: 'unstuck', connId });
   }
 
+  trade(connId: number, d: { action: string; name?: string; uids?: string[]; gold?: number }): void {
+    this.post({ t: 'trade', connId, d });
+  }
+
   refine(connId: number, slot: number, itemId?: string): void {
     this.post({ t: 'refine', connId, slot, ...(itemId ? { itemId } : {}) });
   }

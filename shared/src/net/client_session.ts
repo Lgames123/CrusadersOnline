@@ -5,7 +5,7 @@ import { dequantizeAngle, dequantizePosition } from '../math/quantize.ts';
 import { CS, SC } from '../protocol/opcodes.ts';
 import { INPUT_PACKET_MAX_BYTES, MAX_INPUT_FRAMES, createInputFrame, encodeInput, type InputFrame } from '../protocol/binary/input.ts';
 import { decodeSnapshot, type EntityState } from '../protocol/binary/snapshot.ts';
-import type { AttackKind, ChatBroadcastMsg, CombatEventMsg, CutsceneMsg, EndingMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PartyUpdateMsg, PlayerStatsMsg, QuestLogMsg, ServerControlMsg, ShopMsg, SpellEventMsg, StorySoundMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
+import type { AttackKind, ChatBroadcastMsg, CombatEventMsg, CutsceneMsg, EndingMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PartyUpdateMsg, PlayerStatsMsg, TradeUpdateMsg, QuestLogMsg, ServerControlMsg, ShopMsg, SpellEventMsg, StorySoundMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
 import type { ArenaDef } from '../arena/types.ts';
 import type { Difficulty } from '../game/ruleset.ts';
 import { createMovementWorld, disposeMovementWorld, setBrushPose, setDoorOpen, setDoorPose, type MovementWorld, type Rapier } from '../movement/physics.ts';
@@ -45,6 +45,8 @@ export type Inventory = InventoryUpdateMsg['d'];
 export interface ClientSessionEvents {
   /** The player's party changed, or an invitation came (MMO Stage 2). */
   party?(d: PartyUpdateMsg['d']): void;
+  /** A direct trade's request, offers or end (MMO Stage 4). */
+  trade?(d: TradeUpdateMsg['d']): void;
   spawn?(id: number, name: string, info: EntityInfo): void;
   stats?(stats: PlayerStats): void;
   combat?(event: CombatEvent): void;
@@ -362,6 +364,9 @@ export class ClientSession {
       case SC.PARTY_UPDATE:
         this.events.party?.(msg.d);
         break;
+      case SC.TRADE_UPDATE:
+        this.events.trade?.(msg.d);
+        break;
     }
   }
 
@@ -369,6 +374,12 @@ export class ClientSession {
   questLog: QuestLogMsg['d']['log'] | null = null;
 
   /** Says `text` on a chat channel (`to`: the character a private line goes to). */
+  /** A direct trade action (MMO Stage 4). */
+  trade(d: { action: 'request' | 'accept' | 'decline' | 'offer' | 'lock' | 'confirm' | 'cancel'; name?: string; uids?: string[]; gold?: number }): void {
+    if (!this.connected) return;
+    this.sendJson({ op: CS.TRADE, seq: ++this.seq, d });
+  }
+
   /** One refinement attempt on the gear in `slot` (MMO items; at a merchant). */
   refine(slot: number, itemId?: string): void {
     if (!this.connected) return;

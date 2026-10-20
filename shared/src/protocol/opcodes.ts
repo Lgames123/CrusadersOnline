@@ -33,6 +33,8 @@ export const CS = {
   PARTY: 0x18,
   /** One refinement attempt on a piece of gear at a merchant (MMO items). */
   REFINE: 0x19,
+  /** Direct trade (MMO Stage 4): request, accept, decline, offer, lock, confirm, cancel. */
+  TRADE: 0x1a,
 } as const;
 
 /** Server -> client opcodes. */
@@ -68,6 +70,8 @@ export const SC = {
   ENTITY_FADE: 0x54,
   /** The player's party (MMO Stage 2): its members, or none; a pending invitation. */
   PARTY_UPDATE: 0x55,
+  /** The player's direct trade: a request, both offers, or its end (MMO Stage 4). */
+  TRADE_UPDATE: 0x56,
 } as const;
 
 /** Input flag bits carried in CS_PLAYER_INPUT. */

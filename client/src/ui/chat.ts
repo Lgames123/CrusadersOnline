@@ -81,6 +81,8 @@ export class ChatWindow {
   private readonly sent: string[] = [];
   private sentIndex = -1;
   onSend: (channel: SendChannel, text: string, to?: string) => void = () => {};
+  /** Trade commands (/trade <name>, /trade accept, /trade decline, /trade cancel). */
+  onTrade: (action: 'request' | 'accept' | 'decline' | 'cancel', name?: string) => void = () => {};
   /** Party commands (/invite, /accept, /decline, /leave, /kick, /promote). */
   onParty: (action: 'invite' | 'accept' | 'decline' | 'leave' | 'kick' | 'promote', name?: string) => void = () => {};
   /** The line took or gave up the keyboard. */
@@ -401,6 +403,13 @@ export class ChatWindow {
           return void this.onParty('kick', rest.trim() || undefined);
         case 'promote': case 'leader':
           return void this.onParty('promote', rest.trim() || undefined);
+        case 'trade': {
+          const arg = rest.trim();
+          const action = arg.toLowerCase();
+          if (action === 'accept' || action === 'decline' || action === 'cancel') return void this.onTrade(action);
+          if (!arg) return this.notice('Trade with whom? /trade <name>, /trade accept, /trade decline.', 'error');
+          return void this.onTrade('request', arg);
+        }
         case 'ignore': case 'block':
           return this.setIgnored(rest.trim(), true);
         case 'unignore': case 'unblock':

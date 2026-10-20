@@ -174,6 +174,17 @@ export const RefinePacketSchema = z.object({
   d: z.object({ slot: z.number().int().min(0).max(255), itemId: z.string().min(1).max(64).optional() }),
 });
 
+export const TradePacketSchema = z.object({
+  op: z.literal(CS.TRADE),
+  seq: z.number().int().positive(),
+  d: z.object({
+    action: z.enum(['request', 'accept', 'decline', 'offer', 'lock', 'confirm', 'cancel']),
+    name: z.string().trim().min(1).max(32).optional(),
+    uids: z.array(z.string().max(40)).max(16).optional(),
+    gold: z.number().int().min(0).max(1_000_000_000).optional(),
+  }),
+});
+
 export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   AuthTicketPacketSchema,
   SelectCharacterPacketSchema,
@@ -198,6 +209,7 @@ export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   WaypointTravelPacketSchema,
   PartyPacketSchema,
   RefinePacketSchema,
+  TradePacketSchema,
 ]);
 
 export type ClientControlPacket = z.infer<typeof ClientControlPacketSchema>;

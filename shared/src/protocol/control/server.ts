@@ -309,6 +309,20 @@ export interface PartyMemberView {
   zone: string | null;
 }
 
+/** One side of a direct trade: offered items (with their stats), gold, its lock and confirmation. */
+export interface TradeSideView {
+  items: InventoryItemView[];
+  gold: number;
+  locked: boolean;
+  confirmed: boolean;
+}
+
+export interface TradeUpdateMsg {
+  op: typeof SC.TRADE_UPDATE;
+  /** `pending`: `partner` asks this player; `open`: both offers; `closed`: over (`message` says why). */
+  d: { state: 'pending' | 'open' | 'closed'; partner: string; mine?: TradeSideView; theirs?: TradeSideView; message?: string };
+}
+
 export interface PartyUpdateMsg {
   op: typeof SC.PARTY_UPDATE;
   /** `members`: empty = no party. `invite`: who invites this player (pending). */
@@ -342,6 +356,7 @@ export type ServerControlMsg =
   | ErrorMsg
   | ChatBroadcastMsg
   | PartyUpdateMsg
+  | TradeUpdateMsg
   | PlayerStatsMsg
   | CombatEventMsg
   | InventoryUpdateMsg
