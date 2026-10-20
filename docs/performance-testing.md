@@ -21,7 +21,18 @@ Provide automated load-testing tools and benchmarks to verify that the authorita
 
 Profile of the level case: ~77 % of the tick is the shared movement step's character-controller query (~80 queries per tick at ~0.08 ms each against the trimesh), ~9 % snapshots, ~8 % creature AI. Optimisations made: a settled character standing still skips its collision query (identical result, so prediction stays exact); entity states are built once per tick and shared by every viewer's snapshot (it copied players × entities objects per tick). The worst-window p99 is effectively the slowest of 100 ticks, so GC pauses and OS scheduling show up in it.
 
-Open: the p99 target is met only in some runs on a real level with every bot moving at once; the per-client bandwidth with 100 mutually visible players is ~6× the target (all entities in the 64 m interest radius are sent every tick). Candidates: a smaller interest radius or lower update rates for distant entities, and cheaper controller settings for creatures far from players.
+**2026-10-20, snapshot bandwidth** (`bot_swarm.ts` now prints the down rate per client after everyone is in):
+
+| 100 bots, `ca1a`, 30 s | Down per client | p50 tick | worst p99 |
+|---|---|---|---|
+| Before | 22.2 KB/s | 8.7 ms | 21.2 ms |
+| Varint ids, int16 position deltas, per-receiver rates (nearest 10 / within 8 m at 20 Hz) | 5.8–6.0 KB/s | 10.4–12.4 ms | 18–30 ms |
+| + compact header (36 → 16 bytes standing) | 5.0–5.2 KB/s | | |
+| + nearest 8 / within 4 m at 20 Hz, rank ≥ 24 at 2.5 Hz (shipped) | **4.3 KB/s** (two runs) | 10.2–11.1 ms | 18–31 ms |
+
+Of that, JSON control messages are ~0.45 KB/s and full snapshots under 2 %. The plan (sort by distance, per-entity last-written state) costs about 0.5–1 ms of the tick at 100 players: the old code ran 10.2–12.5 ms p50 on the same machine on different runs, so the variance hides most of it. The tick is still ~65 % character-controller queries (73 per tick at ~0.1 ms); the controller settings are left alone because they are the movement fidelity and client prediction must match them.
+
+Open: the p99 target is met only in some runs on a real level with every bot moving at once; the bandwidth target is met (above). Candidates for the tick: cheaper controller queries for creatures far from players, or splitting a crowded zone; measure on the production host, since this desktop's run-to-run spread (p99 13–31 ms) is larger than the effect of most changes.
 
 ## 4. Acceptance Targets
 

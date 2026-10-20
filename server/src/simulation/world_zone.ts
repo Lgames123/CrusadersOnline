@@ -164,6 +164,8 @@ import {
   dequantizeAngle,
   movementAxes,
   encodeSnapshot,
+  updateInterval,
+  type SnapshotSend,
   inMeleeArc,
   forwardXZ,
   attackSweep,
@@ -293,6 +295,16 @@ import { InputQueue } from './input_queue.ts';
 import { BODY_MID, SpellRuntime, type ActiveStatus, type SpellHost } from './spell_runtime.ts';
 import { BoomerAxes } from './boomer_axe.ts';
 import { TRADE_RANGE, TradeDesk, settleTrade, untradable, type Trade, type TradeOffer } from './trade.ts';
+
+function sameEntityState(a: EntityState, b: EntityState): boolean {
+  return a.x === b.x && a.y === b.y && a.z === b.z && a.yaw === b.yaw && a.anim === b.anim && a.animPhase === b.animPhase && a.hp === b.hp && a.flags === b.flags;
+}
+
+/** The snapshot FIELD bits in which `a` differs from `b` (all of them without `b`). */
+function entityChangedMask(a: EntityState, b: EntityState | undefined): number {
+  if (!b) return 0x1f;
+  return (a.x !== b.x || a.y !== b.y || a.z !== b.z ? 1 : 0) | (a.yaw !== b.yaw ? 2 : 0) | (a.anim !== b.anim || a.animPhase !== b.animPhase ? 4 : 0) | (a.hp !== b.hp ? 8 : 0) | (a.flags !== b.flags ? 16 : 0);
+}
 
 /** Snapshots older than this are not used as delta baselines (full snapshot instead). */
 const MAX_BASELINE_AGE = 20;
@@ -699,6 +711,8 @@ interface Player extends ActorBase {
   ackTick: number;
   history: Map<number, Map<number, EntityState>>;
   known: Set<number>;
+  /** Per remote entity, the state last written to him and its tick (update-rate limiting). */
+  sent: Map<number, { state: EntityState; tick: number }>;
   malformed: number;
   xp: number;
   gold: number;
@@ -992,6 +1006,11 @@ export class WorldZone {
   private respawns = new Map<string, { x: number; y: number; z: number }>();
   private encodeBuf = new DataView(new ArrayBuffer(16 * 1024));
   private readonly scratchIds: number[] = [];
+  /** Snapshot plan scratch: distance-rank keys (centimetres × 65536 + index) and their ids. */
+  private rankKeys = new Float64Array(256);
+  private rankIds = new Int32Array(256);
+  private readonly planScratch = new Map<number, SnapshotSend>();
+  private readonly sendPool: SnapshotSend[] = [];
   private readonly scratchFrames: InputFrame[] = Array.from({ length: MAX_INPUT_FRAMES }, createInputFrame);
   private readonly frame = createInputFrame();
   private readonly objects = new Map<number, WorldObject>();
@@ -1456,6 +1475,7 @@ export class WorldZone {
       ackTick: 0,
       history: new Map(),
       known: new Set(),
+      sent: new Map(),
       malformed: 0,
       xp,
       gold: Math.max(0, Math.floor(opts.gold ?? 0)),
@@ -5297,6 +5317,75 @@ export class WorldZone {
     });
   }
 
+  /**
+   * Which entities this snapshot carries for `p` (performance-testing.md §3): his own always when
+   * it differs from the baseline; another only when it changed since it was last written to him
+   * and its update interval (updateInterval: by distance rank) has run, or its HP changed. A left
+   * out entity decodes as the baseline's value, so its entry in `current` (the snapshot's history)
+   * becomes that: what the client will hold; his rendering keeps the last written state.
+   */
+  private snapshotPlan(p: Player, tick: number, current: Map<number, EntityState>, baseline: ReadonlyMap<number, EntityState> | null): Map<number, SnapshotSend> {
+    const plan = this.planScratch;
+    plan.clear();
+    let used = 0;
+    const put = (id: number, mask: number, interval: number) => {
+      const send = (this.sendPool[used++] ??= { mask: 0, interval: 1 });
+      send.mask = mask;
+      send.interval = interval;
+      plan.set(id, send);
+    };
+    const pos = p.character.position;
+    if (current.size > this.rankKeys.length) {
+      this.rankKeys = new Float64Array(current.size * 2);
+      this.rankIds = new Int32Array(current.size * 2);
+    }
+    let n = 0;
+    for (const [id, e] of current) {
+      if (id === p.entityId) continue;
+      const dx = e.x / 1000 - pos.x;
+      const dz = e.z / 1000 - pos.z;
+      const cm = Math.min(0xffffff, Math.round(Math.sqrt(dx * dx + dz * dz) * 100));
+      this.rankKeys[n] = cm * 65536 + n;
+      this.rankIds[n] = id;
+      n++;
+    }
+    const keys = this.rankKeys.subarray(0, n).sort();
+    const self = current.get(p.entityId);
+    if (self) {
+      const base = baseline?.get(p.entityId);
+      const mask = entityChangedMask(self, base);
+      if (mask) put(p.entityId, mask, 1);
+    }
+    for (let rank = 0; rank < n; rank++) {
+      const key = keys[rank]!;
+      const id = this.rankIds[key % 65536]!;
+      const cur = current.get(id)!;
+      const base = baseline?.get(id);
+      const interval = updateInterval(rank, Math.floor(key / 65536) / 100);
+      let last = p.sent.get(id);
+      if (!last) p.sent.set(id, (last = { state: cur, tick: -1 }));
+      if (!base) {
+        // New to his baseline: written in full until he acknowledges it.
+        put(id, 0x1f, interval);
+        last.state = cur;
+        last.tick = tick;
+        continue;
+      }
+      const due = last.tick < 0 || (!sameEntityState(cur, last.state) && (tick - last.tick >= interval || cur.hp !== last.state.hp));
+      if (!due) {
+        current.set(id, base); // what he decodes for it
+        continue;
+      }
+      // Fields that differ from the baseline; back to the baseline's value after a different
+      // write, the fields that differ from that write (equal to the baseline, so still valid).
+      const mask = entityChangedMask(cur, base) || (last.tick < 0 ? 0 : entityChangedMask(cur, last.state));
+      if (mask) put(id, mask, interval);
+      last.state = cur;
+      last.tick = tick;
+    }
+    return plan;
+  }
+
   private sendSnapshot(p: Player, tick: number): void {
     const pos = p.character.position;
     const n = this.grid.queryRadius(pos.x, pos.z, INTEREST_RADIUS, this.scratchIds);
@@ -5324,11 +5413,14 @@ export class WorldZone {
       });
     }
     for (const id of p.known) {
-      if (!current.has(id)) this.sendJson(p.connId, { op: SC.ENTITY_DESPAWN, d: { id } });
+      if (current.has(id)) continue;
+      this.sendJson(p.connId, { op: SC.ENTITY_DESPAWN, d: { id } });
+      p.sent.delete(id);
     }
     p.known = new Set([...current.keys()].filter((id) => id !== p.entityId));
 
     const baseline = p.ackTick > 0 && tick - p.ackTick <= MAX_BASELINE_AGE ? p.history.get(p.ackTick) ?? null : null;
+    const plan = this.snapshotPlan(p, tick, current, baseline);
     const need = snapshotMaxBytes(current.size, baseline?.size ?? 0);
     if (need > this.encodeBuf.byteLength) this.encodeBuf = new DataView(new ArrayBuffer(need * 2));
     const len = encodeSnapshot(
@@ -5351,6 +5443,7 @@ export class WorldZone {
       },
       current,
       baseline,
+      plan,
     );
     this.outbox.send(p.connId, new Uint8Array(this.encodeBuf.buffer, 0, len).slice());
 

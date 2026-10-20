@@ -86,26 +86,33 @@ Server rules: at most one input applied per server tick per player (extras queue
 ```
 0       1     opcode (0x42)
 1       4     serverTick (uint32)
-5       4     baselineTick (uint32) — 0 = full snapshot, otherwise delta vs this acked tick
-9       4     lastProcessedInput (uint32) — for client reconciliation
-13      4     selfVelY (int32, mm/s) — receiver's own vertical velocity (replay mid-jump)
-17      1     selfFlags (bit0 grounded, bits1-5 timed movement action: 0 none, 1-4 roll forward / back / left / right, 5/6 shield side hop left / right, 7 stand after a hop, 8-11 attack root motion, 16 impact / 17 stun / 18 knock-down; other bits must be 0)
-18      1     selfRollTicks (uint8) — ticks left of the receiver's timed action (replay mid-action)
-19      4     selfAirVelX (int32, mm/s) — receiver's horizontal jump velocity (replay mid-jump)
-23      4     selfAirVelZ (int32, mm/s)
-27      2     selfAirTravel (uint16, mm) — horizontal distance since take-off
-29      1     selfAirKind (0 none, 1 jump, 2 running jump)
-30      2     entityCount (uint16)
+5       1     baselineAge (uint8) — 0 = full snapshot, otherwise delta vs serverTick - baselineAge (an acked tick)
+6       4     lastProcessedInput (uint32) — for client reconciliation
+10      1     selfBits: bit0 grounded; bits1-5 timed movement action (0 none, 1-4 roll forward / back / left / right, 5/6 shield side hop left / right, 7 stand after a hop, 8-11 attack root motion, 16 impact / 17 stun / 18 knock-down); bit6 jump block follows; bit7 selfVelY follows
+11      1     selfRollTicks (uint8) — ticks left of the receiver's timed action (replay mid-action)
+12      1     selfLocoState (uint8) — locomotion clip state (0 standing)
+13      1     selfLocoFrame (uint8, quarter frames)
+14      2     entityCount (uint16)
+16      4     selfVelY (int32, mm/s) — only with bit7: receiver's own vertical velocity (replay mid-jump)
++0     13     jump block, only with bit6: selfAirKind uint8 (0 none, else its JUMP_* state), selfAirVelX int32 (mm/s), selfAirVelZ int32, selfAirTravel uint16 (mm since take-off), selfAirRise uint16 (mm)
 --- per entity ---
-+0      4     entityId (uint32)
-+4      1     changedMask (bit0 pos, bit1 yaw, bit2 anim, bit3 hp, bit4 flags)
++0    1-5     entityId (unsigned LEB128 varint)
++n      1     mask: bit0 pos, bit1 yaw, bit2 anim, bit3 hp, bit4 flags (the fields present);
+              bits5-6 update interval code (1, 2, 4, 8 ticks); bit7 pos is a delta
               flags: bit0 shield up; bits1-2 upper-body swing (1 left, 2 right, 3 air); bit3 swing parity; bits4-5 torch light level (0 off)
-+...          pos: 3 × int32 (millimetres) | yaw: uint16 | anim: uint8 state + uint8 phase | hp: uint16 | flags: uint8
++...          pos: 3 × int32 (millimetres), or with bit7 3 × int16 (mm from the baseline's) | yaw: uint16 | anim: uint8 state + uint8 phase | hp: uint16 | flags: uint8
 --- trailer ---
 +0      2     removedCount (uint16)
-+2      4×n   removed entity ids (uint32) — present in the baseline, absent now
++2   1-5×n    removed entity ids (varint) — present in the baseline, absent now
 ```
-Only fields set in `changedMask` are present; with a baseline, unchanged entities are omitted entirely. Entities new to the client must be sent with all fields. Because the shared movement step snaps position (mm) and vertical velocity (mm/s) to wire resolution every tick, a client that resets to the snapshot (position + `selfVelY` + grounded) and replays its unacknowledged inputs reproduces the server's result exactly. Delta baseline is the last snapshot the client acknowledged via `ackSnapshotTick`; if the baseline is too old (> 1 s), the server sends a full snapshot.
+Only fields set in the mask are present; an entity left out decodes as the baseline's value. Entities new to the client must be sent with all fields and absolute positions. Because the shared movement step snaps position (mm) and vertical velocity (mm/s) to wire resolution every tick, a client that resets to the snapshot (position + `selfVelY` + grounded) and replays its unacknowledged inputs reproduces the server's result exactly. Delta baseline is the last snapshot the client acknowledged via `ackSnapshotTick`; if the baseline is too old (> 1 s), the server sends a full snapshot. A standing receiver's header is 16 bytes (33 at most).
+
+**Per-receiver update rates** (bandwidth, `performance-testing.md` §3). The receiver's own entity goes out whenever it differs from the baseline. Another entity goes out only when it changed since it was last written to that receiver and its interval (`updateInterval(rank, distance)`) has run, or at once when its HP changed:
+- every tick: the nearest eight, and anything within 4 m;
+- then every 2, 4 and 8 ticks by distance rank (ranks 8, 16 and 24 and beyond);
+- beyond 40 m at least every 4 ticks, and beyond 52 m every 8.
+
+A rate-limited entity decodes as the (older) baseline value, so the client draws only the entities written in the snapshot (`decodeSnapshot`'s `sent`), not the decoded map. It draws a rate-limited entity (interval − 1) ticks further back, easing that delay when the rate changes, and it holds a still entity's last sample until one interval before its next one.
 
 ### 3.3 Codec API
 ```typescript

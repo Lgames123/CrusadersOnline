@@ -4,7 +4,7 @@ import { gameplayFeatures, type GameplayFeatures } from '../game/features.ts';
 import { dequantizeAngle, dequantizePosition } from '../math/quantize.ts';
 import { CS, SC } from '../protocol/opcodes.ts';
 import { INPUT_PACKET_MAX_BYTES, MAX_INPUT_FRAMES, createInputFrame, encodeInput, type InputFrame } from '../protocol/binary/input.ts';
-import { decodeSnapshot, type EntityState } from '../protocol/binary/snapshot.ts';
+import { decodeSnapshot, snapshotBaselineTick, type EntityState } from '../protocol/binary/snapshot.ts';
 import type { AttackKind, ChatBroadcastMsg, CombatEventMsg, CutsceneMsg, EndingMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PartyUpdateMsg, PlayerStatsMsg, TradeUpdateMsg, AuctionMsg, TelegraphMsg, OreVeinsMsg, QuestLogMsg, ServerControlMsg, ShopMsg, SpellEventMsg, StorySoundMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
 import type { ArenaDef } from '../arena/types.ts';
 import type { Difficulty } from '../game/ruleset.ts';
@@ -143,6 +143,10 @@ export class ClientSession {
   private latestAt = 0;
   private serverTickEstimate = 0;
   private readonly remote = new Map<number, RemoteFrame[]>();
+  /** Per remote entity: its update interval (ticks, from the snapshot) and the extra render delay easing toward interval - 1. */
+  private readonly remoteRate = new Map<number, { interval: number; delay: number }>();
+  /** Scratch: the entities written in the snapshot being read, with their intervals. */
+  private readonly sentScratch = new Map<number, number>();
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private seq = 0;
 
@@ -197,6 +201,7 @@ export class ClientSession {
     this.entityId = 0;
     this.snapshots.clear();
     this.remote.clear();
+    this.remoteRate.clear();
     this.entities.clear();
     this.names.clear();
     this.objectStates.clear();
@@ -296,6 +301,7 @@ export class ClientSession {
         this.names.delete(msg.d.id);
         this.entities.delete(msg.d.id);
         this.remote.delete(msg.d.id);
+        this.remoteRate.delete(msg.d.id);
         this.events.despawn?.(msg.d.id);
         break;
       case SC.PONG:
@@ -582,9 +588,10 @@ export class ClientSession {
   }
 
   private onSnapshot(view: DataView): void {
-    const baselineTick = view.byteLength >= 9 ? view.getUint32(5, true) : 0;
+    const baselineTick = snapshotBaselineTick(view);
     const state = new Map<number, EntityState>();
-    const header = decodeSnapshot(view, this.snapshots.get(baselineTick) ?? null, state);
+    const sent = this.sentScratch;
+    const header = decodeSnapshot(view, this.snapshots.get(baselineTick) ?? null, state, sent);
     if (!header || header.serverTick <= this.latestTick && this.stats.snapshots > 0) return;
     this.stats.snapshots++;
     this.snapshots.set(header.serverTick, state);
@@ -592,10 +599,20 @@ export class ClientSession {
     this.latestTick = header.serverTick;
     this.latestAt = performance.now();
 
-    for (const [id, e] of state) {
+    // Only entities written in this snapshot get a new sample: one left out is unchanged or
+    // rate-limited, and decodes as the baseline's (possibly older) value.
+    for (const [id, interval] of sent) {
       if (id === this.entityId) continue;
+      const e = state.get(id)!;
       let buf = this.remote.get(id);
       if (!buf) this.remote.set(id, (buf = []));
+      const rate = this.remoteRate.get(id);
+      const gap = Math.max(interval, rate?.interval ?? interval);
+      if (rate) rate.interval = interval;
+      else this.remoteRate.set(id, { interval, delay: interval - 1 });
+      // It stood still since its last sample: hold there until one interval before this one.
+      const last = buf[buf.length - 1];
+      if (last && last.tick < header.serverTick - gap) buf.push({ ...last, tick: header.serverTick - interval });
       buf.push({
         tick: header.serverTick,
         x: dequantizePosition(e.x),
@@ -655,6 +672,14 @@ export class ClientSession {
   sampleRemote(id: number, renderTick: number, out: RemoteSample): boolean {
     const buf = this.remote.get(id);
     if (!buf || buf.length === 0) return false;
+    // A rate-limited entity is drawn (interval - 1) ticks further back, so its next sample is
+    // already in; the delay eases when its rate changes rather than jumping.
+    const rate = this.remoteRate.get(id);
+    if (rate) {
+      const want = rate.interval - 1;
+      rate.delay += Math.max(-0.05, Math.min(0.05, want - rate.delay));
+      renderTick -= rate.delay;
+    }
     let a = buf[0]!;
     let b = a;
     for (let i = 1; i < buf.length; i++) {

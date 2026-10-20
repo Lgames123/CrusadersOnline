@@ -26,6 +26,7 @@ const BOTS = Number(arg('bots', '100'));
 const SECONDS = Number(arg('seconds', '60'));
 const ARENA = arg('arena', 'synthetic-arena');
 const TARGET_P99_MS = 15;
+const TARGET_KBPS = 5;
 
 interface Metrics { zone: string; players: number; ticks: number; p50: number; p99: number; max: number; late: number }
 const samples: Metrics[] = [];
@@ -97,7 +98,11 @@ for (let i = 0; i < BOTS; i++) {
   }
 }
 console.log(`${bots.length} bots connected`);
+// Bandwidth is measured once everyone is in (the spawn bursts are not steady state).
+const bytesAtStart = bots.reduce((s, b) => s + b.session.stats.bytesIn, 0);
+const measuredFrom = performance.now();
 await new Promise((r) => setTimeout(r, SECONDS * 1000));
+const kbPerClient = (bots.reduce((s, b) => s + b.session.stats.bytesIn, 0) - bytesAtStart) / 1024 / ((performance.now() - measuredFrom) / 1000) / Math.max(1, bots.length);
 
 for (const b of bots) b.stop();
 const corrections = bots.reduce((s, b) => s + b.session.stats.corrections, 0);
@@ -113,5 +118,6 @@ const late = loaded.reduce((s, m) => s + m.late, 0);
 const ticks = loaded.reduce((s, m) => s + m.ticks, 0);
 console.log('\n--- summary ---');
 console.log(`bots ${bots.length}  windows ${loaded.length}  mean p50 ${meanP50.toFixed(2)} ms  worst p99 ${worstP99.toFixed(2)} ms  worst max ${worstMax.toFixed(2)} ms  late ticks ${late}/${ticks}  client corrections ${corrections}`);
+console.log(`down per client ${kbPerClient.toFixed(1)} KB/s (target ${TARGET_KBPS} KB/s at 100 players)`);
 console.log(worstP99 < TARGET_P99_MS ? `PASS: p99 below ${TARGET_P99_MS} ms` : `FAIL: p99 ${worstP99.toFixed(2)} ms >= ${TARGET_P99_MS} ms`);
 process.exit(worstP99 < TARGET_P99_MS ? 0 : 1);
