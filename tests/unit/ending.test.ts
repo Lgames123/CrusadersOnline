@@ -93,6 +93,40 @@ describe('the ending (ending.ts)', () => {
     expect(t.portals).toEqual([{ conn: 1, target: 'level:cs5b', via: { exit: 0, toStart: true, offset: { x: 0, y: 0, z: 0 } } }]);
   });
 
+  it("seqNecros as the ship's data has it: Drake is put in the arena, Necros Before goes, Necros comes", () => {
+    const arena = createSyntheticArena();
+    arena.name = 'level:bs1a';
+    arena.mobSpawns = [
+      { archetype: 'npc_139', x: 0, y: 0.5, z: -8, yaw: 0, placement: 22 },
+      { archetype: 'necros', x: 0, y: 0.5, z: -10, yaw: 0, hp: 1000, placement: 23, hidden: true },
+    ];
+    const square: [number, number][] = [[-2 / FT, -2 / FT], [2 / FT, -2 / FT], [2 / FT, 2 / FT], [-2 / FT, 2 / FT]];
+    arena.story = {
+      triggers: [{ id: 232876, kind: 'flag', activation: 1, volume: { polygon: square, yMin: -100, yMax: 100 } }],
+      cameras: [],
+      sequences: [{
+        name: 'seqNecros', trigger: 232876, actors: [{ player: true }, { creature: 22 }, { creature: 23 }],
+        tracks: [{ actor: 2, steps: [0] }, { actor: 3, steps: [1] }, { actor: 4, steps: [2, 3] }],
+        steps: [
+          { action: 'Appear', when: null, args: { appear: 1, appearpos: [0, 0.5 / FT, -5 / FT] } },
+          { action: 'Appear', when: null, args: { appear: 0, no_collide: 1 } },
+          { action: 'Appear', when: null, args: { appear: 0, no_collide: 1 } },
+          { action: 'Appear', when: null, args: { appear: 1 } },
+        ],
+      }],
+    };
+    const t = world(arena);
+    t.zone.join(1, { name: 'Slayer', characterId: 'c1', position: { x: 0, y: 0.5, z: 0 } });
+    t.zone.step();
+    expect(t.of(1, SC.CUTSCENE)).toHaveLength(1);
+    t.zone.cutsceneDone(1, 'seqNecros');
+    t.zone.step();
+    const actors = [...t.internals.actors.values()] as unknown as { kind: string; placement?: number; hidden?: boolean; character: { position: { x: number; y: number; z: number } } }[];
+    expect(actors.find((a) => a.placement === 22)!.hidden).toBe(true);
+    expect(actors.find((a) => a.placement === 23)!.hidden).toBe(false);
+    expect(actors.find((a) => a.kind === 'player')!.character.position.z).toBeCloseTo(-5, 0);
+  });
+
   it('a finished character back on the ship (left during the timeline) goes on to the ending act', () => {
     const t = world(necrosShip());
     t.zone.join(1, { name: 'Slayer', characterId: 'c1', position: { x: 0, y: 0.5, z: 0 }, story: { ...emptyStoryState(), completedAt: 5 } });
@@ -125,6 +159,73 @@ describe('the ending (ending.ts)', () => {
     expect(t.saved.at(-1)?.story?.completedAt).toBeGreaterThan(0);
     expect(t.of(1, SC.CHAT_BROADCAST).some((m) => /finished the story/.test(JSON.stringify(m)))).toBe(true);
     expect(t.of(1, SC.PLAYER_STATS).at(-1)).toMatchObject({ d: { storyComplete: true } });
+  });
+
+  /** Cs5b in small: Aerin, a citizen and a guard; the inn door east, the road west; Seq24 around the start. */
+  function endingAct() {
+    const arena = createSyntheticArena();
+    arena.name = 'level:cs5b';
+    arena.mobSpawns = [
+      { archetype: 'npc_152', x: 0, y: 0.5, z: -2, yaw: 0, placement: 0 },
+      { archetype: 'npc_154', x: 1, y: 0.5, z: -2, yaw: 0, placement: 4 },
+      { archetype: 'npc_113', x: -1, y: 0.5, z: -2, yaw: 0, placement: 12 },
+    ];
+    arena.portals = [
+      { id: 0, target: 'level:cs2b-inn', x: 4, y: 0.5, z: -2, use: true },
+      { id: 1, target: 'level:ws2a', x: -6, y: 0.5, z: -2 },
+    ];
+    const square: [number, number][] = [[-3 / FT, -3 / FT], [3 / FT, -3 / FT], [3 / FT, 3 / FT], [-3 / FT, 3 / FT]];
+    arena.story = {
+      triggers: [{ id: 231582, kind: 'flag', activation: 1, volume: { polygon: square, yMin: -100, yMax: 100 } }],
+      cameras: [],
+      sequences: [{
+        name: 'Seq24', trigger: 231582, actors: [{ player: true }, { creature: 0 }],
+        tracks: [{ actor: 2, steps: [0] }],
+        steps: [{ action: 'ScriptedSequenceDone', when: null, args: { seq: { sequence: 'Seq24' }, loadlevel: { exit: 'end', exitNumber: 1 } } }],
+      }],
+    };
+    return world(arena);
+  }
+
+  it("the ending act's cast is the arriving player's alone: the others see none of it, and it plays his scene", () => {
+    const t = endingAct();
+    expect(t.zone.inspect().filter((a) => a.kind === 'mob')).toHaveLength(0); // nobody spawns for the world
+    t.zone.join(1, { name: 'Slayer', characterId: 'c1', position: { x: 0, y: 0.5, z: 0 } });
+    t.zone.join(2, { name: 'Veteran', characterId: 'c2', position: { x: 0.5, y: 0.5, z: 0.5 }, story: { ...emptyStoryState(), flags: ['cs5b:231582'], completedAt: 5 } });
+    t.zone.step();
+    t.zone.step();
+    const mobs = t.zone.inspect().filter((a) => a.kind === 'mob');
+    expect(mobs).toHaveLength(3); // one cast: the veteran has seen the scene
+    const spawnedFor = (conn: number) => t.of(conn, SC.ENTITY_SPAWN).filter((m) => m.op === SC.ENTITY_SPAWN && m.d.kind === 'mob').length;
+    expect(spawnedFor(1)).toBe(3);
+    expect(spawnedFor(2)).toBe(0);
+    const scene = t.of(1, SC.CUTSCENE)[0] as Extract<ServerControlMsg, { op: typeof SC.CUTSCENE }>;
+    expect(scene.d.actors[1]).toBe(mobs.find((m) => m.x === 0)!.id);
+    expect(t.of(2, SC.CUTSCENE)).toHaveLength(0);
+  });
+
+  it('when the last scene ends the cast walks off, citizens to the door, the others to the road, and is gone', () => {
+    const t = endingAct();
+    t.zone.join(1, { name: 'Slayer', characterId: 'c1', position: { x: 0, y: 0.5, z: 0 } });
+    t.zone.step();
+    t.zone.cutsceneDone(1, 'Seq24');
+    const at = () => Object.fromEntries(t.zone.inspect().filter((a) => a.kind === 'mob').map((a) => [a.id, a.x]));
+    const start = at();
+    for (let i = 0; i < 20; i++) t.zone.step();
+    const later = at();
+    const ids = Object.keys(start).map(Number).sort((a, b) => start[a]! - start[b]!); // guard, Aerin, citizen by x
+    expect(later[ids[0]!]!).toBeLessThan(start[ids[0]!]!); // the guard heads west, to the road
+    expect(later[ids[2]!]!).toBeGreaterThan(start[ids[2]!]!); // the citizen east, to the inn door
+    for (let i = 0; i < 20 * 21; i++) t.zone.step();
+    expect(t.zone.inspect().filter((a) => a.kind === 'mob')).toHaveLength(0);
+  });
+
+  it("a player leaving takes his cast with him", () => {
+    const t = endingAct();
+    t.zone.join(1, { name: 'Slayer', characterId: 'c1', position: { x: 0, y: 0.5, z: 0 } });
+    expect(t.zone.inspect().filter((a) => a.kind === 'mob')).toHaveLength(3);
+    t.zone.leave(1);
+    expect(t.zone.inspect().filter((a) => a.kind === 'mob')).toHaveLength(0);
   });
 
   it('the completion date is kept with the story, anything malformed dropped', () => {

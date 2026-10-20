@@ -789,4 +789,12 @@ Implemented: `server/src/simulation/boomer_axe.ts` (zone: weapon unarmed while i
 - Exit `"end"` keeps the character in Cs5b, and from then on every door opens for him from either side.
 - A finished character found on the ship goes on to Cs5b.
 
+**seqNecros** (bs1a, trigger 232876 at the arena's south door, opening `bnecrosdoor`):
+
+- the player's track shows Drake at (2215, 1065.9, −1545.5), inside the octagonal arena;
+- Necros Before's track ends with Appear 0, and he is gone;
+- Necros's track goes Appear 0 then Appear 1: he is shown at his placement in the arena's centre (2215, 1066.9, −1576).
+
+Each track's last Appear is applied to the shared world when the sequence ends, and the stand-in's `appearpos` is where the player ends.
+
 **Not reproduced:** the `0x004E0C30` event and the `SLTI` status on the player (their effects are not traced). The time scale only slows the client's animations and effects; the server world keeps its pace.

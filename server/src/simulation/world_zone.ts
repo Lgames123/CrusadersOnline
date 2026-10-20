@@ -490,6 +490,9 @@ const PATH_ARRIVE = 0.4;
  * player coming within ~30 ft sets them off again at once.
  */
 const ALERT_TICKS = 5;
+/** The ending's cast walking off after the last scene: gone on arrival, after this long, or once stuck. */
+const CAST_LEAVE_TICKS = 20 * 20;
+const CAST_STUCK_TICKS = 20 * 2;
 const FLEE_TICKS = 20 * 7;
 const WARY_RADIUS = 9;
 const REALERT_TICKS = 2;
@@ -748,6 +751,12 @@ interface Mob extends ActorBase {
   hidden: boolean;
   hideOnRespawn: boolean;
   /**
+   * Not original: one player's copy of the ending act's cast (endingCast), seen by him alone, out
+   * of every fight, standing still until the last scene ends; then `leaving` for an exit.
+   */
+  privateTo?: number;
+  leaving?: { x: number; z: number; until: number; from: { x: number; z: number }; since: number };
+  /**
    * An admin's custom spawn (not original): its spawn id, damage multiplier, whether it comes back
    * after death, and when it is removed (ms since epoch).
    */
@@ -856,6 +865,12 @@ export class WorldZone {
   private readonly thrownWeapons = new Map<number, ItemDef>();
   /** Event rate multipliers set from the admin panel (not original; 1 = the original's). */
   private rates: WorldRates = { ...DEFAULT_RATES };
+  /**
+   * The story's last scene (the sequence whose end is exit "end": Cs5b's Seq24) and the act's
+   * creatures, spawned for each player who arrives for it instead of for everyone (not original).
+   */
+  private readonly endingScene: StorySequence | null;
+  private readonly endingCast: ArenaDef['mobSpawns'] = [];
 
   constructor(rapier: Rapier, name: string, arena: ArenaDef, outbox: ZoneOutbox, opts: WorldZoneOptions = {}) {
     this.name = name;
@@ -874,7 +889,12 @@ export class WorldZone {
     for (const m of arena.meshes) for (let i = 1; i < m.vertices.length; i += 3) lowest = Math.min(lowest, m.vertices[i]!);
     for (const b of arena.boxes) lowest = Math.min(lowest, b.y - b.hy);
     this.fallLimit = (Number.isFinite(lowest) ? lowest : 0) - FALL_MARGIN;
-    for (const s of arena.mobSpawns) this.spawnMob(s.archetype, s);
+    this.endingScene = arena.story?.sequences.find((q) => q.steps.some((st) => {
+      const level = st.args['loadlevel'];
+      return st.action === 'ScriptedSequenceDone' && !!level && typeof level === 'object' && 'exit' in level && level.exit.toLowerCase() === ENDING_EXIT;
+    })) ?? null;
+    if (this.endingScene) this.endingCast = arena.mobSpawns;
+    else for (const s of arena.mobSpawns) this.spawnMob(s.archetype, s);
     for (const def of arena.objects ?? []) {
       // Quest items come only from the story (applyQuest), whatever the level places.
       if (def.kind === 'item' && def.item && this.groundItemDef(def.item)?.questItem) continue;
@@ -1014,6 +1034,8 @@ export class WorldZone {
     if (a === b) return false;
     // A player watching the ending is out of every fight.
     if ((a.kind === 'player' && a.ending) || (b.kind === 'player' && b.ending)) return false;
+    // The ending's cast is scenery: nobody fights it, it fights nobody.
+    if ((a.kind === 'mob' && a.privateTo !== undefined) || (b.kind === 'mob' && b.privateTo !== undefined)) return false;
     if ((a.kind === 'mob' && a.hidden) || (b.kind === 'mob' && b.hidden)) return false;
     const players = (x: Actor) => x.kind === 'player' || x.ally !== undefined;
     if (players(a) === players(b)) return false;
@@ -1296,6 +1318,14 @@ export class WorldZone {
     // Necros's ship has no way out: a finished character (back after leaving during his death
     // timeline) goes on to the ending act at once.
     if (this.act === NECROS_ACT && p.story.completedAt !== undefined) p.ending = { until: this.tick + 1 };
+    // Here for the last scene: the act's cast, his alone (they walk off when it ends).
+    const act = this.act;
+    if (this.endingScene && act && !p.storyFlags.has(storyFlag(act, this.endingScene.trigger))) {
+      for (const s of this.endingCast) {
+        const m = this.actors.get(this.spawnMob(s.archetype, s));
+        if (m?.kind === 'mob') m.privateTo = p.entityId;
+      }
+    }
     if (this.objects.size) {
       const changed = [...this.objects.values()]
         .filter((o) => (this.stateFor(p, o) !== 'present' || o.dynamic) && this.sees(p, o))
@@ -2508,6 +2538,55 @@ export class WorldZone {
     if (record) this.outbox.persist?.([record], 'progress');
   }
 
+  /**
+   * The last scene is over: the player's cast walks off (not original), the citizens to the
+   * nearest door into a building, the others to the nearest way out of the act.
+   */
+  private castLeaves(p: Player): void {
+    const portals = this.arena.portals ?? [];
+    for (const m of this.actors.values()) {
+      if (m.kind !== 'mob' || m.privateTo !== p.entityId || m.leaving) continue;
+      const pos = m.character.position;
+      const doors = /citizen/i.test(m.archetype.name);
+      const pick = portals.filter((q) => !q.scripted && !!q.use === doors);
+      const ways = pick.length ? pick : portals;
+      let best: { x: number; z: number } | null = null;
+      let bestD = Infinity;
+      for (const q of ways) {
+        const d = Math.hypot(q.x - pos.x, q.z - pos.z);
+        if (d < bestD) (bestD = d), (best = { x: q.x, z: q.z });
+      }
+      if (!best) {
+        this.removeMob(m);
+        continue;
+      }
+      m.leaving = { ...best, until: this.tick + CAST_LEAVE_TICKS, from: { x: pos.x, z: pos.z }, since: this.tick };
+    }
+  }
+
+  /** One of the ending's cast: it stands, or walks off to its exit and is gone (castLeaves). */
+  private updateCast(m: Mob): void {
+    m.input.flags = 0;
+    const l = m.leaving;
+    const pos = m.character.position;
+    if (l) {
+      const d = Math.hypot(l.x - pos.x, l.z - pos.z);
+      // Stuck (a wall in the straight way): gone too.
+      if (this.tick - l.since >= CAST_STUCK_TICKS) {
+        if (Math.hypot(pos.x - l.from.x, pos.z - l.from.z) < 0.5) return this.removeMob(m);
+        l.from = { x: pos.x, z: pos.z };
+        l.since = this.tick;
+      }
+      if (d < 1 || this.tick >= l.until) return this.removeMob(m);
+      m.yaw = quantizeAngle(yawTowards(pos.x, pos.z, l.x, l.z));
+      m.input.flags = INPUT.FORWARD | INPUT.WALK;
+    }
+    m.input.yaw = m.yaw;
+    m.input.clientTick = this.tick;
+    stepCharacter(this.mw, m.character, m.input, m.stats, TICK_DT);
+    m.anim = m.input.flags & MOVE_MASK ? ANIM.WALK : ANIM.IDLE;
+  }
+
   /** Sets a brush's mover going (a relay's target, 0x48EC10). */
   private useBrush(name: string, by: number): void {
     const b = this.arena.brushes?.find((x) => x.name === name && x.door !== undefined);
@@ -2545,7 +2624,7 @@ export class WorldZone {
   private startCutscene(p: Player, sequence: StorySequence): void {
     const actors = sequence.actors.map((a) => {
       if (!a || !('creature' in a)) return null;
-      for (const m of this.actors.values()) if (m.kind === 'mob' && m.placement === a.creature && alive(m) && !m.hidden) return m.entityId;
+      for (const m of this.actors.values()) if (m.kind === 'mob' && m.placement === a.creature && alive(m) && !m.hidden && (m.privateTo === undefined || m.privateTo === p.entityId)) return m.entityId;
       return null;
     });
     // At most the estimated length (actors' steps at walking pace) and a margin.
@@ -2587,12 +2666,22 @@ export class WorldZone {
     const standIn = new Set(seq.actors.map((a, i) => (a && 'player' in a ? i + 2 : -1)).filter((i) => i >= 0));
     let end: [number, number, number] | null = null;
     let load: string | null = null;
-    // Creatures the sequence brought in (their track shows them: Necros) are in the world now.
+    // Creatures the sequence shows or takes away (each track's last Appear: Necros comes, Necros
+    // Before goes) are so in the world now, for everyone.
     for (const track of seq.tracks) {
       const actor = seq.actors[track.actor - 2];
       if (!actor || !('creature' in actor)) continue;
-      if (!track.steps.some((i) => seq.steps[i]?.action === 'Appear' && seq.steps[i]!.args['appear'] === 1)) continue;
-      for (const m of this.actors.values()) if (m.kind === 'mob' && m.placement === actor.creature && m.hidden && alive(m)) m.hidden = false;
+      const last = [...track.steps].reverse().map((i) => seq.steps[i]).find((st) => st?.action === 'Appear');
+      if (!last) continue;
+      const show = last.args['appear'] !== 0;
+      for (const m of this.actors.values()) {
+        if (m.kind !== 'mob' || m.placement !== actor.creature || !alive(m) || m.privateTo !== undefined || m.hidden === !show) continue;
+        m.hidden = !show;
+        if (!show) {
+          m.threat.clear();
+          m.state = 'idle';
+        }
+      }
     }
     for (const track of seq.tracks) {
       for (const index of track.steps) {
@@ -2600,6 +2689,9 @@ export class WorldZone {
         if (!step) continue;
         const pos = step.args['pos'];
         if (step.action === 'MoveToPos' && standIn.has(track.actor) && Array.isArray(pos)) end = pos;
+        // The stand-in put somewhere (seqNecros: inside Necros's arena) ends there too.
+        const at = step.args['appearpos'];
+        if (step.action === 'Appear' && standIn.has(track.actor) && step.args['appear'] !== 0 && Array.isArray(at)) end = at;
         const flag = step.args['flag'];
         if (step.action === 'TriggerFlag' && flag && typeof flag === 'object' && 'trigger' in flag) {
           const t = story?.triggers.find((u) => u.id === flag.trigger);
@@ -2622,6 +2714,7 @@ export class WorldZone {
     if (load === ENDING_EXIT) {
       load = null;
       this.storyEnds(p);
+      this.castLeaves(p);
     }
     const record = this.persistRecord(p);
     if (record) this.outbox.persist?.([record], 'progress');
@@ -2643,6 +2736,7 @@ export class WorldZone {
     this.players.delete(connId);
     this.actors.delete(p.entityId);
     for (const a of this.actors.values()) if (a.kind === 'mob') a.threat.delete(p.entityId);
+    for (const a of [...this.actors.values()]) if (a.kind === 'mob' && a.privateTo === p.entityId) this.removeMob(a);
     return record;
   }
 
@@ -2776,7 +2870,8 @@ export class WorldZone {
     // 2. Mobs think and move.
     for (const a of this.actors.values()) {
       if (a.kind !== 'mob' || !alive(a) || a.hidden) continue;
-      this.updateMob(a);
+      if (a.privateTo !== undefined) this.updateCast(a);
+      else this.updateMob(a);
       this.mobFall(a);
     }
 
@@ -3332,6 +3427,9 @@ export class WorldZone {
     let pz = 0;
     for (const o of this.actors.values()) {
       if (o === m || !alive(o)) continue;
+      // One player's copy of the ending's cast is not there for anyone else.
+      const mine = (x: Actor, y: Actor) => x.kind !== 'mob' || x.privateTo === undefined || x.privateTo === y.entityId || (y.kind === 'mob' && y.privateTo === x.privateTo);
+      if (!mine(o, m) || !mine(m, o)) continue;
       const op = o.character.position;
       if (Math.abs(op.y - pos.y) > PLAYER_HEIGHT) continue;
       const dx = pos.x - op.x;
@@ -4238,7 +4336,7 @@ export class WorldZone {
     for (let i = 0; i < n; i++) {
       const id = this.scratchIds[i]!;
       const other = this.actors.get(id);
-      if (!other || (other.kind === 'mob' && other.hidden)) continue;
+      if (!other || (other.kind === 'mob' && (other.hidden || (other.privateTo !== undefined && other.privateTo !== p.entityId)))) continue;
       const op = other.character.position;
       if (id !== p.entityId && Math.hypot(op.x - pos.x, op.z - pos.z) > INTEREST_RADIUS) continue;
       current.set(id, this.states.get(id)!);
