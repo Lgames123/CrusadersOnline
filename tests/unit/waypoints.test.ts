@@ -4,6 +4,7 @@ import path from 'node:path';
 import { WorldZone } from '@crusaders/server/simulation/world_zone';
 import {
   SC,
+  areaName,
   WAYPOINT_CHAPTERS,
   buildLevelArena,
   emptyStoryState,
@@ -76,5 +77,17 @@ describe('waypoints', () => {
     expect(portals).toEqual([]);
     zone.waypointTravel(1, 'gl3c');
     expect(portals).toEqual([{ conn: 1, target: 'level:gl3c', waypoint: true }]);
+  });
+});
+
+describe('area names', () => {
+  it('names acts, inns and dungeon instances by their region', () => {
+    expect(areaName('level:cs1b-inn')).toBe('Cador Sul Inn');
+    expect(areaName('level:CS4B-INN')).toBe('Cador Sul Inn');
+    expect(areaName('level:ca2b')).toBe('The Catacombs');
+    expect(areaName('level:ca1d@crypt-3')).toBe('The Catacombs');
+    expect(areaName('ci1b')).toBe('The Citadel');
+    expect(areaName('level:train')).toBe('Training Grounds');
+    expect(areaName('synthetic-arena')).toBe('SYNTHETIC-ARENA');
   });
 });

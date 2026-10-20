@@ -103,6 +103,20 @@ export function waypointLabel(act: string): string {
   return parts.length <= 1 ? region : `${region} — part ${parts.indexOf(act) + 1}`;
 }
 
+/**
+ * A friendly name for an act or zone ("level:cs1b-inn" → "Cador Sul Inn", "ca2b" → "The
+ * Catacombs", "train" → "Training Grounds"): its region's name, for display only; a dungeon
+ * instance names its base act. Unknown names stay as they are, upper-cased.
+ */
+export function areaName(zone: string): string {
+  const act = zone.toLowerCase().replace(/^level:/, '').split('@')[0]!;
+  if (act === 'train') return 'Training Grounds';
+  const inn = act.endsWith('-inn');
+  const region = WAYPOINT_REGIONS[act.slice(0, 2) as WaypointRegion]?.name;
+  if (!region) return act.toUpperCase();
+  return inn ? `${region.replace(/^The /, '')} Inn` : region;
+}
+
 /** Metres from the crystal within which the use key opens the map (the server checks it too). */
 export const WAYPOINT_REACH = 2.5;
 /** Seconds between two teleports of a player. */

@@ -20,6 +20,7 @@ import {
   PLAYER_REACH,
   attackTiming,
   LEVEL_PREFIX,
+  areaName,
   ORES,
   GROUND_REACH,
   WAYPOINT_REACH,
@@ -774,7 +775,7 @@ async function main(): Promise<void> {
           },
           zone: (name, difficulty) => {
             // Portal transitions (and the first entry): swap the level, then tell the server.
-            errorBox.textContent = `Entering ${name.replace(LEVEL_PREFIX, '').toUpperCase()}…`;
+            errorBox.textContent = `Entering ${areaName(name)}…`;
             for (const id of remotes.byId.keys()) (lighting.forget(id), trails.forget(id));
             spellVisuals.clear();
             remotes.clear();
@@ -1405,7 +1406,7 @@ async function main(): Promise<void> {
     // Door exits (cell doors, inns, town gates): Tab goes through.
     for (const portal of levelView.arena.portals ?? []) {
       if (!portal.use || !inPortal(portal, p, PORTAL_USE_REACH)) continue;
-      best = { id: PORTAL_OBJECT_BASE + portal.id, label: `Tab — go to ${portal.target.replace(LEVEL_PREFIX, '').toUpperCase()}`, d: 0 };
+      best = { id: PORTAL_OBJECT_BASE + portal.id, label: `Tab — go to ${areaName(portal.target)}`, d: 0 };
     }
     for (const [id, door] of levelView.doors) {
       const b = door.def.bounds!;

@@ -1,4 +1,4 @@
-import { LEVEL_PREFIX, type PartyMemberView } from '@crusaders/shared';
+import { areaName, type PartyMemberView } from '@crusaders/shared';
 
 /**
  * The party frame (MMO Stage 2, not original): the other members, the leader marked, each with
@@ -79,7 +79,7 @@ export class PartyFrame {
       const hp = m.zone === zone ? lookup(m.name) : null;
       row.el.classList.toggle('pf-away', hp === null);
       row.fill.style.width = `${Math.round(Math.max(0, Math.min(1, hp ?? 0)) * 100)}%`;
-      const where = !m.zone ? 'offline' : m.zone === zone ? (hp === null ? 'nearby' : '') : m.zone.replace(LEVEL_PREFIX, '').toUpperCase();
+      const where = !m.zone ? 'offline' : m.zone === zone ? (hp === null ? 'nearby' : '') : areaName(m.zone);
       if (row.where.textContent !== where) row.where.textContent = where;
     }
   }
