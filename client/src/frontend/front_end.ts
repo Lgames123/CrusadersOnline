@@ -177,7 +177,7 @@ export async function runFrontEnd(ctx: FrontEndContext): Promise<FrontEndChoice>
   const loginScreen = (serverDown: boolean, notice = '') => {
     const remembered = store.get(ACCOUNT_KEY) ?? activeAccount ?? '';
     const el = html(`<div class="fe-screen fe-login-screen">
-      <header class="fe-logo"><div class="fe-logo-main">Crusaders</div><div class="fe-logo-sub">Online</div></header>
+      <header class="fe-logo"><img class="fe-logo-img" src="/crusadersonline.webp" alt="Crusaders Online" draggable="false" /></header>
       <form class="fe-login" autocomplete="on" novalidate>
         <label class="fe-field"><span>Account name</span>
           <input name="username" autocomplete="username" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_]+" value="${esc(remembered)}" spellcheck="false" />
