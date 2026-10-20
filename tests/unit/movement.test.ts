@@ -41,6 +41,9 @@ import {
   PLAYER_RADIUS,
   TICK_DT,
   createCharacter,
+  pushCharacter,
+  PLAYER_HEIGHT,
+  PLAYER_HALF_SEGMENT,
   createMovementWorld,
   createSyntheticArena,
   initPhysics,
@@ -438,6 +441,24 @@ describe('shared character controller', () => {
     run(block, c, INPUT.FORWARD, 0, 40, 10, stats);
     expect(c.rollDir).not.toBe(ACTION_MOUNT);
     expect(c.position.y).toBeLessThan(0.1);
+  });
+
+  it('pushes a character up a slope with the height the move climbs (a fire ball knock-back)', () => {
+    // Up the ramp (z 3..9, rising 1.5 m toward +Z): a 15 ft knock-back must lift the body with
+    // it. Keeping the old height buried the capsule in the slope, and a buried capsule can fall
+    // through the level.
+    const { mw, c } = setup({ x: 12, y: 0.3, z: 3.5 });
+    run(mw, c, 0, 0, 10);
+    const start = { ...c.position };
+    const moved = pushCharacter(mw, c, 0, 15 * 0.3048);
+    expect(moved.z).toBeGreaterThan(4);
+    expect(c.position.y - start.y).toBeGreaterThan(0.9);
+    const body = new rapier.Capsule(PLAYER_HALF_SEGMENT - 0.05, PLAYER_RADIUS - 0.05);
+    const centre = { x: c.position.x, y: c.position.y + PLAYER_HEIGHT / 2, z: c.position.z };
+    expect(mw.world.intersectionWithShape(centre, { x: 0, y: 0, z: 0, w: 1 }, body, undefined, undefined, c.collider)).toBeNull();
+    run(mw, c, 0, 0, 20);
+    expect(c.grounded).toBe(true);
+    expect(c.position.y - start.y).toBeGreaterThan(0.9);
   });
 
   it('does not catch a ledge while jump is held', () => {

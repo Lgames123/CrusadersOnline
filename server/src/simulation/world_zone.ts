@@ -145,7 +145,6 @@ import {
   ORIGINAL_BLOCK_COS,
   PLAYER_HEIGHT,
   PLAYER_RADIUS,
-  CHARACTER_GROUPS,
   PLAYER_REACH,
   PLAYER_RESPAWN_TICKS,
   SC,
@@ -224,6 +223,7 @@ import {
   quantizePosition,
   removeCharacter,
   setCharacterState,
+  pushCharacter,
   rayDistance,
   wallDistance,
   snapshotMaxBytes,
@@ -4061,15 +4061,7 @@ export class WorldZone {
 
   /** Moves a character against the level, keeping its action, jump and clip; returns the move made. */
   private moveBy(a: Actor, x: number, z: number): { x: number; z: number } {
-    const c = a.character;
-    this.mw.controller.computeColliderMovement(c.collider, { x, y: 0, z }, undefined, CHARACTER_GROUPS);
-    const moved = this.mw.controller.computedMovement();
-    const p = c.position;
-    const air = { kind: c.airKind, velX: c.airVelX, velZ: c.airVelZ, travel: c.airTravel, rise: c.airRise };
-    const length = c.actionLength;
-    setCharacterState(c, { x: p.x + moved.x, y: p.y, z: p.z + moved.z }, c.velocityY, c.grounded, c.rollDir, c.rollTicks, air, { state: c.locoState, frame: c.locoFrame });
-    c.actionLength = length;
-    return { x: moved.x, z: moved.z };
+    return pushCharacter(this.mw, a.character, x, z);
   }
 
   private updateSwing(a: Actor): void {

@@ -435,6 +435,30 @@ export function carryOnBrush(mw: MovementWorld, c: Character, brush: RAPIER.Coll
 const CARRY_PROBE_UP = 0.5;
 const CARRY_PROBE_DOWN = 0.4;
 
+/**
+ * Pushes a character across the ground against the level (a blow's shove, an explosion's
+ * knock-back), keeping its motion state; returns the horizontal move made. Done in short moves:
+ * one long controller move (a fire ball's 15 ft) can slide past a wall it meets on the way and
+ * end on its far side.
+ */
+export function pushCharacter(mw: MovementWorld, c: Character, x: number, z: number): { x: number; z: number } {
+  const n = Math.max(1, Math.ceil(Math.hypot(x, z) / PUSH_STEP));
+  const step = { x: x / n, y: 0, z: z / n };
+  let mx = 0;
+  let mz = 0;
+  for (let i = 0; i < n; i++) {
+    mw.controller.computeColliderMovement(c.collider, step, undefined, CHARACTER_GROUPS);
+    const m = mw.controller.computedMovement();
+    if (Math.abs(m.x) < 1e-5 && Math.abs(m.z) < 1e-5) break;
+    moveCharacterBy(c, { x: m.x, y: m.y, z: m.z });
+    mx += m.x;
+    mz += m.z;
+  }
+  return { x: mx, z: mz };
+}
+/** Longest single controller move of a push, metres. */
+const PUSH_STEP = 0.25;
+
 /** Moves a character by `d` without collision (a carry), keeping its motion state. */
 export function moveCharacterBy(c: Character, d: Readonly<Vec3>): void {
   c.position.x = snapMm(c.position.x + d.x);
