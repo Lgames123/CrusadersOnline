@@ -148,6 +148,9 @@ port.on('message', (msg: ToZone) => {
       zone.unstuck(msg.connId);
       flush();
       break;
+    case 'party':
+      zone.setParty(msg.connId, msg.party);
+      break;
     case 'waypoint':
       zone.waypointTravel(msg.connId, msg.act);
       flush();

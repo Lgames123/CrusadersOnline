@@ -107,6 +107,7 @@ import { TitleScene } from './frontend/title_scene.ts';
 import { QuestBook, loadGameStrings } from './ui/quest_book.ts';
 import { ClassicText } from './ui/classic_text.ts';
 import { WaypointMap } from './ui/waypoint_map.ts';
+import { PartyFrame } from './ui/party_frame.ts';
 import { CRYSTAL_LIGHT_COLOR, WaypointCrystal } from './engine/waypoint_crystal.ts';
 import { CharacterSheet } from './ui/character_sheet.ts';
 import { Cutscene, type Puppet } from './story/cutscene.ts';
@@ -221,6 +222,7 @@ async function main(): Promise<void> {
   questBook.setStrings(gameStrings);
   const charSheet = new CharacterSheet(document.getElementById('char-sheet')!, assetManifest?.textures ?? {});
   const waypointMap = new WaypointMap();
+  const partyFrame = new PartyFrame();
   // This act's waypoint crystal (SC_WORLD_ENTER; not original): shown once the story is finished.
   let crystalAt: { x: number; y: number; z: number } | null = null;
   let crystal: WaypointCrystal | null = null;
@@ -819,6 +821,9 @@ async function main(): Promise<void> {
             lines.forEach((l, i) => window.setTimeout(() => gameMessage(l, headPos), i * 900));
             sounds?.play(SFX.turnPage);
           },
+          party: (d) => {
+            if (d.self !== undefined) partyFrame.set(d.members, d.self);
+          },
           chat: (d) => {
             chat.add(d);
             // Classic: the server's lines for this player (loot, gold, refusals...) also on the
@@ -1213,6 +1218,8 @@ async function main(): Promise<void> {
   // back without a click when the line closes, unless a window was open before.
   let chatTookLock = false;
   chat.onSend = (channel, text, to) => session?.chat(channel, text, to);
+  chat.onParty = (action, name) => session?.party(action, name);
+  partyFrame.onWhisper = (name) => chat.whisper(name);
   chat.onTyping = (typing) => {
     if (typing && input.locked) {
       chatTookLock = true;
@@ -1781,6 +1788,13 @@ async function main(): Promise<void> {
       local.avatar.update(sceneDt);
       if (cutscene?.finished) endCutscene();
     } else local.render(acc / TICK_MS, dt);
+    if (live) {
+      partyFrame.update(live.arenaName, (name) => {
+        const wanted = name.toLowerCase();
+        for (const e of remotes.byId.values()) if (e.info.kind === 'player' && e.visible && e.info.name.toLowerCase() === wanted) return e.info.maxHp > 0 ? e.hp / e.info.maxHp : null;
+        return null;
+      });
+    }
     if (crystal) {
       crystal.update(dt);
       dynamicLights.set(WAYPOINT_LIGHT_KEY, crystal.lightPosition(crystalLight), CRYSTAL_LIGHT_COLOR, 2.2, 7, 0.05);

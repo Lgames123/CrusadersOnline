@@ -169,6 +169,10 @@ export class ZoneHost {
     this.post({ t: 'unstuck', connId });
   }
 
+  setParty(connId: number, party: string | null): void {
+    this.post({ t: 'party', connId, party });
+  }
+
   waypointTravel(connId: number, act: string): void {
     this.post({ t: 'waypoint', connId, act });
   }

@@ -230,10 +230,10 @@ describe('inventory authority in the zone', () => {
     const t = zone(new Map(BUILTIN_ITEMS), [{ name: 'Gold Pieces', quantity: 7 }, { name: 'Long Sword', quantity: 1 }, { name: 'Wooden Shield', quantity: 1 }]);
     const p = t.join(1);
     const other = t.join(2);
-    const internal = t.z as unknown as { actors: Map<number, { kind: string }>; grantReward(p: unknown, m: unknown): { gold: number } };
+    const internal = t.z as unknown as { actors: Map<number, { kind: string }>; grantReward(p: unknown, m: unknown, share: { id: number; xp: number; gold: number }): { gold: number } };
     const mob = [...internal.actors.values()].find((a) => a.kind === 'mob')!;
     const swords = count(p.inventory, 'long_sword');
-    expect(internal.grantReward(p, mob)).toEqual({ xp: expect.any(Number), gold: 7 });
+    expect(internal.grantReward(p, mob, { id: 0, xp: 10, gold: 1 })).toEqual({ xp: 10, gold: 7 });
     expect((p as unknown as { gold: number }).gold).toBe(7);
     expect(count(p.inventory, 'long_sword')).toBe(swords); // nothing goes into the bag
     const left = t.dynamic().map(([id]) => id);

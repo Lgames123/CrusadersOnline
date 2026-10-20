@@ -29,6 +29,8 @@ export const CS = {
   UNSTUCK: 0x16,
   /** Teleports from a waypoint crystal to another act's (not original; a finished story only). */
   WAYPOINT_TRAVEL: 0x17,
+  /** Party actions (MMO Stage 2): invite, accept, decline, leave, kick, promote. */
+  PARTY: 0x18,
 } as const;
 
 /** Server -> client opcodes. */
@@ -62,6 +64,8 @@ export const SC = {
   ENDING: 0x53,
   /** An entity fades out over `seconds` before it goes (the ending's cast walking off). */
   ENTITY_FADE: 0x54,
+  /** The player's party (MMO Stage 2): its members, or none; a pending invitation. */
+  PARTY_UPDATE: 0x55,
 } as const;
 
 /** Input flag bits carried in CS_PLAYER_INPUT. */

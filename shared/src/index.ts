@@ -31,3 +31,4 @@ export * from './game/story.ts';
 export * from './game/ending.ts';
 export * from './game/sequence.ts';
 export * from './game/waypoints.ts';
+export * from './game/rewards.ts';

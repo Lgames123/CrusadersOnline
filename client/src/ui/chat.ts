@@ -12,8 +12,8 @@ import { CHAT_MAX_LENGTH, type ChatBroadcastMsg, type ChatNoticeKind } from '@cr
  * lines are dropped on arrival, on every tab; the server still delivers them. Right-click a name
  * to ignore or unignore it. Staff lines are never dropped.
  */
-type Tab = 'local' | 'global' | 'system' | 'private';
-type SendChannel = 'local' | 'global' | 'private';
+type Tab = 'local' | 'global' | 'system' | 'private' | 'party';
+type SendChannel = 'local' | 'global' | 'private' | 'party';
 type Line = ChatBroadcastMsg['d'] & { at: number };
 
 const TABS: readonly { tab: Tab; label: string }[] = [
@@ -21,6 +21,7 @@ const TABS: readonly { tab: Tab; label: string }[] = [
   { tab: 'global', label: 'Global' },
   { tab: 'system', label: 'Server' },
   { tab: 'private', label: 'Private' },
+  { tab: 'party', label: 'Party' },
 ];
 /** Lines kept per tab. */
 const HISTORY = 200;
@@ -68,8 +69,8 @@ export class ChatWindow {
   private readonly toInput: HTMLInputElement;
   private readonly textInput: HTMLInputElement;
   private readonly tabButtons = new Map<Tab, HTMLButtonElement>();
-  private readonly lines: Record<Tab, Line[]> = { local: [], global: [], system: [], private: [] };
-  private readonly unread: Record<Tab, number> = { local: 0, global: 0, system: 0, private: 0 };
+  private readonly lines: Record<Tab, Line[]> = { local: [], global: [], system: [], private: [], party: [] };
+  private readonly unread: Record<Tab, number> = { local: 0, global: 0, system: 0, private: 0, party: 0 };
   private tab: Tab = 'local';
   private minimized = false;
   /** The character the latest private line came from (/r). */
@@ -80,6 +81,8 @@ export class ChatWindow {
   private readonly sent: string[] = [];
   private sentIndex = -1;
   onSend: (channel: SendChannel, text: string, to?: string) => void = () => {};
+  /** Party commands (/invite, /accept, /decline, /leave, /kick, /promote). */
+  onParty: (action: 'invite' | 'accept' | 'decline' | 'leave' | 'kick' | 'promote', name?: string) => void = () => {};
   /** The line took or gave up the keyboard. */
   onTyping: (typing: boolean) => void = () => {};
 
@@ -305,8 +308,8 @@ export class ChatWindow {
   private updateInput(): void {
     const priv = this.tab === 'private';
     this.toInput.hidden = !priv;
-    this.prefix.textContent = priv ? 'To' : this.tab === 'global' ? 'Global' : 'Local';
-    this.textInput.placeholder = priv ? 'Whisper…' : this.tab === 'global' ? 'Say to every map…' : 'Say to this map…   (/g /w /r)';
+    this.prefix.textContent = priv ? 'To' : this.tab === 'global' ? 'Global' : this.tab === 'party' ? 'Party' : 'Local';
+    this.textInput.placeholder = priv ? 'Whisper…' : this.tab === 'global' ? 'Say to every map…' : this.tab === 'party' ? 'Say to your party…' : 'Say to this map…   (/g /p /w /r)';
   }
 
   private setMinimized(min: boolean): void {
@@ -341,7 +344,7 @@ export class ChatWindow {
   }
 
   /** Switches to Private, addressed to `name`, and opens the line. */
-  private whisper(name: string): void {
+  whisper(name: string): void {
     this.toInput.value = name;
     this.select('private');
     this.focus();
@@ -354,7 +357,7 @@ export class ChatWindow {
       else this.blur();
       return;
     }
-    let channel: SendChannel = this.tab === 'private' ? 'private' : this.tab === 'global' ? 'global' : 'local';
+    let channel: SendChannel = this.tab === 'private' ? 'private' : this.tab === 'global' ? 'global' : this.tab === 'party' ? 'party' : 'local';
     let to = channel === 'private' ? this.toInput.value.trim() : '';
     let text = raw;
     const cmd = /^\/(\S+)\s*(.*)$/s.exec(raw);
@@ -382,6 +385,22 @@ export class ChatWindow {
           text = rest;
           if (!to) return this.notice('Nobody to reply to.', 'error');
           break;
+        case 'p': case 'party':
+          channel = 'party';
+          text = rest;
+          break;
+        case 'invite': case 'inv':
+          return void this.onParty('invite', rest.trim() || undefined);
+        case 'accept':
+          return void this.onParty('accept');
+        case 'decline':
+          return void this.onParty('decline');
+        case 'leave': case 'leaveparty':
+          return void this.onParty('leave');
+        case 'kick':
+          return void this.onParty('kick', rest.trim() || undefined);
+        case 'promote': case 'leader':
+          return void this.onParty('promote', rest.trim() || undefined);
         case 'ignore': case 'block':
           return this.setIgnored(rest.trim(), true);
         case 'unignore': case 'unblock':
@@ -391,7 +410,7 @@ export class ChatWindow {
           return this.notice(names.length ? `Ignored: ${names.join(', ')}` : 'You are ignoring nobody.');
         }
         default:
-          return this.notice(`Unknown command /${name}. Try /l, /g, /w <name>, /r, /ignore <name> or /unignore <name>.`, 'error');
+          return this.notice(`Unknown command /${name}. Try /l, /g, /p, /w <name>, /r, /invite <name>, /leave, /ignore <name>.`, 'error');
       }
     }
     text = text.trim();

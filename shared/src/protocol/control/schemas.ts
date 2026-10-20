@@ -39,7 +39,7 @@ export const ChatMessagePacketSchema = z.object({
   seq: z.number().int().positive(),
   /** `local`: the sender's map (zone); `global`: every map; `private`: the character named `to`. */
   d: z.object({
-    channel: z.enum(['local', 'global', 'private']),
+    channel: z.enum(['local', 'global', 'private', 'party']),
     text: z.string().trim().min(1).max(CHAT_MAX_LENGTH),
     to: z.string().trim().min(1).max(32).optional(),
   }),
@@ -159,6 +159,15 @@ export const WaypointTravelPacketSchema = z.object({
   d: z.object({ act: z.string().regex(/^[a-z0-9-]{2,16}$/) }),
 });
 
+export const PartyPacketSchema = z.object({
+  op: z.literal(CS.PARTY),
+  seq: z.number().int().positive(),
+  d: z.object({
+    action: z.enum(['invite', 'accept', 'decline', 'leave', 'kick', 'promote']),
+    name: z.string().trim().min(1).max(32).optional(),
+  }),
+});
+
 export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   AuthTicketPacketSchema,
   SelectCharacterPacketSchema,
@@ -181,6 +190,7 @@ export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   CutsceneDonePacketSchema,
   UnstuckPacketSchema,
   WaypointTravelPacketSchema,
+  PartyPacketSchema,
 ]);
 
 export type ClientControlPacket = z.infer<typeof ClientControlPacketSchema>;

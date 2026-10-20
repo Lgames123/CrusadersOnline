@@ -7,6 +7,7 @@ import type { ZoneHost } from '../zone/zone_host.ts';
 import type { ZoneManager } from '../zone/zone_manager.ts';
 import { TokenBucket } from './rate_limit.ts';
 import { CLOSE, type ClientConnection, type TransportHandlers } from './transport.ts';
+import { Parties } from './parties.ts';
 
 const AUTH_TIMEOUT_MS = 10_000;
 
@@ -68,6 +69,9 @@ export interface SessionView {
  * Binary input is only accepted in_world and is forwarded untouched to the player's zone worker.
  */
 export class SessionManager implements TransportHandlers {
+  /** Parties (MMO Stage 2): in memory, by character name. */
+  private readonly parties = new Parties();
+
   private readonly sessions = new Map<number, Session>();
   private readonly tickets: TicketStore;
   private readonly zones: ZoneManager;
@@ -189,7 +193,8 @@ export class SessionManager implements TransportHandlers {
     }
     if (!this.sessions.has(s.conn.id)) return;
     s.zone = arena;
-    s.pendingJoin = join;
+    const party = s.name ? this.parties.of(s.name) : null;
+    s.pendingJoin = { ...join, party: party?.id ?? null };
     s.state = 'zoning';
     this.send(s, { op: SC.ZONE_CHANGE, d: { arena, difficulty: this.difficulty } });
   }
@@ -240,6 +245,17 @@ export class SessionManager implements TransportHandlers {
       void this.characters.addPlayTime(s.characterId, seconds).catch((err: unknown) => this.log.error({ err }, 'play time save failed'));
     }
     this.sessions.delete(conn.id);
+    // Leaving the world leaves the party (it lives in memory; nothing keeps the place).
+    const party = s.name ? this.parties.of(s.name) : null;
+    if (party) {
+      const rest = party.members.filter((m) => m.toLowerCase() !== s.name.toLowerCase());
+      this.parties.leave(s.name);
+      for (const m of rest) {
+        this.syncPartyMember(m);
+        const o = this.sessionNamed(m);
+        if (o) this.send(o, { op: SC.CHAT_BROADCAST, d: { channel: 'system', kind: 'info', text: `${s.name} leaves the party.` } });
+      }
+    }
     this.log.info({ conn: conn.id, account: s.account?.name }, 'disconnected');
   }
 
@@ -305,6 +321,7 @@ export class SessionManager implements TransportHandlers {
           if (hello) this.send(s, { op: SC.CHAT_BROADCAST, d: { channel: 'system', kind: 'admin', text: hello } });
         }
         this.log.info({ conn: conn.id, account: s.account?.name, zone: s.zone }, 'entered zone');
+        if (s.name) this.refreshParty(s.name);
         return;
       }
       case CS.INTERACT:
@@ -354,6 +371,9 @@ export class SessionManager implements TransportHandlers {
       case CS.UNSTUCK:
         if (s.state === 'in_world') this.zoneOf(s)?.unstuck(conn.id);
         return;
+      case CS.PARTY:
+        if (s.state === 'in_world' || s.state === 'zoning') this.partyAction(s, msg.d.action, msg.d.name);
+        return;
       case CS.WAYPOINT_TRAVEL:
         if (s.state === 'in_world') this.zoneOf(s)?.waypointTravel(conn.id, msg.d.act);
         return;
@@ -379,7 +399,7 @@ export class SessionManager implements TransportHandlers {
    * to the character named `to` (any case) and echoed back to the sender. Not the original's
    * (single player); the server's own lines (loot, experience) come from the zones as `system`.
    */
-  private chat(s: Session, channel: 'local' | 'global' | 'private', raw: string, to?: string): void {
+  private chat(s: Session, channel: 'local' | 'global' | 'private' | 'party', raw: string, to?: string): void {
     if (!this.inWorld(s) || !s.name) return;
     const notice = (text: string) => this.send(s, { op: SC.CHAT_BROADCAST, d: { channel: 'system', kind: 'error', text } });
     // Control characters (newlines, bidi overrides) would break the line or spoof others.
@@ -391,6 +411,17 @@ export class SessionManager implements TransportHandlers {
       this.mutes.delete(s.account!.id);
     }
     if (!s.chatBucket.take()) return notice('You are sending messages too fast.');
+    if (channel === 'party') {
+      const party = this.parties.of(s.name);
+      if (!party) return notice('You are not in a party.');
+      const d = { channel, from: s.name, text };
+      for (const m of party.members) {
+        const o = this.sessionNamed(m);
+        if (o) this.send(o, { op: SC.CHAT_BROADCAST, d: o === s ? { ...d, sent: true } : d });
+      }
+      this.onChat?.({ channel: 'local', from: s.name, zone: s.zone, text: `[party] ${text}` });
+      return;
+    }
     if (channel === 'private') {
       const wanted = to?.toLowerCase();
       const target = wanted ? [...this.sessions.values()].find((o) => this.inWorld(o) && o.name.toLowerCase() === wanted) : undefined;
@@ -409,6 +440,73 @@ export class SessionManager implements TransportHandlers {
     }
     this.send(s, { op: SC.CHAT_BROADCAST, d: { ...d, sent: true } });
     this.log.info({ conn: s.conn.id, channel, from: s.name, length: text.length }, 'chat');
+  }
+
+  // --- Parties (MMO Stage 2, not original) -----------------------------------------------
+
+  /** The in-world (or zoning) session of a character, by name. */
+  private sessionNamed(name: string): Session | undefined {
+    const wanted = name.toLowerCase();
+    return [...this.sessions.values()].find((o) => this.inWorld(o) && o.name.toLowerCase() === wanted);
+  }
+
+  private partyAction(s: Session, action: 'invite' | 'accept' | 'decline' | 'leave' | 'kick' | 'promote', name?: string): void {
+    const tell = (o: Session, text: string, kind: 'info' | 'error' = 'info') => this.send(o, { op: SC.CHAT_BROADCAST, d: { channel: 'system', kind, text } });
+    const before = this.parties.of(s.name);
+    const beforeMembers = before ? [...before.members] : [];
+    let r;
+    switch (action) {
+      case 'invite': {
+        const target = name ? this.sessionNamed(name) : undefined;
+        if (!target) return tell(s, `${name ?? 'Nobody'} is not online.`, 'error');
+        r = this.parties.invite(s.name, target.name);
+        if (r.ok) {
+          tell(target, `${s.name} invites you to a party. Type /accept or /decline.`);
+          this.send(target, { op: SC.PARTY_UPDATE, d: { members: [], invite: s.name } });
+        }
+        break;
+      }
+      case 'accept': r = this.parties.accept(s.name); break;
+      case 'decline': {
+        const from = this.parties.pendingFor(s.name);
+        r = this.parties.decline(s.name);
+        const inviter = from ? this.sessionNamed(from) : undefined;
+        if (r.ok && inviter) tell(inviter, `${s.name} declines your invitation.`);
+        break;
+      }
+      case 'leave': r = this.parties.leave(s.name); break;
+      case 'kick': r = name ? this.parties.kick(s.name, name) : { ok: false as const, error: 'Remove whom? /kick <name>' }; break;
+      case 'promote': r = name ? this.parties.promote(s.name, name) : { ok: false as const, error: 'Promote whom? /promote <name>' }; break;
+    }
+    if (!r.ok) return tell(s, r.error, 'error');
+    if (r.message) tell(s, r.message);
+    if (action === 'invite' || action === 'decline') return;
+    // Everyone who was or is in the party hears the new line-up.
+    const now = r.party ? [...r.party.members] : [];
+    for (const m of new Set([...beforeMembers, ...now, s.name])) this.syncPartyMember(m);
+    const verb = action === 'accept' ? 'joins' : action === 'leave' ? 'leaves' : action === 'kick' ? 'is removed from' : null;
+    const who = action === 'kick' ? name! : s.name;
+    if (verb) for (const m of new Set([...beforeMembers, ...now])) { const o = this.sessionNamed(m); if (o) tell(o, `${who} ${verb} the party.`); }
+    if (action === 'promote') for (const m of now) { const o = this.sessionNamed(m); if (o) tell(o, `${now[0]} now leads the party.`); }
+  }
+
+  /** Sends a character its party (or none) and tells its zone which party it is in. */
+  private syncPartyMember(name: string): void {
+    const o = this.sessionNamed(name);
+    if (!o) return;
+    const party = this.parties.of(name);
+    const members = (party?.members ?? []).map((m, i) => {
+      const ms = this.sessionNamed(m);
+      return { name: ms?.name ?? m, leader: i === 0, zone: ms && ms.state === 'in_world' ? ms.zone : null };
+    });
+    this.send(o, { op: SC.PARTY_UPDATE, d: { members, self: o.name } });
+    if (o.state === 'in_world') this.zoneOf(o)?.setParty(o.conn.id, party?.id ?? null);
+  }
+
+  /** A character entered a zone or left the world: its party's frames show where everyone is. */
+  private refreshParty(name: string): void {
+    const party = this.parties.of(name);
+    for (const m of party?.members ?? [name]) this.syncPartyMember(m);
   }
 
   // --- Admin panel (not original) -------------------------------------------------------

@@ -191,6 +191,10 @@ import {
   MOB_HOP_TICKS,
   MOB_NEAR_SENSE_RANGE,
   MOB_TOUCH_SENSE_RANGE,
+  KILL_SHARE,
+  shareKill,
+  type KillCandidate,
+  type KillShare,
   GROUND_REACH,
   MOB_POST_TICKS,
   MOB_SHIELD_TICKS,
@@ -317,6 +321,8 @@ export interface JoinOptions {
   /** A story level change: arrive here if this arena is on `arrivingMesh` (another act of the same level). */
   arrivingAt?: { x: number; y: number; z: number };
   arrivingMesh?: string;
+  /** The player's party (MMO Stage 2; sessions.ts), null = none. */
+  party?: string | null;
   /** A waypoint teleport (not original): arrive beside this act's crystal (waypoints.ts). */
   arrivingWaypoint?: boolean;
   /** Story progress: triggers fired and the quest book (story.ts). */
@@ -614,6 +620,10 @@ interface Player extends ActorBase {
   respawnSpot: { x: number; y: number; z: number };
   /** Tick of his last Unstuck (the options menu), for its cooldown. */
   unstuckTick: number;
+  /** His party (MMO Stage 2; sessions.ts), null = none. */
+  party: string | null;
+  /** Tick of his last active input (movement, attack, block, cast): kill rewards ask for one within ACTIVE_WINDOW. */
+  activeTick: number;
   queue: InputQueue;
   lastProcessedInput: number;
   ackTick: number;
@@ -707,6 +717,8 @@ interface Mob extends ActorBase {
   threat: Map<number, number>;
   /** Players who have hurt it since it last died (their entity ids; an ally's blows count for its owner). */
   hurtBy: Set<number>;
+  /** Damage each player dealt it (overkill clamped; an ally's for its owner): kill shares (rewards.ts). */
+  contrib: Map<number, number>;
   /**
    * The original's melee brain (0x00409520): deciding, running in (beyond 12 ft), walking in
    * (shield up) to its engage distance, an attack sequence, the pause after it, and what follows
@@ -1242,6 +1254,7 @@ export class WorldZone {
       state: 'idle',
       threat: new Map(),
       hurtBy: new Set(),
+      contrib: new Map(),
       brain: 'decide',
       lastPick: null,
       spellPick: null,
@@ -1328,6 +1341,8 @@ export class WorldZone {
       characterId: opts.characterId,
       respawnSpot,
       unstuckTick: -Infinity,
+      party: opts.party ?? null,
+      activeTick: this.tick,
       name: opts.name,
       character: createCharacter(this.mw, spawn),
       moveStats: { ...this.playerStats, clipRate: originalSpeedMultiplier(worn, level) },
@@ -1720,6 +1735,7 @@ export class WorldZone {
    */
   castSpell(connId: number): void {
     const p = this.players.get(connId);
+    if (p) p.activeTick = this.tick;
     // A released cast in its last ticks gives way: the client's clip ends by its own clock and a
     // recast can land a tick or two before the server's.
     if (p?.cast?.released && this.tick >= p.cast.end - CAST_END_GRACE_TICKS) p.cast = null;
@@ -2289,6 +2305,12 @@ export class WorldZone {
     p.cast = null;
     this.toRespawnSpot(p);
     this.notify(p, 'info', 'You have been moved to a safe place.');
+  }
+
+  /** The player's party changed (sessions.ts): kill rewards are shared within it. */
+  setParty(connId: number, party: string | null): void {
+    const p = this.players.get(connId);
+    if (p) p.party = party;
   }
 
   /** This act's waypoint crystal (not original; waypoints.ts), found once; null: none here. */
@@ -2966,6 +2988,7 @@ export class WorldZone {
    */
   attack(connId: number, kind: AttackKind = 'normal'): void {
     const p = this.players.get(connId);
+    if (p) p.activeTick = this.tick;
     if (!p || !alive(p) || p.hitUntil > this.tick || p.cast || p.ending) return;
     p.blocking = false; // swinging lowers the shield until the next input re-raises it
     // The Boomer Axe in hand is thrown, near a foe or not (not original: Drake swings it).
@@ -3036,6 +3059,7 @@ export class WorldZone {
         stepCharacter(this.mw, p.character, this.frame, p.moveStats, TICK_DT);
         if (alive(p) && !scripted(p)) this.guardDoors(p, before);
         p.lastProcessedInput = this.frame.clientTick;
+        if (this.frame.flags & (MOVE_MASK | INPUT.JUMP | INPUT.BLOCK | INPUT.ROLL)) p.activeTick = tick;
         if (alive(p) && !scripted(p)) p.yaw = this.frame.yaw;
         if (!scripted(p)) this.checkPortals(p);
         this.catchFall(p);
@@ -4430,7 +4454,10 @@ export class WorldZone {
     if (target.kind === 'mob') {
       target.threat.set(attacker.entityId, (target.threat.get(attacker.entityId) ?? 0) + damage);
       const hurter = attacker.kind === 'player' ? attacker : attacker.ally !== undefined ? this.actors.get(attacker.ally) : undefined;
-      if (damage > 0 && hurter?.kind === 'player') target.hurtBy.add(hurter.entityId);
+      if (damage > 0 && hurter?.kind === 'player') {
+        target.hurtBy.add(hurter.entityId);
+        target.contrib.set(hurter.entityId, (target.contrib.get(hurter.entityId) ?? 0) + Math.min(damage, hpBefore));
+      }
       // Unarmed peaceful creatures (citizens) take the blows; armed ones (guards) fight back.
       // An idle citizen or guard takes no creature's blow as a call to fight: its idle pick
       // (0x40D910 cases 0-2) reads only the player's, through the alarm; the hit pass (0x40F890)
@@ -4464,10 +4491,21 @@ export class WorldZone {
         target.hurtBy.clear();
         // A spectral ally's kills are its owner's.
         const credit = attacker.kind === 'player' ? attacker : attacker.ally !== undefined ? this.actors.get(attacker.ally) : undefined;
-        if (credit?.kind === 'player' && target.ally === undefined) {
-          reward = this.grantReward(credit, target);
-          this.fireDeathTrigger(credit, target.placement);
+        if (target.ally === undefined) {
+          // Everyone who did a meaningful part shares it (rewards.ts, MMO): alone, the killer's
+          // whole reward as before. Each gets his own items and his own death trigger.
+          const shares = this.killShares(target);
+          const killer = credit?.kind === 'player' ? credit : undefined;
+          if (!shares.length && killer) shares.push({ id: killer.entityId, xp: Math.round(target.archetype.xpReward * this.rates.xp), gold: 1 });
+          for (const s of shares) {
+            const p = this.actors.get(s.id);
+            if (p?.kind !== 'player') continue;
+            const got = this.grantReward(p, target, s);
+            if (p === killer) reward = got;
+            this.fireDeathTrigger(p, target.placement);
+          }
         }
+        target.contrib.clear();
       } else {
         target.deadUntil = this.tick + PLAYER_RESPAWN_TICKS;
         target.pendingEquip = null;
@@ -4486,11 +4524,25 @@ export class WorldZone {
    * else the archetype's gold roll and loot table). Gold goes to the purse; the items fall
    * around the corpse, for the killer alone (dropKillLoot).
    */
-  private grantReward(p: Player, mob: Mob): { xp: number; gold: number } {
+  /** The players who share a creature's kill and their part (rewards.ts). */
+  private killShares(mob: Mob): KillShare[] {
+    const at = mob.character.position;
+    const window = KILL_SHARE.activeWindowSeconds * TICK_RATE;
+    const candidates: KillCandidate[] = [];
+    for (const p of this.players.values()) {
+      const damage = mob.contrib.get(p.entityId) ?? 0;
+      if (!damage && !p.party) continue;
+      const q = p.character.position;
+      candidates.push({ id: p.entityId, damage, party: p.party, active: this.tick - p.activeTick <= window, distance: Math.hypot(q.x - at.x, q.y - at.y, q.z - at.z) });
+    }
+    return shareKill(candidates, Math.round(mob.archetype.xpReward * this.rates.xp));
+  }
+
+  private grantReward(p: Player, mob: Mob, share: KillShare): { xp: number; gold: number } {
     const arch = mob.archetype;
     // Event rates (admin panel, not original): XP and gold scaled, loot chances scaled.
     const r = this.rates;
-    const xp = Math.round(arch.xpReward * r.xp);
+    const xp = share.xp;
     this.addExperience(p, xp);
     let grants: GroundGrant[];
     if (mob.carries) grants = mob.carries;
@@ -4508,6 +4560,8 @@ export class WorldZone {
       let n = Math.max(1, g.quantity);
       if (g.name === GOLD_ITEM) {
         n = Math.round(n * r.gold);
+        // A shared kill: this player's part of the gold (at least a coin).
+        if (share.gold < 1 && n > 0) n = Math.max(1, Math.round(n * share.gold));
         if (n > 0) gold += this.grantItem(p, g.name, n);
       } else {
         const def = this.groundItemDef(g);

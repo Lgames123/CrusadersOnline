@@ -25,6 +25,7 @@ export type ToZone =
   | { t: 'cutsceneDone'; connId: number; sequence: string }
   | { t: 'unstuck'; connId: number }
   | { t: 'waypoint'; connId: number; act: string }
+  | { t: 'party'; connId: number; party: string | null }
   /** Remove the player for a zone transfer; answered with 'transferred'. */
   | { t: 'transfer'; connId: number }
   /** Admin panel: event rates for every zone. */

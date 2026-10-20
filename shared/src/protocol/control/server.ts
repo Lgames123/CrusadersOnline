@@ -299,7 +299,21 @@ export interface PongMsg {
   d: { clientTime: number; serverTick: number };
 }
 
-export type ChatChannel = 'local' | 'global' | 'private' | 'system';
+export type ChatChannel = 'local' | 'global' | 'private' | 'system' | 'party';
+
+/** One member of the player's party (MMO Stage 2). */
+export interface PartyMemberView {
+  name: string;
+  leader: boolean;
+  /** Arena the member is in ("level:cs2b"), or null while offline / between zones. */
+  zone: string | null;
+}
+
+export interface PartyUpdateMsg {
+  op: typeof SC.PARTY_UPDATE;
+  /** `members`: empty = no party. `invite`: who invites this player (pending). */
+  d: { members: PartyMemberView[]; invite?: string; self?: string };
+}
 /** What a server (`system`) line reports: the chat tints it by kind. */
 /** `admin`: a line from the server's staff (the admin panel), shown on every tab. */
 export type ChatNoticeKind = 'loot' | 'gold' | 'xp' | 'level' | 'spell' | 'quest' | 'trade' | 'error' | 'info' | 'admin';
@@ -327,6 +341,7 @@ export type ServerControlMsg =
   | PongMsg
   | ErrorMsg
   | ChatBroadcastMsg
+  | PartyUpdateMsg
   | PlayerStatsMsg
   | CombatEventMsg
   | InventoryUpdateMsg
