@@ -61,7 +61,7 @@ load run with open targets. M11 runs locally in Docker but has no real domain.
 | **Intro movies (.bik)** | **Done** (2026-10-19). The converter turns 3DO.bik and CMMIntro.bik into WebM (VP8 + Vorbis): `pnpm convert` with the player's own ffmpeg, the in-browser importer with ffmpeg.wasm fetched from a CDN at import time. The creation dialog offers the introduction (checked by default); it plays 3DO then the intro, skippable as in the original, then enters the world. Options → Introduction plays it again. No converted movie: no offer. |
 | **Walk-in movers** | **Done** (2026-10-19, CMP-004). Ci\*b wheels, Gl\*b crushers, the inns' chandeliers and Bs1a's gears start when walked under. Crushers do no damage in the original (decompiled): one landing on a player waits on his head and falls on once he moves. Not original: movers hold instead of pushing; a fallen crusher stays down until the zone restarts. |
 | **Creature against creature** | **Done** (2026-10-19, CMP-005, executable-analysis §18.1). Creatures pick targets by disposition as the original. Without a relay, guards and hostiles never take each other on, so only Ws5a's lever starts a guards-against-hostiles fight. A hostile that takes an enemy calls the idle hostiles near it. Relay op 0x0E makes a creature inert (no shipped act fires it). Not checked in the client yet. |
-| **Relay ops not converted** | 0/1 enable/disable, 2/3 (the 0x0A–0x0E creature ops are done). |
+| **Relay ops 0–3** | **Settled, nothing to do** (2026-10-20, CMP-006). They only set flag bits; in the shipped acts no trigger reads the bits they set (asset-format-discovery, type 0x2B). The converter keeps them as `flagOps`; the server ignores them. |
 | **Climbing and hanging** | Only the ledge grab is done. |
 
 ### 2.2 Side quests (cut from the original, planned as a feature)
@@ -110,7 +110,7 @@ Renumber when the time comes.
 
 ## 3. Recommended order
 
-1. Remaining campaign mechanisms (movers, creature against creature, relay ops).
+1. Remaining campaign mechanisms: climbing and hanging (CMP-007). Movers, creature against creature and relay ops are done.
 2. MMO Stage 2 (party, then shared loot), which unlocks the later stages.
 3. The completion reward, waypoints and the side quests (a feature), when the post-game loop
    needs content.

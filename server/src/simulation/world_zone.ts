@@ -2474,7 +2474,9 @@ export class WorldZone {
    * A relay's ops (0x463CC0), in the original's order: op 8 fires each target directly (message
    * triggers show their text to this player, 0x4632B0; an exit takes him to its level, 0x462890),
    * mover triggers move their brushes (0x461B10), sound triggers play (0x461490), and creature
-   * ops tell creatures whom to fight. Ops 0-3 (flagOps) change a bit nothing is known to read.
+   * ops tell creatures whom to fight. Ops 0-3 (flagOps) are ignored: they set
+   * flag bits that no shipped trigger reads (only a flag-compare trigger could, 0x463640, and none
+   * points at their targets).
    */
   private runRelay(p: Player, t: StoryTrigger, depth: number, played: boolean): void {
     let exit: { exit: string; exitNumber: number } | null = null;

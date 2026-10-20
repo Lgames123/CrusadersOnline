@@ -67,7 +67,7 @@ export interface CapStoryTrigger {
   sounds?: CapSound[];
   /** Relays: creature ops 0x0A-0x0E, in order. */
   creatureOps?: CapCreatureOp[];
-  /** Relays: ops 0-3 on an object (set / clear its +0x0D bit 0, its slots 6 / 7); no reader decoded. */
+  /** Relays: ops 0-3 on an object (set / clear its +0x0D bit 0, its slots 6 / 7); no shipped trigger reads them. */
   flagOps?: { op: 0 | 1 | 2 | 3; target: CapRef }[];
 }
 
