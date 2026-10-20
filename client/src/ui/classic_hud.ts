@@ -12,6 +12,9 @@ import { SPELLS, type PlayerStats, type SpellId } from '@crusaders/shared';
  * - Mana coin at (10, 152.08): the same pieces turned half a turn (HUDwheelM / HUDcoverM, the
  *   body's plate on top), the spell school's stone upright on it (spells 0-5 HUDstElem, 6-8
  *   HUDstSpirit, 9-10 HUDstGE), the mana 2 below its top.
+ * Casting turns the spell icon white (HUDSpell<Name>'s FACTOR0 to COLOR0 240, 240, 240) and
+ * it fades back over SPELL_FLASH_MS: the cast (0x4BCF70) arms the HUD's recharge 0x468F40(500),
+ * and each frame 0x468B60 sets FACTOR0 = time left / 500 × 100.
  * The quick-use item slot (when an item is selected, everything below moves down 64.64) is not
  * here: the game has no selected item; the hotbar holds them.
  */
@@ -22,6 +25,8 @@ const SPELL = { x: 16.4, y: 87.44 };
 const MANA = { x: 10, y: 152.08 };
 /** Wheel turn from full to empty, degrees (0x468F90: (1 − f) × 211 × π/180). */
 const WHEEL_TURN = 211;
+/** The spell icon's white flash on a cast (0x4BCF70 → 0x468F40(500)). */
+const SPELL_FLASH_MS = 500;
 /** Below this fraction the cover arc hides the wheel's far end (0x468F90, 0.4). */
 const COVER_BELOW = 0.4;
 
@@ -55,6 +60,7 @@ export class ClassicHud {
   private readonly spellBox: HTMLElement;
   private readonly spellIcon: HTMLImageElement;
   private readonly spellRing: HTMLImageElement;
+  private readonly spellFlash: HTMLElement;
   private readonly manaWheel: HTMLImageElement;
   private readonly manaCover: HTMLImageElement;
   private readonly stone: HTMLImageElement;
@@ -97,6 +103,10 @@ export class ClassicHud {
 
     this.spellBox = group(SPELL, SPELL_SIZE, 'ch-spell');
     this.spellIcon = piece(this.spellBox, '', 'ch-spell-icon');
+    this.spellFlash = document.createElement('div');
+    // Over the icon (10, 9)-(55, 54), under the ring: COLOR0 240 grey.
+    Object.assign(this.spellFlash.style, { position: 'absolute', left: '10px', top: '9px', width: '45px', height: '45px', borderRadius: '50%', background: 'rgb(240,240,240)', opacity: '0' });
+    this.spellBox.append(this.spellFlash);
     this.spellRing = piece(this.spellBox, 'hudslring1');
 
     const mana = group(MANA, SIZE, 'ch-mana');
@@ -117,6 +127,16 @@ export class ClassicHud {
   /** The 640 × 480 screen at the window's height. */
   private fit(): void {
     this.root.style.transform = `scale(${window.innerHeight / 480})`;
+  }
+
+  /** A spell was cast: its icon flashes white and fades back. */
+  flashSpell(): void {
+    const f = this.spellFlash;
+    f.style.transition = 'none';
+    f.style.opacity = '1';
+    void f.offsetWidth;
+    f.style.transition = `opacity ${SPELL_FLASH_MS}ms linear`;
+    f.style.opacity = '0';
   }
 
   update(s: PlayerStats): void {

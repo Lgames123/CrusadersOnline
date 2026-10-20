@@ -104,6 +104,7 @@ import { logout } from './frontend/api.ts';
 import { CHARACTER_SCREEN_FLAG, runFrontEnd } from './frontend/front_end.ts';
 import { TitleScene } from './frontend/title_scene.ts';
 import { QuestBook, loadGameStrings } from './ui/quest_book.ts';
+import { ClassicText } from './ui/classic_text.ts';
 import { WaypointMap } from './ui/waypoint_map.ts';
 import { CRYSTAL_LIGHT_COLOR, WaypointCrystal } from './engine/waypoint_crystal.ts';
 import { CharacterSheet } from './ui/character_sheet.ts';
@@ -203,6 +204,9 @@ async function main(): Promise<void> {
   };
   const combatUi = new CombatUi(document.getElementById('world-ui')!);
   const classicHud = new ClassicHud(document.getElementById('classic-hud')!, assetManifest?.textures ?? {});
+  // The classic HUD's text lines (speech, message, notice); the modern HUD keeps the subtitle box
+  // and the notices over the head.
+  const classicText = new ClassicText();
   const hud = new Hud(document.getElementById('hud')!, document.getElementById('player-panel')!, classicHud, document.getElementById('death')!);
   const inventoryPanel = new InventoryPanels(document.getElementById('inventory')!);
   const hotbar = new Hotbar(document.getElementById('hotbar')!);
@@ -275,6 +279,7 @@ async function main(): Promise<void> {
   const applyHud = (s: Settings) => {
     hud.style = s.hudStyle;
     hud.showStats = s.showStats;
+    classicText.visible = s.hudStyle === 'classic';
   };
   applyHud(settings.current);
   settings.onChange(applyHud);
@@ -469,6 +474,11 @@ async function main(): Promise<void> {
   /** View camera between the original's (default) and the modern one (mouse wheel). */
   let chase!: CameraRig;
   const headPos = new THREE.Vector3();
+  /** A game message: the classic HUD's message line (0x4692F0, 5 s; alerts red), else a notice over `at`. */
+  const gameMessage = (text: string, at: THREE.Vector3, alert = false) => {
+    if (classicText.visible) classicText.show('message', text, 5000, { alert });
+    else combatUi.notice(text, at);
+  };
   const prompt = document.getElementById('prompt')!;
   let lastStats: { level: number; dead: boolean } | null = null;
   /** The original's special effects (sparks, blood, bone chips), when the game files are imported. */
@@ -689,7 +699,7 @@ async function main(): Promise<void> {
               if (mine && o.loot?.length) {
                 headPos.copy(at);
                 headPos.y += 1;
-                combatUi.notice(`+ ${o.loot.join(', ')}`, headPos);
+                gameMessage(`+ ${o.loot.join(', ')}`, headPos);
               }
             }
           },
@@ -776,16 +786,21 @@ async function main(): Promise<void> {
             ];
             headPos.copy(player.object.position);
             headPos.y += player.avatar.headHeight + 0.4;
-            lines.forEach((l, i) => window.setTimeout(() => combatUi.notice(l, headPos), i * 900));
+            lines.forEach((l, i) => window.setTimeout(() => gameMessage(l, headPos), i * 900));
             sounds?.play(SFX.turnPage);
           },
-          chat: (d) => chat.add(d),
+          chat: (d) => {
+            chat.add(d);
+            // Classic: the server's lines for this player (loot, gold, refusals...) also on the
+            // HUD's message line, as the original's "Got ..." messages.
+            if (classicText.visible && d.channel === 'system' && d.kind && d.kind !== 'admin') classicText.show('message', d.text, 5000, { alert: d.kind === 'error' });
+          },
           error: (_code, message) => {
             chat.notice(message, 'error');
             if (!player) return;
             headPos.copy(player.object.position);
             headPos.y += player.avatar.headHeight;
-            combatUi.notice(message, headPos);
+            gameMessage(message, headPos, true);
           },
           close: (code, reason) => {
             document.getElementById('error')!.textContent = `Disconnected from server (${code}${reason ? `: ${reason}` : ''}). Reload to reconnect.`;
@@ -1169,6 +1184,8 @@ async function main(): Promise<void> {
   const subtitle = document.getElementById('subtitle')!;
   let subtitleTimer = 0;
   const showSubtitle = (who: string | null, text: string, ms: number) => {
+    // Classic: the speech line, the words alone (0x403FD4).
+    if (classicText.visible) return classicText.show('speech', text, Math.max(2500, ms + 600));
     subtitle.replaceChildren(...(who ? [Object.assign(document.createElement('span'), { className: 'who', textContent: `${who}:` })] : []), document.createTextNode(text));
     subtitle.hidden = false;
     clearTimeout(subtitleTimer);
@@ -1302,7 +1319,8 @@ async function main(): Promise<void> {
   };
   const showMessage = (m: StoryMessage) => {
     if (m.activation & MESSAGE_ONCE) messagesDone.add(m.id);
-    showSubtitle(null, m.text, MESSAGE_MS);
+    if (classicText.visible) classicText.show('notice', m.text, MESSAGE_MS);
+    else showSubtitle(null, m.text, MESSAGE_MS);
   };
   let messageRefresh = 0;
   const updateWalkInMessages = () => {
@@ -1339,6 +1357,7 @@ async function main(): Promise<void> {
     if (!local.startCast(plan)) return;
     if (st.spell !== spell) session?.selectSpell(spell);
     session?.castSpell();
+    classicHud.flashSpell();
   };
   /**
    * Drinks the potion in a bag slot (hotbar, H, Z, the inventory): not while it cools down; Drake
@@ -1549,7 +1568,7 @@ async function main(): Promise<void> {
     if (!player) return;
     headPos.copy(player.object.position);
     headPos.y += player.avatar.headHeight;
-    combatUi.notice(message, headPos);
+    gameMessage(message, headPos);
   };
   // Quest book (F2, the original's key), online only.
   function setQuestBookOpen(open: boolean, swapping = false): void {
