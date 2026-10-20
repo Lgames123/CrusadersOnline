@@ -27,7 +27,9 @@ interface Manifest {
 
 /**
  * The lightmap texels are stored dark; the original modulates the texture with them at a gain
- * (×2, as in common "modulate 2x" lightmapping; tuned by eye against the original).
+ * (×2, tuned by eye against the original and approved by the user). The executable draws
+ * texture × lightmap at ×1 and brightens only through the Brightness option's gamma ramp
+ * (0x42D250: out = in^(1 / (2b + 0.5)), b = 0.25 by default = ×1): see parity-audit §4.
  */
 const LIGHTMAP_GAIN = 2;
 const SKY_PREFIX = 'wld_sy_sky';

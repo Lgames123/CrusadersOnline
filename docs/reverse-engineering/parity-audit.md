@@ -66,7 +66,7 @@ the original's skeletons followed past 75 m), zone workers.
 |---|---|---|
 | AI of the other creatures (dwarves, ogres, dashers, knights, casters, elementals) | the skeleton's | Frida AI log per creature type |
 | Portal fallback cylinder | radius / height for portals without a volume | most portals carry their volume (decoded); rare |
-| Lightmap gain | texture × lightmap × 2 (by eye, approved by the user) | the D3D driver (gfx_d3d.dll) only sets MODULATE (×1) and DESTCOLOR × ZERO blending: the ×2 must come from how the lightmap texels are uploaded; find that conversion |
+| Lightmap gain | texture × lightmap × 2 (by eye, approved by the user) | **Read from the code (2026-10-20): the original is × 1 at its default brightness.** Lightmap pass blend DESTCOLOR / ZERO (gfx_d3d.dll 0x1000498C), dual-texture stage 1 MODULATE (0x10004390), texels copied raw (RGB555, 0x10007BD1). The only brightening is the gamma ramp from the Brightness option (0x42D250: γ = clamp(2b + 0.5, 0.5, 2.5), out = in^(1/γ)); default b = 0.25 (0x4A20AB) gives γ = 1, and the user's own latest.cfg holds 0.25. Brightness 1.0 gives in^0.4 (~×2 on dark values). Kept × 2 pending the user's decision. |
 | Starting equipment | Axe + Wooden Shield | the first act's start |
 | Locked doors | the doors' own mover triggers (side, item: 0x460320), converter 1.33 | — |
 | NPC lines | each NPC cycles its voice role's lines | the acts' sequence scripts (HermitLadySeq13 ...) |
