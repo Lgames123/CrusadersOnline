@@ -5,7 +5,7 @@ import { dequantizeAngle, dequantizePosition } from '../math/quantize.ts';
 import { CS, SC } from '../protocol/opcodes.ts';
 import { INPUT_PACKET_MAX_BYTES, MAX_INPUT_FRAMES, createInputFrame, encodeInput, type InputFrame } from '../protocol/binary/input.ts';
 import { decodeSnapshot, snapshotBaselineTick, type EntityState } from '../protocol/binary/snapshot.ts';
-import type { AttackKind, ChatBroadcastMsg, CombatEventMsg, CutsceneMsg, EndingMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PartyUpdateMsg, PlayerStatsMsg, TradeUpdateMsg, AuctionMsg, TelegraphMsg, OreVeinsMsg, QuestLogMsg, ServerControlMsg, ShopMsg, SpellEventMsg, StorySoundMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
+import type { AttackKind, ChatBroadcastMsg, CombatEventMsg, CutsceneMsg, EndingMsg, EntitySpawnMsg, InventoryUpdateMsg, ObjectStateMsg, PartyUpdateMsg, PlayerStatsMsg, TradeUpdateMsg, AuctionMsg, TelegraphMsg, OreVeinsMsg, DungeonReadyMsg, DungeonStateMsg, DungeonResultMsg, QuestLogMsg, ServerControlMsg, ShopMsg, SpellEventMsg, StorySoundMsg, WorldEnterMsg, WorldObjectState } from '../protocol/control/server.ts';
 import type { ArenaDef } from '../arena/types.ts';
 import type { Difficulty } from '../game/ruleset.ts';
 import { createMovementWorld, disposeMovementWorld, setBrushPose, setDoorOpen, setDoorPose, type MovementWorld, type Rapier } from '../movement/physics.ts';
@@ -53,6 +53,9 @@ export interface ClientSessionEvents {
   telegraph?(d: TelegraphMsg['d']): void;
   /** The zone's ore veins (MMO Stage 6). */
   oreVeins?(d: OreVeinsMsg['d']): void;
+  dungeonReady?(d: DungeonReadyMsg['d']): void;
+  dungeonState?(d: DungeonStateMsg['d']): void;
+  dungeonResult?(d: DungeonResultMsg['d']): void;
   spawn?(id: number, name: string, info: EntityInfo): void;
   stats?(stats: PlayerStats): void;
   combat?(event: CombatEvent): void;
@@ -388,6 +391,15 @@ export class ClientSession {
       case SC.ORE_VEINS:
         this.events.oreVeins?.(msg.d);
         break;
+      case SC.DUNGEON_READY:
+        this.events.dungeonReady?.(msg.d);
+        break;
+      case SC.DUNGEON_STATE:
+        this.events.dungeonState?.(msg.d);
+        break;
+      case SC.DUNGEON_RESULT:
+        this.events.dungeonResult?.(msg.d);
+        break;
     }
   }
 
@@ -417,6 +429,12 @@ export class ClientSession {
   refine(slot: number, itemId?: string): void {
     if (!this.connected) return;
     this.sendJson({ op: CS.REFINE, seq: ++this.seq, d: { slot, ...(itemId ? { itemId } : {}) } });
+  }
+
+  /** A dungeon action (MMO Stage 5): answer ready check `id`, or leave the instance. */
+  dungeon(action: 'accept' | 'decline' | 'leave', id?: number): void {
+    if (!this.connected) return;
+    this.sendJson({ op: CS.DUNGEON, seq: ++this.seq, d: { action, ...(id !== undefined ? { id } : {}) } });
   }
 
   /** A party action (MMO Stage 2): invite / kick / promote name a character. */

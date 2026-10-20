@@ -23,7 +23,7 @@ import {
   ENDING_EXIT,
   ENDING_LOAD_SECONDS,
   NECROS_ACT,
-  WAYPOINT_REACH,
+  crystalReach,
   isWaypointAct,
   waypointSpot,
   type WaypointSpot,
@@ -215,6 +215,7 @@ import {
   dungeonById,
   DUNGEON_ENTRY_PREFIX,
   type DungeonDef,
+  modsTitle,
   rollMods,
   areaLevel,
   mobLevel,
@@ -295,6 +296,7 @@ import {
   type MovementWorld,
   type Rapier,
   type ServerControlMsg,
+  type DungeonStateMsg,
   type ChatNoticeKind,
   SPELL_NAMES,
   type WorldObjectDef,
@@ -372,6 +374,8 @@ export interface ZoneOutbox {
   economy?(event: EconomyEvent): void;
   /** A player at a waypoint crystal asks to take his party into a dungeon (MMO Stage 5). */
   dungeon?(connId: number, dungeon: string): void;
+  /** A player leaves this dungeon instance (Leave dungeon, or his death there): back where he came from. */
+  dungeonExit?(connId: number): void;
 }
 
 /** A chest opened (`items`: what was taken) or found with the bag too full (`items`: what it holds). */
@@ -699,8 +703,23 @@ interface ActorBase {
   timeAcc: number;
 }
 
+/** What a player earned in a dungeon run (its results screen). */
+interface DungeonTally {
+  xp: number;
+  gold: number;
+  kills: number;
+  deaths: number;
+  items: { name: string; quantity: number; color: string | null }[];
+  /** False: the boss's treasure was already claimed today. */
+  treasure: boolean;
+}
+
 interface Player extends ActorBase {
   kind: 'player';
+  /** In a dungeon instance: what this run has given him so far. */
+  dungeonTally?: DungeonTally;
+  /** Tick before which the sealed-exit notice is not repeated (dungeons). */
+  sealedNoticeTick?: number;
   /** Movement stats: the original's, the server's features, and the clip rate (speed multiplier). */
   moveStats: MovementStats;
   connId: number;
@@ -1015,6 +1034,14 @@ export class WorldZone {
     phase: 1 | 2 | 3;
     cleared: boolean;
     enraged: number;
+    /** The run's clock: the first player's arrival, the boss's death. */
+    startTick: number | null;
+    clearedTick: number | null;
+    /** The act's hostile creatures (they do not come back in an instance), and how many fell. */
+    foes: Set<number>;
+    total: number;
+    /** The boss fell this tick: results go out once its rewards are given. */
+    resultsDue: boolean;
   } | null = null;
   /** Direct trades between players of this zone (MMO Stage 4). */
   private readonly trades = new TradeDesk();
@@ -1571,7 +1598,8 @@ export class WorldZone {
       op: SC.WORLD_ENTER,
       d: {
         entityId: p.entityId, zone: this.name, arena: this.arena.name, serverTick: this.tick, spawn: { ...p.character.position }, yaw: dequantizeAngle(p.yaw),
-        ...(this.waypoint ? { waypoint: { ...this.waypoint.crystal } } : {}),
+        // A dungeon's arrival spot has no crystal to use (the instance is left from the options menu).
+        ...(this.waypoint && !this.dungeon ? { waypoint: { ...this.waypoint.crystal, arrival: { x: this.waypoint.arrival.x, y: this.waypoint.arrival.y, z: this.waypoint.arrival.z } } } : {}),
         ...(Object.keys(enabledFeatures(this.features)).length ? { features: enabledFeatures(this.features) } : {}),
       },
     });
@@ -1580,6 +1608,11 @@ export class WorldZone {
     this.sendStats(p);
     this.sendInventory(p);
     this.sendJson(connId, { op: SC.QUEST_LOG, d: { log: p.story.quests } });
+    if (this.dungeon) {
+      p.dungeonTally = { xp: 0, gold: 0, kills: 0, deaths: 0, items: [], treasure: true };
+      if (this.run && this.run.startTick === null) this.run.startTick = this.tick;
+      this.sendDungeonState(p);
+    }
     // Necros's ship has no way out: a finished character (back after leaving during his death
     // timeline) goes on to the ending act at once.
     if (this.act === NECROS_ACT && p.story.completedAt !== undefined) p.ending = { until: this.tick + 1 };
@@ -1615,7 +1648,7 @@ export class WorldZone {
     if (p && id >= PORTAL_OBJECT_BASE && id < DYNAMIC_OBJECT_BASE) {
       // A door exit in reach (its trigger, widened by PORTAL_USE_REACH).
       const portal = this.arena.portals?.find((q) => q.id === id - PORTAL_OBJECT_BASE);
-      if (portal?.use && alive(p) && inPortal(portal, p.character.position, PORTAL_USE_REACH)) this.outbox.portal?.(p.connId, portal.target, undefined, this.crossing(portal, p));
+      if (portal?.use && alive(p) && inPortal(portal, p.character.position, PORTAL_USE_REACH)) this.portalOut(p, portal.target, undefined, this.crossing(portal, p));
       return;
     }
     if (p && alive(p) && !scripted(p)) this.useStory(p);
@@ -1803,6 +1836,7 @@ export class WorldZone {
     const n = Math.max(1, quantity);
     if (name === GOLD_ITEM) {
       p.gold += n;
+      if (p.dungeonTally) p.dungeonTally.gold += n;
       p.statsDirty = true;
       this.notify(p, 'gold', `You receive ${n} gold.`);
       return n;
@@ -2528,8 +2562,16 @@ export class WorldZone {
         anchor = { x: m.x, y: m.y, z: m.z, yaw: m.yaw ?? 0 };
       }
     }
-    this.run = { anchor, bossId: null, adds: new Set(), engagedAt: null, nextSlam: 0, slams: [], phase: 1, cleared: false, enraged: 0 };
+    const foes = new Set<number>();
+    for (const a of this.actors.values()) {
+      if (a.kind === 'mob' && !a.custom && a.ally === undefined && !a.archetype.passive && a.spawnDisposition === DISPOSITION.HOSTILE && alive(a)) foes.add(a.entityId);
+    }
+    this.run = {
+      anchor, bossId: null, adds: new Set(), engagedAt: null, nextSlam: 0, slams: [], phase: 1, cleared: false, enraged: 0,
+      startTick: this.players.size ? this.tick : null, clearedTick: null, foes, total: foes.size, resultsDue: false,
+    };
     this.spawnBoss();
+    this.sendDungeonState();
   }
 
   private spawnBoss(): void {
@@ -2559,6 +2601,10 @@ export class WorldZone {
   private stepDungeon(): void {
     const run = this.run;
     const def = this.dungeon;
+    if (run?.resultsDue) {
+      run.resultsDue = false;
+      this.sendDungeonResults();
+    }
     if (!run || !def || run.cleared || run.bossId === null) return;
     const boss = this.actors.get(run.bossId);
     if (boss?.kind !== 'mob' || !alive(boss)) return;
@@ -2567,8 +2613,11 @@ export class WorldZone {
     if (run.engagedAt === null && boss.hp < boss.maxHp) {
       run.engagedAt = this.tick;
       this.zoneNotice(`${b.name} awakens!`);
+      this.sendDungeonState();
     }
     if (run.engagedAt === null) return;
+    // The tracker's boss bar, once a second.
+    if ((this.tick - run.engagedAt) % TICK_RATE === 0) this.sendDungeonState();
     // A wipe: everyone here is dead. The boss heals and its adds go.
     const players = [...this.players.values()];
     if (players.length && players.every((p) => !alive(p))) {
@@ -2580,6 +2629,7 @@ export class WorldZone {
       this.removeMob(boss);
       this.spawnBoss();
       this.zoneNotice(`${b.name} stands whole again.`);
+      this.sendDungeonState();
       return;
     }
     if (run.phase === 1 && frac <= b.addsBelow) {
@@ -2631,8 +2681,96 @@ export class WorldZone {
   private dungeonCleared(boss: Mob): void {
     if (!this.run || boss.entityId !== this.run.bossId) return;
     this.run.cleared = true;
+    this.run.clearedTick = this.tick;
     this.run.slams = [];
-    this.zoneNotice(`${this.dungeon!.boss.name} is defeated! The crystal here takes you home.`);
+    this.run.resultsDue = true;
+    this.zoneNotice(`${this.dungeon!.boss.name} is defeated!`);
+    this.sendDungeonState();
+  }
+
+  /** A creature fell in a dungeon: the killer's tally, and the clearing objective. */
+  private dungeonKill(mob: Mob, killer: Player | undefined): void {
+    const run = this.run;
+    if (!run) return;
+    if (killer?.dungeonTally) killer.dungeonTally.kills++;
+    if (run.foes.delete(mob.entityId)) this.sendDungeonState();
+  }
+
+  /** The tracker: the run's objectives, clock and boss (everyone here, or one player). */
+  private sendDungeonState(only?: Player): void {
+    const run = this.run;
+    const def = this.dungeon;
+    if (!run || !def) return;
+    const start = run.startTick ?? this.tick;
+    const boss = run.bossId !== null ? this.actors.get(run.bossId) : undefined;
+    const slain = run.total - run.foes.size;
+    const d: DungeonStateMsg['d'] = {
+      dungeon: def.name,
+      elapsed: (this.tick - start) / TICK_RATE,
+      ...(run.clearedTick !== null ? { finished: (run.clearedTick - start) / TICK_RATE } : {}),
+      objectives: [
+        ...(run.total ? [{ text: def.clearText, count: slain, total: run.total, done: slain >= run.total, bonus: true }] : []),
+        { text: `Defeat ${def.boss.name}`, done: run.cleared },
+      ],
+      ...(boss?.kind === 'mob' && run.engagedAt !== null && !run.cleared ? { boss: { name: def.boss.name, hp: Math.max(0, boss.hp / boss.maxHp), phase: run.phase } } : {}),
+    };
+    for (const p of only ? [only] : this.players.values()) this.sendJson(p.connId, { op: SC.DUNGEON_STATE, d });
+  }
+
+  /** The boss fell: each player here gets his results (time, kills, deaths, what he earned). */
+  private sendDungeonResults(): void {
+    const run = this.run;
+    const def = this.dungeon;
+    if (!run || !def) return;
+    const seconds = ((run.clearedTick ?? this.tick) - (run.startTick ?? this.tick)) / TICK_RATE;
+    const party = [...this.players.values()].map((p) => p.name);
+    for (const p of this.players.values()) {
+      const t = p.dungeonTally;
+      if (!t) continue;
+      this.sendJson(p.connId, {
+        op: SC.DUNGEON_RESULT,
+        d: { dungeon: def.name, seconds, kills: t.kills, deaths: t.deaths, xp: t.xp, gold: t.gold, items: t.items, treasure: t.treasure, party },
+      });
+    }
+  }
+
+  /** An item that dropped for a player in a dungeon run (its results screen). */
+  private tallyItem(p: Player, def: ItemDef, quantity: number, mods: ItemMods | undefined): void {
+    const t = p.dungeonTally;
+    if (!t) return;
+    const { title, color } = modsTitle(def.name, mods);
+    const same = !mods && t.items.find((i) => i.name === title && i.color === color);
+    if (same) same.quantity += quantity;
+    else t.items.push({ name: title, quantity, color });
+  }
+
+  /**
+   * Esc → Leave dungeon (or his death here): out of the instance, back where he came from
+   * (sessions.ts). The dead come back to life first.
+   */
+  leaveDungeon(connId: number): void {
+    const p = this.players.get(connId);
+    if (!p || !this.dungeon) return;
+    if (!alive(p)) this.respawn(p);
+    p.swing = null;
+    p.queuedAttack = false;
+    p.cast = null;
+    this.outbox.dungeonExit?.(connId);
+  }
+
+  /**
+   * Leaves this zone by an exit, a crystal or a script. A dungeon instance is sealed: only a
+   * death or Leave dungeon (the options menu) takes a player out of it.
+   */
+  private portalOut(p: Player, target: string, keep?: { x: number; y: number; z: number; mesh: string }, via?: ExitCrossing, waypoint?: boolean): void {
+    if (this.dungeon) {
+      if (this.tick >= (p.sealedNoticeTick ?? 0)) {
+        p.sealedNoticeTick = this.tick + 3 * TICK_RATE;
+        this.notify(p, 'error', 'The way out is sealed. Leave the dungeon from the options menu (Esc).');
+      }
+      return;
+    }
+    this.outbox.portal?.(p.connId, target, keep, via, waypoint);
   }
 
   /** A line for everyone in this zone (the classic message line, the Server tab). */
@@ -2967,9 +3105,10 @@ export class WorldZone {
     const p = this.players.get(connId);
     const spot = this.waypoint;
     if (!p || !spot || !alive(p) || p.cutscene || p.ending || this.held(p)) return;
+    if (this.dungeon) return this.portalOut(p, '');
     if (p.story.completedAt === undefined) return this.notify(p, 'error', 'The crystal is dormant.');
     const at = p.character.position;
-    if (Math.hypot(at.x - spot.crystal.x, at.z - spot.crystal.z) > WAYPOINT_REACH + 0.5 || Math.abs(at.y - spot.crystal.y) > 2.5) return;
+    if (crystalReach(spot, at, 0.5) === null) return;
     // A dungeon (MMO): the session takes him and his party into a new instance of it.
     if (act.startsWith(DUNGEON_ENTRY_PREFIX)) {
       const def = dungeonById(act.slice(DUNGEON_ENTRY_PREFIX.length));
@@ -2981,7 +3120,7 @@ export class WorldZone {
     p.swing = null;
     p.queuedAttack = false;
     p.cast = null;
-    this.outbox.portal?.(p.connId, `${LEVEL_PREFIX}${act}`, undefined, undefined, true);
+    this.portalOut(p, `${LEVEL_PREFIX}${act}`, undefined, undefined, true);
   }
 
   /** Puts a player at his respawn spot; the triggers there count as entered (never fired). */
@@ -3114,7 +3253,7 @@ export class WorldZone {
         p.inPortal.delete(portal.id);
       } else if (!p.inPortal.has(portal.id)) {
         p.inPortal.add(portal.id);
-        this.outbox.portal?.(p.connId, portal.target, undefined, this.crossing(portal, p));
+        this.portalOut(p, portal.target, undefined, this.crossing(portal, p));
       }
     }
   }
@@ -3291,7 +3430,7 @@ export class WorldZone {
     if (name === ENDING_EXIT) return this.storyEnds(p); // the game's ending (state 5): nothing to load
     const target = `${LEVEL_PREFIX}${name}`;
     const portal = this.arena.portals?.find((q) => q.target === target && q.exit === ref.exitNumber);
-    this.outbox.portal?.(p.connId, target, undefined, portal ? this.crossing(portal, p) : undefined);
+    this.portalOut(p, target, undefined, portal ? this.crossing(portal, p) : undefined);
   }
 
   /**
@@ -3363,7 +3502,7 @@ export class WorldZone {
   /** The death timeline is over: to the ending act's first start point, as the original's load of CS5B. */
   private loadEnding(p: Player): void {
     p.ending = null;
-    this.outbox.portal?.(p.connId, `${LEVEL_PREFIX}${ENDING_ACT}`, undefined, { exit: 0, toStart: true, offset: { x: 0, y: 0, z: 0 } });
+    this.portalOut(p, `${LEVEL_PREFIX}${ENDING_ACT}`, undefined, { exit: 0, toStart: true, offset: { x: 0, y: 0, z: 0 } });
   }
 
   /**
@@ -3593,7 +3732,7 @@ export class WorldZone {
     if (record) this.outbox.persist?.([record], 'progress');
     // Another act of the same level keeps Drake where he stands (the acts share the mesh's coordinates).
     const pos = p.character.position;
-    if (load) this.outbox.portal?.(p.connId, `${LEVEL_PREFIX}${load}`, this.arena.mesh ? { x: pos.x, y: pos.y, z: pos.z, mesh: this.arena.mesh } : undefined);
+    if (load) this.portalOut(p, `${LEVEL_PREFIX}${load}`, this.arena.mesh ? { x: pos.x, y: pos.y, z: pos.z, mesh: this.arena.mesh } : undefined);
   }
 
   /** Removes the player; returns its final state for saving (null for guests / unknown). */
@@ -3776,7 +3915,9 @@ export class WorldZone {
     for (const a of this.actors.values()) {
       if (a.deadUntil !== 0 && tick >= a.deadUntil) {
         // A custom spawn that does not come back is gone once its corpse time is over.
-        if (a.kind === 'mob' && a.custom && !a.custom.respawn) this.removeMob(a);
+        // In a dungeon instance nothing comes back, and a fallen player is taken out of it.
+        if (a.kind === 'mob' && ((a.custom && !a.custom.respawn) || this.dungeon)) this.removeMob(a);
+        else if (a.kind === 'player' && this.dungeon) this.leaveDungeon(a.connId);
         else this.respawn(a);
       }
     }
@@ -5145,6 +5286,7 @@ export class WorldZone {
         target.hurtBy.clear();
         // A spectral ally's kills are its owner's.
         const credit = attacker.kind === 'player' ? attacker : attacker.ally !== undefined ? this.actors.get(attacker.ally) : undefined;
+        if (this.run) this.dungeonKill(target, credit?.kind === 'player' ? credit : undefined);
         if (target.ally === undefined) {
           // Everyone who did a meaningful part shares it (rewards.ts, MMO): alone, the killer's
           // whole reward as before. Each gets his own items and his own death trigger.
@@ -5162,6 +5304,7 @@ export class WorldZone {
         target.contrib.clear();
       } else {
         target.deadUntil = this.tick + PLAYER_RESPAWN_TICKS;
+        if (target.dungeonTally) target.dungeonTally.deaths++;
         target.pendingEquip = null;
         target.queuedAttack = false;
       }
@@ -5203,6 +5346,7 @@ export class WorldZone {
     if (mob.bossOf) {
       const flag = dungeonLockFlag(mob.bossOf);
       if (p.storyFlags.has(flag)) {
+        if (p.dungeonTally) p.dungeonTally.treasure = false;
         this.notify(p, 'info', "You have already claimed this boss's treasure today.");
         p.statsDirty = true;
         return { xp, gold: 0 };
@@ -5280,6 +5424,7 @@ export class WorldZone {
     const at = mob.character.position;
     const changes: ObjectChange[] = [];
     loot.forEach(({ def, quantity, mods, rolled }, i) => {
+      this.tallyItem(p, def, quantity, mods);
       const id = this.nextDynamicObjectId++;
       // Golden-angle steps from the creature's heading: a ring of items that never overlap.
       const a = dequantizeAngle(mob.yaw) + i * 2.4;
@@ -5302,6 +5447,7 @@ export class WorldZone {
   private addExperience(p: Player, xp: number): void {
     if (xp <= 0) return;
     p.xp += xp;
+    if (p.dungeonTally) p.dungeonTally.xp += xp;
     p.statsDirty = true;
     this.notify(p, 'xp', `You gain ${xp} experience.`);
     const level = levelForXp(p.xp, this.features.mmoLevels);

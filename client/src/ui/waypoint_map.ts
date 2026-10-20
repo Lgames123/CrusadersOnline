@@ -2,8 +2,8 @@ import {
   DUNGEONS,
   DUNGEON_ENTRY_PREFIX,
   WAYPOINT_CHAPTERS,
+  WAYPOINT_MAP_SIZE,
   WAYPOINT_REGIONS,
-  WAYPOINT_ROADS,
   waypointChapter,
   waypointLabel,
   waypointRegion,
@@ -13,8 +13,11 @@ import {
 /**
  * The waypoint map (not original): opened with the use key at a teleport crystal by a character
  * who finished the story. Chapter tabs (an act of a place per chapter: Cador Sul is a different
- * act in each), a schematic map of the regions and their roads, and the areas of the picked
- * region; clicking an area travels there. Styles live here, not in index.html.
+ * act in each), the original's world map with the chapter's regions lit on it, and the areas of
+ * the picked region; clicking an area travels there. Regions the chapter has no act in are not
+ * marked, and the battleship's drawing (map1a) shows only in the chapter that reaches it, as in
+ * the original (0x454920: map1a when the map's destination is the battleship). Styles live here,
+ * not in index.html.
  */
 const STYLE = `
 #waypoint-map { position: fixed; inset: 0; z-index: 12; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.45); }
@@ -33,15 +36,12 @@ const STYLE = `
 #waypoint-map .wm-tab[aria-selected="true"] { border-color: #6fb6ff; background: rgba(30,60,100,.75); color: #fff; box-shadow: 0 0 10px rgba(80,170,255,.35); }
 #waypoint-map .wm-body { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 14px; }
 @media (max-width: 640px) { #waypoint-map .wm-body { grid-template-columns: 1fr; } }
-#waypoint-map svg { width: 100%; height: auto; display: block; background: rgba(0,0,0,.35); border: 1px solid #3c3220; border-radius: 4px; }
-#waypoint-map .wm-road { stroke: #5d4a23; stroke-width: .7; stroke-dasharray: 1.6 1.2; }
+#waypoint-map svg { width: 100%; height: auto; display: block; background: #26301c; border: 1px solid #3c3220; border-radius: 4px; }
 #waypoint-map .wm-node { cursor: pointer; }
-#waypoint-map .wm-node circle { fill: #2a2418; stroke: #6d5a30; stroke-width: .6; }
-#waypoint-map .wm-node text { fill: #8f846a; font-size: 3.4px; text-anchor: middle; font-family: Georgia, serif; pointer-events: none; }
-#waypoint-map .wm-node.open circle { fill: #1d4f86; stroke: #8fd0ff; }
-#waypoint-map .wm-node.open text { fill: #f4e8c8; }
-#waypoint-map .wm-node.picked circle { fill: #3d8fe0; stroke: #fff; stroke-width: .9; }
-#waypoint-map .wm-node.here circle { stroke: #f1d58e; stroke-width: 1.1; }
+#waypoint-map .wm-node rect { fill: rgba(80,170,255,.08); stroke: #8fd0ff; stroke-width: 1.6; filter: drop-shadow(0 0 4px rgba(80,170,255,.9)); }
+#waypoint-map .wm-node:hover rect { fill: rgba(80,170,255,.22); }
+#waypoint-map .wm-node.picked rect { fill: rgba(80,170,255,.3); stroke: #fff; stroke-width: 2.2; }
+#waypoint-map .wm-node.here rect { stroke: #f1d58e; filter: drop-shadow(0 0 4px rgba(241,213,142,.9)); }
 #waypoint-map .wm-list h3 { margin: 0 0 8px; color: #f1d58e; font-size: 16px; font-weight: normal; }
 #waypoint-map .wm-list p { margin: 0; color: #9a8f78; }
 #waypoint-map .wm-area { display: block; width: 100%; margin-bottom: 6px; padding: 7px 10px; border: 1px solid #3f5f86; border-radius: 4px; background: rgba(20,40,70,.7); color: #e8f2ff; font: inherit; text-align: left; cursor: pointer; }
@@ -64,6 +64,8 @@ export class WaypointMap {
   private current: string | null = null;
   private chapter = 1;
   private region: WaypointRegion | null = null;
+  /** The map's tile textures (manifest name -> URL), once the manifest is read. */
+  private tiles: Record<string, string> = {};
   onClose: () => void = () => {};
   onTravel: (act: string) => void = () => {};
 
@@ -78,7 +80,7 @@ export class WaypointMap {
       <button class="wm-close" aria-label="Close">×</button>
       <div class="wm-head"><img src="/waypoint-crystal.webp" alt="" draggable="false" /><div><div class="wm-title">Waypoint</div><div class="wm-here"></div></div></div>
       <div class="wm-tabs" role="tablist"></div>
-      <div class="wm-body"><svg viewBox="-8 -4 116 104" preserveAspectRatio="xMidYMid meet"></svg><div class="wm-list"></div></div>
+      <div class="wm-body"><svg viewBox="0 0 ${WAYPOINT_MAP_SIZE.w} ${WAYPOINT_MAP_SIZE.h}" preserveAspectRatio="xMidYMid meet"></svg><div class="wm-list"></div></div>
     </div>`;
     document.body.append(this.root);
     this.here = this.root.querySelector('.wm-here')!;
@@ -103,6 +105,13 @@ export class WaypointMap {
       });
       this.tabs.append(b);
     }
+    void fetch('/generated/manifest.json')
+      .then((r) => r.json() as Promise<{ textures?: Record<string, string> }>)
+      .then((m) => {
+        for (const t of ['map1', 'map1a', 'map2', 'map3', 'map4']) if (m.textures?.[t]) this.tiles[t] = `/generated/${m.textures[t]}`;
+        if (this.open) this.render();
+      })
+      .catch(() => {});
   }
 
   get open(): boolean {
@@ -148,40 +157,39 @@ export class WaypointMap {
     if (this.region && !open.has(this.region)) this.region = null;
     const ns = 'http://www.w3.org/2000/svg';
     this.svg.replaceChildren();
-    for (const [a, b] of WAYPOINT_ROADS) {
-      const p = WAYPOINT_REGIONS[a], q = WAYPOINT_REGIONS[b];
-      const line = document.createElementNS(ns, 'line');
-      line.setAttribute('class', 'wm-road');
-      line.setAttribute('x1', String(p.x));
-      line.setAttribute('y1', String(p.y));
-      line.setAttribute('x2', String(q.x));
-      line.setAttribute('y2', String(q.y));
-      this.svg.append(line);
+    // The four tiles as 0x4549F0 lays them out, 255 px apart; map3 / map4 are 128 px tall.
+    const first = open.has('bs') ? 'map1a' : 'map1';
+    for (const [tile, x, y] of [[first, 0, 0], ['map2', 255, 0], ['map3', 0, 255], ['map4', 255, 255]] as const) {
+      const url = this.tiles[tile];
+      if (!url) continue;
+      const img = document.createElementNS(ns, 'image');
+      img.setAttribute('href', url);
+      img.setAttribute('x', String(x));
+      img.setAttribute('y', String(y));
+      img.setAttribute('width', '256');
+      img.setAttribute('height', '256');
+      this.svg.append(img);
     }
     for (const [key, info] of Object.entries(WAYPOINT_REGIONS) as [WaypointRegion, (typeof WAYPOINT_REGIONS)[WaypointRegion]][]) {
+      if (!open.has(key)) continue;
       const g = document.createElementNS(ns, 'g');
       const cls = ['wm-node'];
-      if (open.has(key)) cls.push('open');
       if (key === this.region) cls.push('picked');
       if (here && waypointRegion(here) === key && waypointChapter(here)?.act === this.chapter) cls.push('here');
       g.setAttribute('class', cls.join(' '));
-      const c = document.createElementNS(ns, 'circle');
-      c.setAttribute('cx', String(info.x));
-      c.setAttribute('cy', String(info.y));
-      c.setAttribute('r', '3.2');
-      const t = document.createElementNS(ns, 'text');
-      t.setAttribute('x', String(info.x));
-      t.setAttribute('y', String(info.y + 7));
-      t.textContent = info.name.replace(/^The /, '');
+      const r = document.createElementNS(ns, 'rect');
+      r.setAttribute('x', String(info.x - info.w / 2 - 3));
+      r.setAttribute('y', String(info.y - info.h / 2 - 3));
+      r.setAttribute('width', String(info.w + 6));
+      r.setAttribute('height', String(info.h + 6));
+      r.setAttribute('rx', '6');
       const title = document.createElementNS(ns, 'title');
       title.textContent = info.name;
-      g.append(c, t, title);
-      if (open.has(key)) {
-        g.addEventListener('click', () => {
-          this.region = key;
-          this.render();
-        });
-      }
+      g.append(r, title);
+      g.addEventListener('click', () => {
+        this.region = key;
+        this.render();
+      });
       this.svg.append(g);
     }
     this.list.replaceChildren();

@@ -301,6 +301,42 @@
         "GAME_SERVER_URL": "http://127.0.0.1:8195"
       },
       "port": 3105
+    },
+    {
+      "name": "dungeon-server",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/server",
+        "start"
+      ],
+      "env": {
+        "SERVER_PORT": "8196",
+        "ARENA": "level:cs2b",
+        "DATABASE_URL": "pglite:local/pgdata-dungeon",
+        "GAME_FEATURES": "mmoDungeons,mmoItems",
+        "DEV_GUEST_FINISHED": "1",
+        "DEV_GUEST_SPAWN": "463.2,292.8,-485.8",
+        "DEV_GUEST_XP": "60000"
+      },
+      "port": 8196
+    },
+    {
+      "name": "dungeon-client",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/client",
+        "exec",
+        "vite",
+        "--port",
+        "3106",
+        "--strictPort"
+      ],
+      "env": {
+        "GAME_SERVER_URL": "http://127.0.0.1:8196"
+      },
+      "port": 3106
     }
   ]
 }

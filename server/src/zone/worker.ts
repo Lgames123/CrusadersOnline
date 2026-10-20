@@ -66,6 +66,9 @@ const zone = new WorldZone(rapier, zoneName, loadArena(splitInstance(arenaName).
   dungeon(connId, dungeon) {
     post({ t: 'dungeon', connId, dungeon });
   },
+  dungeonExit(connId) {
+    post({ t: 'dungeonExit', connId });
+  },
   loot(event) {
     post({ t: 'loot', event });
   },
@@ -184,6 +187,10 @@ port.on('message', (msg: ToZone) => {
       break;
     case 'waypoint':
       zone.waypointTravel(msg.connId, msg.act);
+      flush();
+      break;
+    case 'leaveDungeon':
+      zone.leaveDungeon(msg.connId);
       flush();
       break;
     case 'transfer': {

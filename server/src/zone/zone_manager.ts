@@ -15,6 +15,7 @@ export interface ZoneManagerEvents {
   loot?(arena: string, event: LootEvent): void;
   economy?(arena: string, event: EconomyEvent): void;
   dungeon?(arena: string, connId: number, dungeon: string): void;
+  dungeonExit?(arena: string, connId: number): void;
 }
 
 export interface ZoneManagerOptions {
@@ -139,6 +140,7 @@ export class ZoneManager {
           loot: (event) => this.events.loot?.(arena, event),
           economy: (event) => this.events.economy?.(arena, event),
           dungeon: (connId, dungeon) => this.events.dungeon?.(arena, connId, dungeon),
+          dungeonExit: (connId) => this.events.dungeonExit?.(arena, connId),
         },
       );
       p = host.whenReady().then(() => {

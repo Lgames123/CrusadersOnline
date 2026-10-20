@@ -12,6 +12,7 @@ import {
   isWaypointAct,
   waypointLabel,
   waypointSpot,
+  crystalReach,
   type LevelPlacements,
   type Rapier,
   type ServerControlMsg,
@@ -49,7 +50,8 @@ describe('waypoints', () => {
     for (const act of acts) {
       const spot = waypointSpot(level(act));
       if (!spot) missing.push(act);
-      else expect(Math.hypot(spot.arrival.x - spot.crystal.x, spot.arrival.z - spot.crystal.z)).toBeCloseTo(1.8, 1);
+      // Ws9a: the crystal stands in a barred cell; the arrival waits in the corridor.
+      else if (act !== 'ws9a') expect(Math.hypot(spot.arrival.x - spot.crystal.x, spot.arrival.z - spot.crystal.z)).toBeCloseTo(1.8, 1);
     }
     expect(missing).toEqual([]);
   }, 120_000);
@@ -68,7 +70,7 @@ describe('waypoints', () => {
     zone.join(1, { name: 'Done', characterId: 'c1', arrivingWaypoint: true, story: done });
     zone.join(2, { name: 'Fresh', characterId: 'c2', arrivingWaypoint: true });
     const enter = sent.find((s) => s.conn === 1 && s.msg.op === SC.WORLD_ENTER)!.msg as { d: { spawn: { x: number; z: number }; waypoint?: { x: number; y: number; z: number } } };
-    expect(enter.d.waypoint).toEqual(spot.crystal);
+    expect(enter.d.waypoint).toMatchObject(spot.crystal);
     expect(Math.hypot(enter.d.spawn.x - spot.arrival.x, enter.d.spawn.z - spot.arrival.z)).toBeLessThan(0.05);
     // The story not finished: refused. Finished: sent on, marked as a waypoint teleport.
     zone.waypointTravel(2, 'gl3c');
@@ -77,6 +79,20 @@ describe('waypoints', () => {
     expect(portals).toEqual([]);
     zone.waypointTravel(1, 'gl3c');
     expect(portals).toEqual([{ conn: 1, target: 'level:gl3c', waypoint: true }]);
+  });
+
+  it.skipIf(!haveLevels)("the prison's crystal stays in its cell; travellers arrive in the corridor and use it from there", () => {
+    const arena = level('ws9a');
+    const spot = waypointSpot(arena)!;
+    // The barred cell east of the corridor (x 663.5 and up); Drake's own cell beside it is open.
+    expect(spot.crystal.x).toBeGreaterThan(663.5);
+    expect(spot.arrival.x).toBeLessThan(662.5);
+    expect(crystalReach(spot, spot.arrival)).not.toBeNull();
+    const portals: string[] = [];
+    const zone = new WorldZone(rapier, arena.name, arena, { send: () => {}, portal: (_c, target) => portals.push(target), persist: () => {} }, { random: () => 0.5 });
+    zone.join(1, { name: 'Done', characterId: 'c1', arrivingWaypoint: true, story: { ...emptyStoryState(), completedAt: 1 } });
+    zone.waypointTravel(1, 'gl3c');
+    expect(portals).toEqual(['level:gl3c']);
   });
 });
 

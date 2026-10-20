@@ -30,6 +30,8 @@ export interface DungeonDef {
   /** The original act it runs on. */
   act: string;
   maxParty: number;
+  /** The tracker's bonus objective: the act's hostile creatures (they do not come back in an instance). */
+  clearText: string;
   boss: DungeonBoss;
 }
 
@@ -39,6 +41,7 @@ export const DUNGEONS: readonly DungeonDef[] = [
     name: 'The Crypt of the Catacombs',
     act: 'ca1d',
     maxParty: 5,
+    clearText: 'Clear the crypt of the dead',
     boss: {
       archetype: 'black_knight',
       name: 'Crypt Overlord',
@@ -55,6 +58,12 @@ export const DUNGEONS: readonly DungeonDef[] = [
     },
   },
 ];
+
+/**
+ * The party's ready check before a run: everyone asked, one "no" calls it off, and whoever has
+ * not answered when it runs out counts as ready.
+ */
+export const DUNGEON_READY_SECONDS = 15;
 
 /** The waypoint "act" that enters a dungeon ("dg-crypt"). */
 export const DUNGEON_ENTRY_PREFIX = 'dg-';

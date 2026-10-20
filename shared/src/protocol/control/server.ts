@@ -36,7 +36,8 @@ export interface WorldEnterMsg {
     /** Non-original gameplay features this server has on (features.ts); absent: none. */
     features?: Partial<GameplayFeatures>;
     /** This act's waypoint crystal (waypoints.ts, not original): shown to finished characters. */
-    waypoint?: { x: number; y: number; z: number };
+    /** `arrival`: where travellers appear (usable too when out of the crystal's reach, crystalReach). */
+    waypoint?: { x: number; y: number; z: number; arrival?: { x: number; y: number; z: number } };
   };
 }
 
@@ -356,6 +357,65 @@ export interface OreVeinsMsg {
   d: { veins: { id: number; kind: 'iron' | 'stone' | 'mithril'; at: [number, number, number]; ready: boolean }[] };
 }
 
+/**
+ * A dungeon's ready check (MMO Stage 5): `ask` opens it for every member, `update` carries the
+ * answers, `cancelled` (someone said no, or the leader left) and `started` close it. Nobody
+ * answering in `seconds` counts as yes.
+ */
+export interface DungeonReadyMsg {
+  op: typeof SC.DUNGEON_READY;
+  d: {
+    state: 'ask' | 'update' | 'cancelled' | 'started';
+    id: number;
+    dungeon: string;
+    leader: string;
+    /** Seconds left to answer. */
+    seconds: number;
+    members: { name: string; answer: 'yes' | 'no' | null }[];
+    message?: string;
+  };
+}
+
+/** One line of a dungeon's objective tracker. */
+export interface DungeonObjectiveView {
+  text: string;
+  done: boolean;
+  count?: number;
+  total?: number;
+  /** Not needed to clear the dungeon. */
+  bonus?: boolean;
+}
+
+/** The dungeon run as the tracker shows it; `elapsed` = seconds since the run began. */
+export interface DungeonStateMsg {
+  op: typeof SC.DUNGEON_STATE;
+  d: {
+    dungeon: string;
+    elapsed: number;
+    /** Set once cleared: the clock stops there. */
+    finished?: number;
+    objectives: DungeonObjectiveView[];
+    /** The boss once the fight began: its name and health fraction. */
+    boss?: { name: string; hp: number; phase: number };
+  };
+}
+
+/** A cleared dungeon's results for this player. `treasure`: false = today's boss loot was already claimed. */
+export interface DungeonResultMsg {
+  op: typeof SC.DUNGEON_RESULT;
+  d: {
+    dungeon: string;
+    seconds: number;
+    kills: number;
+    deaths: number;
+    xp: number;
+    gold: number;
+    items: { name: string; quantity: number; color: string | null }[];
+    treasure: boolean;
+    party: string[];
+  };
+}
+
 export interface TelegraphMsg {
   op: typeof SC.TELEGRAPH;
   d: { at: [number, number, number]; radius: number; seconds: number; color: 'red' | 'yellow' };
@@ -404,6 +464,9 @@ export type ServerControlMsg =
   | AuctionMsg
   | TelegraphMsg
   | OreVeinsMsg
+  | DungeonReadyMsg
+  | DungeonStateMsg
+  | DungeonResultMsg
   | PlayerStatsMsg
   | CombatEventMsg
   | InventoryUpdateMsg

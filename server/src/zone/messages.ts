@@ -25,6 +25,7 @@ export type ToZone =
   | { t: 'cutsceneDone'; connId: number; sequence: string }
   | { t: 'unstuck'; connId: number }
   | { t: 'waypoint'; connId: number; act: string }
+  | { t: 'leaveDungeon'; connId: number }
   | { t: 'party'; connId: number; party: string | null }
   | { t: 'refine'; connId: number; slot: number; itemId?: string }
   | { t: 'trade'; connId: number; d: { action: string; name?: string; uids?: string[]; gold?: number } }
@@ -73,6 +74,8 @@ export type FromZone =
   | { t: 'loot'; event: LootEvent }
   | { t: 'economy'; event: EconomyEvent }
   | { t: 'dungeon'; connId: number; dungeon: string }
+  /** A player leaves a dungeon instance (Esc → Leave dungeon, or a death there). */
+  | { t: 'dungeonExit'; connId: number }
   | { t: 'transferred'; connId: number; record: PersistRecord | null; state: TransferState | null }
   | { t: 'reply'; reqId: number; reply: ZoneReply }
   | { t: 'stopped' };

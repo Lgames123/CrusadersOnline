@@ -1,5 +1,5 @@
 import type { Logger } from 'pino';
-import { dungeonById, CS, LEVEL_PREFIX, MAX_STACK, PERMANENT_UNTIL, SC, SPELLS, decodeSpells, emptyStoryState, encodeSpells, parseClientControl, startingInventory, type Difficulty, type InventoryEntry, type ExitCrossing, type ItemCatalog, type KnownSpell, type ServerControlMsg } from '@crusaders/shared';
+import { dungeonById, splitInstance, DUNGEON_READY_SECONDS, type DungeonDef, type DungeonReadyMsg, CS, LEVEL_PREFIX, MAX_STACK, PERMANENT_UNTIL, SC, SPELLS, decodeSpells, emptyStoryState, encodeSpells, parseClientControl, startingInventory, type Difficulty, type InventoryEntry, type ExitCrossing, type ItemCatalog, type KnownSpell, type ServerControlMsg } from '@crusaders/shared';
 import type { Account, TicketStore } from '../auth/tickets.ts';
 import type { CharacterPersistRecord, CharacterRepository } from '../persistence/characters.ts';
 import { auctionDeposit, type EconomyEvent, type JoinOptions, type PersistRecord, type TransferState } from '../simulation/world_zone.ts';
@@ -17,6 +17,17 @@ const AUTH_TIMEOUT_MS = 10_000;
  * CS_ZONE_READY); transferring: the old zone is removing the player for a portal transition.
  */
 type State = 'awaiting_auth' | 'authenticated' | 'joining' | 'zoning' | 'in_world' | 'transferring';
+
+/** A party's ready check before a dungeon run (answers by lower-cased name). */
+interface ReadyCheck {
+  id: number;
+  def: DungeonDef;
+  leader: string;
+  members: string[];
+  answers: Map<string, boolean>;
+  endsAt: number;
+  timer: NodeJS.Timeout;
+}
 
 interface Session {
   conn: ClientConnection;
@@ -252,6 +263,7 @@ export class SessionManager implements TransportHandlers {
     const s = this.sessions.get(conn.id);
     if (!s) return;
     clearTimeout(s.authTimer);
+    this.dungeonReturn.delete(conn.id);
     if (s.state === 'in_world' || s.state === 'transferring') this.zoneOf(s)?.leave(conn.id);
     if (s.characterId) this.activeCharacters.delete(s.characterId);
     if (s.characterId && s.enteredAt && !s.account?.guest) {
@@ -402,6 +414,12 @@ export class SessionManager implements TransportHandlers {
         return;
       case CS.WAYPOINT_TRAVEL:
         if (s.state === 'in_world') this.zoneOf(s)?.waypointTravel(conn.id, msg.d.act);
+        return;
+      case CS.DUNGEON:
+        if (s.state !== 'in_world') return;
+        if (msg.d.action === 'leave') {
+          if (splitInstance(s.zone).dungeon) this.zoneOf(s)?.leaveDungeon(conn.id);
+        } else if (msg.d.id !== undefined) this.answerReadyCheck(s, msg.d.id, msg.d.action === 'accept');
         return;
       case CS.CHAT_MESSAGE:
         this.chat(s, msg.d.channel, msg.d.text, msg.d.to);
@@ -586,26 +604,123 @@ export class SessionManager implements TransportHandlers {
   // --- Dungeons (MMO Stage 5, not original; dungeons.ts) ----------------------------------
 
   private nextInstance = 1;
+  /** Ready checks under way, by id. */
+  private readonly readyChecks = new Map<number, ReadyCheck>();
+  private nextReadyCheck = 1;
+  /** Where each player in a dungeon instance goes back to when he leaves it (by connection). */
+  private readonly dungeonReturn = new Map<number, string>();
 
   /**
-   * A finished character at a crystal takes his party into a new instance of a dungeon: the
-   * leader asks; every member in the world comes along (up to the dungeon's size), arriving
-   * beside the act's crystal.
+   * A finished character at a crystal asks to take his party into a new instance of a dungeon:
+   * only the leader may. Alone he goes at once; with a party, every member in the world (up to
+   * the dungeon's size, none already in a dungeon) is asked first (startReadyCheck).
    */
   onDungeon(arena: string, connId: number, dungeonId: string): void {
     const s = this.sessions.get(connId);
     const def = dungeonById(dungeonId);
     if (!s || s.state !== 'in_world' || s.zone !== arena || !def) return;
-    const tell = (o: Session, text: string, kind: 'info' | 'error' = 'info') => this.send(o, { op: SC.CHAT_BROADCAST, d: { channel: 'system', kind, text } });
     const party = this.parties.of(s.name);
-    if (party && party.members[0]!.toLowerCase() !== s.name.toLowerCase()) return tell(s, 'Only the party leader can lead the party into a dungeon.', 'error');
+    if (party && party.members[0]!.toLowerCase() !== s.name.toLowerCase()) return this.tell(s, 'Only the party leader can lead the party into a dungeon.', 'error');
+    const group = party
+      ? party.members.map((m) => this.sessionNamed(m)).filter((o): o is Session => !!o && o.state === 'in_world' && !splitInstance(o.zone).dungeon).slice(0, def.maxParty)
+      : [s];
+    if (!group.includes(s)) group.unshift(s);
+    if (group.length === 1) return this.enterDungeon(def, s, group);
+    for (const c of this.readyChecks.values()) {
+      if (c.members.some((m) => group.some((o) => o.name.toLowerCase() === m.toLowerCase()))) return this.tell(s, 'A ready check is already under way.', 'error');
+    }
+    const check: ReadyCheck = {
+      id: this.nextReadyCheck++,
+      def,
+      leader: s.name,
+      members: group.map((o) => o.name),
+      answers: new Map([[s.name.toLowerCase(), true]]),
+      endsAt: Date.now() + DUNGEON_READY_SECONDS * 1000,
+      timer: setTimeout(() => this.closeReadyCheck(check.id), DUNGEON_READY_SECONDS * 1000),
+    };
+    this.readyChecks.set(check.id, check);
+    this.sendReadyCheck(check, 'ask');
+    this.log.info({ leader: s.name, dungeon: def.id, members: check.members }, 'dungeon ready check');
+  }
+
+  /** A member's yes or no: one no calls the run off; everyone's yes starts it at once. */
+  private answerReadyCheck(s: Session, id: number, yes: boolean): void {
+    const check = this.readyChecks.get(id);
+    const me = s.name.toLowerCase();
+    if (!check || !check.members.some((m) => m.toLowerCase() === me) || check.answers.has(me)) return;
+    check.answers.set(me, yes);
+    if (!yes) return this.cancelReadyCheck(check, `${s.name} is not ready. The run is called off.`);
+    if (check.members.every((m) => check.answers.get(m.toLowerCase()) === true)) return this.closeReadyCheck(id);
+    this.sendReadyCheck(check, 'update');
+  }
+
+  /** Everyone said yes, or time ran out (silence counts as yes): the group goes in. */
+  private closeReadyCheck(id: number): void {
+    const check = this.readyChecks.get(id);
+    if (!check) return;
+    const leader = this.sessionNamed(check.leader);
+    if (!leader || leader.state !== 'in_world') return this.cancelReadyCheck(check, `${check.leader} is no longer here. The run is called off.`);
+    clearTimeout(check.timer);
+    this.readyChecks.delete(id);
+    this.sendReadyCheck(check, 'started');
+    const group = check.members.map((m) => this.sessionNamed(m)).filter((o): o is Session => !!o && o.state === 'in_world' && !splitInstance(o.zone).dungeon);
+    if (!group.includes(leader)) group.unshift(leader);
+    this.enterDungeon(check.def, leader, group);
+  }
+
+  private cancelReadyCheck(check: ReadyCheck, message: string): void {
+    clearTimeout(check.timer);
+    this.readyChecks.delete(check.id);
+    this.sendReadyCheck(check, 'cancelled', message);
+    for (const m of check.members) {
+      const o = this.sessionNamed(m);
+      if (o) this.tell(o, message, 'error');
+    }
+  }
+
+  private sendReadyCheck(check: ReadyCheck, state: DungeonReadyMsg['d']['state'], message?: string): void {
+    const d: DungeonReadyMsg['d'] = {
+      state,
+      id: check.id,
+      dungeon: check.def.name,
+      leader: check.leader,
+      seconds: Math.max(0, (check.endsAt - Date.now()) / 1000),
+      members: check.members.map((name) => {
+        const a = check.answers.get(name.toLowerCase());
+        return { name, answer: a === undefined ? null : a ? 'yes' : 'no' };
+      }),
+      ...(message ? { message } : {}),
+    };
+    for (const m of check.members) {
+      const o = this.sessionNamed(m);
+      if (o) this.send(o, { op: SC.DUNGEON_READY, d });
+    }
+  }
+
+  /** The group goes into a new instance, arriving beside its act's crystal; each remembers where he was. */
+  private enterDungeon(def: DungeonDef, leader: Session, group: Session[]): void {
     const instance = `${LEVEL_PREFIX}${def.act}@${def.id}-${(this.nextInstance++).toString(36)}`;
-    const group = party ? party.members.map((m) => this.sessionNamed(m)).filter((o): o is Session => !!o && o.state === 'in_world').slice(0, def.maxParty) : [s];
     for (const o of group) {
-      tell(o, `${s.name} leads the way into ${def.name}.`);
+      this.dungeonReturn.set(o.conn.id, o.zone);
+      this.tell(o, `${leader.name} leads the way into ${def.name}.`);
       this.onPortal(o.zone, o.conn.id, instance, undefined, undefined, true);
     }
-    this.log.info({ leader: s.name, instance, members: group.map((o) => o.name) }, 'dungeon run');
+    this.log.info({ leader: leader.name, instance, members: group.map((o) => o.name) }, 'dungeon run');
+  }
+
+  /** A player leaves a dungeon instance (Leave dungeon, or his death there): back to where he entered it from. */
+  onDungeonExit(arena: string, connId: number): void {
+    const s = this.sessions.get(connId);
+    if (!s || s.zone !== arena) return;
+    const base = splitInstance(arena).base;
+    let target = this.dungeonReturn.get(connId) ?? base;
+    if (!this.zones.available(target)) target = base;
+    this.dungeonReturn.delete(connId);
+    this.onPortal(arena, connId, target, undefined, undefined, true);
+  }
+
+  private tell(o: Session, text: string, kind: 'info' | 'error' = 'info'): void {
+    this.send(o, { op: SC.CHAT_BROADCAST, d: { channel: 'system', kind, text } });
   }
 
   // --- Parties (MMO Stage 2, not original) -----------------------------------------------

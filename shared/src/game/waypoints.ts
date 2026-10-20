@@ -15,29 +15,32 @@ export type WaypointRegion = 'ci' | 'cs' | 'ws' | 'ca' | 'du' | 'gl' | 'co' | 'c
 
 export interface WaypointRegionInfo {
   name: string;
-  /** Position on the map (0..100 both ways, north up). */
+  /**
+   * The region's label scroll on the original's map (crusaders.exe 0x4549F0: textures map1 /
+   * map1a, map2, map3, map4 drawn at 64,47.5 / 319,47.5 / 64,302.5 / 319,302.5, so 511x383 px
+   * from its top left): centre and size, in those pixels.
+   */
   x: number;
   y: number;
+  w: number;
+  h: number;
 }
 
 export const WAYPOINT_REGIONS: Readonly<Record<WaypointRegion, WaypointRegionInfo>> = {
-  ci: { name: 'The Citadel', x: 26, y: 18 },
-  cs: { name: 'Cador Sul', x: 30, y: 44 },
-  ws: { name: 'The Stronghold (west)', x: 10, y: 62 },
-  ca: { name: 'The Catacombs', x: 50, y: 40 },
-  gl: { name: 'The Glaciers', x: 62, y: 12 },
-  du: { name: 'Duskwood', x: 68, y: 50 },
-  co: { name: 'Corantha', x: 90, y: 64 },
-  cm: { name: 'The Coranthan Mines', x: 88, y: 88 },
-  es: { name: 'The Stronghold (east)', x: 58, y: 80 },
-  bs: { name: "Necros's Battleship", x: 22, y: 88 },
+  ci: { name: 'The Citadel', x: 47, y: 59, w: 66, h: 22 },
+  cs: { name: 'Cador Sul', x: 87, y: 161, w: 70, h: 22 },
+  ws: { name: 'The Stronghold (west)', x: 241, y: 184, w: 72, h: 32 },
+  ca: { name: 'The Catacombs', x: 64, y: 244, w: 72, h: 24 },
+  gl: { name: 'The Glaciers', x: 242, y: 361, w: 75, h: 28 },
+  du: { name: 'Duskwood', x: 290, y: 274, w: 70, h: 22 },
+  co: { name: 'Corantha', x: 461, y: 280, w: 78, h: 25 },
+  cm: { name: 'The Coranthan Mines', x: 461, y: 350, w: 78, h: 35 },
+  es: { name: 'The Stronghold (east)', x: 319, y: 184, w: 72, h: 32 },
+  bs: { name: "Necros's Battleship", x: 174, y: 78, w: 62, h: 34 },
 };
 
-/** Roads drawn between regions on the map (the acts' exits join them). */
-export const WAYPOINT_ROADS: readonly [WaypointRegion, WaypointRegion][] = [
-  ['ci', 'cs'], ['cs', 'ws'], ['cs', 'ca'], ['ca', 'du'], ['ca', 'gl'], ['du', 'gl'],
-  ['du', 'co'], ['co', 'cm'], ['du', 'es'], ['es', 'ws'], ['ws', 'bs'],
-];
+/** The original map's size in pixels (the four tiles less their one-pixel overlap). */
+export const WAYPOINT_MAP_SIZE = { w: 511, h: 383 } as const;
 
 export interface WaypointChapter {
   /** 1-5. */
@@ -119,6 +122,23 @@ export function areaName(zone: string): string {
 
 /** Metres from the crystal within which the use key opens the map (the server checks it too). */
 export const WAYPOINT_REACH = 2.5;
+/**
+ * How far from a crystal a player at `p` stands for using it (metres, horizontal), or null when
+ * out of reach (`slack` widens it: the server's tolerance). Where the arrival spot is out of the
+ * crystal's reach (Ws9a: the crystal stands behind the bars of a cell, the arrival in the
+ * corridor), the arrival spot is used as well.
+ */
+export function crystalReach(spot: { crystal: { x: number; y: number; z: number }; arrival?: { x: number; y: number; z: number } }, p: { x: number; y: number; z: number }, slack = 0): number | null {
+  let best: number | null = null;
+  const points = [spot.crystal];
+  if (spot.arrival && Math.hypot(spot.arrival.x - spot.crystal.x, spot.arrival.z - spot.crystal.z) > WAYPOINT_REACH) points.push(spot.arrival);
+  for (const q of points) {
+    const d = Math.hypot(q.x - p.x, q.z - p.z);
+    if (d <= WAYPOINT_REACH + slack && Math.abs(q.y - p.y) < 2.5 && (best === null || d < best)) best = d;
+  }
+  return best;
+}
+
 /** Seconds between two teleports of a player. */
 export const WAYPOINT_COOLDOWN = 10;
 
@@ -135,6 +155,8 @@ const RINGS = [2.5, 3.5, 4.5, 6, 8, 10, 13, 16, 20];
 const HEADROOM = 2.6;
 /** Metres the arrival is from the crystal. */
 const ARRIVAL_GAP = 1.8;
+/** Farther arrivals, when none beside the crystal walks back to the area's beginning. */
+const ARRIVAL_GAPS = [ARRIVAL_GAP, 2.5, 3.5, 4.5, 6, 8];
 /** Clearance kept from triggers, props, objects and brushes. */
 const CLEAR = 1.2;
 
@@ -149,7 +171,7 @@ export function waypointSpot(arena: ArenaDef): WaypointSpot | null {
   if (!mesh) return null;
   const base = respawnPoint(arena);
   const v = mesh.vertices, idx = mesh.indices;
-  const reach = RINGS[RINGS.length - 1]! + 3;
+  const reach = RINGS[RINGS.length - 1]! + ARRIVAL_GAPS[ARRIVAL_GAPS.length - 1]! + 3;
   const tris: number[] = [];
   for (let t = 0; t < idx.length; t += 3) {
     const a = idx[t]! * 3, b = idx[t + 1]! * 3, c = idx[t + 2]! * 3;
@@ -224,6 +246,46 @@ export function waypointSpot(arena: ArenaDef): WaypointSpot | null {
     }
     return true;
   };
+  /** Whether the straight walk from a to b (feet on the floor) crosses no surface of the level, at the waist and the head. */
+  const open = (ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean => {
+    for (const h of [0.9, 1.6]) {
+      const px = ax, py = ay + h, pz = az, dx = bx - ax, dy = by + h - py, dz = bz - az;
+      for (const t of tris) {
+        const a = idx[t]! * 3, b = idx[t + 1]! * 3, c = idx[t + 2]! * 3;
+        // Möller–Trumbore, segment parameter in (0, 1).
+        const e1x = v[b]! - v[a]!, e1y = v[b + 1]! - v[a + 1]!, e1z = v[b + 2]! - v[a + 2]!;
+        const e2x = v[c]! - v[a]!, e2y = v[c + 1]! - v[a + 1]!, e2z = v[c + 2]! - v[a + 2]!;
+        const hx = dy * e2z - dz * e2y, hy = dz * e2x - dx * e2z, hz = dx * e2y - dy * e2x;
+        const det = e1x * hx + e1y * hy + e1z * hz;
+        if (Math.abs(det) < 1e-9) continue;
+        const f = 1 / det;
+        const sx = px - v[a]!, sy = py - v[a + 1]!, sz = pz - v[a + 2]!;
+        const u = f * (sx * hx + sy * hy + sz * hz);
+        if (u < 0 || u > 1) continue;
+        const qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x;
+        const w = f * (dx * qx + dy * qy + dz * qz);
+        if (w < 0 || u + w > 1) continue;
+        const s = f * (e2x * qx + e2y * qy + e2z * qz);
+        if (s > 0 && s < 1) return false;
+      }
+    }
+    return true;
+  };
+  /** Whether a spot walks back to the area's beginning: straight, or round one corner. */
+  const reaches = (x: number, y: number, z: number): boolean =>
+    open(x, y, z, base.x, base.y, base.z) ||
+    [[x, base.z], [base.x, z]].some(([cx, cz]) => {
+      const cy = floor(cx!, cz!, y, 1);
+      return cy !== null && open(x, y, z, cx!, cy, cz!) && open(cx!, cy, cz!, base.x, base.y, base.z);
+    });
+  /** Room for a body: no surface within 0.7 m around the spot (a far arrival, not pressed against bars or a wall). */
+  const roomy = (x: number, y: number, z: number): boolean => {
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      if (!open(x, y, z, x + Math.sin(a) * 0.7, y, z + Math.cos(a) * 0.7)) return false;
+    }
+    return true;
+  };
   /** The crystal's footprint: flat floor under its middle and around its rim, level within 0.3 m. */
   const pad = (x: number, z: number, y: number): boolean => {
     for (let k = 0; k < 8; k++) {
@@ -240,15 +302,20 @@ export function waypointSpot(arena: ArenaDef): WaypointSpot | null {
       const x = base.x - Math.sin(ang) * r, z = base.z - Math.cos(ang) * r;
       const y = floor(x, z, base.y, 3);
       if (y === null || !pad(x, z, y) || !clear(x, y, z)) continue;
-      // The arrival: beside the crystal on the way back to the start point, else any side.
+      // The arrival: beside the crystal on the way back to the start point, else any side; it
+      // must walk back to the start point (Ws9a's crystal stands in a barred cell beside Drake's
+      // open one: whoever arrives waits in the corridor, in front of the bars).
       const back = Math.atan2(base.x - x, base.z - z);
-      for (let j = 0; j < 8; j++) {
-        const dir = back + (j % 2 ? 1 : -1) * Math.ceil(j / 2) * (Math.PI / 4);
-        const ax = x + Math.sin(dir) * ARRIVAL_GAP, az = z + Math.cos(dir) * ARRIVAL_GAP;
-        const ay = floor(ax, az, y, 0.5);
-        if (ay === null || !clear(ax, ay, az)) continue;
-        // Facing the crystal (forward = (-sin yaw, -cos yaw) = -dir): the chase camera stays clear of it.
-        return { crystal: { x, y, z }, arrival: { x: ax, y: ay + 0.1, z: az, yaw: dir } };
+      for (const gap of ARRIVAL_GAPS) {
+        const steps = gap === ARRIVAL_GAP ? 8 : 16;
+        for (let j = 0; j < steps; j++) {
+          const dir = back + (j % 2 ? 1 : -1) * Math.ceil(j / 2) * ((Math.PI * 2) / steps);
+          const ax = x + Math.sin(dir) * gap, az = z + Math.cos(dir) * gap;
+          const ay = floor(ax, az, y, gap === ARRIVAL_GAP ? 0.5 : 1);
+          if (ay === null || !clear(ax, ay, az) || !reaches(ax, ay, az) || (gap !== ARRIVAL_GAP && !roomy(ax, ay, az))) continue;
+          // Facing the crystal (forward = (-sin yaw, -cos yaw) = -dir): the chase camera stays clear of it.
+          return { crystal: { x, y, z }, arrival: { x: ax, y: ay + 0.1, z: az, yaw: dir } };
+        }
       }
     }
   }

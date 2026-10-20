@@ -39,6 +39,8 @@ export const CS = {
   AUCTION: 0x1b,
   /** Soft skills (MMO Stage 6): mine a vein, smith a recipe, salvage gear. */
   CRAFT: 0x1c,
+  /** Dungeons (MMO Stage 5): answer the party's ready check, or leave the instance. */
+  DUNGEON: 0x1d,
 } as const;
 
 /** Server -> client opcodes. */
@@ -82,6 +84,12 @@ export const SC = {
   TELEGRAPH: 0x58,
   /** The zone's ore veins and whether each can be mined (MMO Stage 6). */
   ORE_VEINS: 0x59,
+  /** A dungeon's ready check for the party: who said yes or no, the time left, its end. */
+  DUNGEON_READY: 0x5a,
+  /** The dungeon run's objectives and clock (shown on screen while inside). */
+  DUNGEON_STATE: 0x5b,
+  /** The dungeon is cleared: this player's results (time, kills, rewards). */
+  DUNGEON_RESULT: 0x5c,
 } as const;
 
 /** Input flag bits carried in CS_PLAYER_INPUT. */

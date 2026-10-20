@@ -52,5 +52,41 @@ describe('dungeon instances (MMO Stage 5)', () => {
     hero.hp = 300;
     internal.loseHp(hero, boss(), 3000);
     expect(hero.storyFlags.has(dungeonLockFlag('crypt'))).toBe(true);
+    // The tracker went out on arrival; the results follow the boss's rewards on the next tick.
+    const state = sent.find((m) => m.op === SC.DUNGEON_STATE);
+    expect(state && state.op === SC.DUNGEON_STATE && state.d.objectives.map((o) => o.text)).toContain('Defeat Crypt Overlord');
+    zone.step();
+    const result = sent.find((m) => m.op === SC.DUNGEON_RESULT);
+    expect(result?.op === SC.DUNGEON_RESULT && result.d).toMatchObject({ dungeon: 'The Crypt of the Catacombs', kills: 1, deaths: 1, treasure: true });
+    expect(result?.op === SC.DUNGEON_RESULT && result.d.xp).toBeGreaterThan(0);
+    expect(result?.op === SC.DUNGEON_RESULT && result.d.items.length).toBeGreaterThan(0);
+  });
+
+  it.skipIf(!have)('an instance is sealed: exits and crystals lead nowhere, a death or Leave dungeon takes a player out', () => {
+    const placements = JSON.parse(fs.readFileSync(path.join(levelsDir, 'ca1d.placements.json'), 'utf8')) as LevelPlacements;
+    const arena = buildLevelArena('level:ca1d', new Uint8Array(fs.readFileSync(path.join(levelsDir, `${placements.mesh}.collision.bin`))), placements);
+    const portals: string[] = [];
+    const exits: number[] = [];
+    const zone = new WorldZone(rapier, 'level:ca1d@crypt-2', arena, {
+      send: () => {},
+      persist: () => {},
+      portal: (_c, target) => portals.push(target),
+      dungeonExit: (c) => exits.push(c),
+    }, { features: { mmoDungeons: true }, random: () => 0.5 });
+    zone.join(1, { name: 'Hero', characterId: 'c1', arrivingWaypoint: true, story: { ...emptyStoryState(), completedAt: 1 }, hp: 300 });
+    zone.step();
+    type P = { hp: number; deadUntil: number };
+    const internal = zone as unknown as { players: Map<number, P>; portalOut(p: P, target: string): void; loseHp(a: unknown, t: unknown, d: number): void };
+    const hero = internal.players.get(1)!;
+    internal.portalOut(hero, 'level:gl1a');
+    zone.waypointTravel(1, 'cs2b');
+    expect(portals).toEqual([]);
+    zone.leaveDungeon(1);
+    expect(exits).toEqual([1]);
+    // A death: out once the body has lain its time, alive again.
+    internal.loseHp(hero, hero, 10_000);
+    for (let i = 0; i < TICK_RATE * 10 && exits.length < 2; i++) zone.step();
+    expect(exits).toEqual([1, 1]);
+    expect(hero.hp).toBeGreaterThan(0);
   });
 });

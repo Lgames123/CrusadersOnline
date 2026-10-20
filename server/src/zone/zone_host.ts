@@ -14,6 +14,7 @@ export interface ZoneHostEvents {
   loot?(event: LootEvent): void;
   economy?(event: EconomyEvent): void;
   dungeon?(connId: number, dungeon: string): void;
+  dungeonExit?(connId: number): void;
 }
 
 /** Main-thread handle for one zone worker. */
@@ -59,6 +60,9 @@ export class ZoneHost {
             break;
           case 'dungeon':
             events.dungeon?.(msg.connId, msg.dungeon);
+            break;
+          case 'dungeonExit':
+            events.dungeonExit?.(msg.connId);
             break;
           case 'loot':
             events.loot?.(msg.event);
@@ -207,6 +211,10 @@ export class ZoneHost {
 
   waypointTravel(connId: number, act: string): void {
     this.post({ t: 'waypoint', connId, act });
+  }
+
+  leaveDungeon(connId: number): void {
+    this.post({ t: 'leaveDungeon', connId });
   }
 
   useItem(connId: number, slot: number): void {

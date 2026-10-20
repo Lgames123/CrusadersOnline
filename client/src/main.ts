@@ -23,7 +23,7 @@ import {
   areaName,
   ORES,
   GROUND_REACH,
-  WAYPOINT_REACH,
+  crystalReach,
   MAIN_QUESTS,
   NPC_VOICES,
   ASM_STATE_NAMES,
@@ -115,6 +115,7 @@ import { WeaponSparkles } from './engine/weapon_sparkles.ts';
 import { TradeWindow } from './ui/trade_window.ts';
 import { AuctionWindow } from './ui/auction_window.ts';
 import { Telegraphs } from './engine/telegraphs.ts';
+import { DungeonUi } from './ui/dungeon_ui.ts';
 import { OreVeins } from './engine/ore_veins.ts';
 import { CraftWindow } from './ui/craft_window.ts';
 import { CRYSTAL_LIGHT_COLOR, WaypointCrystal } from './engine/waypoint_crystal.ts';
@@ -232,6 +233,11 @@ async function main(): Promise<void> {
   const charSheet = new CharacterSheet(document.getElementById('char-sheet')!, assetManifest?.textures ?? {});
   const waypointMap = new WaypointMap();
   const partyFrame = new PartyFrame();
+  const dungeonUi = new DungeonUi();
+  /** This character's name as the party updates give it (the ready check marks its own row). */
+  let partySelf = '';
+  /** In a dungeon instance ("level:ca1d@crypt-3"): the options menu offers Leave Dungeon. */
+  let inDungeon = false;
   /** Direct trade (MMO Stage 4). */
   const tradeWindow = new TradeWindow();
   /** The auction house (MMO Stage 4). */
@@ -248,7 +254,7 @@ async function main(): Promise<void> {
   /** And its star dust (after Rappelz's galaxy stones), stronger with each refinement. */
   const weaponSparkles = new WeaponSparkles(scene);
   // This act's waypoint crystal (SC_WORLD_ENTER; not original): shown once the story is finished.
-  let crystalAt: { x: number; y: number; z: number } | null = null;
+  let crystalAt: { x: number; y: number; z: number; arrival?: { x: number; y: number; z: number } } | null = null;
   let crystal: WaypointCrystal | null = null;
   const crystalLight = new THREE.Vector3();
   const refreshCrystal = () => {
@@ -776,6 +782,9 @@ async function main(): Promise<void> {
           zone: (name, difficulty) => {
             // Portal transitions (and the first entry): swap the level, then tell the server.
             errorBox.textContent = `Entering ${areaName(name)}…`;
+            inDungeon = name.includes('@');
+            document.getElementById('btn-leave-dungeon')?.toggleAttribute('hidden', !inDungeon);
+            dungeonUi.reset();
             for (const id of remotes.byId.keys()) (lighting.forget(id), trails.forget(id));
             spellVisuals.clear();
             remotes.clear();
@@ -871,8 +880,14 @@ async function main(): Promise<void> {
             } else if (!tradeWindow.open && was && !optionsOpen) input.requestLock();
           },
           party: (d) => {
-            if (d.self !== undefined) partyFrame.set(d.members, d.self);
+            if (d.self !== undefined) {
+              partyFrame.set(d.members, d.self);
+              partySelf = d.self;
+            }
           },
+          dungeonReady: (d) => dungeonUi.readyCheck(d, partySelf),
+          dungeonState: (d) => dungeonUi.state(d),
+          dungeonResult: (d) => dungeonUi.results(d),
           chat: (d) => {
             chat.add(d);
             // Classic: the server's lines for this player (loot, gold, refusals...) also on the
@@ -1273,6 +1288,15 @@ async function main(): Promise<void> {
   chat.onParty = (action, name) => session?.party(action, name);
   chat.onTrade = (action, name) => session?.trade({ action, ...(name ? { name } : {}) });
   tradeWindow.onAction = (d) => session?.trade(d);
+  dungeonUi.onAnswer = (id, yes) => session?.dungeon(yes ? 'accept' : 'decline', id);
+  dungeonUi.onLeave = () => session?.dungeon('leave');
+  // The ready check and the results want the mouse; the world takes it back when they close.
+  dungeonUi.onModal = (open) => {
+    if (open && input.locked) {
+      releasing = true;
+      document.exitPointerLock();
+    } else if (!open && !optionsOpen && !input.locked) input.requestLock();
+  };
   const setAuctionOpen = (open: boolean) => {
     if (open === auctionWindow.open) return;
     if (open) {
@@ -1389,8 +1413,8 @@ async function main(): Promise<void> {
     const p = local.object.position;
     // A waypoint crystal (a finished story only): Tab opens the map.
     if (crystal && crystalAt) {
-      const d = Math.hypot(crystalAt.x - p.x, crystalAt.z - p.z);
-      if (d <= WAYPOINT_REACH && Math.abs(crystalAt.y - p.y) < 2.5 && (!best || best.d > d)) best = { id: 0, label: 'Tab — waypoint crystal', d, waypoint: true };
+      const d = crystalReach({ crystal: crystalAt, ...(crystalAt.arrival ? { arrival: crystalAt.arrival } : {}) }, p);
+      if (d !== null && (!best || best.d > d)) best = { id: 0, label: 'Tab — waypoint crystal', d, waypoint: true };
     }
     // An ore vein (mmoCrafting): Tab mines it.
     const vein = oreVeins.nearest(p, 2.5);
@@ -1599,6 +1623,7 @@ async function main(): Promise<void> {
   // Back to the character screen: the account session stays, the world is left.
   const navButtonsRow = document.getElementById('nav-buttons-row')!;
   const unstuckButton = document.getElementById('btn-unstuck')!;
+  const leaveDungeonButton = document.getElementById('btn-leave-dungeon')!;
   const characterButton = document.getElementById('btn-characters')!;
   const logoutButton = document.getElementById('btn-logout')!;
   const confirmBox = document.getElementById('confirm-box')!;
@@ -1606,7 +1631,7 @@ async function main(): Promise<void> {
   const confirmYes = document.getElementById('btn-confirm-yes')!;
   const confirmCancel = document.getElementById('btn-confirm-cancel')!;
 
-  let pendingAction: 'unstuck' | 'characters' | 'logout' | null = null;
+  let pendingAction: 'unstuck' | 'leaveDungeon' | 'characters' | 'logout' | null = null;
 
   const resetConfirm = () => {
     pendingAction = null;
@@ -1615,7 +1640,7 @@ async function main(): Promise<void> {
   };
   resetOverlayConfirm = resetConfirm;
 
-  const showConfirm = (action: 'unstuck' | 'characters' | 'logout', prompt: string) => {
+  const showConfirm = (action: 'unstuck' | 'leaveDungeon' | 'characters' | 'logout', prompt: string) => {
     pendingAction = action;
     confirmPrompt.textContent = prompt;
     confirmYes.className = action === 'logout' ? 'btn-danger' : 'btn-warn';
@@ -1628,6 +1653,12 @@ async function main(): Promise<void> {
   unstuckButton.addEventListener('click', (e) => {
     e.stopPropagation();
     showConfirm('unstuck', 'Move to the start of the area (or your last checkpoint)?');
+  });
+
+  leaveDungeonButton.hidden = !session || !inDungeon;
+  leaveDungeonButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showConfirm('leaveDungeon', 'Leave the dungeon? You go back to where you entered it from.');
   });
 
   if (auth.kind === 'account') {
@@ -1658,6 +1689,9 @@ async function main(): Promise<void> {
     if (pendingAction === 'unstuck') {
       session?.unstuck();
       setOptionsOpen(false);
+    } else if (pendingAction === 'leaveDungeon') {
+      session?.dungeon('leave');
+      setOptionsOpen(false);
     } else if (pendingAction === 'characters') {
       session?.close();
       try {
@@ -1681,7 +1715,7 @@ async function main(): Promise<void> {
       chat.blur();
     }
     // Esc released the pointer: the options (sequences play to their end, as in the original).
-    if (!locked && !ours && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !tradeWindow.open && !auctionWindow.open && !craftWindow.open && !inScene()) setOptionsOpen(true);
+    if (!locked && !ours && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !tradeWindow.open && !auctionWindow.open && !craftWindow.open && !dungeonUi.modal && !inScene()) setOptionsOpen(true);
   };
 
   // Inventory window (online only); the ground window opens beside it (and opens it).
@@ -1900,6 +1934,7 @@ async function main(): Promise<void> {
       });
     }
     telegraphs.update(dt);
+    dungeonUi.update();
     if (crystal) {
       crystal.update(dt);
       dynamicLights.set(WAYPOINT_LIGHT_KEY, crystal.lightPosition(crystalLight), CRYSTAL_LIGHT_COLOR, 2.2, 7, 0.05);
