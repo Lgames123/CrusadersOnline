@@ -264,6 +264,14 @@
       #cutscene .bar.top { top: 0; }
       #cutscene .bar.bottom { bottom: 0; }
       #fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 9; }
+      #intro-movie { position: fixed; inset: 0; z-index: 1000; background: #000; cursor: default; }
+      #intro-movie video { width: 100%; height: 100%; object-fit: contain; display: block; }
+      #intro-movie button { position: absolute; font: 13px/1 Georgia, serif; color: #d8cfb8; background: rgba(0,0,0,.55); border: 1px solid #5a4a2e; border-radius: 3px; padding: 8px 14px; cursor: pointer; }
+      #intro-movie button:hover { border-color: #b09050; color: #fff; }
+      #intro-movie .intro-skip { right: 16px; bottom: 16px; opacity: .6; }
+      #intro-movie .intro-skip:hover { opacity: 1; }
+      #intro-movie .intro-skip small { opacity: .6; margin-left: 4px; }
+      #intro-movie .intro-start { left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 16px; padding: 12px 20px; }
       #prompt { position: fixed; left: 50%; bottom: 22%; transform: translateX(-50%); padding: 6px 12px; background: rgba(12,11,9,.72); border: 1px solid #6b5a3a; color: #f0e6cc; font: 14px/1.3 system-ui, sans-serif; pointer-events: none; }
       .floater.notice { color: #9be08a; font-size: 14px; }
       #game-files { position: fixed; top: 12px; right: 12px; width: min(320px, calc(100vw - 32px)); padding: 10px 12px; background: rgba(20,18,14,.94); border: 1px solid #6b5a3a; z-index: 20; font: 13px/1.4 system-ui, sans-serif; box-sizing: border-box; }
@@ -493,6 +501,7 @@
         <div class="overlay-nav">
           <div id="nav-buttons-row" class="row main-actions">
             <button type="button" id="btn-resume">Resume</button>
+            <button type="button" id="btn-intro" hidden>Introduction</button>
             <button type="button" id="btn-unstuck" hidden>Unstuck</button>
             <button type="button" id="btn-characters" hidden>Change Character</button>
             <button type="button" id="btn-logout" class="btn-logout" hidden>Log Out</button>

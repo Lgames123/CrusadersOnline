@@ -26,6 +26,10 @@ This project adheres to a strict clean-room policy modeled after landmark game p
   1. Converted locally on their machine using `pnpm convert` (the TypeScript converter CLI) into their private `local/generated/` folder.
   2. Selected via the browser's native File System Access API (`showDirectoryPicker()`), converted in a Web Worker by the same converter code, and cached locally in the browser's **IndexedDB / Origin Private File System (OPFS)**.
 - **Assets are NEVER uploaded to the game server or shared with other connected players.**
+- The original's Bink movies are re-encoded by FFmpeg, which the project does not ship: the CLI
+  uses the player's installed `ffmpeg`, and the browser importer downloads the public ffmpeg.wasm
+  core (GPL-2.0-or-later) from its CDN into the player's browser (hash-checked). The movie bytes
+  never leave the player's machine.
 
 ---
 

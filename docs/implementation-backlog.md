@@ -117,7 +117,7 @@ Current priorities and the user's decisions are in `PROJECT_STATUS.md` §2–3.
 | **CMP-001** | Ending after Necros's death: death timeline, Cs5b's Seq24, story marked complete, every door open (post-game state) | P0 | Necros fight | Medium | **VERIFIED** | executable-analysis §24; tests/unit/ending.test.ts; checked live |
 | **CMP-008** | Completion reward (title, cape or similar) for characters with `completedAt` | P2 | CMP-001 | Low | **NOT STARTED** | To be decided |
 | **CMP-002** | Waypoints: teleport to areas and maps the character has unlocked | P2 | CMP-001 | Medium | **NOT STARTED** | Not original |
-| **CMP-003** | Intro movies (.bik): option at character creation to watch the introduction | P1 | Bink conversion in the importer | Medium | **NOT STARTED** | |
+| **CMP-003** | Intro movies (.bik): option at character creation to watch the introduction | P1 | Bink conversion in the importer | Medium | **VERIFIED** | docs/context/2026-10-19-intro-movies.md; tests/unit/converter.test.ts; checked live (create → 3DO → intro → Ws9a; decline; Options → Introduction) |
 | **CMP-004** | Walk-in movers: wheels, Gl\*b crushers (with damage), chandeliers, Bs1a gears | P1 | — | Medium | **NOT STARTED** | |
 | **CMP-005** | Creature against creature (guards vs hostiles, Ws5a fight) | P1 | — | High | **NOT STARTED** | |
 | **CMP-006** | Relay ops still unconverted (0/1, 2/3, 0x0A–0x0E) | P2 | — | Medium | **NEEDS INVESTIGATION** | |

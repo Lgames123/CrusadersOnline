@@ -3,9 +3,12 @@
  * CLI host: pnpm convert --input "<original install dir>" --out "./local/generated"
  * Reads the user's own installation (read-only) and writes browser-ready assets locally.
  */
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
-import { parseArgs } from 'node:util';
+import { parseArgs, promisify } from 'node:util';
+import { MOVIE_ENCODE_ARGS, MOVIE_EXT, type MovieTranscoder } from '../movies.ts';
 import { convertInstall, type ImageEncoder, type OutputSink, type SourceFS } from '../pipeline.ts';
 
 const { values } = parseArgs({
@@ -64,6 +67,41 @@ const encoder: ImageEncoder = {
   },
 };
 
+const run = promisify(execFile);
+
+/**
+ * The movies go through the player's own FFmpeg (`FFMPEG`, else `ffmpeg` on the PATH; not a
+ * project dependency). Null when it is missing or lacks the Bink decoder / VP8 + Vorbis encoders.
+ */
+async function ffmpegTranscoder(): Promise<MovieTranscoder | null> {
+  const bin = process.env['FFMPEG'] || 'ffmpeg';
+  try {
+    const [dec, enc] = await Promise.all([run(bin, ['-hide_banner', '-decoders'], { maxBuffer: 8 << 20 }), run(bin, ['-hide_banner', '-encoders'], { maxBuffer: 8 << 20 })]);
+    if (!/binkvideo/.test(dec.stdout) || !/libvpx/.test(enc.stdout) || !/libvorbis/.test(enc.stdout)) {
+      console.warn(`[convert] ${bin} lacks binkvideo / libvpx / libvorbis: movies not converted`);
+      return null;
+    }
+  } catch {
+    console.warn('[convert] ffmpeg not found (install it or set FFMPEG): movies not converted');
+    return null;
+  }
+  return {
+    ext: MOVIE_EXT,
+    async transcode(name, bink) {
+      const dir = await mkdtemp(path.join(os.tmpdir(), 'crusaders-movie-'));
+      try {
+        const src = path.join(dir, `${name}.bik`);
+        const dst = path.join(dir, `${name}.${MOVIE_EXT}`);
+        await writeFile(src, bink);
+        await run(bin, ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-i', src, ...MOVIE_ENCODE_ARGS, dst], { maxBuffer: 8 << 20 });
+        return new Uint8Array(await readFile(dst));
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+  };
+}
+
 console.log(`[convert] input:  ${input}`);
 console.log(`[convert] output: ${outDir}`);
 const started = performance.now();
@@ -72,6 +110,7 @@ const report = await convertInstall({
   sink,
   encoder,
   concurrency: Number(values.concurrency),
+  movies: await ffmpegTranscoder(),
   log: (m) => console.log(`[convert] ${m}`),
 });
 console.log(

@@ -2,6 +2,7 @@ import { CHARACTER_NAME_RE, LEVEL_PREFIX, type CharacterDetails, type RealmInfo,
 import { outfitFor } from '../assets/item_models.ts';
 import type { MusicPlayer } from '../audio/music.ts';
 import type { GameFilesPanel } from '../ui/game_files_panel.ts';
+import { introMovies, playIntro } from '../ui/intro_movie.ts';
 import * as api from './api.ts';
 import type { TitleScene } from './title_scene.ts';
 
@@ -432,12 +433,16 @@ export async function runFrontEnd(ctx: FrontEndContext): Promise<FrontEndChoice>
     const create = async () => {
       if (chars.length >= max) return;
       let createdId = '';
+      let watchIntro = false;
+      // The original opens on its introduction; here a new character is offered it (when converted).
+      const movies = await introMovies();
       const r = await dialog(
         `<h2>New character</h2>
          <p class="fe-muted">Every crusader is Drake, the hero of the original game. Choose the name this one is known by.</p>
          <form novalidate>
            <label class="fe-field"><span>Name</span><input name="name" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_]+" spellcheck="false" autocomplete="off" /></label>
            <p class="fe-hint">3–20 letters, digits or _</p>
+           ${movies ? '<label class="fe-check"><input type="checkbox" name="intro" checked /> Watch the introduction, then enter the world</label>' : ''}
            <div class="fe-error" role="alert"></div>
            <div class="fe-actions"><button type="button" class="fe-secondary" data-cancel>Cancel</button><button type="submit" class="fe-primary">Create</button></div>
          </form>`,
@@ -457,6 +462,7 @@ export async function runFrontEnd(ctx: FrontEndContext): Promise<FrontEndChoice>
             ok.disabled = true;
             try {
               createdId = (await api.createCharacter(name)).id;
+              watchIntro = !!(form.elements.namedItem('intro') as HTMLInputElement | null)?.checked;
               close('created');
             } catch (e2) {
               err.textContent = (e2 as Error).message;
@@ -465,7 +471,13 @@ export async function runFrontEnd(ctx: FrontEndContext): Promise<FrontEndChoice>
           });
         },
       );
-      if (r === 'created') await load(createdId);
+      if (r !== 'created') return;
+      await load(createdId);
+      if (!watchIntro || !movies || chosen?.id !== createdId) return;
+      ctx.music.hold(true);
+      await playIntro(movies);
+      ctx.music.hold(false);
+      play();
     };
 
     const remove = async () => {

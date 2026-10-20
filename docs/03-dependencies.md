@@ -47,6 +47,13 @@ Single TypeScript implementation with Node and browser hosts (ADR-003):
 - **`sharp`** (`>=0.33`, Node host only): WebP/PNG encoding in the CLI.
 - Browser host encodes images with `OffscreenCanvas.convertToBlob()` — no dependency.
 - TGA decoding is implemented in `converter/src/formats/tga.ts` (simple format, no dependency).
+- **Movies (Bink → WebM), no package dependency.** Node host: the player's own **FFmpeg** (`FFMPEG`
+  env var, else `ffmpeg` on the PATH; needs the `binkvideo` decoder and `libvpx` / `libvorbis`
+  encoders, as the gyan.dev and most distribution builds have). Without it the movies are left out
+  with a warning. Browser host: **ffmpeg.wasm core 0.12.10** (`@ffmpeg/core`, GPL-2.0-or-later),
+  fetched from cdn.jsdelivr.net only when the picked folder has movies, checked against the npm
+  package's SHA-256, run in the import worker. Neither is bundled, hosted or redistributed by the
+  project; FFmpeg runs as a separate program over the player's own files.
 
 ### 3.4 Browser Client (`client/`)
 - **`three`** (`>=0.170`) and **`@types/three`**: Scene graph, WebGL2 rendering, glTF loading, skeletal animation.

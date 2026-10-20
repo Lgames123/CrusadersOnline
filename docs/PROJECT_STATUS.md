@@ -58,7 +58,7 @@ load run with open targets. M11 runs locally in Docker but has no real domain.
 | Item | Decision / note |
 |---|---|
 | **Ending after Necros's death** | **Done** (2026-10-19, executable-analysis §24). As the original: the death timeline, then Cs5b and Seq24. Not original: everyone who hurt Necros gets it; Drake stays in Cs5b; the completion date is saved (`StoryState.completedAt`); every door opens for him from either side. Still open: the **completion reward** (title, cape or similar; nothing given yet), and **waypoints** to teleport to unlocked areas and maps. |
-| **Intro movies (.bik)** | Option at character creation: "watch the introduction?". The two Bink files need a conversion to a browser format (e.g. WebM) in the import pipeline. |
+| **Intro movies (.bik)** | **Done** (2026-10-19). The converter turns 3DO.bik and CMMIntro.bik into WebM (VP8 + Vorbis): `pnpm convert` with the player's own ffmpeg, the in-browser importer with ffmpeg.wasm fetched from a CDN at import time. The creation dialog offers the introduction (checked by default); it plays 3DO then the intro, skippable as in the original, then enters the world. Options → Introduction plays it again. No converted movie: no offer. |
 | **Walk-in movers still at rest** | Wheels, Gl\*b crushers (they need their damage), chandeliers, Bs1a gears. |
 | **Creature against creature** | Guards against hostiles; Ws5a's scripted fight. |
 | **Relay ops not converted** | 0/1 enable/disable, 2/3, the 0x0A–0x0E creature ops. |
@@ -110,10 +110,9 @@ Renumber when the time comes.
 
 ## 3. Recommended order
 
-1. The intro movie option at character creation.
-2. Remaining campaign mechanisms (movers, creature against creature, relay ops).
-3. MMO Stage 2 (party, then shared loot), which unlocks the later stages.
-4. The completion reward, waypoints and the side quests (a feature), when the post-game loop
+1. Remaining campaign mechanisms (movers, creature against creature, relay ops).
+2. MMO Stage 2 (party, then shared loot), which unlocks the later stages.
+3. The completion reward, waypoints and the side quests (a feature), when the post-game loop
    needs content.
 
 ## 4. Where to look

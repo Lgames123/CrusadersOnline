@@ -13,6 +13,7 @@ import type { CapArg, CapCameraPath, CapStory, CapTriggerVolume } from './format
 import { parsePeStrings } from './formats/pe_strings.ts';
 import { parseSoundCtx, parseTexturesNfo } from './formats/sound_ctx.ts';
 import { emitLevel } from './emit/gltf_level.ts';
+import { MOVIE_ENCODE_ARGS, MOVIES, type MovieTranscoder } from './movies.ts';
 
 /** Read access to the user's original install. Paths are relative, forward-slash separated. */
 export interface SourceFS {
@@ -47,6 +48,8 @@ export interface Manifest {
   placements: Record<string, string>;
   rules: Record<string, string>;
   audio: Record<string, string>;
+  /** Original movies transcoded for the browser: key (`MOVIES`) -> path. */
+  movies: Record<string, string>;
 }
 
 export interface ConvertOptions {
@@ -56,6 +59,8 @@ export interface ConvertOptions {
   log?: (msg: string) => void;
   /** Parallel image encodes. */
   concurrency?: number;
+  /** Turns the Bink movies into a browser format; without one they are left out (warning). */
+  movies?: MovieTranscoder | null;
   now?: () => Date;
 }
 
@@ -90,7 +95,7 @@ export async function sha256Hex(data: Uint8Array): Promise<string> {
 }
 
 function emptyManifest(): Manifest {
-  return { version: MANIFEST_VERSION, generated_at: '', inputs: {}, textures: {}, textureSizes: {}, models: {}, levels: {}, placements: {}, rules: {}, audio: {} };
+  return { version: MANIFEST_VERSION, generated_at: '', inputs: {}, textures: {}, textureSizes: {}, models: {}, levels: {}, placements: {}, rules: {}, audio: {}, movies: {} };
 }
 
 async function loadPrevious(sink: OutputSink): Promise<Manifest> {
@@ -353,6 +358,43 @@ export async function convertInstall(opts: ConvertOptions): Promise<ConvertRepor
     manifest.audio[key] = out;
   }
   if (musicFiles.length) log(`music: ${musicFiles.length} tracks`);
+
+  // --- Movies: Media/Movies/<file>.bik -> movies/<key>.<ext>, transcoded by the host; new encode
+  // settings transcode them again.
+  const movieEncode = MOVIE_ENCODE_ARGS.join(' ');
+  const movieNames = (await source.list?.('Media/Movies')) ?? null;
+  for (const movie of MOVIES) {
+    const file = movieNames ? movieNames.find((f) => f.toLowerCase() === movie.file.toLowerCase()) : movie.file;
+    if (!file) continue;
+    const path = `Media/Movies/${file}`;
+    const bytes = await source.readFile(path);
+    if (!bytes) continue;
+    const hash = await sha256Hex(bytes);
+    const transcoder = opts.movies;
+    const out = transcoder ? `movies/${movie.key}.${transcoder.ext}` : null;
+    if (prev.inputs[path] === hash && prev.inputs['movies:encode'] === movieEncode && prev.movies[movie.key] && (!out || prev.movies[movie.key] === out)) {
+      manifest.inputs[path] = hash;
+      manifest.inputs['movies:encode'] = movieEncode;
+      manifest.movies[movie.key] = prev.movies[movie.key]!;
+      report.skipped.push(path);
+      continue;
+    }
+    if (!transcoder || !out) {
+      report.warnings.push(`${path}: no movie transcoder (FFmpeg with Bink support) available, not converted`);
+      continue;
+    }
+    try {
+      log(`movies: transcoding ${file} (${(bytes.length / 1e6).toFixed(1)} MB)`);
+      await sink.writeFile(out, await transcoder.transcode(movie.key, bytes));
+      manifest.inputs[path] = hash;
+      manifest.inputs['movies:encode'] = movieEncode;
+      manifest.movies[movie.key] = out;
+      report.converted.push(path);
+    } catch (err) {
+      report.warnings.push(`${path}: ${(err as Error).message}`);
+    }
+  }
+  if (Object.keys(manifest.movies).length) log(`movies: ${Object.keys(manifest.movies).join(', ')}`);
 
   // --- Levels: Meshes/*.msh -> levels/<name>.glb + _lightmap atlas + .collision.bin
   manifest.inputs['levels:emit'] = LEVEL_EMIT_VERSION;

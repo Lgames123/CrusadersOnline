@@ -8,6 +8,7 @@ export class MusicPlayer {
   private track = 0;
   private urls: Record<string, string> | null = null;
   private unlocked = false;
+  private held = false;
 
   constructor(volume: number) {
     this.audio.loop = true;
@@ -48,13 +49,20 @@ export class MusicPlayer {
       };
       this.audio.addEventListener('loadedmetadata', seek, { once: true });
     }
-    if (this.unlocked) void this.audio.play().catch(() => {});
+    if (this.unlocked && !this.held) void this.audio.play().catch(() => {});
   }
 
   /** Browsers start audio only after a user gesture (the click that starts the game). */
   unlock(): void {
     this.unlocked = true;
-    if (this.track && this.audio.src && this.audio.paused) void this.audio.play().catch(() => {});
+    if (this.track && this.audio.src && this.audio.paused && !this.held) void this.audio.play().catch(() => {});
+  }
+
+  /** Silences the track while something else plays (the introduction movie); false resumes it. */
+  hold(on: boolean): void {
+    this.held = on;
+    if (on) this.audio.pause();
+    else if (this.unlocked && this.track && this.audio.src) void this.audio.play().catch(() => {});
   }
 
   set volume(v: number) {

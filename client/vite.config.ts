@@ -6,7 +6,7 @@ const ENV_FILE = path.resolve(import.meta.dirname, '../.env');
 if (existsSync(ENV_FILE)) process.loadEnvFile(ENV_FILE); // same SERVER_PORT as the game server
 const GAME_SERVER = process.env['GAME_SERVER_URL'] ?? `http://127.0.0.1:${process.env['SERVER_PORT'] ?? 8090}`;
 const GENERATED_DIR = path.resolve(import.meta.dirname, '../local/generated');
-const TYPES: Record<string, string> = { '.glb': 'model/gltf-binary', '.webp': 'image/webp', '.json': 'application/json' };
+const TYPES: Record<string, string> = { '.glb': 'model/gltf-binary', '.webp': 'image/webp', '.json': 'application/json', '.webm': 'video/webm' };
 
 /**
  * Dev-only: serves the user's locally converted assets (local/generated, git-ignored) at

@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { zipSync } from 'fflate';
 import {
+  MOVIES,
   TgaError,
   convertInstall,
   decodeTga,
   interpretDefaultCtx,
   parseCtxTable,
+  type MovieTranscoder,
   type OutputSink,
   type SourceFS,
 } from '@crusaders/converter';
@@ -110,5 +112,75 @@ describe('convertInstall pipeline', () => {
     const second = await convertInstall({ source, sink, encoder });
     expect(second.skipped).toEqual(['Textures/textures.zip']);
     expect(second.manifest.textures).toEqual({ wood: 'textures/wood.raw' });
+  });
+
+  describe('movies', () => {
+    // Listed in the case the GOG install has (3do.bik lower case); a fake transcoder tags its input.
+    const bik = { '3do.bik': new Uint8Array([1]), 'CMMIntro.bik': new Uint8Array([2]) };
+    const withMovies: SourceFS = {
+      async readFile(p) { return install[p] ?? bik[p.slice('Media/Movies/'.length) as keyof typeof bik] ?? null; },
+      async list(dir) { return dir === 'Media/Movies' ? [...Object.keys(bik), 'binkw32.dll'] : null; },
+    };
+    function transcoder() {
+      const calls: string[] = [];
+      const movies: MovieTranscoder = { ext: 'webm', async transcode(name, data) { calls.push(name); return new Uint8Array([9, ...data]); } };
+      return { calls, movies };
+    }
+
+    it('transcodes 3DO.bik and CMMIntro.bik into the manifest', async () => {
+      const { files, sink } = memory();
+      const { calls, movies } = transcoder();
+      const r = await convertInstall({ source: withMovies, sink, encoder, movies });
+      expect(MOVIES.map((m) => m.key)).toEqual(['3do', 'cmmintro']);
+      expect(calls).toEqual(['3do', 'cmmintro']);
+      expect(r.manifest.movies).toEqual({ '3do': 'movies/3do.webm', cmmintro: 'movies/cmmintro.webm' });
+      expect(files.get('movies/cmmintro.webm')).toEqual(new Uint8Array([9, 2]));
+      expect(r.manifest.inputs['Media/Movies/CMMIntro.bik']).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it('keeps unchanged movies, even without a transcoder', async () => {
+      const { sink } = memory();
+      await convertInstall({ source: withMovies, sink, encoder, movies: transcoder().movies });
+      const again = transcoder();
+      const second = await convertInstall({ source: withMovies, sink, encoder, movies: again.movies });
+      expect(again.calls).toEqual([]);
+      expect(second.skipped).toContain('Media/Movies/CMMIntro.bik');
+      const third = await convertInstall({ source: withMovies, sink, encoder });
+      expect(third.manifest.movies).toEqual({ '3do': 'movies/3do.webm', cmmintro: 'movies/cmmintro.webm' });
+      expect(third.warnings.filter((w) => w.startsWith('Media/'))).toEqual([]);
+    });
+
+    it('transcodes again when the encode settings changed', async () => {
+      const { files, sink } = memory();
+      await convertInstall({ source: withMovies, sink, encoder, movies: transcoder().movies });
+      const m = JSON.parse(files.get('manifest.json') as string);
+      m.inputs['movies:encode'] = '-c:a libopus';
+      files.set('manifest.json', JSON.stringify(m));
+      const again = transcoder();
+      await convertInstall({ source: withMovies, sink, encoder, movies: again.movies });
+      expect(again.calls).toEqual(['3do', 'cmmintro']);
+    });
+
+    it('leaves movies out with a warning when nothing can transcode them', async () => {
+      const { sink } = memory();
+      const r = await convertInstall({ source: withMovies, sink, encoder });
+      expect(r.manifest.movies).toEqual({});
+      expect(r.warnings.filter((w) => w.startsWith('Media/Movies/'))).toHaveLength(2);
+    });
+
+    it('reports a failed transcode and goes on', async () => {
+      const { sink } = memory();
+      const movies: MovieTranscoder = { ext: 'webm', async transcode(name) { if (name === '3do') throw new Error('broken'); return new Uint8Array([1]); } };
+      const r = await convertInstall({ source: withMovies, sink, encoder, movies });
+      expect(r.manifest.movies).toEqual({ cmmintro: 'movies/cmmintro.webm' });
+      expect(r.warnings).toContain('Media/Movies/3do.bik: broken');
+    });
+
+    it('needs no movies: installs without them convert as before', async () => {
+      const { sink } = memory();
+      const r = await convertInstall({ source, sink, encoder, movies: transcoder().movies });
+      expect(r.manifest.movies).toEqual({});
+      expect(r.warnings.filter((w) => w.startsWith('Media/'))).toEqual([]);
+    });
   });
 });

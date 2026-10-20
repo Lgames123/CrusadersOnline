@@ -45,6 +45,9 @@ Changes made for the multiplayer world or on request. Each has a context note in
 - **Input:** a movement key closes the inventory windows; holding Alt frees the cursor; there is no
   "click to play" hint.
 - **MMO tools:** text chat, hotbar, admin panel.
+- **Intro movies:** the original plays 3DO.bik then CMMIntro.bik at every start. Here a new
+  character is offered them in the creation dialog (checked by default), and Options →
+  Introduction plays them again. Re-encoded to WebM (VP8 + Vorbis) from the player's own files.
 - **Ending:** everyone who hurt Necros gets the ending. After Cs5b's last scene, Drake stays in
   Cs5b with the story complete, and every door opens for him from either side.
 
@@ -53,7 +56,6 @@ Changes made for the multiplayer world or on request. Each has a context note in
 - **Completion reward:** a title, a cape or similar, for characters who finished the story; to
   be decided.
 - **Waypoints:** later, so players can teleport to the areas and maps they have unlocked.
-- **Intro movies:** an option at character creation to watch the introduction (.bik).
 - **Side quests:** the 26 cut quests, behind `sideQuests` (`game-design/side-quests.md`).
 - **Chat ignore list:** kept in the browser and applied on display. No chat history.
 

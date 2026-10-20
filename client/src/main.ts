@@ -79,6 +79,7 @@ import { GameFilesPanel } from './ui/game_files_panel.ts';
 import { InputManager } from './input/input_manager.ts';
 import { installBrowserGuards } from './input/browser_guards.ts';
 import { MusicPlayer } from './audio/music.ts';
+import { introMovies, playIntro } from './ui/intro_movie.ts';
 import { EFFECTS_SCALE, Effects, SMALL_EFFECTS_SCALE } from './engine/effects.ts';
 import { Decals } from './engine/decals.ts';
 import { SpellVisuals } from './engine/spell_visuals.ts';
@@ -265,6 +266,19 @@ async function main(): Promise<void> {
   const title = await TitleScene.create(renderer, settings, originals);
   if (import.meta.env.DEV) (window as unknown as { __title: TitleScene }).__title = title;
   const resumeButton = document.getElementById('btn-resume')!;
+  // Options → Introduction (when converted): closes the menu and plays the original's movies.
+  const introButton = document.getElementById('btn-intro')!;
+  void introMovies().then((m) => (introButton.hidden = !m));
+  let watchIntro = async (movies: string[]) => {
+    resumeButton.click(); // the title screen's options close
+    music.hold(true);
+    await playIntro(movies);
+    music.hold(false);
+  };
+  introButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    void introMovies().then((m) => m && watchIntro(m));
+  });
   const auth = await runFrontEnd({
     title,
     music,
@@ -1077,6 +1091,15 @@ async function main(): Promise<void> {
     if (!input.locked && !optionsOpen && !inScene()) play();
   });
   document.getElementById('btn-resume')!.addEventListener('click', () => setOptionsOpen(false));
+  // In the world the menu stays "open" under the movie (no pointer, no menus), then play resumes.
+  watchIntro = async (movies) => {
+    overlay.classList.add('hidden');
+    gameFiles.visible = false;
+    music.hold(true);
+    await playIntro(movies);
+    music.hold(false);
+    setOptionsOpen(false);
+  };
   const isAlt = (e: KeyboardEvent) => (e.code === 'AltLeft' || e.code === 'AltRight') && !input.isBound(e.code);
   window.addEventListener('keydown', (e) => {
     if (!isAlt(e) || e.repeat || !input.locked || inScene()) return;
