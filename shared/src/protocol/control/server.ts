@@ -35,6 +35,8 @@ export interface WorldEnterMsg {
     yaw?: number;
     /** Non-original gameplay features this server has on (features.ts); absent: none. */
     features?: Partial<GameplayFeatures>;
+    /** This act's waypoint crystal (waypoints.ts, not original): shown to finished characters. */
+    waypoint?: { x: number; y: number; z: number };
   };
 }
 

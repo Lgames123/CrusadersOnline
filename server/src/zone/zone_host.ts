@@ -9,7 +9,7 @@ export interface ZoneHostEvents {
   metrics?(m: ZoneMetrics): void;
   persist?(records: PersistRecord[], reason: PersistReason): void;
   error?(err: Error): void;
-  portal?(connId: number, target: string, keep?: { x: number; y: number; z: number; mesh: string }, via?: ExitCrossing): void;
+  portal?(connId: number, target: string, keep?: { x: number; y: number; z: number; mesh: string }, via?: ExitCrossing, waypoint?: boolean): void;
   transferred?(connId: number, record: PersistRecord | null, state: TransferState | null): void;
   loot?(event: LootEvent): void;
 }
@@ -50,7 +50,7 @@ export class ZoneHost {
             events.persist?.(msg.records, msg.reason);
             break;
           case 'portal':
-            events.portal?.(msg.connId, msg.target, msg.keep, msg.via);
+            events.portal?.(msg.connId, msg.target, msg.keep, msg.via, msg.waypoint);
             break;
           case 'loot':
             events.loot?.(msg.event);
@@ -167,6 +167,10 @@ export class ZoneHost {
 
   unstuck(connId: number): void {
     this.post({ t: 'unstuck', connId });
+  }
+
+  waypointTravel(connId: number, act: string): void {
+    this.post({ t: 'waypoint', connId, act });
   }
 
   useItem(connId: number, slot: number): void {

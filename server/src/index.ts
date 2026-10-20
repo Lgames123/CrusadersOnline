@@ -63,7 +63,7 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
       metrics: (m) => log.debug(m, 'zone tick metrics'),
       error: (arena, err) => log.error({ err, arena }, 'zone worker error'),
       persist: (records, reason) => save(records, reason),
-      portal: (arena, connId, target, keep, via) => sessions?.onPortal(arena, connId, target, keep, via),
+      portal: (arena, connId, target, keep, via, waypoint) => sessions?.onPortal(arena, connId, target, keep, via, waypoint),
       transferred: (arena, connId, record, state) => sessions?.onTransferred(arena, connId, record, state),
       loot: (arena, { connId, character, chest, outcome, items }) =>
         log.info({ conn: connId, character, zone: arena, chest, items }, outcome === 'looted' ? 'chest looted' : 'chest not looted: inventory full'),
@@ -74,7 +74,7 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
   await zones.get(config.arena);
   let admin: AdminService | null = null;
   sessions = new SessionManager(tickets, zones, characters, log, {
-    defaultArena: config.arena, difficulty: config.difficulty, devGuestSpawn: config.devGuestSpawn, devGuestSpells: config.devGuestSpells, devGuestXp: config.devGuestXp, devGuestItems: config.devGuestItems,
+    defaultArena: config.arena, difficulty: config.difficulty, devGuestSpawn: config.devGuestSpawn, devGuestSpells: config.devGuestSpells, devGuestXp: config.devGuestXp, devGuestFinished: config.devGuestFinished, devGuestItems: config.devGuestItems,
     persist: (r) => save(r, 'transfer'),
     onChat: (line) => admin?.chat(line),
     greeting: () => admin?.greeting() ?? null,

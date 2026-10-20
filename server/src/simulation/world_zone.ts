@@ -23,6 +23,10 @@ import {
   ENDING_EXIT,
   ENDING_LOAD_SECONDS,
   NECROS_ACT,
+  WAYPOINT_REACH,
+  isWaypointAct,
+  waypointSpot,
+  type WaypointSpot,
   estimateSequenceMs,
   stagedPlayerSpot,
   stagedPlayerYaw,
@@ -271,9 +275,10 @@ export interface ZoneOutbox {
   /**
    * A player walked into a portal trigger leading to `target` (once per entry), or a scripted
    * sequence loads another act; `keep`: arrive at this position if `target` is on the same mesh;
-   * `via`: the exit taken and where the player crossed it (where he arrives, see exitArrival).
+   * `via`: the exit taken and where the player crossed it (where he arrives, see exitArrival);
+   * `waypoint`: a teleport from a waypoint crystal (he arrives at the destination's crystal).
    */
-  portal?(connId: number, target: string, keep?: { x: number; y: number; z: number; mesh: string }, via?: ExitCrossing): void;
+  portal?(connId: number, target: string, keep?: { x: number; y: number; z: number; mesh: string }, via?: ExitCrossing, waypoint?: boolean): void;
   /** A chest was opened, or left shut for a bag too full to take it all (the server log). */
   loot?(event: LootEvent): void;
 }
@@ -310,6 +315,8 @@ export interface JoinOptions {
   /** A story level change: arrive here if this arena is on `arrivingMesh` (another act of the same level). */
   arrivingAt?: { x: number; y: number; z: number };
   arrivingMesh?: string;
+  /** A waypoint teleport (not original): arrive beside this act's crystal (waypoints.ts). */
+  arrivingWaypoint?: boolean;
   /** Story progress: triggers fired and the quest book (story.ts). */
   story?: StoryState;
   /** Timers running when he left his last zone (a zone transfer only; logins start clean). */
@@ -330,7 +337,7 @@ export interface CarriedTimers {
 }
 
 /** Player state carried across a zone transfer (everything but the position). */
-export type TransferState = Omit<JoinOptions, 'position' | 'arrivingFrom' | 'arrivingVia' | 'arrivingAt' | 'arrivingMesh'>;
+export type TransferState = Omit<JoinOptions, 'position' | 'arrivingFrom' | 'arrivingVia' | 'arrivingAt' | 'arrivingMesh' | 'arrivingWaypoint'>;
 
 /** State a zone hands back for saving (see persistence/characters.ts). */
 export interface PersistRecord {
@@ -873,6 +880,8 @@ export class WorldZone {
   private readonly states = new Map<number, EntityState>();
   private nextEntityId = 1;
   private spawnIndex = 0;
+  /** The act's waypoint crystal (undefined until first asked). */
+  private crystalSpot: WaypointSpot | null | undefined;
   /** Respawn points by way in (respawnFor). */
   private respawns = new Map<string, { x: number; y: number; z: number }>();
   private encodeBuf = new DataView(new ArrayBuffer(16 * 1024));
@@ -1279,7 +1288,8 @@ export class WorldZone {
   join(connId: number, opts: JoinOptions): number {
     if (this.players.has(connId)) throw new Error(`connection ${connId} already in zone`);
     // Nowhere to resume in an original act: its first start point, as a new game (0x476F20).
-    const start = !opts.arrivingAt && !opts.arrivingFrom && !validPosition(opts.position) ? this.arena.starts?.[0] : undefined;
+    const crystal = opts.arrivingWaypoint ? this.waypoint : null;
+    const start = !crystal && !opts.arrivingAt && !opts.arrivingFrom && !validPosition(opts.position) ? this.arena.starts?.[0] : undefined;
     // Through an exit: the original's entry point; the heading carries over unless it names one.
     const arr = opts.arrivingFrom ? exitArrival(this.arena, opts.arrivingFrom, opts.arrivingVia) : null;
     const respawnSpot = this.respawnFor(opts.arrivingFrom, opts.arrivingVia);
@@ -1287,7 +1297,9 @@ export class WorldZone {
     const resume = validPosition(opts.position) && (opts.hp === undefined || opts.hp > 0) && opts.position.y >= this.fallLimit
       ? opts.position
       : respawnSpot;
-    const spawn = opts.arrivingAt && opts.arrivingMesh && opts.arrivingMesh === this.arena.mesh && validPosition(opts.arrivingAt)
+    const spawn = crystal
+      ? crystal.arrival
+      : opts.arrivingAt && opts.arrivingMesh && opts.arrivingMesh === this.arena.mesh && validPosition(opts.arrivingAt)
       ? opts.arrivingAt
       : arr
         ? arr
@@ -1321,7 +1333,7 @@ export class WorldZone {
       statuses: new Map(),
       timeAcc: 0,
       queue: new InputQueue(),
-      yaw: start ? quantizeAngle(start.yaw) : arr?.yaw !== undefined ? quantizeAngle(arr.yaw) : (opts.yaw ?? 0) & 0xffff,
+      yaw: crystal ? quantizeAngle(crystal.arrival.yaw) : start ? quantizeAngle(start.yaw) : arr?.yaw !== undefined ? quantizeAngle(arr.yaw) : (opts.yaw ?? 0) & 0xffff,
       anim: ANIM.IDLE,
       hp,
       maxHp,
@@ -1381,6 +1393,7 @@ export class WorldZone {
       op: SC.WORLD_ENTER,
       d: {
         entityId: p.entityId, zone: this.name, arena: this.arena.name, serverTick: this.tick, spawn: { ...p.character.position }, yaw: dequantizeAngle(p.yaw),
+        ...(this.waypoint ? { waypoint: { ...this.waypoint.crystal } } : {}),
         ...(Object.keys(enabledFeatures(this.features)).length ? { features: enabledFeatures(this.features) } : {}),
       },
     });
@@ -2257,6 +2270,33 @@ export class WorldZone {
     p.cast = null;
     this.toRespawnSpot(p);
     this.notify(p, 'info', 'You have been moved to a safe place.');
+  }
+
+  /** This act's waypoint crystal (not original; waypoints.ts), found once; null: none here. */
+  private get waypoint(): WaypointSpot | null {
+    if (this.crystalSpot === undefined) {
+      const act = this.act;
+      this.crystalSpot = act && isWaypointAct(act) ? waypointSpot(this.arena) : null;
+    }
+    return this.crystalSpot;
+  }
+
+  /**
+   * CS_WAYPOINT_TRAVEL (not original): a player who finished the story, at this act's crystal,
+   * teleports to another campaign act's crystal. Alive, outside sequences and the ending, not held.
+   */
+  waypointTravel(connId: number, act: string): void {
+    const p = this.players.get(connId);
+    const spot = this.waypoint;
+    if (!p || !spot || !alive(p) || p.cutscene || p.ending || this.held(p)) return;
+    if (p.story.completedAt === undefined) return this.notify(p, 'error', 'The crystal is dormant.');
+    const at = p.character.position;
+    if (Math.hypot(at.x - spot.crystal.x, at.z - spot.crystal.z) > WAYPOINT_REACH + 0.5 || Math.abs(at.y - spot.crystal.y) > 2.5) return;
+    if (!isWaypointAct(act) || act === this.act) return;
+    p.swing = null;
+    p.queuedAttack = false;
+    p.cast = null;
+    this.outbox.portal?.(p.connId, `${LEVEL_PREFIX}${act}`, undefined, undefined, true);
   }
 
   /** Puts a player at his respawn spot; the triggers there count as entered (never fired). */

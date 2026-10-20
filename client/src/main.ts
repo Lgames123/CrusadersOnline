@@ -20,6 +20,7 @@ import {
   PLAYER_REACH,
   attackTiming,
   LEVEL_PREFIX,
+  WAYPOINT_REACH,
   MAIN_QUESTS,
   NPC_VOICES,
   ASM_STATE_NAMES,
@@ -103,6 +104,8 @@ import { logout } from './frontend/api.ts';
 import { CHARACTER_SCREEN_FLAG, runFrontEnd } from './frontend/front_end.ts';
 import { TitleScene } from './frontend/title_scene.ts';
 import { QuestBook, loadGameStrings } from './ui/quest_book.ts';
+import { WaypointMap } from './ui/waypoint_map.ts';
+import { CRYSTAL_LIGHT_COLOR, WaypointCrystal } from './engine/waypoint_crystal.ts';
 import { CharacterSheet } from './ui/character_sheet.ts';
 import { Cutscene, type Puppet } from './story/cutscene.ts';
 import { NecrosDeath } from './story/necros_death.ts';
@@ -112,6 +115,7 @@ const MAX_FRAME_MS = 250;
 /** Enhanced lighting (not original): wall torches, the player's Torch Light, sparks. */
 const LEVEL_TORCH_KEY = 'level-torch:';
 const LEVEL_TORCH_COLOR = 0xff9a40;
+const WAYPOINT_LIGHT_KEY = 'waypoint';
 const LEVEL_TORCH_INTENSITY = 1.2;
 const LEVEL_TORCH_RADIUS = 8;
 const MY_TORCH_KEY = 'torch:me';
@@ -208,6 +212,25 @@ async function main(): Promise<void> {
   const questBook = new QuestBook(document.getElementById('quest-book')!, assetManifest?.textures ?? {});
   questBook.setStrings(gameStrings);
   const charSheet = new CharacterSheet(document.getElementById('char-sheet')!, assetManifest?.textures ?? {});
+  const waypointMap = new WaypointMap();
+  // This act's waypoint crystal (SC_WORLD_ENTER; not original): shown once the story is finished.
+  let crystalAt: { x: number; y: number; z: number } | null = null;
+  let crystal: WaypointCrystal | null = null;
+  const crystalLight = new THREE.Vector3();
+  const refreshCrystal = () => {
+    const show = !!crystalAt && !!session?.playerStats?.storyComplete;
+    if (!show) {
+      crystal?.dispose();
+      crystal = null;
+      dynamicLights.remove(WAYPOINT_LIGHT_KEY);
+      return;
+    }
+    if (!crystal) {
+      crystal = new WaypointCrystal();
+      scene.add(crystal.object);
+    }
+    crystal.object.position.set(crystalAt!.x, crystalAt!.y, crystalAt!.z);
+  };
   charSheet.setStrings(gameStrings);
   // Scripted sequences (cutscenes): played here, the server waits for the end (CS_CUTSCENE_DONE).
   let cutscene: Cutscene | null = null;
@@ -520,6 +543,7 @@ async function main(): Promise<void> {
           correction: (dx, dy, dz) => player?.correct(dx, dy, dz),
           stats: (s) => {
             hud.stats(s);
+            if (!!crystal !== (!!s.storyComplete && !!crystalAt)) refreshCrystal();
             charSheet.update(s);
             if (live) spellVisuals.syncStatuses(live.entityId, (s.statuses ?? []).map((x) => x.tag));
             inventoryPanel.setGold(s.gold);
@@ -693,6 +717,9 @@ async function main(): Promise<void> {
           },
           enter: (d) => {
             errorBox.textContent = '';
+            crystalAt = d.waypoint ?? null;
+            setWaypointMapOpen(false);
+            refreshCrystal();
             enterYaw = d.yaw ?? null;
             // From black: an act's opening sequence (the server sends it on its first tick, before
             // that tick's snapshot) takes the fade over; otherwise the world fades in.
@@ -1063,7 +1090,7 @@ async function main(): Promise<void> {
   /** Alt held: the cursor is out for the UI; letting go takes the camera back. */
   let altFree = false;
   let optionsAt = 0;
-  input.wantsLock = () => !(altFree || chat.typing || optionsOpen || inventoryPanel.open || questBook.open || charSheet.open || inScene());
+  input.wantsLock = () => !(altFree || chat.typing || optionsOpen || inventoryPanel.open || questBook.open || charSheet.open || waypointMap.open || inScene());
   const play = () => {
     sounds?.unlock();
     music.unlock();
@@ -1111,7 +1138,7 @@ async function main(): Promise<void> {
     if (!isAlt(e) || !altFree) return;
     altFree = false;
     // A page that let go of the lock itself may take it back without a click (Pointer Lock 2.0).
-    if (!optionsOpen && !chat.typing && !inventoryPanel.open && !questBook.open && !charSheet.open && !inScene()) input.requestLock();
+    if (!optionsOpen && !chat.typing && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !inScene()) input.requestLock();
   });
   // The chat line takes the keyboard (Enter): the camera lets go of the pointer, and takes it
   // back without a click when the line closes, unless a window was open before.
@@ -1124,7 +1151,7 @@ async function main(): Promise<void> {
       document.exitPointerLock();
     } else if (!typing && chatTookLock) {
       chatTookLock = false;
-      if (!optionsOpen && !inventoryPanel.open && !questBook.open && !charSheet.open && !inScene()) input.requestLock();
+      if (!optionsOpen && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !inScene()) input.requestLock();
     }
   };
   window.addEventListener('blur', () => {
@@ -1187,11 +1214,16 @@ async function main(): Promise<void> {
   const DOOR_RANGE = 1.6;
   const nearestInteractable = () => {
     if (!levelView || !session) return null;
-    let best: { id: number; label: string; d: number; key?: boolean; shop?: boolean } | null = null;
+    let best: { id: number; label: string; d: number; key?: boolean; shop?: boolean; waypoint?: boolean } | null = null;
     // In a shop's volume (the merchant's counter): Tab trades.
     const shop = shopHere();
     if (shop) best = { id: shop.id, label: 'Tab — trade', d: 0.5, shop: true };
     const p = local.object.position;
+    // A waypoint crystal (a finished story only): Tab opens the map.
+    if (crystal && crystalAt) {
+      const d = Math.hypot(crystalAt.x - p.x, crystalAt.z - p.z);
+      if (d <= WAYPOINT_REACH && Math.abs(crystalAt.y - p.y) < 2.5 && (!best || best.d > d)) best = { id: 0, label: 'Tab — waypoint crystal', d, waypoint: true };
+    }
     // Peaceful creatures within reach: Tab talks.
     for (const [id, e] of remotes.byId) {
       if (!e.visible || e.hp <= 0 || !e.info.archetype?.startsWith('npc_') || talkLine(e) === null) continue;
@@ -1353,7 +1385,8 @@ async function main(): Promise<void> {
       const sign = messagesAt(MESSAGE_USE)[0];
       if (sign) showMessage(sign);
       const target = nearestInteractable();
-      if (target?.shop) session?.shopOpen(target.id);
+      if (target?.waypoint) setWaypointMapOpen(true);
+      else if (target?.shop) session?.shopOpen(target.id);
       else if (target && target.id < 0) talk(-target.id);
       else if (target && !target.key) {
         session?.interact(target.id);
@@ -1473,7 +1506,7 @@ async function main(): Promise<void> {
       chat.blur();
     }
     // Esc released the pointer: the options (sequences play to their end, as in the original).
-    if (!locked && !ours && !inventoryPanel.open && !questBook.open && !charSheet.open && !inScene()) setOptionsOpen(true);
+    if (!locked && !ours && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !inScene()) setOptionsOpen(true);
   };
 
   // Inventory window (online only); the ground window opens beside it (and opens it).
@@ -1545,6 +1578,30 @@ async function main(): Promise<void> {
     } else if (!swapping && !optionsOpen) input.requestLock();
   }
   charSheet.onClose = () => setCharSheetOpen(false);
+  // The waypoint map (a crystal's use key), online only.
+  function setWaypointMapOpen(open: boolean): void {
+    if (open === waypointMap.open) return;
+    if (!open) {
+      waypointMap.hide();
+      if (!optionsOpen && session) input.requestLock();
+      return;
+    }
+    const act = levelView?.arena.name.startsWith(LEVEL_PREFIX) ? levelView.arena.name.slice(LEVEL_PREFIX.length) : null;
+    if (!session || !act) return;
+    closeInventoryPanels();
+    setQuestBookOpen(false, true);
+    setCharSheetOpen(false, true);
+    waypointMap.show(act);
+    if (input.locked) {
+      releasing = true;
+      document.exitPointerLock();
+    }
+  }
+  waypointMap.onClose = () => setWaypointMapOpen(false);
+  waypointMap.onTravel = (act) => {
+    session?.waypointTravel(act);
+    waypointMap.hide();
+  };
   questBook.onTurn = () => sounds?.play(SFX.turnPage);
   window.addEventListener('keydown', (e) => {
     // Sequences cannot be skipped.
@@ -1557,6 +1614,7 @@ async function main(): Promise<void> {
       } else if (inventoryPanel.open) closeInventoryPanels();
       else if (questBook.open) setQuestBookOpen(false);
       else if (charSheet.open) setCharSheetOpen(false);
+      else if (waypointMap.open) setWaypointMapOpen(false);
       else setOptionsOpen(true);
       return;
     }
@@ -1573,13 +1631,14 @@ async function main(): Promise<void> {
     } else if (!typing && e.shiftKey && !e.repeat && e.code === 'KeyC') {
       e.preventDefault();
       setInventoryOpen(!inventoryPanel.open);
-    } else if (!typing && !e.defaultPrevented && !e.ctrlKey && !e.altKey && !e.shiftKey && !chat.typing && (inventoryPanel.open || questBook.open || charSheet.open) && input.isMoveKey(e.code)) {
+    } else if (!typing && !e.defaultPrevented && !e.ctrlKey && !e.altKey && !e.shiftKey && !chat.typing && (inventoryPanel.open || questBook.open || charSheet.open || waypointMap.open) && input.isMoveKey(e.code)) {
       // Walking off with a window open: the windows close, the camera takes the pointer back and
       // the step starts at once (not after the key repeat).
       e.preventDefault();
       closeInventoryPanels();
       setQuestBookOpen(false);
       setCharSheetOpen(false);
+      waypointMap.hide();
       input.pressMove(e.code);
     } else if ((input.isKeyForAction('inventory', e.code) || e.code === 'KeyI') && !e.repeat) setInventoryOpen(!inventoryPanel.open);
     else if ((input.isKeyForAction('questBook', e.code) || e.code === 'F2') && !e.repeat) {
@@ -1649,6 +1708,10 @@ async function main(): Promise<void> {
       local.avatar.update(sceneDt);
       if (cutscene?.finished) endCutscene();
     } else local.render(acc / TICK_MS, dt);
+    if (crystal) {
+      crystal.update(dt);
+      dynamicLights.set(WAYPOINT_LIGHT_KEY, crystal.lightPosition(crystalLight), CRYSTAL_LIGHT_COLOR, 2.2, 7, 0.05);
+    }
     if (myTorch.visible) {
       myTorch.position.set(local.object.position.x, local.object.position.y + TORCH_LIGHT_HEIGHT, local.object.position.z);
       dynamicLights.set(MY_TORCH_KEY, myTorch.position, TORCH_LIGHT_COLOR, TORCH_DYNAMIC_INTENSITY, myTorch.distance, 0.08);

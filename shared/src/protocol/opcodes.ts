@@ -27,6 +27,8 @@ export const CS = {
   SHOP_SELL: 0x15,
   /** Asks to be put back where the player would respawn (the options menu's Unstuck). */
   UNSTUCK: 0x16,
+  /** Teleports from a waypoint crystal to another act's (not original; a finished story only). */
+  WAYPOINT_TRAVEL: 0x17,
 } as const;
 
 /** Server -> client opcodes. */

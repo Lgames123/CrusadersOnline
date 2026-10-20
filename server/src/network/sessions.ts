@@ -1,5 +1,5 @@
 import type { Logger } from 'pino';
-import { CS, LEVEL_PREFIX, MAX_STACK, PERMANENT_UNTIL, SC, SPELLS, decodeSpells, encodeSpells, parseClientControl, startingInventory, type Difficulty, type InventoryEntry, type ExitCrossing, type KnownSpell, type ServerControlMsg } from '@crusaders/shared';
+import { CS, LEVEL_PREFIX, MAX_STACK, PERMANENT_UNTIL, SC, SPELLS, decodeSpells, emptyStoryState, encodeSpells, parseClientControl, startingInventory, type Difficulty, type InventoryEntry, type ExitCrossing, type KnownSpell, type ServerControlMsg } from '@crusaders/shared';
 import type { Account, TicketStore } from '../auth/tickets.ts';
 import type { CharacterPersistRecord, CharacterRepository } from '../persistence/characters.ts';
 import type { JoinOptions, PersistRecord, TransferState } from '../simulation/world_zone.ts';
@@ -90,6 +90,7 @@ export class SessionManager implements TransportHandlers {
       devGuestSpawn?: { x: number; y: number; z: number } | null;
       devGuestSpells?: string | null;
       devGuestXp?: number;
+      devGuestFinished?: boolean;
       devGuestItems?: string | null;
       persist: (records: CharacterPersistRecord[]) => void;
       /** Every player's chat line, for the admin panel's log. */
@@ -112,6 +113,7 @@ export class SessionManager implements TransportHandlers {
     this.devGuestSpells = all ? SPELLS.map((spell) => ({ spell, level: Number(all[1]) })) : decodeSpells(opts.devGuestSpells);
     this.devGuestSpells = decodeSpells(encodeSpells(this.devGuestSpells));
     this.devGuestXp = opts.devGuestXp ?? 0;
+    this.devGuestFinished = opts.devGuestFinished ?? false;
     const extra = (opts.devGuestItems ?? '').split(',').map((e) => e.trim().split(':')).filter(([id]) => !!id);
     this.devGuestItems = extra.length
       ? [...startingInventory(), ...extra.map(([itemId, n], i) => ({ slot: 2 + i, itemId: itemId!, equipped: false, ...(Number(n) > 1 ? { quantity: Math.min(MAX_STACK, Number(n)) } : {}) }))]
@@ -127,6 +129,8 @@ export class SessionManager implements TransportHandlers {
   /** Development only: what guests know and their experience (DEV_GUEST_SPELLS / DEV_GUEST_XP). */
   private readonly devGuestSpells: KnownSpell[];
   private readonly devGuestXp: number;
+  /** Development only: guests have finished the story (DEV_GUEST_FINISHED). */
+  private readonly devGuestFinished: boolean;
   /** Development only: the guests' inventory (DEV_GUEST_ITEMS), else the starting one. */
   private readonly devGuestItems: InventoryEntry[] | null;
 
@@ -135,7 +139,7 @@ export class SessionManager implements TransportHandlers {
   }
 
   /** A player of `arena` entered a portal to `target` (from the zone worker). */
-  onPortal(arena: string, connId: number, target: string, keep?: { x: number; y: number; z: number; mesh: string }, via?: ExitCrossing): void {
+  onPortal(arena: string, connId: number, target: string, keep?: { x: number; y: number; z: number; mesh: string }, via?: ExitCrossing, waypoint?: boolean): void {
     const s = this.sessions.get(connId);
     if (!s || s.state !== 'in_world' || s.zone !== arena) return;
     if (!this.zones.available(target)) {
@@ -151,19 +155,26 @@ export class SessionManager implements TransportHandlers {
     (s as Session & { transferTo?: string }).transferTo = target;
     (s as Session & { transferKeep?: typeof keep }).transferKeep = keep;
     (s as Session & { transferVia?: ExitCrossing }).transferVia = via;
+    (s as Session & { transferWaypoint?: boolean }).transferWaypoint = waypoint;
   }
 
   /** The old zone removed the player: save, then send them into the destination zone. */
   onTransferred(arena: string, connId: number, record: PersistRecord | null, state: TransferState | null): void {
-    const s = this.sessions.get(connId) as (Session & { transferTo?: string; transferKeep?: { x: number; y: number; z: number; mesh: string }; transferVia?: ExitCrossing }) | undefined;
+    const s = this.sessions.get(connId) as (Session & { transferTo?: string; transferKeep?: { x: number; y: number; z: number; mesh: string }; transferVia?: ExitCrossing; transferWaypoint?: boolean }) | undefined;
     const target = s?.transferTo;
     const keep = s?.transferKeep;
     const via = s?.transferVia;
+    const waypoint = s?.transferWaypoint;
     if (record) this.persist([{ ...record, ...(target ? { zone: target, resetPosition: true } : {}) }]);
     if (!s || !target || !state) return;
     delete s.transferTo;
     delete s.transferKeep;
     delete s.transferVia;
+    delete s.transferWaypoint;
+    if (waypoint) {
+      void this.sendToZone(s, target, { ...state, arrivingWaypoint: true });
+      return;
+    }
     void this.sendToZone(s, target, { ...state, arrivingFrom: arena, ...(via ? { arrivingVia: via } : {}), ...(keep ? { arrivingAt: { x: keep.x, y: keep.y, z: keep.z }, arrivingMesh: keep.mesh } : {}) });
   }
 
@@ -343,6 +354,9 @@ export class SessionManager implements TransportHandlers {
       case CS.UNSTUCK:
         if (s.state === 'in_world') this.zoneOf(s)?.unstuck(conn.id);
         return;
+      case CS.WAYPOINT_TRAVEL:
+        if (s.state === 'in_world') this.zoneOf(s)?.waypointTravel(conn.id, msg.d.act);
+        return;
       case CS.CHAT_MESSAGE:
         this.chat(s, msg.d.channel, msg.d.text, msg.d.to);
         return;
@@ -475,6 +489,7 @@ export class SessionManager implements TransportHandlers {
           ...(this.devGuestSpawn ? { position: this.devGuestSpawn } : {}),
           ...(this.devGuestSpells.length ? { spells: this.devGuestSpells, selectedSpell: this.devGuestSpells[0]!.spell } : {}),
           ...(this.devGuestXp ? { experience: this.devGuestXp } : {}),
+          ...(this.devGuestFinished ? { story: { ...emptyStoryState(), completedAt: Date.now() } } : {}),
           ...(this.devGuestItems ? { inventory: structuredClone(this.devGuestItems) } : {}),
         });
       } else {

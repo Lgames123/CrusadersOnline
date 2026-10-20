@@ -375,6 +375,12 @@ export class ClientSession {
     this.sendJson({ op: CS.UNSTUCK, seq: ++this.seq, d: {} });
   }
 
+  /** Teleports from this act's waypoint crystal to `act`'s (the server checks reach and the story). */
+  waypointTravel(act: string): void {
+    if (!this.connected || this.dead) return;
+    this.sendJson({ op: CS.WAYPOINT_TRAVEL, seq: ++this.seq, d: { act } });
+  }
+
   /** The scripted sequence `sequence` has been played (or skipped). */
   cutsceneDone(sequence: string): void {
     if (!this.connected) return;

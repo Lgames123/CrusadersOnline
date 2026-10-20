@@ -153,6 +153,12 @@ export const UnstuckPacketSchema = z.object({
   d: z.object({}),
 });
 
+export const WaypointTravelPacketSchema = z.object({
+  op: z.literal(CS.WAYPOINT_TRAVEL),
+  seq: z.number().int().positive(),
+  d: z.object({ act: z.string().regex(/^[a-z0-9-]{2,16}$/) }),
+});
+
 export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   AuthTicketPacketSchema,
   SelectCharacterPacketSchema,
@@ -174,6 +180,7 @@ export const ClientControlPacketSchema = z.discriminatedUnion('op', [
   PingPacketSchema,
   CutsceneDonePacketSchema,
   UnstuckPacketSchema,
+  WaypointTravelPacketSchema,
 ]);
 
 export type ClientControlPacket = z.infer<typeof ClientControlPacketSchema>;

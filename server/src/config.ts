@@ -47,6 +47,8 @@ export interface ServerConfig {
    */
   devGuestSpells: string | null;
   devGuestXp: number;
+  /** Development only (DEV_GUEST_FINISHED=1): guests have finished the story (post-game, waypoints). */
+  devGuestFinished: boolean;
   /** Development only: what guests carry besides the sword and shield (DEV_GUEST_ITEMS, "healing_potion:5,axe:1"). */
   devGuestItems: string | null;
   /** Name of this world on the server selection screen (REALM_NAME). */
@@ -95,6 +97,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     devGuestSpawn: env === 'production' ? null : parsePoint(process.env['DEV_GUEST_SPAWN']),
     devGuestSpells: env === 'production' ? null : process.env['DEV_GUEST_SPELLS'] ?? null,
     devGuestXp: env === 'production' ? 0 : Math.max(0, Number(process.env['DEV_GUEST_XP'] ?? 0) || 0),
+    devGuestFinished: env !== 'production' && process.env['DEV_GUEST_FINISHED'] === '1',
     devGuestItems: env === 'production' ? null : process.env['DEV_GUEST_ITEMS'] ?? null,
     realmName: (process.env['REALM_NAME'] ?? '').trim().slice(0, 32) || 'Ardon',
     adminUsers: (process.env['ADMIN_USERS'] ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),

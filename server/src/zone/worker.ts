@@ -56,8 +56,8 @@ const zone = new WorldZone(rapier, zoneName, loadArena(arenaName), {
   persist(records, reason) {
     post({ t: 'persist', reason, records });
   },
-  portal(connId, target, keep, via) {
-    post({ t: 'portal', connId, target, ...(keep ? { keep } : {}), ...(via ? { via } : {}) });
+  portal(connId, target, keep, via, waypoint) {
+    post({ t: 'portal', connId, target, ...(keep ? { keep } : {}), ...(via ? { via } : {}), ...(waypoint ? { waypoint } : {}) });
   },
   loot(event) {
     post({ t: 'loot', event });
@@ -146,6 +146,10 @@ port.on('message', (msg: ToZone) => {
       break;
     case 'unstuck':
       zone.unstuck(msg.connId);
+      flush();
+      break;
+    case 'waypoint':
+      zone.waypointTravel(msg.connId, msg.act);
       flush();
       break;
     case 'transfer': {

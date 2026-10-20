@@ -24,6 +24,7 @@ export type ToZone =
   | { t: 'use'; connId: number; slot: number }
   | { t: 'cutsceneDone'; connId: number; sequence: string }
   | { t: 'unstuck'; connId: number }
+  | { t: 'waypoint'; connId: number; act: string }
   /** Remove the player for a zone transfer; answered with 'transferred'. */
   | { t: 'transfer'; connId: number }
   /** Admin panel: event rates for every zone. */
@@ -60,7 +61,7 @@ export type FromZone =
   /** Character states to save: periodic flush, a player leaving, or final flush before stop. */
   | { t: 'persist'; reason: PersistReason; records: PersistRecord[] }
   /** A player entered a portal trigger (the main thread decides whether to transfer). */
-  | { t: 'portal'; connId: number; target: string; keep?: { x: number; y: number; z: number; mesh: string }; via?: ExitCrossing }
+  | { t: 'portal'; connId: number; target: string; keep?: { x: number; y: number; z: number; mesh: string }; via?: ExitCrossing; waypoint?: boolean }
   /** A chest opened or found with the bag too full (the main thread logs it). */
   | { t: 'loot'; event: LootEvent }
   | { t: 'transferred'; connId: number; record: PersistRecord | null; state: TransferState | null }
