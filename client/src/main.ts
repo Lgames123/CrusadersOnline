@@ -493,7 +493,26 @@ async function main(): Promise<void> {
   void Debris.load(scene).then((d) => (debris = d));
   const fxPos = new THREE.Vector3();
   /** Pending wall-spark checks of the local swings (seconds to the impact frame, heading). */
-  const wallChecks: { t: number; yaw: number }[] = [];
+  /**
+   * Blows to check against walls at their impact frame: the local player's, and since any
+   * character's blade on a wall marks it (0x0048CAB0), other players' and creatures' too (`id`:
+   * their entity, probed from where they are then; `decal`: their weapon's mark).
+   */
+  const wallChecks: { t: number; yaw: number; id?: number; reach?: number; decal?: DecalKind | null }[] = [];
+  /** The swing counter seen per remote entity (a new swing schedules a wall check). */
+  const remoteSwings = new Map<number, number>();
+  /** Remote characters' weapon marks: creatures' by placement or archetype; other players' sword. */
+  const remoteDecals = new Map<number, DecalKind | null>();
+  const remoteDecal = (e: RemoteEntity): DecalKind | null => {
+    if (remoteDecals.has(e.id)) return remoteDecals.get(e.id)!;
+    remoteDecals.set(e.id, e.info.kind === 'mob' ? null : 'SCRATCH');
+    if (e.info.kind === 'mob') {
+      const placed = e.info.placement !== undefined ? levelView?.arena.mobSpawns.find((sp) => sp.placement === e.info.placement)?.weapon : undefined;
+      const weapon = placed !== undefined ? placed : e.info.archetype ? MOB_ARCHETYPES[e.info.archetype]?.weapon : undefined;
+      void weaponDecal(weapon ?? undefined).then((k) => remoteDecals.set(e.id, k));
+    }
+    return remoteDecals.get(e.id)!;
+  };
   /** The local blade's tip this frame and the last (its sweep orients a wall mark). */
   const bladeTip = new THREE.Vector3();
   const bladeTipBefore = new THREE.Vector3();
@@ -719,6 +738,8 @@ async function main(): Promise<void> {
             for (const id of remotes.byId.keys()) (lighting.forget(id), trails.forget(id));
             spellVisuals.clear();
             remotes.clear();
+            remoteSwings.clear();
+            remoteDecals.clear();
             clearScenePuppets();
             void showArena(name, difficulty).then((next) => {
               if (!next || !live) return;
@@ -1751,12 +1772,24 @@ async function main(): Promise<void> {
     bladeSeen = !!local.avatar.blade?.(bladeBase, bladeTip);
     for (const [id, e] of remotes.byId) if (e.info.kind !== 'mob') trails.track(id, (a, b) => (e.visible ? e.avatar.blade?.(a, b) ?? null : null), dt);
     // A swing that reaches a wall throws sparks off it at its impact frame (SWORD_DAMAGE + SWORD_METAL x3).
+    // Other characters' new swings (the replicated swing phase started over).
+    for (const [id, e] of remotes.byId) {
+      const was = remoteSwings.get(id);
+      remoteSwings.set(id, e.swingId);
+      if (was === undefined || was === e.swingId || !e.visible || e.hp <= 0) continue;
+      const arch = e.info.archetype ? MOB_ARCHETYPES[e.info.archetype] : undefined;
+      const timing = arch ? arch.swing : attackTiming('normal', 1, 1, 1);
+      wallChecks.push({ t: (timing.startup + timing.active / 2) * TICK_DT, yaw: 0, id, reach: (arch?.reach ?? PLAYER_REACH) + 0.6, decal: remoteDecal(e) });
+    }
     for (let i = wallChecks.length - 1; i >= 0; i--) {
       const w = wallChecks[i]!;
       if ((w.t -= dt) > 0) continue;
       wallChecks.splice(i, 1);
-      const feet = local.character.position;
-      const d = wallDistance(session?.mw ?? mw, feet, w.yaw, PLAYER_REACH + 0.6, 1.2);
+      const other = w.id !== undefined ? remotes.byId.get(w.id) : undefined;
+      if (w.id !== undefined && (!other || !other.visible)) continue;
+      const feet = other ? other.avatar.object.position : local.character.position;
+      if (other) w.yaw = other.avatar.object.rotation.y;
+      const d = wallDistance(session?.mw ?? mw, feet, w.yaw, w.reach ?? PLAYER_REACH + 0.6, 1.2);
       if (d === null || !effects) continue;
       const fwd = new THREE.Vector3(-Math.sin(w.yaw), 0, -Math.cos(w.yaw));
       const at = new THREE.Vector3(feet.x, feet.y + 1.2, feet.z).addScaledVector(fwd, d - 0.05);
@@ -1766,9 +1799,10 @@ async function main(): Promise<void> {
       fxBurst('SWORD_METAL', 3, at, normal.clone().multiplyScalar(0.2), normal);
       // 0x0048CAB0: a clank (HitMetal01-04 or HitStone01: 338 + round(rand x 4)) at the striker and
       // the weapon's mark on the wall, laid along the blade's sweep.
-      sounds?.play(SFX.wallHit + Math.round(Math.random() * 4), local.object.position);
-      const sweep = bladeSeen ? bladeTip.clone().sub(bladeTipBefore) : null;
-      if (myDecal) decals?.stamp(myDecal, at, sweep && sweep.lengthSq() > 1e-8 ? sweep : new THREE.Vector3(fwd.z, 0, -fwd.x));
+      sounds?.play(SFX.wallHit + Math.round(Math.random() * 4), other ? other.avatar.object.position : local.object.position);
+      const sweep = !other && bladeSeen ? bladeTip.clone().sub(bladeTipBefore) : null;
+      const decal = other ? w.decal ?? null : myDecal;
+      if (decal) decals?.stamp(decal, at, sweep && sweep.lengthSq() > 1e-8 ? sweep : new THREE.Vector3(fwd.z, 0, -fwd.x));
     }
     input.updateView(dt);
     const movingNow = Math.hypot(local.object.position.x - target.x, local.object.position.z - target.z) > 1e-4;
