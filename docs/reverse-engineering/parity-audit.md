@@ -47,6 +47,13 @@ the current value is a stand-in until a capture or a reading settles it).
 | Creature HP, XP, resists, loadouts | `.cap` placements, creature template table |
 | Projectile / effect object pool sizes (32 debris, 8 arrows, ...) | 0x482F60 (local/PASSADA_REA_GAPS.md §7) |
 
+## 2b. Settled since this audit (2026-10-19 / 20)
+
+| System | Evidence |
+|---|---|
+| Creature perception (aggro) | 0x40D910: squared 3D distance < 49 ft² takes the player with no ray, else < 10000 ft² within 60° of the heading or < 400 ft² outside it, with a clear ray (0x406AF0). Measured in 3D, no same-floor filter (2026-10-20). |
+| Interaction reach | Ground items, chests, corpses: squared 3D distance < 96 ft² (0x00471940, constant 0x4E16A0) = 2.99 m. Talk: 12 ft (0x40DEB0). Doors: their mover triggers' volumes. |
+
 ## 3. MMO (kept on purpose)
 
 Server authority and prediction, persistence instead of save shrines, threat shared between
@@ -57,9 +64,7 @@ the original's skeletons followed past 75 m), zone workers.
 
 | System | Stand-in | How to settle |
 |---|---|---|
-| Creature perception (aggro) | 10 m radius, same floor (±3 m) | the AI maneuver tables (0x004EA268) and their reader; capture: approach an idle skeleton and log the distance at its first RUNNING request, behind a wall and in the open |
 | AI of the other creatures (dwarves, ogres, dashers, knights, casters, elementals) | the skeleton's | Frida AI log per creature type |
-| Interaction reach (Tab pick-up / open / talk) | 2.5 m (doors 1.8 m from the slab) | the object search 0x437A70 is a segment test: log its segment length |
 | Portal fallback cylinder | radius / height for portals without a volume | most portals carry their volume (decoded); rare |
 | Lightmap gain | texture × lightmap × 2 (by eye, approved by the user) | the D3D driver (gfx_d3d.dll) only sets MODULATE (×1) and DESTCOLOR × ZERO blending: the ×2 must come from how the lightmap texels are uploaded; find that conversion |
 | Starting equipment | Axe + Wooden Shield | the first act's start |

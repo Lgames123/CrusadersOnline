@@ -326,6 +326,11 @@ export const MOB_TURN_RATE = (270 * Math.PI) / 180;
  * creature's heading, 20 ft otherwise, and in sight (a ray through the level, 0x00406AF0).
  */
 export const MOB_TOUCH_SENSE_RANGE = 7 * FT;
+/**
+ * Reach of the use key on ground items, chests and corpses: the ground window (0x00471940) takes
+ * every one whose squared 3D distance to the player is under 96 ft² (0x4E16A0), ~2.99 m.
+ */
+export const GROUND_REACH = Math.sqrt(96) * FT;
 export const MOB_SIGHT_RANGE = 100 * FT;
 export const MOB_SIGHT_HALF_ANGLE = (60 * Math.PI) / 180;
 export const MOB_NEAR_SENSE_RANGE = 20 * FT;

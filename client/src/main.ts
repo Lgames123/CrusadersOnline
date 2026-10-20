@@ -20,6 +20,7 @@ import {
   PLAYER_REACH,
   attackTiming,
   LEVEL_PREFIX,
+  GROUND_REACH,
   WAYPOINT_REACH,
   MAIN_QUESTS,
   NPC_VOICES,
@@ -1227,7 +1228,7 @@ async function main(): Promise<void> {
   };
 
   // Nearest item, chest or door within reach (the server re-checks); Tab picks up / opens.
-  const INTERACT_RANGE = 2.3;
+  const INTERACT_RANGE = GROUND_REACH;
   const DOOR_RANGE = 1.6;
   const nearestInteractable = () => {
     if (!levelView || !session) return null;
@@ -1272,7 +1273,7 @@ async function main(): Promise<void> {
     for (const [id, v] of levelView.objects) {
       if (v.state !== 'present' || (v.def.kind !== 'item' && v.def.kind !== 'chest')) continue;
       const d = Math.hypot(v.position.x - p.x, v.position.z - p.z);
-      if (d > INTERACT_RANGE || Math.abs(v.position.y - p.y) > 2 || (best && best.d < d)) continue;
+      if (Math.hypot(d, v.position.y - p.y) > INTERACT_RANGE || (best && best.d < d)) continue;
       const label = v.def.kind === 'chest' ? 'open chest' : `pick up ${v.def.item?.quantity && v.def.item.quantity > 1 ? `${v.def.item.quantity} ` : ''}${v.def.item?.name ?? v.def.name}`;
       best = { id, label: `Tab — ${label}`, d };
     }
@@ -1292,7 +1293,7 @@ async function main(): Promise<void> {
           distance: Math.hypot(view.position.x - p.x, view.position.z - p.z),
           vertical: Math.abs(view.position.y - p.y),
         }))
-        .filter((item) => item.distance <= INTERACT_RANGE && item.vertical <= 2)
+        .filter((item) => Math.hypot(item.distance, item.vertical) <= INTERACT_RANGE)
         .sort((a, b) => a.distance - b.distance || a.id - b.id)
         .map(({ vertical: _vertical, ...item }) => item),
     );

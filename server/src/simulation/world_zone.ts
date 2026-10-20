@@ -190,6 +190,7 @@ import {
   MOB_HOP_TICKS,
   MOB_NEAR_SENSE_RANGE,
   MOB_TOUCH_SENSE_RANGE,
+  GROUND_REACH,
   MOB_POST_TICKS,
   MOB_SHIELD_TICKS,
   MOB_SIGHT_HALF_ANGLE,
@@ -385,7 +386,7 @@ const CAST_END_GRACE_TICKS = 2;
 /** World objects (original levels): interaction reach and respawn delays (slice values). */
 /** Sound a boost potion plays when drunk (0x00401AB0 / 0x00401D10: 0x19E). */
 const BOOST_POTION_SOUND = 0x19e;
-const INTERACT_RANGE = 2.5;
+/** Height band for swings against breakable props. */
 const INTERACT_HEIGHT = 2;
 /** Doors: reach from the door's bounds (they are up to 24 ft wide). */
 const DOOR_INTERACT_RANGE = 1.8;
@@ -1451,7 +1452,8 @@ export class WorldZone {
     }
     if (scripted(p)) return;
     const pos = p.character.position;
-    if (Math.hypot(o.def.x - pos.x, o.def.z - pos.z) > INTERACT_RANGE || Math.abs(o.def.y - pos.y) > INTERACT_HEIGHT) return;
+    // 3D, as the ground window measures it (GROUND_REACH); a little slack for the client's view.
+    if (Math.hypot(o.def.x - pos.x, o.def.y - pos.y, o.def.z - pos.z) > GROUND_REACH + 0.2) return;
     const grants: GroundGrant[] = (o.def.kind === 'item' ? (o.def.item ? [o.def.item] : []) : (o.def.contents ?? []))
       .filter((g) => !this.groundItemDef(g)?.questItem); // quest items come only from the story
     // All or nothing: a bag that cannot hold everything takes nothing, and it all stays there.
@@ -3670,14 +3672,14 @@ export class WorldZone {
     for (const p of this.actors.values()) {
       if (!alive(p) || (p.kind !== 'player' && p.ally === undefined)) continue;
       const q = p.character.position;
-      // Same floor only: original levels stack rooms.
-      if (Math.abs(q.y - pos.y) > AGGRO_HEIGHT) continue;
-      const d = Math.hypot(q.x - pos.x, q.z - pos.z);
+      // 0x40D910 measures in 3D (squared distances against 49 / 10000 / 400 ft²); the ray keeps
+      // creatures from noticing through floors of stacked rooms.
+      const d = Math.hypot(q.x - pos.x, q.y - pos.y, q.z - pos.z);
       const off = Math.abs(angleDiff(yawTowards(pos.x, pos.z, q.x, q.z), heading));
       // An admin's aggressive spawn: any range, any angle, in sight.
       const range = m.huntsPlayers ? Infinity : off < MOB_SIGHT_HALF_ANGLE ? MOB_SIGHT_RANGE : MOB_NEAR_SENSE_RANGE;
       if (d >= range || d >= bestDist) continue;
-      const touching = Math.hypot(q.x - pos.x, q.y - pos.y, q.z - pos.z) < MOB_TOUCH_SENSE_RANGE;
+      const touching = d < MOB_TOUCH_SENSE_RANGE;
       if (!touching && !lineOfSight(this.mw, pos, q, EYE_HEIGHT)) continue;
       best = p;
       bestDist = d;
