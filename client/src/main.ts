@@ -257,9 +257,11 @@ async function main(): Promise<void> {
   // This act's waypoint crystal (SC_WORLD_ENTER; not original): shown once the story is finished.
   let crystalAt: { x: number; y: number; z: number; arrival?: { x: number; y: number; z: number } } | null = null;
   let crystal: WaypointCrystal | null = null;
+  // The stats' storyComplete, kept here: `session` is not assigned yet during the first entry.
+  let storyComplete = false;
   const crystalLight = new THREE.Vector3();
   const refreshCrystal = () => {
-    const show = !!crystalAt && !!session?.playerStats?.storyComplete;
+    const show = !!crystalAt && storyComplete;
     if (!show) {
       crystal?.dispose();
       crystal = null;
@@ -618,7 +620,8 @@ async function main(): Promise<void> {
             combatUi.playerLevel = s.level;
             hud.stats(s);
             craftWindow.setStats(s);
-            if (!!crystal !== (!!s.storyComplete && !!crystalAt)) refreshCrystal();
+            questBook.storyComplete = storyComplete = !!s.storyComplete;
+            if (!!crystal !== (storyComplete && !!crystalAt)) refreshCrystal();
             charSheet.update(s);
             if (live) spellVisuals.syncStatuses(live.entityId, (s.statuses ?? []).map((x) => x.tag));
             inventoryPanel.setGold(s.gold);
@@ -802,7 +805,7 @@ async function main(): Promise<void> {
             errorBox.textContent = '';
             crystalAt = d.waypoint ?? null;
             inventoryPanel.refining = d.features?.mmoItems === true;
-            waypointMap.dungeons = d.features?.mmoDungeons === true;
+            waypointMap.dungeons = questBook.dungeons = d.features?.mmoDungeons === true;
             inventoryPanel.anvil = d.features?.mmoCrafting === true;
             hud.mmoLevels = charSheet.mmoLevels = d.features?.mmoLevels === true;
             telegraphs.clear();
@@ -960,6 +963,8 @@ async function main(): Promise<void> {
     }
     if (session.playerStats) {
       hud.stats(session.playerStats);
+      questBook.storyComplete = storyComplete = !!session.playerStats.storyComplete;
+      refreshCrystal();
       inventoryPanel.setSpells(session.playerStats);
       hotbar.setStats(session.playerStats);
       lastStats = { level: session.playerStats.level, dead: session.playerStats.dead };

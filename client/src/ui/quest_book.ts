@@ -1,4 +1,4 @@
-import { MAIN_QUESTS, QUEST_TEXT, type QuestLog } from '@crusaders/shared';
+import { DUNGEONS, MAIN_QUESTS, QUEST_TEXT, type QuestLog } from '@crusaders/shared';
 
 /**
  * The quest book (F2), as the original draws it (0x455EE0 / 0x456240): its frame of texture
@@ -6,6 +6,8 @@ import { MAIN_QUESTS, QUEST_TEXT, type QuestLog } from '@crusaders/shared';
  * Assigned, Completed, Notes — and the page text from crusaders.exe's string table:
  * Assigned "<giver> said" / objective, Completed "Completed: <title> Quest", Notes the journal.
  * With more than one entry a page shows one, turned with Next / Previous.
+ * Not original: a character who finished the story gets a first Assigned page saying what is
+ * left to do (the dungeons, when the server runs them).
  */
 type Tab = 'assigned' | 'completed' | 'notes';
 
@@ -33,6 +35,8 @@ export class QuestBook {
   private strings: ReadonlyMap<number, string> = new Map();
   private tab: Tab = 'assigned';
   private first = 0;
+  private finished = false;
+  private dungeonsOn = false;
   onClose: () => void = () => {};
   /** Turning a page (UITurnPage, Sound.ctx 412). */
   onTurn: () => void = () => {};
@@ -109,6 +113,28 @@ export class QuestBook {
     if (this.open) this.render();
   }
 
+  /** The story is complete (the stats' `storyComplete`). */
+  set storyComplete(v: boolean) {
+    if (v === this.finished) return;
+    this.finished = v;
+    if (this.open) this.render();
+  }
+
+  /** The server runs dungeons (`mmoDungeons`). */
+  set dungeons(v: boolean) {
+    if (v === this.dungeonsOn) return;
+    this.dungeonsOn = v;
+    if (this.open) this.render();
+  }
+
+  /** The post-game page (not original: no such text in the string table). */
+  private afterStory(): string {
+    const head = 'Necros has fallen and the story is done. Every way it once barred is open to you now.';
+    if (!this.dungeonsOn) return `${head}\n\nTouch a waypoint crystal to travel to any area you have seen.`;
+    const names = DUNGEONS.map((d) => d.name).join(', ');
+    return `${head}\n\nTry the dungeons: touch a waypoint crystal and pick one under the map (${names}). Gather a party first; it comes in with you.`;
+  }
+
   show(tab: Tab): void {
     this.tab = tab;
     this.first = 0;
@@ -117,15 +143,16 @@ export class QuestBook {
 
   private entries(): string[] {
     const log = this.log;
-    if (!log) return [];
     const s = (id: number) => this.strings.get(id) ?? '';
     if (this.tab === 'assigned') {
-      return log.active.map((i) => {
+      const assigned = (log?.active ?? []).map((i) => {
         const q = MAIN_QUESTS[i];
         if (!q) return '';
         return `${q.giver ? `${s(q.giver)}${s(QUEST_TEXT.SAID)}\n` : ''}${s(q.objective)}`;
       });
+      return this.finished ? [this.afterStory(), ...assigned] : assigned;
     }
+    if (!log) return [];
     if (this.tab === 'completed') {
       return log.completed.map((i) => (MAIN_QUESTS[i] ? `${s(QUEST_TEXT.COMPLETED)}${s(MAIN_QUESTS[i]!.title)}${s(QUEST_TEXT.QUEST)}` : ''));
     }

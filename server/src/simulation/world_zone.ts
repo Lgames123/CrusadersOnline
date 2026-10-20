@@ -3534,6 +3534,7 @@ export class WorldZone {
     if (p.story.completedAt === undefined) p.story.completedAt = Date.now();
     p.statsDirty = true;
     this.notify(p, 'quest', 'You have finished the story. Every way it once barred is open to you now.');
+    if (this.features.mmoDungeons) this.notify(p, 'quest', 'Try the dungeons: touch a waypoint crystal and pick one under the map. Your party comes with you.');
     const record = this.persistRecord(p);
     if (record) this.outbox.persist?.([record], 'progress');
   }
