@@ -568,6 +568,8 @@ async function main(): Promise<void> {
           },
           spell: (d) => {
             spellVisuals.handle(d);
+            // Our Boomer Axe coming home: the catch (the throw clip again, controller flag 0x200000).
+            if (d.axe?.catching && live && d.axe.owner === live.entityId) player?.startItemAction(BOOMER_THROW.anim);
             for (const k of d.decals ?? []) decals?.stamp(k.kind, new THREE.Vector3(...k.at));
           },
           despawn: (id) => {

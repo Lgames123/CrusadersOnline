@@ -35,6 +35,7 @@ export const BOOMER_RULES = {
   returnPace: 80 * FT,
   /** Caught at t >= 3 - 0.05 x pace (0x004E34D8); the wielder's catch flag at 3 - 0.15 x pace (0x004E34E0). */
   catchAt: 0.05,
+  catchFlagAt: 0.15,
   /** Keys 1 and 2: 0.25 / 0.5 of the way home, pushed sideways by rand x 0.3 x the horizontal span, alternate sides. */
   keyStep: 0.25,
   wobble: 0.3,
@@ -95,6 +96,8 @@ export interface BoomerHost {
   emit(at: V3, d: SpellEventMsg['d']): void;
   /** The axe is back in its wielder's hand (0x0046B000). */
   caught(owner: SpellTarget): void;
+  /** It is about to be caught: the wielder plays the catch (controller flag 0x200000). */
+  catching?(owner: SpellTarget): void;
 }
 
 interface Axe {
@@ -116,6 +119,8 @@ interface Axe {
    */
   inside: Set<SpellTarget>;
   sendIn: number;
+  /** The wielder's catch flag was raised (once, at t >= 3 - 0.15 x pace). */
+  catching?: boolean;
 }
 
 const tuple = (v: V3): T3 => [round(v.x), round(v.y), round(v.z)];
@@ -225,6 +230,13 @@ export class BoomerAxes {
     const sz = naturalSpline(ts, [...axe.keys.map((k) => k.z), hand.z]);
     axe.t += TICK_DT * axe.pace;
     if (axe.t >= 3 - R.catchAt * axe.pace) return true;
+    // 0x004C06B0: crossing 3 - 0.15 x pace with the hand empty (it always is while the axe flies
+    // here) raises the wielder's controller flag 0x200000: the THROW_ITEM group's clip, the catch.
+    if (!axe.catching && axe.t >= 3 - R.catchFlagAt * axe.pace) {
+      axe.catching = true;
+      this.host.catching?.(axe.owner);
+      this.host.emit(axe.pos, { axe: { id: axe.id, owner: axe.owner.entityId, pos: tuple(axe.pos), vel: tuple(axe.vel), catching: true } });
+    }
     const to = { x: sx(axe.t), y: sy(axe.t), z: sz(axe.t) };
     // Velocity = (spline point - position) / frame: the physics carries it there (walls do not
     // turn it again: only a hit on the way out starts the return).

@@ -966,6 +966,7 @@ export class WorldZone {
       damage: (a, t, vector, push) => this.host.damage(a, t, vector, push),
       emit: (at, d) => this.host.emit(at, d),
       caught: (a) => this.boomerCaught(a as Actor),
+      catching: (a) => this.boomerCatching(a as Actor),
     });
   }
 
@@ -4235,6 +4236,16 @@ export class WorldZone {
     p.boomerThrowAt = this.tick + Math.max(1, Math.round((BOOMER_THROW.release / rate) * TICK_RATE));
     p.itemAction = { anim: BOOMER_THROW.anim, until: this.tick + Math.max(1, Math.round((BOOMER_THROW.end / rate) * TICK_RATE)) };
     p.queuedAttack = false;
+  }
+
+  /**
+   * The axe is about to be caught (controller flag 0x200000): a player plays the throw clip again
+   * as the catch, unless something else holds the upper body. Creatures keep their clip.
+   */
+  private boomerCatching(a: Actor): void {
+    if (a.kind !== 'player' || !alive(a) || a.itemAction || a.swing || a.cast || !a.character.grounded) return;
+    const rate = a.moveStats.clipRate ?? 1;
+    a.itemAction = { anim: BOOMER_THROW.anim, until: this.tick + Math.max(1, Math.round((BOOMER_THROW.end / rate) * TICK_RATE)) };
   }
 
   /** The axe is back in the hand (0x0046B000): wielded again; a gear change asked for meanwhile follows. */

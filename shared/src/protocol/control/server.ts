@@ -144,7 +144,8 @@ export interface SpellEventMsg {
      * turns back and every few ticks on the curve home); `owner`'s right hand is empty meanwhile.
      * `end` when it is caught (the weapon is back in the hand).
      */
-    axe?: { id: number; owner: number; pos: V3; vel: V3; end?: boolean };
+    /** `catching`: its wielder starts the catch (the throw clip again, 0x200000). */
+    axe?: { id: number; owner: number; pos: V3; vel: V3; end?: boolean; catching?: true };
     /** A growing area (explosions, holy wrath, revelation): to `radius` over `seconds`; `dark`: a creature's unholy wrath. */
     burst?: { spell: SpellId; level: number; at: V3; radius: number; seconds: number; dark?: boolean };
     /** Lightning bolts. */
