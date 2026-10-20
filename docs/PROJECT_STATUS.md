@@ -1,6 +1,6 @@
 # Project Status: CrusadersOnline
 
-**Status date:** 2026-10-19. This file is a snapshot of where the project stands and what comes
+**Status date:** 2026-10-20. This file is a snapshot of where the project stands and what comes
 next. The detail lives in the context notes (`docs/context/INDEX.md`, one per commit) and in the
 parity audit (`docs/reverse-engineering/parity-audit.md`). The session-by-session log that this
 file used to carry (up to 2026-10-14) is in git history.
@@ -12,7 +12,8 @@ options. Presentation options are per player; gameplay rules are per server
 ## 1. Where we are
 
 Milestones M00–M08 are done. M09 (gameplay reconstruction) is far along. M10 has its tests and a
-load run with open targets. M11 runs locally in Docker but has no real domain.
+load run: the bandwidth target is met, the tick p99 target is not. M11 is ready to go live but has no real
+domain yet. All six MMO stages are in, each behind its own `GAME_FEATURES` flag (off by default).
 
 **Done**
 
@@ -47,9 +48,20 @@ load run with open targets. M11 runs locally in Docker but has no real domain.
   - Optional: grass and bushes, object shadows, dynamic lights.
   - Original effects, sprites and sounds.
 - **MMO**
-  - Text chat (Local, Global, Server, Private), hotbar, admin panel (moderation, rate events,
-    custom spawns).
+  - Text chat (Local, Global, Server, Private) with an ignore list, hotbar, admin panel
+    (moderation, rate events, custom spawns).
   - Spell effects and cooldowns kept across zone changes.
+  - Waypoint crystals after the story.
+  - Parties of five with kills shared by contribution.
+  - Behind flags:
+    - item rarity, affixes and +10 refinement (`mmoItems`);
+    - dungeon instances with a phased boss (`mmoDungeons`);
+    - mining, smithing and salvaging (`mmoCrafting`).
+  - Always on: direct trade, and the auction house with a mailbox.
+- **Operations**
+  - `/metrics` (Prometheus) and a 45 ms tick alarm in the logs.
+  - Daily dumps plus an optional encrypted off-host copy (rclone, `--profile offsite`).
+  - A go-live checklist in `deployment.md` §7.
 
 ## 2. What comes next
 
@@ -68,19 +80,28 @@ load run with open targets. M11 runs locally in Docker but has no real domain.
 ### 2.2 Side quests (cut from the original, planned as a feature)
 
 26 quests whose records, strings, items and voice lines are still on the disc, but which no act
-offers. Some are fetch quests, some deliveries, some kills. Inventory and details are in
-[`game-design/side-quests.md`](game-design/side-quests.md). They are to be implemented later as a
-non-original feature (`sideQuests`, off by default).
+offers. [`game-design/side-quests.md`](game-design/side-quests.md) is now the full reference for checking by
+hand:
+- how each quest works, its objectives and its rewards;
+- the reward lists decoded from `0x498AE0`.
 
-### 2.3 Fidelity: stand-ins still to settle
+Quest 23 cannot be finished as recorded. Implementing them (`sideQuests`, off by default) waits
+on the user's review of that document.
 
-- **AI and aggro:** only the skeleton's AI is captured; the others reuse it. The 10 m aggro radius
-  is a stand-in.
-- **Visual stand-ins:** soul drinker's line, snap freeze's glow, the status shells.
-- **Not done:** bloodstains and footprints; decals from other players' and creatures' blows; the
-  Boomer Axe's catch clip.
-- **HUD:** spell recharge whitening and the message line.
-- **Engine values:** interaction reach and the lightmap gain (parity audit §4).
+### 2.3 Fidelity: stand-ins
+
+All settled on 2026-10-20 (context notes of that date):
+- **AI:** every hostile type runs the same brain; they differ by data only, and there are no archers.
+- **Visuals:** snap freeze and soul drinker draw nothing of their own in the original.
+- **Not done before, now in:**
+  - footprints, body thuds and bloodstains;
+  - wall marks from other players' and creatures' blows;
+  - the Boomer Axe's catch clip.
+- **HUD:** the three text lines and the spell icon's flash.
+- **Interaction reach:** 3D, √96 ft.
+
+**Waiting on the user:** the lightmap gain. The executable applies ×1, and only the Brightness gamma
+brightens; we draw ×2. That stays until the user decides.
 
 ### 2.4 Quality of life: decided
 
@@ -93,28 +114,41 @@ non-original feature (`sideQuests`, off by default).
 
 ### 2.5 MMO systems (proposals: `game-design/mmo/`, roadmap in `11-implementation-roadmap.md`)
 
-1. **Stage 1, item identity and authority:** mostly in place (authoritative grid, migration 005).
-   Item instances with UUIDs and affix payloads are missing.
-2. **Stage 2, shared combat and loot:** needs a **party system** (not started), contribution
-   tracking and instanced drops.
-3. **Stages 3–6:** rarity, affixes and +10 upgrades; trade and auction house; instanced dungeons;
-   crafting. Not started.
+All six stages are implemented (2026-10-20). Each has a context note with its numbers and gaps.
 
-Trap: the spec names its economy migration `006`, but `006` is already the admin bans migration.
-Renumber when the time comes.
+| Stage | What | Switch |
+|---|---|---|
+| 1 | Item instances with a uid and mods (migration 007) | always |
+| 2 | Parties of five, kills shared by contribution | always |
+| 3 | Rarity, affixes, +10 refinement, materials | `mmoItems` |
+| 4 | Direct trade; auction house with escrow, deposit, tax and a mailbox (migration 008) | always |
+| 5 | Dungeon instances (the Crypt under Ca1d) with a phased boss | `mmoDungeons` |
+| 6 | Mining, smithing, salvaging (migration 009) | `mmoCrafting` |
+
+Known gaps:
+- the auction house was not run end to end in the browser;
+- the recipe and economy numbers are first-pass values (doc 10's scenarios not re-run);
+- ore veins and dungeon runs are not saved across a zone restart.
 
 ### 2.6 Production
 
-- First deployment on a real domain (TLS), off-host backups, metrics.
-- **Load:** 100 bots in a real level give a p99 of 13–24 ms (target 15 ms) and about 29 KB/s per
-  client (target 5 KB/s); see `performance-testing.md` §3.
+- **Load:** 100 bots in `ca1a` now take **4.3 KB/s per client**, under the 5 KB/s target; the
+  rate was 22.2 KB/s before (snapshot-bandwidth note).
+- **Tick p99:** still 18–31 ms against the 15 ms target. That varies run to run on this desktop;
+  about 65 % of the tick is the character controller. Measure on the production host.
+- **Ready:** TLS through Caddy, `/metrics`, off-host backups and the go-live checklist
+  (`deployment.md` §7).
+- **Left:** the first real deployment, which needs the operator's domain and host.
 
 ## 3. Recommended order
 
-1. Campaign mechanisms: done (movers, creature against creature, relay ops, climbing settled as unreachable).
-2. MMO Stage 2 (party, then shared loot), which unlocks the later stages.
-3. The completion reward, waypoints and the side quests (a feature), when the post-game loop
-   needs content.
+1. Go live on a real domain (`deployment.md` §7), then measure the tick on that host.
+2. The user's decisions:
+   - the lightmap gain (×1 as the executable, or keep ×2);
+   - the completion reward;
+   - the side-quest review, then implement them behind `sideQuests`.
+3. Play-test the MMO stages with their flags on, balance the crafting and economy numbers, and
+   run the auction house end to end.
 
 ## 4. Where to look
 

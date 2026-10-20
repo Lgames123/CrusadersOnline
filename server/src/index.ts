@@ -8,6 +8,7 @@ import { AdminService } from './admin/admin_service.ts';
 import { TicketStore } from './auth/tickets.ts';
 import { REPO_ROOT, loadConfig, type ServerConfig } from './config.ts';
 import { createApiHandler } from './http/api.ts';
+import { TICK_ALARM_MS, metricsAllowed, renderMetrics } from './http/metrics.ts';
 import { AccountRepository } from './persistence/accounts.ts';
 import { EconomyRepository } from './persistence/economy.ts';
 import { AdminRepository } from './persistence/admin.ts';
@@ -61,7 +62,10 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
     { difficulty: config.difficulty, features: config.features, itemRulesPath: config.itemRulesPath, generatedDir: config.generatedDir },
     {
       deliver: (connId, data) => sessions?.deliver(connId, data),
-      metrics: (m) => log.debug(m, 'zone tick metrics'),
+      metrics: (m) => {
+        log.debug(m, 'zone tick metrics');
+        if (m.max > TICK_ALARM_MS) log.warn(m, `zone tick over ${TICK_ALARM_MS} ms`);
+      },
       error: (arena, err) => log.error({ err, arena }, 'zone worker error'),
       persist: (records, reason) => save(records, reason),
       portal: (arena, connId, target, keep, via, waypoint) => sessions?.onPortal(arena, connId, target, keep, via, waypoint),
@@ -106,6 +110,24 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (req.method === 'GET' && url.pathname === '/healthz') {
       return json(res, 200, { ok: true, arena: config.arena, zones: zones.names, tick: zones.host(config.arena)?.tick ?? 0, players: sessions!.playerCount });
+    }
+    if (req.method === 'GET' && url.pathname === '/metrics') {
+      if (!metricsAllowed(config.metricsToken, req.headers.authorization)) return json(res, 401, { error: 'unauthorized' });
+      const mem = process.memoryUsage();
+      const body = renderMetrics({
+        onlinePlayers: sessions!.playerCount,
+        zones: zones.names.map((name) => {
+          const h = zones.host(name);
+          return { name, players: h?.members.size ?? 0, metrics: h?.lastMetrics ?? null };
+        }),
+        pendingSaves: pendingSaves.size,
+        uptimeSeconds: process.uptime(),
+        rssBytes: mem.rss,
+        heapUsedBytes: mem.heapUsed,
+      });
+      res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(body);
+      return;
     }
     if (url.pathname.startsWith('/api/')) {
       void api(req, res, url.pathname).then((handled) => {

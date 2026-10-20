@@ -55,6 +55,8 @@ export interface ServerConfig {
   realmName: string;
   /** Accounts (usernames, lower case) given the admin panel at start and when they sign in (ADMIN_USERS, comma-separated). */
   adminUsers: string[];
+  /** Bearer token GET /metrics wants (METRICS_TOKEN); null = open to whoever reaches the port. */
+  metricsToken: string | null;
 }
 
 /** Repository root; relative paths (e.g. pglite:local/pgdata) resolve against it. */
@@ -101,6 +103,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     devGuestItems: env === 'production' ? null : process.env['DEV_GUEST_ITEMS'] ?? null,
     realmName: (process.env['REALM_NAME'] ?? '').trim().slice(0, 32) || 'Ardon',
     adminUsers: (process.env['ADMIN_USERS'] ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+    metricsToken: process.env['METRICS_TOKEN']?.trim() || null,
     ...overrides,
   };
 }

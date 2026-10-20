@@ -12,7 +12,14 @@
 
 The game itself also flushes every connected character every 60 s, on leave and on shutdown (persistence.md), so a dump captures at most about a minute of unsaved play.
 
-**Off-host copies are still the operator's job.** Copy `deployment/backups/` to another machine or to object storage, for example with a nightly `rclone copy` or a cloud sync of that directory. A backup that only exists on the game host does not survive losing that host.
+**Off-host copies:** the compose `offsite` service (`deployment/backup/offsite.sh`, rclone image, only with `--profile offsite`) copies every finished dump to `OFFSITE_REMOTE` every `OFFSITE_INTERVAL_SECONDS` (1 h). It deletes remote dumps older than `OFFSITE_KEEP_DAYS` (30). Set it up once:
+1. Create `deployment/rclone/rclone.conf` (git-ignored) with `rclone config` on any machine: a bucket remote (S3, B2, R2...).
+2. Wrap that remote in a `crypt` remote, so the dumps are encrypted before they leave the host. Keep its passwords somewhere other than the host.
+3. Set `OFFSITE_REMOTE=<crypt remote>:<path>` in `deployment/.env`.
+4. Start it with `docker compose ... --profile offsite up -d`.
+5. Check it: `OFFSITE_ONCE=1` runs a single copy, and the log shows `offsite ok` / `offsite copy FAILED`.
+
+A backup that only exists on the game host does not survive losing that host.
 
 ## 2. Commands
 
@@ -40,5 +47,5 @@ The script:
 ## 4. Not yet done
 
 - WAL archiving / point-in-time recovery (only useful once the player base makes a 24 h dump interval too coarse).
-- Automated off-host upload and encryption at rest of the dumps.
+- Encryption of the dumps on the host itself (the off-host copy is encrypted through the rclone crypt remote).
 - Periodic automated restore test (restore into a scratch database and compare row counts).

@@ -74,6 +74,8 @@ tests/playwright-report/
 
 # Database backups (deployment/backup/backup.sh)
 deployment/backups/
+# rclone remote credentials for off-host backups (deployment/backup/offsite.sh)
+deployment/rclone/
 
 # Third-party / LLM-assisted RE notes kept local (may contain extracted data)
 GeminiDecomp/

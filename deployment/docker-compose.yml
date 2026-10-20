@@ -39,6 +39,12 @@ services:
       ARENA: ${ARENA:-synthetic-arena}
       GENERATED_DIR: /app/local/generated
       ITEM_RULES: ${ITEM_RULES:-}
+      GAME_FEATURES: ${GAME_FEATURES:-}
+      # Accounts (usernames, comma-separated) given the admin panel.
+      ADMIN_USERS: ${ADMIN_USERS:-}
+      REALM_NAME: ${REALM_NAME:-}
+      # GET /metrics on server:8080 (not proxied by Caddy); a scraper on this network reads it.
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
     volumes:
       - ${GENERATED_DIR:-../local/generated}:/app/local/generated:ro
     networks: [internal]
@@ -81,8 +87,27 @@ services:
       - ${BACKUP_DIR:-./backups}:/backups
     networks: [internal]
 
+  # Off-host copies of those dumps with rclone (backup/offsite.sh); only with `--profile offsite`.
+  # Configure the remote in ${RCLONE_CONFIG_DIR}/rclone.conf (an rclone `crypt` remote encrypts).
+  offsite:
+    image: rclone/rclone:1.68.2
+    profiles: [offsite]
+    restart: unless-stopped
+    entrypoint: ["sh", "/scripts/offsite.sh"]
+    environment:
+      OFFSITE_REMOTE: ${OFFSITE_REMOTE:-}
+      OFFSITE_INTERVAL_SECONDS: ${OFFSITE_INTERVAL_SECONDS:-3600}
+      OFFSITE_KEEP_DAYS: ${OFFSITE_KEEP_DAYS:-30}
+    volumes:
+      - ./backup/offsite.sh:/scripts/offsite.sh:ro
+      - ${BACKUP_DIR:-./backups}:/backups:ro
+      - ${RCLONE_CONFIG_DIR:-./rclone}:/config/rclone
+    networks: [egress]
+
 networks:
   internal:
+  # Outbound only for the off-host copy; the database stays on `internal`.
+  egress:
 
 volumes:
   pgdata:

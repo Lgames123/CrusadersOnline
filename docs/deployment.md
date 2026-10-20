@@ -75,8 +75,24 @@ Saving never depends on clients completing the WebSocket close handshake (covere
   - after the import and the automatic reload, the player is online in Ca_a, with the original models, at 120 FPS and with 0 corrections.
 - **Same-version rule:** client prediction and server collision come from the same converter. The operator should convert with the same game version the players own (the original 1999 release; GOG 2.0.0.7 was used here).
 
-## 7. Not yet done
+## 7. Going live (checklist)
 
-- Deploying the published images to a real host and domain (first real certificate).
-- Resource limits, log shipping, metrics and alerting.
-- Off-host backup upload.
+Everything below runs on the operator's own host and domain. Nothing in the repository creates accounts, DNS records or cloud resources.
+
+1. **Host:** a Linux VM with Docker. Sizing: 2 vCPU and 2 GB RAM hold about 100 players in one zone (performance-testing.md). Each extra busy zone is one more worker thread, so add a core per two or three busy zones.
+2. **DNS:** an A/AAAA record for the play domain pointing at the host. Open ports 80 and 443 (80 is needed for the ACME challenge and the redirect).
+3. **`deployment/.env`** from `.env.example`:
+   - a long random `DB_PASSWORD`;
+   - `SITE_ADDRESS=<domain>`, `WEB_PORT=80`, `WEB_TLS_PORT=443`, `COOKIE_SECURE=true`;
+   - `ADMIN_USERS=<your account>`, plus `ARENA` / `GENERATED_DIR` / `ITEM_RULES` from your own conversion;
+   - optional `GAME_FEATURES` (e.g. `mmoItems,mmoDungeons,mmoCrafting`) and `METRICS_TOKEN`.
+4. **Start:** `docker compose -f deployment/docker-compose.yml --env-file deployment/.env up -d --build`, or pull the GHCR images. Check `https://<domain>/healthz` and that the certificate is valid.
+5. **Backups:** confirm a `backup ok` line within the first run. Set up the `offsite` profile (backup-and-recovery.md) and do one restore drill from an off-host copy into a scratch database.
+6. **Metrics:** point a Prometheus / Grafana Agent on the compose network at `server:8080/metrics`, and set the alerts from operations.md §2. Otherwise at least watch the logs for `zone tick over 45 ms` and `backup FAILED`.
+7. **Load check on the real host:** the swarm starts its own in-process server, so run `pnpm --filter @crusaders/tests load -- --bots 100 --seconds 60 --arena level:ca1a` on the host itself before opening (stack stopped) to see that host's p99 and bandwidth.
+
+## 8. Not yet done
+
+- An actual first deployment to a real host and domain (the first real certificate): it needs the operator's domain and host.
+- Resource limits per container and log shipping.
+- A load run against a deployed server from outside (the swarm starts its own in-process server).
