@@ -611,7 +611,7 @@ export async function loadOriginalLevel(arenaName: string, difficulty: Difficult
           rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1],
           hp: 0,
           position: [def.x / LEVEL_UNIT_METRES, def.y / LEVEL_UNIT_METRES, def.z / LEVEL_UNIT_METRES],
-          item: def.item ? { name: def.item.name, quantity: def.item.quantity } : undefined,
+          item: def.item ? { name: def.item.name, quantity: def.item.quantity, ...(def.item.mods ? { mods: def.item.mods } : {}) } : undefined,
         },
         object,
         position: viewPos,

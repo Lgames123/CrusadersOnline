@@ -1,4 +1,4 @@
-import { affixLines, modsTitle, moddable, nextRefine, refineChance, BUILTIN_ITEMS, BUILTIN_SPELLS, canPlaceGrid, DAMAGE_TYPES, equipCapacity, firstFreeGridPosition, isEquippable, INVENTORY_GRID, layoutItemViews, SPELL_NAMES, type GridPlacement, type Inventory, type InventoryItemView, type PlayerStats, type ShopItemView, type SpellId } from '@crusaders/shared';
+import { affixLines, modsTitle, moddable, nextRefine, refineChance, BUILTIN_ITEMS, BUILTIN_SPELLS, canPlaceGrid, DAMAGE_TYPES, equipCapacity, firstFreeGridPosition, isEquippable, INVENTORY_GRID, layoutItemViews, SPELL_NAMES, type GridPlacement, type Inventory, type InventoryItemView, type ItemMods, type PlayerStats, type ShopItemView, type SpellId } from '@crusaders/shared';
 import { HeldItemPreview } from './held_item_preview.ts';
 import { ItemThumbnails } from './item_thumbnails.ts';
 import { itemPreviewModelFile } from '../assets/item_models.ts';
@@ -13,6 +13,8 @@ export interface GroundItemView {
   name: string;
   quantity: number;
   distance: number;
+  /** Its rarity / affixes / refinement (MMO): the name takes the rarity's colour. */
+  mods?: ItemMods;
 }
 
 type ItemType = InventoryItemView['type'];
@@ -236,7 +238,7 @@ export class InventoryPanels {
     root.addEventListener('contextmenu', (e) => this.contextMenu(e));
     root.addEventListener('pointerover', (e) => this.hover(e));
     root.addEventListener('pointerout', (e) => {
-      if (!(e.relatedTarget as HTMLElement | null)?.closest?.('.inv-item, [data-spell]')) this.hideTooltip();
+      if (!(e.relatedTarget as HTMLElement | null)?.closest?.('.inv-item, [data-spell], .ground-item')) this.hideTooltip();
     });
     ItemThumbnails.get().onChange((key, url) => {
       for (const img of root.querySelectorAll<HTMLImageElement>(`img[data-thumb-key="${key}"]`)) {
@@ -346,6 +348,8 @@ export class InventoryPanels {
     const next = items.map((i) => `${i.id}:${i.quantity}:${i.distance.toFixed(1)}`).join('|');
     if (next === this.groundSignature) return;
     this.groundSignature = next;
+    // An item picked up (or gone) under the pointer takes its tooltip with it.
+    if (this.ground.some((g) => !items.some((i) => i.id === g.id))) this.hideTooltip();
     this.ground = [...items];
     if (this.shown.ground) this.renderGround();
   }
@@ -438,9 +442,22 @@ export class InventoryPanels {
   }
 
   private renderGround(): void {
-    this.groundList.innerHTML = this.ground.map((item) => `<button type="button" class="ground-item" data-object="${item.id}" title="Pick up ${escape(item.name)}">
-      <span class="inv-mark" aria-hidden="true">◆</span><span class="ground-name"><strong>${escape(item.name)}</strong>${item.quantity > 1 ? ` ×${item.quantity}` : ''}<small>${item.distance.toFixed(1)} m</small></span>
-    </button>`).join('') || '<p class="inv-empty">Nothing on the ground nearby.</p>';
+    this.groundList.innerHTML = this.ground.map((item) => {
+      const named = modsTitle(item.name, item.mods);
+      return `<button type="button" class="ground-item" data-object="${item.id}" aria-label="Pick up ${escape(named.title)}">
+      <span class="inv-mark" aria-hidden="true">◆</span><span class="ground-name"><strong${named.color ? ` style="color:${named.color}"` : ''}>${escape(named.title)}</strong>${item.quantity > 1 ? ` ×${item.quantity}` : ''}<small>${item.distance.toFixed(1)} m</small></span>
+    </button>`;
+    }).join('') || '<p class="inv-empty">Nothing on the ground nearby.</p>';
+  }
+
+  /** A ground item's tooltip: its name in the rarity's colour, its affixes, the pick-up hint. */
+  private groundTooltip(item: GroundItemView): string {
+    const named = modsTitle(item.name, item.mods);
+    const lines = [...affixLines(item.mods), ...(item.quantity > 1 ? [`Quantity: ${item.quantity}`] : [])];
+    return `<strong class="tt-name"${named.color ? ` style="color:${named.color}"` : ''}>${escape(named.title)}</strong>
+      <span class="tt-type">On the ground</span>
+      ${lines.map((l) => `<span>${escape(l)}</span>`).join('')}
+      <small>Click to pick up</small>`;
   }
 
   // --- Tooltip
@@ -499,10 +516,12 @@ export class InventoryPanels {
     }
     const row = (e.target as HTMLElement).closest<HTMLElement>('[data-stock]');
     const stocked = row && this.shop?.stock[Number(row.dataset['stock'])];
-    const el = row ?? (e.target as HTMLElement).closest<HTMLElement>('.inv-item');
-    const item = stocked ? null : el && this.itemBySlot(Number(el.dataset['slot']));
-    if (!el || (!item && !stocked)) return;
-    this.tooltip.innerHTML = stocked ? this.stockTooltip(stocked) : this.tooltipHtml(item!);
+    const groundEl = row ? null : (e.target as HTMLElement).closest<HTMLElement>('.ground-item');
+    const onGround = groundEl && this.ground.find((g) => g.id === Number(groundEl.dataset['object']));
+    const el = row ?? groundEl ?? (e.target as HTMLElement).closest<HTMLElement>('.inv-item');
+    const item = stocked || onGround ? null : el && this.itemBySlot(Number(el.dataset['slot']));
+    if (!el || (!item && !stocked && !onGround)) return;
+    this.tooltip.innerHTML = stocked ? this.stockTooltip(stocked) : onGround ? this.groundTooltip(onGround) : this.tooltipHtml(item!);
     this.tooltip.hidden = false;
     const r = el.getBoundingClientRect();
     const t = this.tooltip.getBoundingClientRect();

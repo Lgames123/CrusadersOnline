@@ -1434,6 +1434,7 @@ async function main(): Promise<void> {
           quantity: Math.max(1, view.def.item!.quantity),
           distance: Math.hypot(view.position.x - p.x, view.position.z - p.z),
           vertical: Math.abs(view.position.y - p.y),
+          ...(view.def.item!.mods ? { mods: view.def.item!.mods } : {}),
         }))
         .filter((item) => Math.hypot(item.distance, item.vertical) <= INTERACT_RANGE)
         .sort((a, b) => a.distance - b.distance || a.id - b.id)

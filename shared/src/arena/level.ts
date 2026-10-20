@@ -1,7 +1,7 @@
 import { doorSwingFromMotion, type LevelBrushMotion } from './door_swing.ts';
 import { moverFromMotion } from './mover.ts';
 import { CREATURE_TEMPLATES, npcArchetypeId } from '../game/creatures.ts';
-import { itemSlug } from '../game/items.ts';
+import { itemSlug, type ItemMods } from '../game/items.ts';
 import type { ArenaDef, BrushDef, DoorPlane, DoorUse, PortalDef, TriMeshDef, WorldObjectDef } from './types.ts';
 import { SEQUENCE_ACTOR_BASE, type LevelStory } from '../game/story.ts';
 import { PLAYER_HEIGHT, PLAYER_RADIUS } from '../constants.ts';
@@ -63,7 +63,8 @@ export interface LevelObject {
   /** Row-major 3x3, mirrored. */
   rotation: number[];
   hp: number;
-  item?: { name: string; quantity: number };
+  /** Dropped items (MMO): their rarity / affixes / refinement, for the ground window. */
+  item?: { name: string; quantity: number; mods?: ItemMods };
   contents?: { name: string; quantity: number }[];
   /** Sprites: metatex / image name ("TORCHFIRE": the procedural fire; "Flare04", "Flickerslow"). */
   effect?: string;
