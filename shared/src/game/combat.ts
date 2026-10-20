@@ -321,10 +321,11 @@ export const MOB_POST_TICKS = Math.round(1.5 * TICK_RATE);
 /** Body turn towards the heading the brain sets (0x004918E0, standing): 270 degrees a second. */
 export const MOB_TURN_RATE = (270 * Math.PI) / 180;
 /**
- * Noticing the player (0x0040D910, hostile creatures): within 100 ft when the player is less
- * than 60 degrees off the creature's heading, 20 ft otherwise, and in sight (a ray through the
- * level, 0x00406AF0).
+ * Noticing the player (0x0040D910, hostile creatures): within 7 ft at once (squared 3D distance
+ * < 49, no ray); otherwise within 100 ft when the player is less than 60 degrees off the
+ * creature's heading, 20 ft otherwise, and in sight (a ray through the level, 0x00406AF0).
  */
+export const MOB_TOUCH_SENSE_RANGE = 7 * FT;
 export const MOB_SIGHT_RANGE = 100 * FT;
 export const MOB_SIGHT_HALF_ANGLE = (60 * Math.PI) / 180;
 export const MOB_NEAR_SENSE_RANGE = 20 * FT;

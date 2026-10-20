@@ -186,6 +186,7 @@ import {
   MOB_HOP_SWING_DELAY,
   MOB_HOP_TICKS,
   MOB_NEAR_SENSE_RANGE,
+  MOB_TOUCH_SENSE_RANGE,
   MOB_POST_TICKS,
   MOB_SHIELD_TICKS,
   MOB_SIGHT_HALF_ANGLE,
@@ -3614,8 +3615,9 @@ export class WorldZone {
   }
 
   /**
-   * A hostile creature notices the nearest player on its floor within 100 ft ahead (60 degrees
-   * either side of its heading) or 20 ft elsewhere, with level geometry not in between.
+   * A hostile creature notices the nearest player on its floor within 7 ft whatever lies between,
+   * or within 100 ft ahead (60 degrees either side of its heading) or 20 ft elsewhere with level
+   * geometry not in between (0x40D910).
    */
   private noticedPlayer(m: Mob): Actor | null {
     const pos = m.character.position;
@@ -3633,7 +3635,8 @@ export class WorldZone {
       // An admin's aggressive spawn: any range, any angle, in sight.
       const range = m.huntsPlayers ? Infinity : off < MOB_SIGHT_HALF_ANGLE ? MOB_SIGHT_RANGE : MOB_NEAR_SENSE_RANGE;
       if (d >= range || d >= bestDist) continue;
-      if (!lineOfSight(this.mw, pos, q, EYE_HEIGHT)) continue;
+      const touching = Math.hypot(q.x - pos.x, q.y - pos.y, q.z - pos.z) < MOB_TOUCH_SENSE_RANGE;
+      if (!touching && !lineOfSight(this.mw, pos, q, EYE_HEIGHT)) continue;
       best = p;
       bestDist = d;
     }
