@@ -26,6 +26,11 @@ export interface MovementWorld {
   controller: RAPIER.KinematicCharacterController;
   /** Door colliders by world-object id (disabled while open), and breakable props' (while broken). */
   doors: Map<number, RAPIER.Collider>;
+  /**
+   * Handles of the level's own geometry (arena boxes and meshes; the original's BSP), without
+   * brushes or props: the ledge grab queries only these (0x004395F0 / 0x00438760).
+   */
+  level: Set<number>;
 }
 
 function boxRotation(b: BoxDef): { x: number; y: number; z: number; w: number } {
@@ -69,16 +74,17 @@ export function lineOfSight(mw: MovementWorld, from: { x: number; y: number; z: 
 /** Builds the static collision world for a level. Identical on client and server. */
 export function createMovementWorld(rapier: Rapier, arena: ArenaDef): MovementWorld {
   const world = new rapier.World({ x: 0, y: 0, z: 0 }); // gravity is applied by the controller, not the solver
+  const level = new Set<number>();
 
   for (const b of arena.boxes) {
     const desc = rapier.ColliderDesc.cuboid(b.hx, b.hy, b.hz)
       .setTranslation(b.x, b.y, b.z)
       .setRotation(boxRotation(b))
       .setCollisionGroups(WORLD_GROUPS);
-    world.createCollider(desc);
+    level.add(world.createCollider(desc).handle);
   }
   for (const m of arena.meshes) {
-    world.createCollider(rapier.ColliderDesc.trimesh(m.vertices, m.indices).setCollisionGroups(WORLD_GROUPS));
+    level.add(world.createCollider(rapier.ColliderDesc.trimesh(m.vertices, m.indices).setCollisionGroups(WORLD_GROUPS)).handle);
   }
   const doors = new Map<number, RAPIER.Collider>();
   for (const b of arena.brushes ?? []) {
@@ -106,7 +112,7 @@ export function createMovementWorld(rapier: Rapier, arena: ArenaDef): MovementWo
   controller.enableSnapToGround(GROUND_SNAP);
   controller.setApplyImpulsesToDynamicBodies(false);
 
-  return { rapier, world, controller, doors };
+  return { rapier, world, controller, doors, level };
 }
 
 /** Opens (no collision) or closes a door; false if it is not a door of this world. */

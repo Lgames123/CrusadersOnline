@@ -386,6 +386,60 @@ describe('shared character controller', () => {
     expect(c.position.y).toBeCloseTo(4, 1);
   });
 
+  it('mounts a 3-4.5 ft ledge walked into on the ground, not a taller one (0x004912F0 grounded)', () => {
+    // A 1.1 m (3.6 ft) block whose face is 2.5 m ahead (yaw 0 faces -Z).
+    const block = createMovementWorld(rapier, { ...arena, boxes: [...arena.boxes, { kind: 'platform', x: 0, y: 0.55, z: -3, hx: 1, hy: 0.55, hz: 0.5 }] });
+    const c = createCharacter(block, { x: 0, y: 0.5, z: 0 });
+    run(block, c, 0, 0, 10);
+    let mountedAt = -1;
+    for (let i = 0; i < 40 && mountedAt < 0; i++) {
+      run(block, c, INPUT.FORWARD, 0, 1);
+      if (c.rollDir === ACTION_MOUNT) mountedAt = i;
+    }
+    expect(mountedAt).toBeGreaterThanOrEqual(0);
+    expect(c.position.y).toBeCloseTo(1.1, 2);
+    expect(c.position.z).toBeLessThan(-2.5);
+    // The 4 m pillar: 4.5 ft up is inside it, so walking into it only stops.
+    const { mw, c: p } = setup({ x: -8, y: 0.5, z: -6.8 });
+    run(mw, p, 0, 0, 10);
+    for (let i = 0; i < 30; i++) {
+      run(mw, p, INPUT.FORWARD, 0, 1);
+      expect(p.rollDir).not.toBe(ACTION_MOUNT);
+    }
+  });
+
+  it('does not catch a ledge more than 2 ft below the top of the fall (+0x144)', () => {
+    // Dropped from 7 m beside the 4 m pillar's face: crossing its top it has fallen 3 m.
+    const { mw, c } = setup({ x: -8, y: 7, z: -6.8 });
+    for (let i = 0; i < 40 && !c.grounded; i++) {
+      run(mw, c, INPUT.FORWARD, 0, 1);
+      expect(c.rollDir).not.toBe(ACTION_MOUNT);
+    }
+    expect(c.position.y).toBeLessThan(0.1);
+  });
+
+  it('does not mount a prop: the test sees only the level (the BSP)', () => {
+    const points = new Float32Array([-1, 0, -3.5, 1, 0, -3.5, -1, 0, -2.5, 1, 0, -2.5, -1, 1.1, -3.5, 1, 1.1, -3.5, -1, 1.1, -2.5, 1, 1.1, -2.5]);
+    const crate = createMovementWorld(rapier, { ...arena, solids: [...(arena.solids ?? []), { points }] });
+    const c = createCharacter(crate, { x: 0, y: 0.5, z: 0 });
+    run(crate, c, 0, 0, 10);
+    for (let i = 0; i < 40; i++) {
+      run(crate, c, INPUT.FORWARD, 0, 1);
+      expect(c.rollDir).not.toBe(ACTION_MOUNT);
+    }
+    expect(c.position.y).toBeLessThan(0.1);
+  });
+
+  it('gives creatures no ledge grab (only Drake runs the test)', () => {
+    const block = createMovementWorld(rapier, { ...arena, boxes: [...arena.boxes, { kind: 'platform', x: 0, y: 0.55, z: -3, hx: 1, hy: 0.55, hz: 0.5 }] });
+    const c = createCharacter(block, { x: 0, y: 0.5, z: 0 });
+    const stats = { ...DEFAULT_MOVEMENT_STATS, noLedgeGrab: true };
+    run(block, c, 0, 0, 10, 0, stats);
+    run(block, c, INPUT.FORWARD, 0, 40, 10, stats);
+    expect(c.rollDir).not.toBe(ACTION_MOUNT);
+    expect(c.position.y).toBeLessThan(0.1);
+  });
+
   it('does not catch a ledge while jump is held', () => {
     const { mw, c } = setup({ x: -8, y: 0.5, z: -6.8 });
     run(mw, c, 0, 0, 10);

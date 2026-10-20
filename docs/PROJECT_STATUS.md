@@ -62,7 +62,7 @@ load run with open targets. M11 runs locally in Docker but has no real domain.
 | **Walk-in movers** | **Done** (2026-10-19, CMP-004). Ci\*b wheels, Gl\*b crushers, the inns' chandeliers and Bs1a's gears start when walked under. Crushers do no damage in the original (decompiled): one landing on a player waits on his head and falls on once he moves. Not original: movers hold instead of pushing; a fallen crusher stays down until the zone restarts. |
 | **Creature against creature** | **Done** (2026-10-19, CMP-005, executable-analysis §18.1). Creatures pick targets by disposition as the original. Without a relay, guards and hostiles never take each other on, so only Ws5a's lever starts a guards-against-hostiles fight. A hostile that takes an enemy calls the idle hostiles near it. Relay op 0x0E makes a creature inert (no shipped act fires it). Not checked in the client yet. |
 | **Relay ops 0–3** | **Settled, nothing to do** (2026-10-20, CMP-006). They only set flag bits; in the shipped acts no trigger reads the bits they set (asset-format-discovery, type 0x2B). The converter keeps them as `flagOps`; the server ignores them. |
-| **Climbing and hanging** | Only the ledge grab is done. |
+| **Climbing and hanging** | **Settled** (2026-10-20, CMP-007, executable-analysis §13.2). Climbing and hanging need a climb volume (cap type 0x0C), and no act has one, so the shipped game never climbs. The ledge grab now also works on the ground, as in the original: walking into a ledge 3–4.5 ft high climbs onto it. In the air it works only within 2 ft below the top of the flight. Level geometry only, never props; players only. Not checked in the client yet. |
 
 ### 2.2 Side quests (cut from the original, planned as a feature)
 
@@ -110,7 +110,7 @@ Renumber when the time comes.
 
 ## 3. Recommended order
 
-1. Remaining campaign mechanisms: climbing and hanging (CMP-007). Movers, creature against creature and relay ops are done.
+1. Campaign mechanisms: done (movers, creature against creature, relay ops, climbing settled as unreachable).
 2. MMO Stage 2 (party, then shared loot), which unlocks the later stages.
 3. The completion reward, waypoints and the side quests (a feature), when the post-game loop
    needs content.

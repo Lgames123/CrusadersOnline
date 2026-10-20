@@ -1,5 +1,5 @@
 import type RAPIER from '@dimforge/rapier3d-deterministic-compat';
-import { IMPACT_VARIANTS, isHitAction, ACTION_ATTACK, ACTION_BASH, ACTION_LUNGE, LUNGE_TICKS, ATTACK_CURVES, actionCurve, attackMotionTicks, curveTicks, hitReactionTicks, isAttackAction, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_LEFT_FORWARD, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_RIGHT_FORWARD, shieldHopTicks, curveAtTick, curveAtFrame, ORIGINAL_ROLLS, ROLL_CURVES, rollTicks as rollLength, advanceLoco, ACTION_JUMP, ACTION_LAND, ACTION_MOUNT, LEDGE_MAX_FACING_DOT, LEDGE_MAX_WALL_NORMAL_Y, LEDGE_MIN_RISE, LEDGE_REACH_AHEAD, LEDGE_REACH_UP, LEDGE_TRACE_TO, mountTicks, GROUND_HOLD_SPEED, JUMP_B, JUMP_F, JUMP_L, JUMP_R, JUMP_RUN, JUMP_V, RISE_DRAG_SPENT, jumpAutoPush, jumpLimits, jumpTakeoffTicks, landSoftTicks, LOCO_CAREFUL_LEFT, LOCO_CAREFUL_RIGHT, LOCO_HOP_LEFT, LOCO_HOP_RIGHT, LOCO_RETREAT, LOCO_RUN, LOCO_SIDE_LEFT, LOCO_SIDE_RIGHT, LOCO_WALK, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, GRAVITY, JUMP_HOLD_LIFT, MAX_SLOPE_DEG, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
+import { IMPACT_VARIANTS, isHitAction, ACTION_ATTACK, ACTION_BASH, ACTION_LUNGE, LUNGE_TICKS, ATTACK_CURVES, actionCurve, attackMotionTicks, curveTicks, hitReactionTicks, isAttackAction, ACTION_HOP_LEFT, ACTION_HOP_PAUSE, ACTION_HOP_RIGHT, SHIELD_HOP_LEFT_CURVE, SHIELD_HOP_LEFT_FORWARD, SHIELD_HOP_PAUSE_TICKS, SHIELD_HOP_RIGHT_CURVE, SHIELD_HOP_RIGHT_FORWARD, shieldHopTicks, curveAtTick, curveAtFrame, ORIGINAL_ROLLS, ROLL_CURVES, rollTicks as rollLength, advanceLoco, ACTION_JUMP, ACTION_LAND, ACTION_MOUNT, LEDGE_MAX_DROP, LEDGE_MAX_FACING_DOT, LEDGE_MAX_WALL_NORMAL_Y, LEDGE_MIN_RISE, LEDGE_REACH_AHEAD, LEDGE_REACH_UP, LEDGE_TRACE_TO, mountTicks, GROUND_HOLD_SPEED, JUMP_B, JUMP_F, JUMP_L, JUMP_R, JUMP_RUN, JUMP_V, RISE_DRAG_SPENT, jumpAutoPush, jumpLimits, jumpTakeoffTicks, landSoftTicks, LOCO_CAREFUL_LEFT, LOCO_CAREFUL_RIGHT, LOCO_HOP_LEFT, LOCO_HOP_RIGHT, LOCO_RETREAT, LOCO_RUN, LOCO_SIDE_LEFT, LOCO_SIDE_RIGHT, LOCO_WALK, AIR_ACCEL, AIR_DRAG, AIR_DRAG_SPENT, GRAVITY, JUMP_HOLD_LIFT, MAX_SLOPE_DEG, PLAYER_HALF_SEGMENT, RISE_DRAG, PLAYER_HEIGHT, PLAYER_RADIUS, ROLLS, type MovementStats } from '../constants.ts';
 import type { Vec3 } from '../math/vec3.ts';
 import { dequantizeAngle } from '../math/quantize.ts';
 import { INPUT, INPUT_ATTACK_SHIFT } from '../protocol/opcodes.ts';
@@ -362,8 +362,11 @@ export function stepCharacter(
   if (desired.y > 0 && moved.y < desired.y * 0.5) vy = 0;
   if (grounded && vy < 0) vy = 0;
 
-  // In the air, a ledge within reach pulls the character up onto it (0x004916A0 / 0x004912F0).
-  const ledge = !grounded && !rolling && !(f & INPUT.JUMP) ? ledgeAhead(mw, c, moved, dequantizeAngle(input.yaw)) : null;
+  // A ledge within reach pulls the character up onto it (0x004916A0 / 0x004912F0): walked into on
+  // the ground (a top 3-4.5 ft up), or in the air within 2 ft below the jump's highest point.
+  const ledge = !stats.noLedgeGrab && !rolling && !(f & INPUT.JUMP)
+    ? ledgeAhead(mw, c, moved, dequantizeAngle(input.yaw), grounded ? 0 : dropBelowApex(vy))
+    : null;
   if (ledge) {
     setCharacterState(c, ledge, 0, true, ACTION_MOUNT, mountTicks(rate));
     return;
@@ -472,9 +475,10 @@ function touchesWalkable(mw: MovementWorld): boolean {
  * its position plus it). Needs a wall touched this step, faced within ~37° and near vertical; the
  * point 4.5 ft up and 2.21 ft ahead open; a trace from it back down to 1.5 ft above the feet
  * meeting a walkable top more than 3 ft above them. The original lands 1.5 ft lower and lets its
- * collision lift the body out; here the capsule must fit standing on the top.
+ * collision lift the body out; here the capsule must fit standing on the top. `drop` is how far
+ * the feet end this step below the airborne stretch's highest point (0 on the ground).
  */
-function ledgeAhead(mw: MovementWorld, c: Character, moved: Readonly<Vec3>, yaw: number): Vec3 | null {
+function ledgeAhead(mw: MovementWorld, c: Character, moved: Readonly<Vec3>, yaw: number, drop: number): Vec3 | null {
   const fx = -Math.sin(yaw);
   const fz = -Math.cos(yaw);
   let wall = false;
@@ -492,22 +496,34 @@ function ledgeAhead(mw: MovementWorld, c: Character, moved: Readonly<Vec3>, yaw:
   const samples = Math.max(1, Math.ceil(Math.abs(moved.y) / LEDGE_SAMPLE));
   for (let i = 0; i < samples; i++) {
     const y = end - (moved.y * i) / samples;
+    if (drop - (y - end) > LEDGE_MAX_DROP) continue;
     const target = ledgeAt(mw, { x: c.position.x + moved.x, y, z: c.position.z + moved.z }, fx, fz);
     if (target) return target;
   }
   return null;
 }
+/**
+ * How far below the top of its flight a falling character is, from its vertical speed: falling
+ * has gravity only (no drag, and the grab is never tried with jump held, so no lift), so the
+ * drop is v² / 2g. Tracking the highest point (+0x144) instead would need it in every snapshot.
+ */
+function dropBelowApex(vy: number): number {
+  return vy < 0 ? (vy * vy) / (-2 * GRAVITY) : 0;
+}
+
 /** Height step between ledge tests within one tick, metres. */
 const LEDGE_SAMPLE = 0.2;
 
 /** The grab test at one feet position, facing (fx, fz): the feet position on the ledge, or null. */
 function ledgeAt(mw: MovementWorld, feet: Readonly<Vec3>, fx: number, fz: number): Vec3 | null {
   const from = { x: feet.x + fx * LEDGE_REACH_AHEAD, y: feet.y + LEDGE_REACH_UP, z: feet.z + fz * LEDGE_REACH_AHEAD };
-  if (mw.world.projectPoint(from, true, undefined, CHARACTER_GROUPS)?.isInside) return null;
+  // The original's open-point test and trace see only the BSP: props and brushes are never caught.
+  const isLevel = (col: RAPIER.Collider) => mw.level.has(col.handle);
+  if (mw.world.projectPoint(from, true, undefined, CHARACTER_GROUPS, undefined, undefined, isLevel)?.isInside) return null;
   const d = { x: feet.x - from.x, y: feet.y + LEDGE_TRACE_TO - from.y, z: feet.z - from.z };
   const len = Math.hypot(d.x, d.y, d.z);
   const ray = new mw.rapier.Ray(from, { x: d.x / len, y: d.y / len, z: d.z / len });
-  const hit = mw.world.castRayAndGetNormal(ray, len, true, undefined, CHARACTER_GROUPS);
+  const hit = mw.world.castRayAndGetNormal(ray, len, true, undefined, CHARACTER_GROUPS, undefined, undefined, isLevel);
   if (!hit || hit.normal.y < GROUND_MIN_NORMAL_Y) return null;
   const top = from.y + ray.dir.y * hit.timeOfImpact;
   if (top - feet.y <= LEDGE_MIN_RISE) return null;

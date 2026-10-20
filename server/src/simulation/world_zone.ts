@@ -1199,12 +1199,12 @@ export class WorldZone {
     const clipMps = (c: [number, number]) => (c[0] * 0.3048 * ORIGINAL_CLIP_FPS) / c[1];
     const stats: MovementStats = loco
       ? {
-        ...DEFAULT_MOVEMENT_STATS, jumpVelocity: 0, clipLocomotion: false,
+        ...DEFAULT_MOVEMENT_STATS, jumpVelocity: 0, clipLocomotion: false, noLedgeGrab: true,
         runSpeed: clipMps(loco.run), walkSpeed: clipMps(loco.walk), backSpeed: clipMps(loco.retreat), walkBackSpeed: clipMps(loco.retreat),
         strafeSpeed: (clipMps(loco.left) + clipMps(loco.right)) / 2, walkStrafeSpeed: (clipMps(loco.left) + clipMps(loco.right)) / 2,
         strafeLeft: [-clipMps(loco.left), 0], strafeRight: [clipMps(loco.right), 0], walkStrafeLeft: [-clipMps(loco.left), 0], walkStrafeRight: [clipMps(loco.right), 0],
       }
-      : { ...DEFAULT_MOVEMENT_STATS, jumpVelocity: 0 };
+      : { ...DEFAULT_MOVEMENT_STATS, jumpVelocity: 0, noLedgeGrab: true };
     if (!weapon) throw new Error(`unknown weapon ${archetype.weapon} for ${archetypeId}`);
     const shield = heldShield === null ? null : heldShield?.type === 'shield' ? heldShield : archetype.shield ? this.items.get(archetype.shield) ?? null : null;
     const disposition = at.disposition ?? (archetype.passive ? DISPOSITION.GUARD : DISPOSITION.HOSTILE);

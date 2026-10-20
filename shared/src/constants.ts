@@ -78,6 +78,8 @@ export const LEDGE_TRACE_TO = 1.5 * 0.3048;
 export const LEDGE_MIN_RISE = 3 * 0.3048;
 export const LEDGE_MAX_WALL_NORMAL_Y = 0.1;
 export const LEDGE_MAX_FACING_DOT = -0.8;
+/** In the air the grab needs the feet at most this far below the airborne stretch's highest point (+0x144, 0x004912F0). */
+export const LEDGE_MAX_DROP = 2 * 0.3048;
 export function mountTicks(rate = 1): number {
   return Math.max(1, Math.round(((27 - 1) / (ENGINE_CLIP_FPS * rate)) * TICK_RATE));
 }
@@ -128,6 +130,11 @@ export interface MovementStats {
    * movement selector (0x42AFC0) lets a sideways key override forward / back.
    */
   diagonalMoves?: boolean;
+  /**
+   * No ledge grab: only Drake's physics class (vtable 0x4E26DC, built once beside his controller
+   * 0x42C9D0) runs the grab test 0x004916A0; creatures' classes do not.
+   */
+  noLedgeGrab?: boolean;
 }
 
 const FT = 0.3048;
