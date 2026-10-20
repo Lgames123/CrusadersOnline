@@ -694,7 +694,15 @@ async function main(): Promise<void> {
             chase.snap();
             for (const [id, state] of live.objectStates) levelView?.setObjectState(id, state, live.swings.get(id)?.motion ?? null, live.movers.get(id)?.motion ?? null);
           },
-          cutscene: (d) => playCutscene(d.sequence, d.actors),
+          cutscene: (d) => {
+            // The server ran out of time for it (this page played it slowly): it is over here too.
+            if (d.end) {
+              if (cutscene?.sequence.name === d.sequence) endCutscene();
+              return;
+            }
+            playCutscene(d.sequence, d.actors);
+          },
+          fade: (id, seconds) => remotes.fade(id, seconds),
           ending: (d) => startEnding(d.at, d.yaw),
           // A message trigger a relay or a death fired for this player (signs and hints are local).
           storyMessage: (id) => {
@@ -833,6 +841,14 @@ async function main(): Promise<void> {
         local.placeAt({ x, y: y + 0.1, z }, yaw);
         local.object.rotation.y = yaw;
         local.object.position.set(x, y + 0.1, z);
+      }
+    } else {
+      // Where the character is: a sequence that starts on the first tick of an act (Cs5b's Seq24,
+      // Ws9a's opening) comes before any frame has drawn him, his object still at the origin.
+      const at = local.character.position;
+      if (local.object.position.distanceTo(new THREE.Vector3(at.x, at.y, at.z)) > 0.5) {
+        local.object.position.set(at.x, at.y, at.z);
+        local.object.rotation.y = input.yaw;
       }
     }
     const standIn: Puppet = {
@@ -1575,6 +1591,9 @@ async function main(): Promise<void> {
   let stepFoot = 0;
 
   const frameLoop = (now: number): void => {
+    // Scripted views keep the real clock (up to 1 s a frame): a page in the background draws
+    // seldom, and its sequence would fall behind the server's.
+    const sceneDt = Math.min(now - last, 1000) / 1000;
     const frameMs = Math.min(now - last, MAX_FRAME_MS);
     last = now;
     acc += frameMs;
@@ -1596,23 +1615,24 @@ async function main(): Promise<void> {
     // Necros's death slows the world (its clips, effects and debris) under the timeline's real clock.
     const worldDt = ending ? dt * ending.timeScale : dt;
     if (ending) {
-      ending.update(dt);
+      ending.update(sceneDt);
       local.render(acc / TICK_MS, worldDt);
       if (ending.finished) {
         endEnding();
         fade(false, 800);
       }
     } else if (cutscene) {
-      cutscene.update(dt);
-      local.avatar.update(dt);
+      cutscene.update(sceneDt);
+      local.avatar.update(sceneDt);
       if (cutscene?.finished) endCutscene();
     } else local.render(acc / TICK_MS, dt);
     if (myTorch.visible) {
       myTorch.position.set(local.object.position.x, local.object.position.y + TORCH_LIGHT_HEIGHT, local.object.position.z);
       dynamicLights.set(MY_TORCH_KEY, myTorch.position, TORCH_LIGHT_COLOR, TORCH_DYNAMIC_INTENSITY, myTorch.distance, 0.08);
     }
-    if (session) remotes.update(session, worldDt);
-    for (const p of scenePuppets.values()) p.avatar.update(worldDt);
+    // The puppets of a sequence keep its clock (their clips time its steps).
+    if (session) remotes.update(session, cutscene ? sceneDt : worldDt);
+    for (const p of scenePuppets.values()) p.avatar.update(cutscene ? sceneDt : worldDt);
     effects?.update(worldDt);
     decals?.update(worldDt);
     spellVisuals.update(worldDt);

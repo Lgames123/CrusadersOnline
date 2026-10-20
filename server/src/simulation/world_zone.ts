@@ -223,6 +223,7 @@ import {
   removeCharacter,
   setCharacterState,
   rayDistance,
+  wallDistance,
   snapshotMaxBytes,
   stepCharacter,
   yawTowards,
@@ -490,9 +491,17 @@ const PATH_ARRIVE = 0.4;
  * player coming within ~30 ft sets them off again at once.
  */
 const ALERT_TICKS = 5;
-/** The ending's cast walking off after the last scene: gone on arrival, after this long, or once stuck. */
-const CAST_LEAVE_TICKS = 20 * 20;
-const CAST_STUCK_TICKS = 20 * 2;
+/**
+ * The ending's cast walking off after the last scene: it fades out (CAST_FADE_SECONDS) on
+ * arrival, after CAST_LEAVE_TICKS, or when it has not got CAST_STUCK_METRES nearer its exit in
+ * CAST_STUCK_TICKS. On the way it turns aside from walls and drops ahead (CAST_TURNS, radians).
+ */
+const CAST_LEAVE_TICKS = 20 * 25;
+const CAST_STUCK_TICKS = 20 * 3;
+const CAST_STUCK_METRES = 0.5;
+const CAST_FADE_SECONDS = 1;
+const CAST_PROBE = 1.2;
+const CAST_TURNS = [0, 0.5, 1, 1.5, 2, 2.5];
 const FLEE_TICKS = 20 * 7;
 const WARY_RADIUS = 9;
 const REALERT_TICKS = 2;
@@ -755,7 +764,7 @@ interface Mob extends ActorBase {
    * of every fight, standing still until the last scene ends; then `leaving` for an exit.
    */
   privateTo?: number;
-  leaving?: { x: number; z: number; until: number; from: { x: number; z: number }; since: number };
+  leaving?: { x: number; z: number; until: number; fromD: number; since: number; side: number; goneAt?: number };
   /**
    * An admin's custom spawn (not original): its spawn id, damage multiplier, whether it comes back
    * after death, and when it is removed (ms since epoch).
@@ -1033,7 +1042,7 @@ export class WorldZone {
   private hostile(a: Actor, b: Actor): boolean {
     if (a === b) return false;
     // A player watching the ending is out of every fight.
-    if ((a.kind === 'player' && a.ending) || (b.kind === 'player' && b.ending)) return false;
+    if ((a.kind === 'player' && scripted(a)) || (b.kind === 'player' && scripted(b))) return false;
     // The ending's cast is scenery: nobody fights it, it fights nobody.
     if ((a.kind === 'mob' && a.privateTo !== undefined) || (b.kind === 'mob' && b.privateTo !== undefined)) return false;
     if ((a.kind === 'mob' && a.hidden) || (b.kind === 'mob' && b.hidden)) return false;
@@ -2560,31 +2569,64 @@ export class WorldZone {
         this.removeMob(m);
         continue;
       }
-      m.leaving = { ...best, until: this.tick + CAST_LEAVE_TICKS, from: { x: pos.x, z: pos.z }, since: this.tick };
+      m.leaving = { ...best, until: this.tick + CAST_LEAVE_TICKS, fromD: bestD, since: this.tick, side: this.random() < 0.5 ? 1 : -1 };
     }
   }
 
-  /** One of the ending's cast: it stands, or walks off to its exit and is gone (castLeaves). */
+  /** One of the ending's cast: it stands, or walks off to its exit, fades and is gone (castLeaves). */
   private updateCast(m: Mob): void {
     m.input.flags = 0;
     const l = m.leaving;
     const pos = m.character.position;
-    if (l) {
+    if (l?.goneAt !== undefined) {
+      if (this.tick >= l.goneAt) return this.removeMob(m);
+    } else if (l) {
       const d = Math.hypot(l.x - pos.x, l.z - pos.z);
-      // Stuck (a wall in the straight way): gone too.
+      let stuck = false;
+      // Held up: no nearer its exit by CAST_STUCK_METRES in CAST_STUCK_TICKS (pacing a nook counts).
       if (this.tick - l.since >= CAST_STUCK_TICKS) {
-        if (Math.hypot(pos.x - l.from.x, pos.z - l.from.z) < 0.5) return this.removeMob(m);
-        l.from = { x: pos.x, z: pos.z };
+        stuck = l.fromD - d < CAST_STUCK_METRES;
+        l.fromD = d;
         l.since = this.tick;
       }
-      if (d < 1 || this.tick >= l.until) return this.removeMob(m);
-      m.yaw = quantizeAngle(yawTowards(pos.x, pos.z, l.x, l.z));
-      m.input.flags = INPUT.FORWARD | INPUT.WALK;
+      const yaw = d < 1 || stuck || this.tick >= l.until ? null : this.castWay(m, yawTowards(pos.x, pos.z, l.x, l.z));
+      if (yaw === null) {
+        // There, held up or out of time: it fades out where it is, its owner sees it go.
+        l.goneAt = this.tick + Math.round(CAST_FADE_SECONDS * TICK_RATE);
+        const owner = [...this.players.values()].find((q) => q.entityId === m.privateTo);
+        if (owner) this.sendJson(owner.connId, { op: SC.ENTITY_FADE, d: { id: m.entityId, seconds: CAST_FADE_SECONDS } });
+      } else {
+        m.yaw = quantizeAngle(yaw);
+        m.input.flags = INPUT.FORWARD | INPUT.WALK;
+      }
     }
     m.input.yaw = m.yaw;
     m.input.clientTick = this.tick;
     stepCharacter(this.mw, m.character, m.input, m.stats, TICK_DT);
     m.anim = m.input.flags & MOVE_MASK ? ANIM.WALK : ANIM.IDLE;
+  }
+
+  /**
+   * The heading a walking cast member takes towards `want`: straight on when nothing is in the
+   * way, else the nearest turn (its own side first) with no wall within CAST_PROBE and floor
+   * ahead; null when every way is shut.
+   */
+  private castWay(m: Mob, want: number): number | null {
+    const pos = m.character.position;
+    // Its own side all the way round first, so it follows a wall instead of dithering along it.
+    const side = m.leaving?.side ?? 1;
+    for (const s of [side, -side]) {
+      for (const k of CAST_TURNS) {
+        if (k === 0 && s !== side) continue;
+        const yaw = want + s * k;
+        if (wallDistance(this.mw, pos, yaw, CAST_PROBE, 0.9) !== null) continue;
+        const ahead = { x: pos.x - Math.sin(yaw) * LEDGE_PROBE, y: pos.y, z: pos.z - Math.cos(yaw) * LEDGE_PROBE };
+        if (this.floorBelow(ahead) === null) continue;
+        if (m.leaving) m.leaving.side = s;
+        return yaw;
+      }
+    }
+    return null;
   }
 
   /** Sets a brush's mover going (a relay's target, 0x48EC10). */
@@ -2859,7 +2901,11 @@ export class WorldZone {
       if (p.ending) {
         if (tick >= p.ending.until) this.loadEnding(p);
       } else if (p.cutscene) {
-        if (tick >= p.cutscene.until) this.finishCutscene(p);
+        if (tick >= p.cutscene.until) {
+          // Its client never said it was over (a page in the background plays slowly): it stops too.
+          this.sendJson(p.connId, { op: SC.CUTSCENE, d: { sequence: p.cutscene.sequence.name, actors: [], end: true } });
+          this.finishCutscene(p);
+        }
       } else if (alive(p)) {
         this.checkStory(p);
         this.walkIntoDoors(p);
@@ -4106,8 +4152,9 @@ export class WorldZone {
 
   /** Stats_LoseHp (0x0044CA00): the HP loss, the player's flinch roll, death; `rush`: a rush's own cost. */
   private loseHp(attacker: Actor, target: Actor, damage: number, rush = false, knockdown = false): void {
-    // A player watching the ending takes nothing (a projectile already on its way).
-    if (target.kind === 'player' && target.ending) return;
+    // A player in a scripted sequence or watching the ending takes nothing (not original: the
+    // world goes on around him; a projectile may already be on its way).
+    if (target.kind === 'player' && scripted(target)) return;
     const hpBefore = target.hp;
     let impact: number | undefined;
     target.hp = Math.max(0, target.hp - damage);

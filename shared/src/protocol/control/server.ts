@@ -232,7 +232,14 @@ export interface ZoneChangeMsg {
  */
 export interface CutsceneMsg {
   op: typeof SC.CUTSCENE;
-  d: { sequence: string; actors: (number | null)[] };
+  /** `end`: the server has finished the sequence (its time ran out): stop playing it. */
+  d: { sequence: string; actors: (number | null)[]; end?: true };
+}
+
+/** An entity fades out over `seconds` (the ending's cast leaving); its despawn follows. */
+export interface EntityFadeMsg {
+  op: typeof SC.ENTITY_FADE;
+  d: { id: number; seconds: number };
 }
 
 /**
@@ -325,7 +332,8 @@ export type ServerControlMsg =
   | StorySoundMsg
   | ShopMsg
   | SpellEventMsg
-  | EndingMsg;
+  | EndingMsg
+  | EntityFadeMsg;
 
 /** Animation state ids carried in snapshot `anim`. */
 export const ANIM = {

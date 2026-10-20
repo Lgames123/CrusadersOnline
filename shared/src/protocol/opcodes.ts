@@ -58,6 +58,8 @@ export const SC = {
   SPELL_EVENT: 0x52,
   /** Necros fell to this player (ending.ts): play his death timeline; the ending act loads next. */
   ENDING: 0x53,
+  /** An entity fades out over `seconds` before it goes (the ending's cast walking off). */
+  ENTITY_FADE: 0x54,
 } as const;
 
 /** Input flag bits carried in CS_PLAYER_INPUT. */

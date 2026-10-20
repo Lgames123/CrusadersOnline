@@ -41,6 +41,9 @@ export class RemoteEntities {
   /** Animation rates set by spell effects (slowed 0.3, frozen 0), by entity. */
   readonly rates = new Map<number, number>();
 
+  /** Entities fading out before they go (seconds left, of `total`). */
+  private readonly fades = new Map<number, { left: number; total: number }>();
+
   /** Torch lights carried by other players (Torch Light spell). */
   private readonly lights = new Map<number, THREE.PointLight>();
 
@@ -92,8 +95,35 @@ export class RemoteEntities {
     for (const id of [...this.byId.keys()]) this.despawn(id);
   }
 
+  /**
+   * Fades an entity out over `seconds` (it keeps moving meanwhile). Its materials may be shared
+   * with other avatars, so the opacity is set around each of its meshes' own draws only.
+   */
+  fade(id: number, seconds: number): void {
+    const e = this.byId.get(id);
+    if (!e || this.fades.has(id)) return;
+    const f = { left: Math.max(0.05, seconds), total: Math.max(0.05, seconds) };
+    this.fades.set(id, f);
+    const saved = new Map<THREE.Material, { transparent: boolean; opacity: number }>();
+    e.avatar.object.traverse((o) => {
+      if (!(o as THREE.Mesh).isMesh && !(o as THREE.Sprite).isSprite) return;
+      o.onBeforeRender = (_r, _s, _c, _g, material) => {
+        saved.set(material, { transparent: material.transparent, opacity: material.opacity });
+        material.transparent = true;
+        material.opacity *= Math.max(0, f.left / f.total);
+      };
+      o.onAfterRender = (_r, _s, _c, _g, material) => {
+        const s = saved.get(material);
+        if (!s) return;
+        material.transparent = s.transparent;
+        material.opacity = s.opacity;
+      };
+    });
+  }
+
   despawn(id: number): void {
     const e = this.byId.get(id);
+    this.fades.delete(id);
     if (!e) return;
     this.scene.remove(e.avatar.object);
     e.avatar.dispose();
@@ -103,6 +133,11 @@ export class RemoteEntities {
   }
 
   update(session: ClientSession, dt: number): void {
+    for (const [id, f] of this.fades) {
+      f.left -= dt;
+      const e = this.byId.get(id);
+      if (e && f.left <= 0) e.avatar.object.visible = false; // gone; its despawn follows
+    }
     const renderTick = session.estimateServerTick() - INTERP_DELAY_TICKS;
     for (const e of this.byId.values()) {
       if (this.scripted.has(e.id)) {
@@ -110,7 +145,8 @@ export class RemoteEntities {
         continue;
       }
       if (!session.sampleRemote(e.id, renderTick, this.sample)) continue;
-      e.visible = e.avatar.object.visible = true;
+      e.visible = true;
+      e.avatar.object.visible = (this.fades.get(e.id)?.left ?? 1) > 0;
       e.avatar.object.position.set(this.sample.x, this.sample.y, this.sample.z);
       e.avatar.object.rotation.y = this.sample.yaw;
       e.hp = this.sample.hp;

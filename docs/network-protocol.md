@@ -58,6 +58,7 @@ All game code talks to a `Transport` interface (`send(bytes|object)`, `onMessage
 | `0x48` | `SC_PONG` | JSON | Heartbeat response with server timestamp |
 | `0x4F` | `SC_ERROR` | JSON | Rejection reason (insufficient mana, invalid target) |
 | `0x53` | `SC_ENDING` | JSON | `{ at, yaw, first }`: Necros fell and this player hurt him; play his death timeline (ending.ts); the ending act (Cs5b) loads 10.5 s later |
+| `0x54` | `SC_ENTITY_FADE` | JSON | `{ id, seconds }`: fade that entity out (the ending's cast leaving); its despawn follows |
 
 ---
 

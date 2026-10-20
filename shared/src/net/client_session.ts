@@ -66,6 +66,8 @@ export interface ClientSessionEvents {
   cutscene?(d: CutsceneMsg['d']): void;
   /** Necros fell to this player: play his death timeline (the server loads the ending act). */
   ending?(d: EndingMsg['d']): void;
+  /** An entity fades out before it goes. */
+  fade?(id: number, seconds: number): void;
   /** The quest book (on entry and after every change). */
   quests?(d: QuestLogMsg['d']): void;
   /** A message trigger fired for this player (its id in the level's story.messages). */
@@ -332,6 +334,9 @@ export class ClientSession {
         break;
       case SC.ENDING:
         this.events.ending?.(msg.d);
+        break;
+      case SC.ENTITY_FADE:
+        this.events.fade?.(msg.d.id, msg.d.seconds);
         break;
       case SC.QUEST_LOG:
         this.questLog = msg.d.log;

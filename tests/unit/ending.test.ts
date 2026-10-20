@@ -165,6 +165,8 @@ describe('the ending (ending.ts)', () => {
   function endingAct() {
     const arena = createSyntheticArena();
     arena.name = 'level:cs5b';
+    // A wall between the citizen (x 1) and the inn door (x 4): it has to walk round it.
+    arena.boxes.push({ kind: 'wall', x: 2.5, y: 1, z: -2, hx: 0.1, hy: 1, hz: 1.5 });
     arena.mobSpawns = [
       { archetype: 'npc_152', x: 0, y: 0.5, z: -2, yaw: 0, placement: 0 },
       { archetype: 'npc_154', x: 1, y: 0.5, z: -2, yaw: 0, placement: 4 },
@@ -220,12 +222,57 @@ describe('the ending (ending.ts)', () => {
     expect(t.zone.inspect().filter((a) => a.kind === 'mob')).toHaveLength(0);
   });
 
+  it('the cast walks around what stands in its way, fades out for its owner alone, then goes', () => {
+    const t = endingAct();
+    t.zone.join(1, { name: 'Slayer', characterId: 'c1', position: { x: 0, y: 0.5, z: 0 } });
+    t.zone.join(2, { name: 'Veteran', characterId: 'c2', position: { x: 0.5, y: 0.5, z: 0.5 }, story: { ...emptyStoryState(), flags: ['cs5b:231582'], completedAt: 5 } });
+    t.zone.step();
+    t.zone.cutsceneDone(1, 'Seq24');
+    const citizen = () => t.zone.inspect().find((a) => a.kind === 'mob' && Math.abs(a.x - 1) < 0.01 && Math.abs(a.z + 2) < 0.01);
+    const id = citizen()!.id;
+    let nearest = Infinity;
+    for (let i = 0; i < 20 * 26; i++) {
+      t.zone.step();
+      const m = t.zone.inspect().find((a) => a.id === id);
+      if (m) nearest = Math.min(nearest, Math.hypot(m.x - 4, m.z + 2));
+    }
+    expect(nearest).toBeLessThan(1.2);
+    expect(t.of(1, SC.ENTITY_FADE).map((m) => (m as Extract<ServerControlMsg, { op: typeof SC.ENTITY_FADE }>).d.id)).toContain(id);
+    expect(t.of(1, SC.ENTITY_FADE)).toHaveLength(3);
+    expect(t.of(2, SC.ENTITY_FADE)).toHaveLength(0);
+    expect(t.zone.inspect().filter((a) => a.kind === 'mob')).toHaveLength(0);
+  });
+
   it("a player leaving takes his cast with him", () => {
     const t = endingAct();
     t.zone.join(1, { name: 'Slayer', characterId: 'c1', position: { x: 0, y: 0.5, z: 0 } });
     expect(t.zone.inspect().filter((a) => a.kind === 'mob')).toHaveLength(3);
     t.zone.leave(1);
     expect(t.zone.inspect().filter((a) => a.kind === 'mob')).toHaveLength(0);
+  });
+
+  it("a sequence whose client never answers is ended by the server, which tells the client; meanwhile nothing hurts the player", () => {
+    const arena = createSyntheticArena();
+    arena.name = 'level:t1a';
+    arena.mobSpawns = [{ archetype: 'skeleton_warrior', x: 0, y: 0.5, z: -3, yaw: 0, placement: 1 }];
+    const square: [number, number][] = [[-2 / FT, -2 / FT], [2 / FT, -2 / FT], [2 / FT, 2 / FT], [-2 / FT, 2 / FT]];
+    arena.story = {
+      triggers: [{ id: 9, kind: 'flag', activation: 1, volume: { polygon: square, yMin: -100, yMax: 100 } }],
+      cameras: [],
+      sequences: [{ name: 'Long', trigger: 9, actors: [{ player: true }], tracks: [{ actor: 2, steps: [0] }], steps: [{ action: 'Wait', when: null, args: { time: 4000 } }] }],
+    };
+    const t = world(arena);
+    t.zone.join(1, { name: 'Watcher', characterId: 'c1', position: { x: 0, y: 0.5, z: 0 } });
+    t.zone.step();
+    expect(t.of(1, SC.CUTSCENE)).toHaveLength(1);
+    const me = t.internals.players.get(1) as { hp: number };
+    const skeleton = [...t.internals.actors.values()].find((a) => a.kind === 'mob')!;
+    const hp = me.hp;
+    t.internals.applyDamage(skeleton, me, new Array(11).fill(1000));
+    expect(me.hp).toBe(hp);
+    for (let i = 0; i < 20 * 40; i++) t.zone.step();
+    const msgs = t.of(1, SC.CUTSCENE) as Extract<ServerControlMsg, { op: typeof SC.CUTSCENE }>[];
+    expect(msgs.at(-1)!.d).toMatchObject({ sequence: 'Long', end: true });
   });
 
   it('the completion date is kept with the story, anything malformed dropped', () => {
