@@ -385,6 +385,19 @@ const DOOR_INTERACT_RANGE = 1.8;
 const AGGRO_HEIGHT = 3;
 /** Height above the feet of a creature's line of sight (slice value). */
 const EYE_HEIGHT = 1.5;
+/**
+ * Creature dispositions (stats +0x1D8, slot 0x38): who takes whom as a target (`opposes`, from
+ * 0x40DC90 / 0x40D790 / 0x40D360). The player answers 5 (the hostiles' list has it, nobody else's).
+ */
+const DISPOSITION = { CITIZEN: 0, GUARD: 2, HOSTILE: 3, INERT: 4, PLAYER: 5, ALLY: 6 } as const;
+/**
+ * A creature taking a target calls the idle hostiles near it to the same one (0x40D360, event
+ * 0x17): those within 4 ft of its height and 100 ft across, within 7 ft, or that see it (eye
+ * ray) within 100 ft in their 60° cone or 20 ft outside it.
+ */
+const CALL_HEIGHT = 4 * 0.3048;
+const CALL_RANGE = 100 * 0.3048;
+const CALL_TOUCH = 7 * 0.3048;
 /** Signed difference a - b of two headings, wrapped to [-pi, pi]. */
 const angleDiff = (a: number, b: number) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
 const OBJECT_RESPAWN_TICKS = 20 * 300; // 5 min: broken props come back (level items and chests never do)
@@ -741,10 +754,19 @@ interface Mob extends ActorBase {
   /** Original levels: index in the act's placements (scripted sequences name actors by it). */
   placement?: number;
   /**
-   * Told by a relay to fight the nearest enemy (op 0x0D, brain flag 0x400, 0x40DC90): it notices
-   * players in sight at any range and any angle. Cleared when it respawns.
+   * Told by a relay to fight the nearest enemy (op 0x0D, brain flag 0x400, 0x40DC90): it takes
+   * the nearest creature or player it opposes in sight, at any range and angle, picks again when
+   * that one dies, and has no leash. Cleared when it respawns.
    */
   fightsNearest?: boolean;
+  /** An admin's aggressive spawn (not original): it notices players in sight at any range. */
+  huntsPlayers?: boolean;
+  /**
+   * Its disposition (stats +0x1D8; DISPOSITION): which side it takes (`opposes`). A relay's op
+   * 0x0E makes it 4 (inert) until it respawns with `spawnDisposition`.
+   */
+  disposition: number;
+  spawnDisposition: number;
   /** A spectral ally (disposition 6): the player it fights for (entity id). */
   ally?: number;
   /** Its weapon's damage when not the item's (the spectral ally's, by spell level). */
@@ -1047,10 +1069,46 @@ export class WorldZone {
     // The ending's cast is scenery: nobody fights it, it fights nobody.
     if ((a.kind === 'mob' && a.privateTo !== undefined) || (b.kind === 'mob' && b.privateTo !== undefined)) return false;
     if ((a.kind === 'mob' && a.hidden) || (b.kind === 'mob' && b.hidden)) return false;
+    // Two creatures of the world: when either takes the other as a target (guards and hostiles).
+    if (a.kind === 'mob' && b.kind === 'mob' && a.ally === undefined && b.ally === undefined) return this.opposes(a, b) || this.opposes(b, a);
     const players = (x: Actor) => x.kind === 'player' || x.ally !== undefined;
     if (players(a) === players(b)) return false;
     if (a.kind === 'mob' && a.ally !== undefined && b.kind === 'mob' && b.archetype.passive) return false;
     return true;
+  }
+
+  /**
+   * Whether creature `a` would take `b` as a target, by their dispositions (0x40DC90; the same
+   * table in 0x40D790 and 0x40D360): citizens and guards (0-2) oppose hostiles (3); hostiles
+   * oppose 0-2, the player (5) and spectral allies (6); an ally opposes hostiles and guards that
+   * are fighting a player. Inert creatures (4) oppose nobody and nobody opposes them. The
+   * guards' alarm on the player is apart (raiseAlarm).
+   */
+  private opposes(a: Mob, b: Actor): boolean {
+    if (a === b || !alive(b)) return false;
+    const db = b.kind === 'player' ? DISPOSITION.PLAYER : b.disposition;
+    const da = a.disposition;
+    if (da <= DISPOSITION.GUARD) return db === DISPOSITION.HOSTILE;
+    if (da === DISPOSITION.HOSTILE) return db <= DISPOSITION.GUARD || db === DISPOSITION.PLAYER || db === DISPOSITION.ALLY;
+    if (da === DISPOSITION.ALLY) {
+      if (db === DISPOSITION.HOSTILE) return true;
+      return b.kind === 'mob' && db >= 1 && db <= DISPOSITION.GUARD && this.fightingPlayer(b);
+    }
+    return false;
+  }
+
+  /** Its current target is a player (0x40E440: the target's +0x14 has 0x40000). */
+  private fightingPlayer(m: Mob): boolean {
+    if (m.state !== 'chase') return false;
+    let top = 0;
+    let target: Actor | undefined;
+    for (const [id, t] of m.threat) {
+      if (t > top) {
+        top = t;
+        target = this.actors.get(id);
+      }
+    }
+    return target?.kind === 'player';
   }
 
   /** Summons a spectral ally (type 155) for `owner` (0x00440230: HP, weapon and resists by level). */
@@ -1064,6 +1122,7 @@ export class WorldZone {
     const m = this.actors.get(id) as Mob | undefined;
     if (!m) return null;
     m.ally = owner.entityId;
+    m.disposition = m.spawnDisposition = DISPOSITION.ALLY;
     m.name = 'Spectral Ally';
     m.damage = damageVector({ SLASH: slash, BASH: bash, LIGHT: light });
     void until;
@@ -1147,6 +1206,7 @@ export class WorldZone {
       : { ...DEFAULT_MOVEMENT_STATS, jumpVelocity: 0 };
     if (!weapon) throw new Error(`unknown weapon ${archetype.weapon} for ${archetypeId}`);
     const shield = heldShield === null ? null : heldShield?.type === 'shield' ? heldShield : archetype.shield ? this.items.get(archetype.shield) ?? null : null;
+    const disposition = at.disposition ?? (archetype.passive ? DISPOSITION.GUARD : DISPOSITION.HOSTILE);
     const mob: Mob = {
       kind: 'mob',
       entityId: this.nextEntityId++,
@@ -1204,6 +1264,8 @@ export class WorldZone {
       attacks,
       hidden: at.hidden === true,
       hideOnRespawn: at.hidden === true,
+      disposition,
+      spawnDisposition: disposition,
       ...(at.placement !== undefined ? { placement: at.placement } : {}),
       ...(at.carries ? { carries: at.carries } : {}),
       statuses: new Map(),
@@ -2439,22 +2501,50 @@ export class WorldZone {
   }
 
   /**
-   * A relay's creature op. Only the ones whose target can be a player apply here: server
-   * creatures do not fight each other, so preferTarget / attackTarget (another creature) and
-   * disposition4 (meaning not decoded) do nothing yet.
+   * A relay's creature op (0x463CC0 -> 0x4102D0 events / brain flag / disposition). `other`
+   * names a second creature of the act by its placement.
    */
   private applyCreatureOp(p: Player, op: StoryCreatureOp): void {
-    for (const m of this.actors.values()) {
-      if (m.kind !== 'mob' || m.placement !== op.creature || !alive(m) || m.archetype.passive) continue;
-      if (op.op === 'targetPlayer') {
-        // Event 0x18: a hostile creature takes the player at once, seen or not (0x40D910).
-        m.threat.set(p.entityId, (m.threat.get(p.entityId) ?? 0) + 1);
-        if (m.state !== 'chase') {
-          m.state = 'chase';
-          m.brain = 'decide';
-          m.lastPick = null;
-        }
-      } else if (op.op === 'fightNearest') m.fightsNearest = true;
+    const placed = (i: number | undefined) => {
+      for (const a of this.actors.values()) if (a.kind === 'mob' && a.placement === i && alive(a) && a.privateTo === undefined) return a;
+      return undefined;
+    };
+    const m = placed(op.creature);
+    if (!m) return;
+    const hostile = m.disposition === DISPOSITION.HOSTILE;
+    const idle = m.state === 'idle' || m.state === 'watch' || m.state === 'talk';
+    switch (op.op) {
+      case 'targetPlayer':
+        // Event 0x18: a hostile creature takes the player at once, seen or not (0x40D910 case 3).
+        if (hostile && this.hostile(m, p)) this.engage(m, p, false);
+        break;
+      case 'preferTarget': {
+        // Event 0x17: an idle hostile takes `other` if it is its enemy (0x40D910 case 3).
+        const other = placed(op.other);
+        if (hostile && idle && other && this.opposes(m, other) && this.hostile(m, other)) this.engage(m, other, false);
+        break;
+      }
+      case 'attackTarget': {
+        // Event 0x19: it attacks `other` now and calls the hostiles near it (0x40C370 ->
+        // 0x40D360); its disposition is not asked. Ws5a's lever pairs the guards with the
+        // skeletons and dark mages here.
+        const other = placed(op.other);
+        if (other && other !== m && m.disposition !== DISPOSITION.INERT && this.hostile(m, other)) this.engage(m, other, true);
+        break;
+      }
+      case 'fightNearest':
+        // Brain flag 0x400: it fights the nearest enemy in sight, at any range (0x40DC90).
+        m.fightsNearest = true;
+        break;
+      case 'disposition4':
+        // 0x40CCD0: disposition 4 and the brain back to its start, where it stays (state 8):
+        // inert, nobody's enemy. No shipped act fires its relay (Ws5a 353547 is referenced by
+        // nothing but the act's type lists).
+        m.disposition = DISPOSITION.INERT;
+        m.threat.clear();
+        m.state = 'idle';
+        this.calmDown(m);
+        break;
     }
   }
 
@@ -3028,25 +3118,38 @@ export class WorldZone {
     const pos = m.character.position;
     const fromSpawn = Math.hypot(pos.x - m.spawn.x, pos.z - m.spawn.z);
     m.input.flags = 0;
+    // Inert (disposition 4, a relay's op 0x0E): its brain sits in state 8 (0x40C520), no walk, no
+    // target, no talk; blows don't wake it.
+    const inert = m.disposition === DISPOSITION.INERT;
+    if (inert && m.state !== 'idle') {
+      m.threat.clear();
+      m.state = 'idle';
+      this.calmDown(m);
+    }
     if (m.ally !== undefined) this.allyThink(m);
+    // Told to fight the nearest enemy (op 0x0D): citizens and guards take the nearest hostile in
+    // sight, at any range (0x40DC90); unarmed ones run from it.
+    if (arch.passive && m.fightsNearest && !inert && (m.state === 'idle' || m.state === 'watch' || m.state === 'talk')) {
+      const foe = this.nearestFoe(m);
+      if (foe && isCitizen(m)) this.scare(m, foe.character.position);
+      else if (foe) this.engage(m, foe, true);
+    }
     // Peaceful creatures stand (or walk their path) until hit; armed ones then fight like any creature.
-    if (arch.passive && m.state === 'idle' && m.waryUntil > this.tick) this.keepWary(m);
-    if (arch.passive && (m.state === 'idle' || m.state === 'watch')) this.watchOrIdle(m);
+    if (arch.passive && !inert && m.state === 'idle' && m.waryUntil > this.tick) this.keepWary(m);
+    if (arch.passive && !inert && (m.state === 'idle' || m.state === 'watch')) this.watchOrIdle(m);
     if (m.state === 'flee') this.flee(m);
     if (m.state === 'talk') this.keepTalking(m);
 
-    if (m.state === 'idle' && !arch.passive && m.ally === undefined) {
-      const seen = this.noticedPlayer(m);
+    if (m.state === 'idle' && !arch.passive && m.ally === undefined && !inert) {
+      // Told to fight the nearest enemy: any creature or player it opposes, at any range.
+      const seen = m.fightsNearest ? this.nearestFoe(m) : this.noticedPlayer(m);
       if (seen) {
-        m.threat.set(seen.entityId, (m.threat.get(seen.entityId) ?? 0) + 1);
         // A hostile entering combat cries its +0x1E4 sound (0x40C830; Greater Black Knights).
         if (m.talkLine >= 0 && m.placement !== undefined) {
           const c = m.character.position;
           this.broadcastNear(m, { op: SC.STORY_SOUND, d: { sound: m.talkLine, positions: [[c.x, c.y, c.z]], volume: 1 } });
         }
-        m.state = 'chase';
-        m.brain = 'decide';
-        m.lastPick = null;
+        this.engage(m, seen, true);
       } else this.walkPath(m); // its idle walk until then (brain mode 1, 0x405950)
     }
 
@@ -3064,7 +3167,15 @@ export class WorldZone {
           target = p;
         }
       }
-      if (!target || fromSpawn > arch.leashRadius) {
+      // Its target gone, the brain picks again (0x40C830 on event 0x16): told to fight the
+      // nearest, it takes the next enemy in sight at any range.
+      if (!target && m.fightsNearest && !inert) {
+        target = this.nearestFoe(m);
+        if (target) this.engage(m, target, true);
+      }
+      // The leash is the server's (the original has none): a creature told to fight the nearest
+      // goes as far as its enemies.
+      if (!target || (fromSpawn > arch.leashRadius && !m.fightsNearest)) {
         m.threat.clear();
         m.state = 'return';
         this.calmDown(m);
@@ -3225,6 +3336,14 @@ export class WorldZone {
    * peaceful creature that can see the player (0x40D910: an eye-to-eye ray, 0x406AF0; no range)
    * takes him as its target: guards and other armed ones attack, citizens run from him.
    */
+  /** A citizen on the alert facing `from`, then running from it. */
+  private scare(m: Mob, from: { x: number; z: number }): void {
+    if (m.state !== 'flee') m.alertUntil = Math.max(this.tick, m.hitUntil) + ALERT_TICKS;
+    m.state = 'flee';
+    m.fleeUntil = Math.max(m.alertUntil, this.tick) + FLEE_TICKS;
+    m.fleeFrom = { x: from.x, z: from.z };
+  }
+
   private raiseAlarm(player: Player): void {
     const at = player.character.position;
     for (const m of this.actors.values()) {
@@ -3232,10 +3351,7 @@ export class WorldZone {
       const p = m.character.position;
       if (!lineOfSight(this.mw, p, at, EYE_HEIGHT)) continue;
       if (isCitizen(m)) {
-        if (m.state !== 'flee') m.alertUntil = Math.max(this.tick, m.hitUntil) + ALERT_TICKS;
-        m.state = 'flee';
-        m.fleeUntil = Math.max(m.alertUntil, this.tick) + FLEE_TICKS;
-        m.fleeFrom = { x: at.x, z: at.z };
+        this.scare(m, at);
       } else {
         m.threat.set(player.entityId, (m.threat.get(player.entityId) ?? 0) + 1);
         if (m.state !== 'chase') {
@@ -3514,14 +3630,69 @@ export class WorldZone {
       if (Math.abs(q.y - pos.y) > AGGRO_HEIGHT) continue;
       const d = Math.hypot(q.x - pos.x, q.z - pos.z);
       const off = Math.abs(angleDiff(yawTowards(pos.x, pos.z, q.x, q.z), heading));
-      // Told to fight the nearest enemy (0x40DC90): any range, any angle, in sight.
-      const range = m.fightsNearest ? Infinity : off < MOB_SIGHT_HALF_ANGLE ? MOB_SIGHT_RANGE : MOB_NEAR_SENSE_RANGE;
+      // An admin's aggressive spawn: any range, any angle, in sight.
+      const range = m.huntsPlayers ? Infinity : off < MOB_SIGHT_HALF_ANGLE ? MOB_SIGHT_RANGE : MOB_NEAR_SENSE_RANGE;
       if (d >= range || d >= bestDist) continue;
       if (!lineOfSight(this.mw, pos, q, EYE_HEIGHT)) continue;
       best = p;
       bestDist = d;
     }
     return best;
+  }
+
+  /**
+   * The nearest creature or player it opposes and can see, at any range (0x40DC90, brain flag
+   * 0x400; same floor only, as for noticing).
+   */
+  private nearestFoe(m: Mob): Actor | null {
+    const pos = m.character.position;
+    let best: Actor | null = null;
+    let bestDist = Infinity;
+    for (const a of this.actors.values()) {
+      if (!this.opposes(m, a) || !this.hostile(m, a)) continue;
+      const q = a.character.position;
+      if (Math.abs(q.y - pos.y) > AGGRO_HEIGHT) continue;
+      const d = Math.hypot(q.x - pos.x, q.z - pos.z);
+      if (d >= bestDist || !lineOfSight(this.mw, pos, q, EYE_HEIGHT)) continue;
+      best = a;
+      bestDist = d;
+    }
+    return best;
+  }
+
+  /** It takes `target` as its enemy and fights; `call`: the idle hostiles near it join in (0x40D360). */
+  private engage(m: Mob, target: Actor, call: boolean): void {
+    m.threat.set(target.entityId, Math.max(0, ...m.threat.values()) + 1);
+    if (m.state !== 'chase') {
+      m.state = 'chase';
+      m.brain = 'decide';
+      m.lastPick = null;
+    }
+    if (call) this.callAllies(m, target);
+  }
+
+  /**
+   * A creature took `target` (0x40D360): every other creature that is not its enemy and is near
+   * it gets event 0x17 naming that target. Only idle hostiles act on it (0x40D910 case 3), and
+   * only against an enemy of theirs; they don't call others in turn (the pick came from an event).
+   */
+  private callAllies(m: Mob, target: Actor): void {
+    if (m.disposition !== DISPOSITION.HOSTILE) return; // no one else hears a guard's or an ally's call
+    const at = m.character.position;
+    for (const o of this.actors.values()) {
+      if (o === m || o.kind !== 'mob' || o.disposition !== DISPOSITION.HOSTILE || o.state !== 'idle' || !alive(o)) continue;
+      if (o.hidden || o.privateTo !== undefined || o.archetype.type === NECROS_TYPE) continue;
+      if (!this.opposes(o, target) || !this.hostile(o, target)) continue;
+      const q = o.character.position;
+      const flat = Math.hypot(q.x - at.x, q.z - at.z);
+      let near = Math.abs(q.y - at.y) < CALL_HEIGHT && flat < CALL_RANGE;
+      if (!near) {
+        const d = Math.hypot(flat, q.y - at.y);
+        const off = Math.abs(angleDiff(yawTowards(q.x, q.z, at.x, at.z), dequantizeAngle(o.yaw)));
+        near = d < CALL_TOUCH || (d < (off < MOB_SIGHT_HALF_ANGLE ? MOB_SIGHT_RANGE : MOB_NEAR_SENSE_RANGE) && lineOfSight(this.mw, q, at, EYE_HEIGHT));
+      }
+      if (near) this.engage(o, target, false);
+    }
   }
 
   /** A creature turns towards a heading at its body turn rate (radians). */
@@ -4189,8 +4360,16 @@ export class WorldZone {
       const hurter = attacker.kind === 'player' ? attacker : attacker.ally !== undefined ? this.actors.get(attacker.ally) : undefined;
       if (damage > 0 && hurter?.kind === 'player') target.hurtBy.add(hurter.entityId);
       // Unarmed peaceful creatures (citizens) take the blows; armed ones (guards) fight back.
-      const fightsBack = !target.archetype.passive || target.weapon.id !== UNARMED.id;
-      if (target.state !== 'chase' && fightsBack) target.state = 'chase';
+      // An idle citizen or guard takes no creature's blow as a call to fight: its idle pick
+      // (0x40D910 cases 0-2) reads only the player's, through the alarm; the hit pass (0x40F890)
+      // only flags the hit. Already fighting, it turns on the attacker (0x40C830 case 1).
+      const fightsBack = (!target.archetype.passive || target.weapon.id !== UNARMED.id) && target.disposition !== DISPOSITION.INERT
+        && (!target.archetype.passive || attacker.kind === 'player' || target.state === 'chase');
+      if (target.state !== 'chase' && fightsBack) {
+        target.state = 'chase';
+        // Its pick from the hit event (0x40D790) calls the hostiles near it (0x40D360).
+        if (!killed && target.ally === undefined && this.opposes(target, attacker)) this.callAllies(target, attacker);
+      }
       if (attacker.kind === 'player' && target.archetype.passive) this.raiseAlarm(attacker);
       // A creature that fights back turns on whoever hurt it (a spectral ally too).
     } else {
@@ -4332,6 +4511,7 @@ export class WorldZone {
       a.hitUntil = 0;
       a.threat.clear();
       delete a.fightsNearest;
+      a.disposition = a.spawnDisposition;
       this.calmDown(a);
       a.hidden = a.hideOnRespawn;
       a.yaw = a.spawnYaw;
@@ -4492,7 +4672,7 @@ export class WorldZone {
       m.custom = { id: spec.id, damage: spec.damage, respawn: spec.respawn, expiresAt: spec.expiresAt };
       // Not a level placement: it has nothing to say.
       m.talkLine = -1;
-      if (spec.aggressive) m.fightsNearest = true;
+      if (spec.aggressive) m.huntsPlayers = true;
       ids.push(id);
     }
     return ids;

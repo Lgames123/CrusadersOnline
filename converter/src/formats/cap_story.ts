@@ -83,7 +83,8 @@ export interface CapSound {
  * targetPlayer 0x0A (brain event 0x18: a hostile one takes the player as its target, 0x40D910),
  * preferTarget 0x0B (event 0x17: a hostile one picks `other`), attackTarget 0x0C (event 0x19:
  * an idle one attacks `other` now, 0x40C370), fightNearest 0x0D (brain flag 0x400: it targets the
- * nearest opposing creature or player in sight, at any range, 0x40DC90), disposition4 0x0E.
+ * nearest opposing creature or player in sight, at any range, 0x40DC90), disposition4 0x0E (inert,
+ * 0x40CCD0 -> brain state 8).
  */
 export interface CapCreatureOp {
   op: 'targetPlayer' | 'preferTarget' | 'attackTarget' | 'fightNearest' | 'disposition4';

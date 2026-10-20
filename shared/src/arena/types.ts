@@ -150,6 +150,11 @@ export interface ArenaDef {
     archetype: string; x: number; y: number; z: number; hp?: number; xp?: number; resist?: number[];
     /** Heading (radians, 0 = -Z). */ yaw?: number;
     /** Original levels: the creature's index in the act's placements (sequences name actors by it). */ placement?: number;
+    /**
+     * Original levels: its disposition (stats +0x1D8): 0 citizen, 1 / 2 guard or friendly fighter,
+     * 3 hostile. Absent: 2 for peaceful archetypes, 3 for the others.
+     */
+    disposition?: number;
     /** Original levels: the item ids it holds (null: nothing), replacing the archetype's loadout. */
     weapon?: string | null;
     shield?: string | null;

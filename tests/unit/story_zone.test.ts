@@ -306,7 +306,7 @@ describe('relay ops (0x463CC0)', () => {
     const t = opsZone();
     for (let i = 0; i < 20; i++) t.zone.step();
     expect(t.mob().state).toBe('idle');
-    t.fire(720); // attackTarget names another creature: not applied (creatures do not fight each other)
+    t.fire(720); // its attackTarget names a creature the act lacks: nothing
     t.zone.step();
     expect(t.mob().state).toBe('chase');
   });

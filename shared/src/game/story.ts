@@ -100,7 +100,7 @@ export interface StorySound {
  * preferTarget (0x0B, event 0x17): a hostile one picks `other`. attackTarget (0x0C, event 0x19):
  * an idle one attacks `other` now (0x40C370). fightNearest (0x0D, brain flag 0x400): it targets
  * the nearest opposing creature or player in sight, at any range (0x40DC90). disposition4 (0x0E):
- * its disposition becomes 4 (0x40CCD0; meaning not decoded).
+ * its disposition becomes 4 (0x40CCD0): inert, nobody's enemy (executable-analysis §18.1).
  */
 export interface StoryCreatureOp {
   op: 'targetPlayer' | 'preferTarget' | 'attackTarget' | 'fightNearest' | 'disposition4';

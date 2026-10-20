@@ -32,7 +32,7 @@ table only gives the state.
 | **Magic** | Spells | 11 spells (Torch Light … Holy Wrath) | All 11, server-authoritative | `IMPLEMENTED` | Some status looks are stand-ins |
 | **AI** | Skeleton | Distance bands, stance, chains (Frida) | Same | `VERIFIED` | |
 | **AI** | Other creatures | Per-type brains | The skeleton's, plus casters' spell choice | `IMPLEMENTED` | Unverified: no captures; aggro radius is a stand-in |
-| **AI** | Creature vs creature | Guards fight hostiles; Ws5a fight | Not done | `SPECIFIED` | |
+| **AI** | Creature vs creature | Picks by disposition (0x40D910); only relays set guards on hostiles; hostiles call idle hostiles near them (0x40D360) | Same; Ws5a's lever fight | `IMPLEMENTED` | No friendly fire (the original's blows hit their own side); not seen in the client |
 | **Inventory** | Bag, paper doll, rings | Grid bag, worn slots | MU-style window, authoritative server | `CHANGED_FOR_MULTIPLAYER` | |
 | **Items** | Ground items and chests | Once per game | Once per character | `CHANGED_FOR_MULTIPLAYER` | |
 | **Story** | Main quests and cutscenes | 29 sequences, 10 main quests | Same, per character | `IMPLEMENTED` | Ending as the original, then the post-game (ending.ts) |

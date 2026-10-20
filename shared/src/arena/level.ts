@@ -770,6 +770,7 @@ export function buildLevelArena(name: string, collision: Uint8Array, placements:
       mobSpawns.push({
         archetype: npcArchetypeId(c.type),
         placement,
+        disposition: c.disposition,
         x: c.position[0] * s,
         y: c.position[1] * s + 0.1,
         z: c.position[2] * s,

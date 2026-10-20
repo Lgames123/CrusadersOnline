@@ -38,7 +38,8 @@ Changes made for the multiplayer world or on request. Each has a context note in
   to the purse.
 - **Respawns:** dead players come back at the start of the area. Pits in the Catacombs catch falls
   and return the player to the respawn spot.
-- **Creatures:** they stop at ledges and die in deep falls.
+- **Creatures:** they stop at ledges and die in deep falls. Their blows and spells never hurt their
+  own side (in the original they do, and the one struck turns on the striker half the time).
 - **Movers:** a mover reaching a player holds until he moves instead of pushing him (a Gl\*b
   crusher does the same in the original). The world is shared, so a crusher falls for good the
   first time anyone walks under it, until the zone restarts.

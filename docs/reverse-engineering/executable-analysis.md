@@ -636,6 +636,49 @@ A `.cap` creature record is the creature as the level editor left it, so its sta
 
 **Side quests.** The quest manager's 26 side quests (§17.2: offer, reminder and completion lines, items) are never offered: no shipped placement has a talk trigger, no quest trigger names a side quest, and the givers (Nai, Sir Marik, Raven, …) are not placed in any act. Record layout, talk / item-check handlers (0x497170 / 0x4974A0) and the full list: `docs/game-design/side-quests.md`. Shops are not NPCs but level triggers (§19).
 
+### 18.1 Target choice by disposition; creature against creature (decompiled, 2026-10-19)
+
+The disposition is stats slot 0x38 (+0x1D8). The player answers 5: only the hostiles' list has it.
+
+**Who opposes whom** (one table in 0x40DC90, 0x40D790 and 0x40D360). Candidates are creatures with a brain or the player (+0x14 bit 0x40000), not hidden (+0x14 bit 0x40).
+
+| Chooser | Opposes |
+|---|---|
+| 0–2 (citizen, guard) | 3 |
+| 3 (hostile) | 0, 1, 2, 5, 6 |
+| 6 (spectral ally) | 3; 1–2 whose target is the player (0x40E440) |
+| 4, 5, other | nobody |
+
+**The pick** (0x40D910). It is called from idle (0x40C520), from talk mode (0x40C190 case 2), and in combat when the target died (event 0x16) or hid (0x40C830).
+- **0–2:**
+  - With brain flag 0x400, the nearest opponent in sight at any range (0x40DC90: ray 0x406AF0, 3D distance).
+  - Else the player, only while the alarm is up (§18).
+- **3:**
+  - First, whoever hit it this frame if that one is an opponent (0x40D790(0, 1): event 0x10).
+  - Then event 0x17's creature if an opponent.
+  - Then event 0x18 → the player.
+  - Then flag 0x400 → the nearest opponent.
+  - Else the player in its 100 ft / 60° cone (20 ft outside it, 7 ft always), in sight.
+- **6:** whoever hit it, else the nearest opponent at any range.
+- **4, 5:** nothing.
+
+So without a relay, guards and hostiles never pick each other.
+
+**Hits.** The hit pass (0x40F890) only flags a hit and raises the alarm for the player's blows on 0–2. An idle 0–2 creature struck by a creature does nothing. In combat (0x40C830 case 1), a hit from someone other than its target makes it switch (0x40D1C0). If the hitter is of its own group (both 0–2, or both 3), it switches only on rand % 100 < 50.
+
+**Calling allies** (0x40D360). It is run when a pick does not come from an event (0x40C520, 0x40C830) and by event 0x19 (0x40C370). Every other creature with a brain (not type 0x96, not hidden) that does not oppose the picker gets event 0x17 naming the target, if any of these holds:
+- within 4 ft of its height (0x4DE674) and 100 ft across (0x4DE6A4 = 100²);
+- within 7 ft (0x4DE6A0 = 7²);
+- it sees the picker within 100 ft in its 60° cone (0x4DE69C), or 20 ft outside it (0x4DE698 = 20²).
+
+Only hostiles act on 0x17, so a hostile pulls the idle hostiles near it into its fight. Event 0x17 is queued only here and by relay op 0x0B. Events 0x18 and 0x19 are queued only by relay ops 0x0A and 0x0C (call scan of 0x410290).
+
+**Event 0x19** (0x40C370). The creature takes the named creature at once (+0x160), enters combat (brain state 3) and calls allies. Its disposition is not asked.
+
+**Disposition 4** (relay op 0x0E, 0x40CCD0). It writes +0x1D8 and flags the brain (+0x60 bit 0x1000) to restart. On entry, the idle brain sends a disposition-4 creature to brain state 8, which does nothing (0x40C520 / 0x40C190): it is inert and opposes nobody, and nobody opposes it. Only Ws5a's relay 353547 uses op 0x0E, and nothing in the act points to it except the act's type lists, so it never fires. 0x41FD10 (a scripted possession/charm, not traced) sets 3 + flag 0x400 and restores +0x204 afterwards.
+
+**Ws5a's lever** (use relay 354011). It opens `bOuterGates`, plays 517, and fires relay 353715 (attack-target pairs: HighGuards / OldGuards 5–12 ↔ DarkMaster 17, DarkMage4 18, SkeletonWarriors 10 / 11 = placements 20 / 19) and relay 353631 (fight-nearest for the same twelve).
+
 ## 19. Shops (decompiled, 2026-10-16)
 
 A shop is a cap object of **type 0x1C** (loader case 0x4786B4, vtable 0x4E1D94), placed at a merchant's counter: +4 volume, +8 activation (8 = the use key in every shipped one), +0x35 item count, +0x36 the merchant's greeting (Sound.ctx: mm_ci_01 "Please, please check out my fine wares.", mm_ci_02, mm_co_02, HL_13_02), +0x38 the items (inventory slots of 0x44 bytes: count +0x10, name +0x24). The merchant NPC standing there (eMerchant1, DwarfMerchant*, DasherMerchant1) has no part in it.

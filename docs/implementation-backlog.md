@@ -119,8 +119,8 @@ Current priorities and the user's decisions are in `PROJECT_STATUS.md` §2–3.
 | **CMP-002** | Waypoints: teleport to areas and maps the character has unlocked | P2 | CMP-001 | Medium | **NOT STARTED** | Not original |
 | **CMP-003** | Intro movies (.bik): option at character creation to watch the introduction | P1 | Bink conversion in the importer | Medium | **VERIFIED** | docs/context/2026-10-19-intro-movies.md; tests/unit/converter.test.ts; checked live (create → 3DO → intro → Ws9a; decline; Options → Introduction) |
 | **CMP-004** | Walk-in movers: wheels, Gl\*b crushers, chandeliers, Bs1a gears | P1 | — | Medium | **VERIFIED** | docs/context/2026-10-19-walk-in-movers.md; tests/unit/walk_in_movers.test.ts; checked live (Gl1b crusher 4, Ci1b wheels). No crusher damage: none in the original (0x48E370) |
-| **CMP-005** | Creature against creature (guards vs hostiles, Ws5a fight) | P1 | — | High | **NOT STARTED** | |
-| **CMP-006** | Relay ops still unconverted (0/1, 2/3, 0x0A–0x0E) | P2 | — | Medium | **NEEDS INVESTIGATION** | |
+| **CMP-005** | Creature against creature (guards vs hostiles, Ws5a fight) | P1 | — | High | **IMPLEMENTED** | docs/context/2026-10-19-creature-against-creature.md; tests/unit/creature_fights.test.ts; Ws5a's lever fight run headless on the converted act (not seen in the client). Guards and hostiles never pick each other without a relay (0x40D910) |
+| **CMP-006** | Relay ops still unconverted (0/1, 2/3; 0x0A–0x0E done in CMP-005) | P2 | — | Medium | **NEEDS INVESTIGATION** | |
 | **CMP-007** | Climbing and hanging (0x0042C310, 0x00490E80) | P2 | Climbable surfaces | High | **NEEDS INVESTIGATION** | |
 | **SQ-001** | Side quests as a feature (`sideQuests`, off by default): records, NPC placements, objectives, rewards | P2 | CMP-001 | High | **NOT STARTED** | Cut content; spec in `game-design/side-quests.md` |
 | **QOL-001** | Chat ignore list, kept in the browser and applied on display | P3 | — | Low | **NOT STARTED** | Chat history: not wanted |
