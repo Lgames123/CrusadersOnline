@@ -1,5 +1,5 @@
 import type { CustomSpawnSpec, ExitCrossing, SpellId, WorldRates } from '@crusaders/shared';
-import type { JoinOptions, LootEvent, PersistReason, PersistRecord, TransferState, ZoneAdminReport, EconomyEvent, EscrowItem } from '../simulation/world_zone.ts';
+import type { PartyVitals, JoinOptions, LootEvent, PersistReason, PersistRecord, TransferState, ZoneAdminReport, EconomyEvent, EscrowItem } from '../simulation/world_zone.ts';
 import type { AttackKind } from '@crusaders/shared';
 
 /** Main thread <-> zone worker messages (ADR-009). Binary payloads are transferred, not copied. */
@@ -76,6 +76,8 @@ export type FromZone =
   | { t: 'dungeon'; connId: number; dungeon: string }
   /** A player leaves a dungeon instance (Esc → Leave dungeon, or a death there). */
   | { t: 'dungeonExit'; connId: number }
+  /** Party members' health and mana, twice a second (party frames). */
+  | { t: 'vitals'; list: PartyVitals[] }
   | { t: 'transferred'; connId: number; record: PersistRecord | null; state: TransferState | null }
   | { t: 'reply'; reqId: number; reply: ZoneReply }
   | { t: 'stopped' };

@@ -73,6 +73,7 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
       economy: (_arena, event) => sessions?.onEconomy(event),
       dungeon: (arena, connId, dungeon) => sessions?.onDungeon(arena, connId, dungeon),
       dungeonExit: (arena, connId) => sessions?.onDungeonExit(arena, connId),
+      vitals: (arena, list) => sessions?.onVitals(arena, list),
       loot: (arena, { connId, character, chest, outcome, items }) =>
         log.info({ conn: connId, character, zone: arena, chest, items }, outcome === 'looted' ? 'chest looted' : 'chest not looted: inventory full'),
     },

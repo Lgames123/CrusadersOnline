@@ -2,13 +2,13 @@ import type { Logger } from 'pino';
 import { dungeonById, splitInstance, DUNGEON_READY_SECONDS, type DungeonDef, type DungeonReadyMsg, CS, LEVEL_PREFIX, MAX_STACK, PERMANENT_UNTIL, SC, SPELLS, decodeSpells, emptyStoryState, encodeSpells, parseClientControl, startingInventory, type Difficulty, type InventoryEntry, type ExitCrossing, type ItemCatalog, type KnownSpell, type ServerControlMsg } from '@crusaders/shared';
 import type { Account, TicketStore } from '../auth/tickets.ts';
 import type { CharacterPersistRecord, CharacterRepository } from '../persistence/characters.ts';
-import { auctionDeposit, type EconomyEvent, type JoinOptions, type PersistRecord, type TransferState } from '../simulation/world_zone.ts';
+import { auctionDeposit, type EconomyEvent, type JoinOptions, type PartyVitals, type PersistRecord, type TransferState } from '../simulation/world_zone.ts';
 import type { EconomyRepository } from '../persistence/economy.ts';
 import type { ZoneHost } from '../zone/zone_host.ts';
 import type { ZoneManager } from '../zone/zone_manager.ts';
 import { TokenBucket } from './rate_limit.ts';
 import { CLOSE, type ClientConnection, type TransportHandlers } from './transport.ts';
-import { Parties } from './parties.ts';
+import { INVITE_MS, Parties } from './parties.ts';
 
 const AUTH_TIMEOUT_MS = 10_000;
 
@@ -83,6 +83,8 @@ export interface SessionView {
 export class SessionManager implements TransportHandlers {
   /** Parties (MMO Stage 2): in memory, by character name. */
   private readonly parties = new Parties();
+  /** Party members' last health and mana from their zones, by connection (party frames). */
+  private readonly vitals = new Map<number, PartyVitals>();
 
   private readonly sessions = new Map<number, Session>();
   private readonly tickets: TicketStore;
@@ -271,6 +273,7 @@ export class SessionManager implements TransportHandlers {
       void this.characters.addPlayTime(s.characterId, seconds).catch((err: unknown) => this.log.error({ err }, 'play time save failed'));
     }
     this.sessions.delete(conn.id);
+    this.vitals.delete(conn.id);
     // Leaving the world leaves the party (it lives in memory; nothing keeps the place).
     const party = s.name ? this.parties.of(s.name) : null;
     if (party) {
@@ -743,7 +746,7 @@ export class SessionManager implements TransportHandlers {
         r = this.parties.invite(s.name, target.name);
         if (r.ok) {
           tell(target, `${s.name} invites you to a party. Type /accept or /decline.`);
-          this.send(target, { op: SC.PARTY_UPDATE, d: { members: [], invite: s.name } });
+          this.send(target, { op: SC.PARTY_UPDATE, d: { members: [], invite: s.name, inviteSeconds: INVITE_MS / 1000 } });
         }
         break;
       }
@@ -771,17 +774,42 @@ export class SessionManager implements TransportHandlers {
     if (action === 'promote') for (const m of now) { const o = this.sessionNamed(m); if (o) tell(o, `${now[0]} now leads the party.`); }
   }
 
-  /** Sends a character its party (or none) and tells its zone which party it is in. */
-  private syncPartyMember(name: string): void {
+  /** Sends a character its party (or none) and, unless `frameOnly`, tells its zone which party it is in. */
+  private syncPartyMember(name: string, frameOnly = false): void {
     const o = this.sessionNamed(name);
     if (!o) return;
     const party = this.parties.of(name);
     const members = (party?.members ?? []).map((m, i) => {
       const ms = this.sessionNamed(m);
-      return { name: ms?.name ?? m, leader: i === 0, zone: ms && ms.state === 'in_world' ? ms.zone : null };
+      const zone = ms && ms.state === 'in_world' ? ms.zone : null;
+      const v = ms && zone ? this.vitals.get(ms.conn.id) : undefined;
+      return { name: ms?.name ?? m, leader: i === 0, zone, ...(v ? { level: v.level, hp: v.hp, maxHp: v.maxHp, mana: v.mana, maxMana: v.maxMana, dead: v.dead } : {}) };
     });
     this.send(o, { op: SC.PARTY_UPDATE, d: { members, self: o.name } });
-    if (o.state === 'in_world') this.zoneOf(o)?.setParty(o.conn.id, party?.id ?? null);
+    if (!frameOnly && o.state === 'in_world') this.zoneOf(o)?.setParty(o.conn.id, party?.id ?? null);
+  }
+
+  /** A zone's party members' health and mana (twice a second): parties with a change see it. */
+  onVitals(arena: string, list: PartyVitals[]): void {
+    const changed = new Set<string>();
+    for (const v of list) {
+      const s = this.sessions.get(v.connId);
+      if (!s || s.zone !== arena || !s.name) continue;
+      const was = this.vitals.get(v.connId);
+      if (was && was.hp === v.hp && was.maxHp === v.maxHp && was.mana === v.mana && was.maxMana === v.maxMana && was.level === v.level && was.dead === v.dead) continue;
+      this.vitals.set(v.connId, v);
+      const party = this.parties.of(s.name);
+      if (party) changed.add(party.id);
+    }
+    if (changed.size === 0) return;
+    const seen = new Set<string>();
+    for (const o of this.sessions.values()) {
+      if (!this.inWorld(o) || !o.name) continue;
+      const party = this.parties.of(o.name);
+      if (!party || !changed.has(party.id) || seen.has(o.name.toLowerCase())) continue;
+      seen.add(o.name.toLowerCase());
+      this.syncPartyMember(o.name, true);
+    }
   }
 
   /** A character entered a zone or left the world: its party's frames show where everyone is. */

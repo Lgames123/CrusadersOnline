@@ -109,7 +109,7 @@ import { TitleScene } from './frontend/title_scene.ts';
 import { QuestBook, loadGameStrings } from './ui/quest_book.ts';
 import { ClassicText } from './ui/classic_text.ts';
 import { WaypointMap } from './ui/waypoint_map.ts';
-import { PartyFrame } from './ui/party_frame.ts';
+import { PartyFrame, PartyInvite } from './ui/party_frame.ts';
 import { ArmorGlow, HeldGlow } from './engine/weapon_glow.ts';
 import { WeaponSparkles } from './engine/weapon_sparkles.ts';
 import { TradeWindow } from './ui/trade_window.ts';
@@ -233,6 +233,7 @@ async function main(): Promise<void> {
   const charSheet = new CharacterSheet(document.getElementById('char-sheet')!, assetManifest?.textures ?? {});
   const waypointMap = new WaypointMap();
   const partyFrame = new PartyFrame();
+  const partyInvite = new PartyInvite();
   const dungeonUi = new DungeonUi();
   /** This character's name as the party updates give it (the ready check marks its own row). */
   let partySelf = '';
@@ -880,9 +881,11 @@ async function main(): Promise<void> {
             } else if (!tradeWindow.open && was && !optionsOpen) input.requestLock();
           },
           party: (d) => {
+            if (d.invite) partyInvite.show(d.invite, d.inviteSeconds);
             if (d.self !== undefined) {
               partyFrame.set(d.members, d.self);
               partySelf = d.self;
+              if (d.members.length > 0) partyInvite.close();
             }
           },
           dungeonReady: (d) => dungeonUi.readyCheck(d, partySelf),
@@ -1231,7 +1234,7 @@ async function main(): Promise<void> {
   /** Alt held: the cursor is out for the UI; letting go takes the camera back. */
   let altFree = false;
   let optionsAt = 0;
-  input.wantsLock = () => !(altFree || chat.typing || optionsOpen || inventoryPanel.open || questBook.open || charSheet.open || waypointMap.open || tradeWindow.open || auctionWindow.open || craftWindow.open || inScene());
+  input.wantsLock = () => !(altFree || chat.typing || optionsOpen || inventoryPanel.open || questBook.open || charSheet.open || waypointMap.open || tradeWindow.open || auctionWindow.open || craftWindow.open || partyInvite.modal || inScene());
   const play = () => {
     sounds?.unlock();
     music.unlock();
@@ -1285,7 +1288,12 @@ async function main(): Promise<void> {
   // back without a click when the line closes, unless a window was open before.
   let chatTookLock = false;
   chat.onSend = (channel, text, to) => session?.chat(channel, text, to);
-  chat.onParty = (action, name) => session?.party(action, name);
+  chat.onParty = (action, name) => {
+    if (action === 'accept' || action === 'decline') partyInvite.close();
+    session?.party(action, name);
+  };
+  partyInvite.onAnswer = (yes) => session?.party(yes ? 'accept' : 'decline');
+  partyFrame.onAction = (action, name) => (action === 'whisper' ? chat.whisper(name) : session?.party(action, action === 'leave' ? undefined : name));
   chat.onTrade = (action, name) => session?.trade({ action, ...(name ? { name } : {}) });
   tradeWindow.onAction = (d) => session?.trade(d);
   dungeonUi.onAnswer = (id, yes) => session?.dungeon(yes ? 'accept' : 'decline', id);
@@ -1295,7 +1303,13 @@ async function main(): Promise<void> {
     if (open && input.locked) {
       releasing = true;
       document.exitPointerLock();
-    } else if (!open && !optionsOpen && !input.locked) input.requestLock();
+    } else if (!open && !optionsOpen && !partyInvite.modal && !input.locked) input.requestLock();
+  };
+  partyInvite.onModal = (open) => {
+    if (open && input.locked) {
+      releasing = true;
+      document.exitPointerLock();
+    } else if (!open && !optionsOpen && !dungeonUi.modal && !chat.typing && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !tradeWindow.open && !auctionWindow.open && !craftWindow.open && !inScene() && !input.locked) input.requestLock();
   };
   const setAuctionOpen = (open: boolean) => {
     if (open === auctionWindow.open) return;
@@ -1715,7 +1729,7 @@ async function main(): Promise<void> {
       chat.blur();
     }
     // Esc released the pointer: the options (sequences play to their end, as in the original).
-    if (!locked && !ours && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !tradeWindow.open && !auctionWindow.open && !craftWindow.open && !dungeonUi.modal && !inScene()) setOptionsOpen(true);
+    if (!locked && !ours && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !tradeWindow.open && !auctionWindow.open && !craftWindow.open && !dungeonUi.modal && !partyInvite.modal && !inScene()) setOptionsOpen(true);
   };
 
   // Inventory window (online only); the ground window opens beside it (and opens it).
@@ -1935,6 +1949,7 @@ async function main(): Promise<void> {
     }
     telegraphs.update(dt);
     dungeonUi.update();
+    partyInvite.update();
     if (crystal) {
       crystal.update(dt);
       dynamicLights.set(WAYPOINT_LIGHT_KEY, crystal.lightPosition(crystalLight), CRYSTAL_LIGHT_COLOR, 2.2, 7, 0.05);

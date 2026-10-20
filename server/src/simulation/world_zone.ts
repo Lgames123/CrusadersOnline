@@ -997,6 +997,17 @@ const RUSH_TICK_CHANCE = 1 - (1 - RUSH_STEP_CHANCE) ** (RUSH_STEPS_PER_SECOND / 
  * client inputs, server-driven mobs, authoritative melee, and per-client interest-filtered
  * delta snapshots. Pure (no I/O), so it runs inside a worker thread or directly in tests.
  */
+/** One party member's state as its zone reports it (party frames). */
+export interface PartyVitals {
+  connId: number;
+  level: number;
+  hp: number;
+  maxHp: number;
+  mana: number;
+  maxMana: number;
+  dead: boolean;
+}
+
 export class WorldZone {
   readonly name: string;
   readonly arena: ArenaDef;
@@ -3086,6 +3097,16 @@ export class WorldZone {
   setParty(connId: number, party: string | null): void {
     const p = this.players.get(connId);
     if (p) p.party = party;
+  }
+
+  /** Health, mana and level of every player in a party, for the party frames (sessions.ts). */
+  partyVitals(): PartyVitals[] {
+    const out: PartyVitals[] = [];
+    for (const p of this.players.values()) {
+      if (!p.party) continue;
+      out.push({ connId: p.connId, level: p.level, hp: Math.ceil(Math.max(0, p.hp)), maxHp: p.maxHp, mana: Math.floor(p.mana), maxMana: p.maxMana, dead: !alive(p) });
+    }
+    return out;
   }
 
   /** This act's waypoint crystal (not original; waypoints.ts), found once; null: none here. */

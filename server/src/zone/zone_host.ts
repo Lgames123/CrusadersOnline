@@ -1,6 +1,6 @@
 import { Worker } from 'node:worker_threads';
 import type { ExitCrossing, SpellId, WorldRates } from '@crusaders/shared';
-import type { JoinOptions, LootEvent, PersistReason, PersistRecord, TransferState, EconomyEvent, EscrowItem } from '../simulation/world_zone.ts';
+import type { JoinOptions, LootEvent, PartyVitals, PersistReason, PersistRecord, TransferState, EconomyEvent, EscrowItem } from '../simulation/world_zone.ts';
 import type { AttackKind } from '@crusaders/shared';
 import type { FromZone, ToZone, ZoneMetrics, ZoneReply, ZoneRequest, ZoneWorkerData } from './messages.ts';
 
@@ -15,6 +15,7 @@ export interface ZoneHostEvents {
   economy?(event: EconomyEvent): void;
   dungeon?(connId: number, dungeon: string): void;
   dungeonExit?(connId: number): void;
+  vitals?(list: PartyVitals[]): void;
 }
 
 /** Main-thread handle for one zone worker. */
@@ -63,6 +64,9 @@ export class ZoneHost {
             break;
           case 'dungeonExit':
             events.dungeonExit?.(msg.connId);
+            break;
+          case 'vitals':
+            events.vitals?.(msg.list);
             break;
           case 'loot':
             events.loot?.(msg.event);

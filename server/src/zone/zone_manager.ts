@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { splitInstance, DEFAULT_RATES, LEVEL_PREFIX, type ExitCrossing, type WorldRates } from '@crusaders/shared';
-import type { EconomyEvent, LootEvent, PersistReason, PersistRecord, TransferState } from '../simulation/world_zone.ts';
+import type { EconomyEvent, LootEvent, PartyVitals, PersistReason, PersistRecord, TransferState } from '../simulation/world_zone.ts';
 import type { ZoneMetrics, ZoneWorkerData } from './messages.ts';
 import { ZoneHost } from './zone_host.ts';
 
@@ -16,6 +16,7 @@ export interface ZoneManagerEvents {
   economy?(arena: string, event: EconomyEvent): void;
   dungeon?(arena: string, connId: number, dungeon: string): void;
   dungeonExit?(arena: string, connId: number): void;
+  vitals?(arena: string, list: PartyVitals[]): void;
 }
 
 export interface ZoneManagerOptions {
@@ -141,6 +142,7 @@ export class ZoneManager {
           economy: (event) => this.events.economy?.(arena, event),
           dungeon: (connId, dungeon) => this.events.dungeon?.(arena, connId, dungeon),
           dungeonExit: (connId) => this.events.dungeonExit?.(arena, connId),
+          vitals: (list) => this.events.vitals?.(arena, list),
         },
       );
       p = host.whenReady().then(() => {

@@ -8,6 +8,7 @@ import { WorldZone } from '../simulation/world_zone.ts';
 import type { FromZone, ToZone, ZoneReply, ZoneWorkerData } from './messages.ts';
 
 const METRICS_EVERY_TICKS = 100; // 5 s
+const VITALS_EVERY_TICKS = 10; // 0.5 s: party frames
 const PERSIST_EVERY_TICKS = 20 * 60; // 60 s (persistence.md §2)
 
 const port = parentPort!;
@@ -232,6 +233,10 @@ clock.start((tick) => {
   zone.step();
   flush();
   stats.record(performance.now() - t0);
+  if (tick % VITALS_EVERY_TICKS === 0) {
+    const list = zone.partyVitals();
+    if (list.length > 0) post({ t: 'vitals', list });
+  }
   if (tick % PERSIST_EVERY_TICKS === 0) {
     const records = zone.persistAll();
     if (records.length > 0) post({ t: 'persist', reason: 'periodic', records });

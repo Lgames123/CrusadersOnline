@@ -312,6 +312,13 @@ export interface PartyMemberView {
   leader: boolean;
   /** Arena the member is in ("level:cs2b"), or null while offline / between zones. */
   zone: string | null;
+  /** From the member's zone (twice a second) while in the world: level, health, mana, dead. */
+  level?: number;
+  hp?: number;
+  maxHp?: number;
+  mana?: number;
+  maxMana?: number;
+  dead?: boolean;
 }
 
 /** One side of a direct trade: offered items (with their stats), gold, its lock and confirmation. */
@@ -429,8 +436,8 @@ export interface TradeUpdateMsg {
 
 export interface PartyUpdateMsg {
   op: typeof SC.PARTY_UPDATE;
-  /** `members`: empty = no party. `invite`: who invites this player (pending). */
-  d: { members: PartyMemberView[]; invite?: string; self?: string };
+  /** `members`: empty = no party. `invite`: who invites this player (pending, lapses after `inviteSeconds`). */
+  d: { members: PartyMemberView[]; invite?: string; inviteSeconds?: number; self?: string };
 }
 /** What a server (`system`) line reports: the chat tints it by kind. */
 /** `admin`: a line from the server's staff (the admin panel), shown on every tab. */
