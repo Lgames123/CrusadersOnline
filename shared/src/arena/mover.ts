@@ -26,6 +26,14 @@ export interface MoverDef {
   /** Mode 0: go back after the delay (flag 8). */
   returns: boolean;
   delayMs: number;
+  /**
+   * What it does on reaching the player (0x48E370): 'none' passes through (flag 0x100: Bs1a's
+   * gears, the only shipped mover with any of these bits), 'reverse' turns round (0x200), 'stop'
+   * holds (0x80), 'push' (the rest) carries him along with its own movement and, if that still
+   * overlaps after 4 tries (pushed into the floor), holds. Nothing in it hurts: the hook it calls
+   * first (vtable 0x4E372C +0x4C) is the empty 0x402840.
+   */
+  contact: 'none' | 'reverse' | 'stop' | 'push';
 }
 
 /** Mover states (+0x108). */
@@ -50,6 +58,9 @@ const TURN_X = 0x08;
 const TURN_Y = 0x10;
 const TURN_Z = 0x20;
 const RETURNS = 0x8;
+const CONTACT_STOP = 0x80;
+const CONTACT_NONE = 0x100;
+const CONTACT_REVERSE = 0x200;
 const EASED = 0x2000;
 const EASE_IN = 0x1000000;
 const EASE_OUT = 0x2000000;
@@ -78,7 +89,14 @@ export function moverFromMotion(m: LevelBrushMotion, metres: number): MoverDef |
     mode: m.flags & 7,
     returns: (m.flags & RETURNS) !== 0,
     delayMs: Math.max(0, m.delayMs),
+    contact: m.flags & CONTACT_NONE ? 'none' : m.flags & CONTACT_REVERSE ? 'reverse' : m.flags & CONTACT_STOP ? 'stop' : 'push',
   };
+}
+
+/** Reaching the player with flag 0x200 (0x48E370): forwards turns backwards and back again. */
+export function reverseMover(m: MoverMotion): void {
+  if (m.state === MOVER_FORWARD) m.state = MOVER_BACK;
+  else if (m.state === MOVER_BACK) m.state = MOVER_FORWARD;
 }
 
 export function shutMover(): MoverMotion {

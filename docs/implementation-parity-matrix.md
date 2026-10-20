@@ -37,7 +37,7 @@ table only gives the state.
 | **Items** | Ground items and chests | Once per game | Once per character | `CHANGED_FOR_MULTIPLAYER` | |
 | **Story** | Main quests and cutscenes | 29 sequences, 10 main quests | Same, per character | `IMPLEMENTED` | Ending as the original, then the post-game (ending.ts) |
 | **Story** | Side quests | 26 records, never offered (cut) | Not done; planned as feature `sideQuests` | `SPECIFIED` | Records decoded: `game-design/side-quests.md` |
-| **World** | Doors, levers, movers | Mover triggers, relays | Doors, levers, Catacombs floor and bridges | `IMPLEMENTED` | Wheels, crushers, chandeliers, gears at rest |
+| **World** | Doors, levers, movers | Mover triggers, relays | Doors, levers, Catacombs floor and bridges, wheels, crushers, chandeliers, gears | `IMPLEMENTED` | Movers hold instead of pushing; turning movers never touch anyone |
 | **World** | Save | Save files | Continuous PostgreSQL persistence | `CHANGED_FOR_MULTIPLAYER` | |
 | **Graphics** | Direct3D 7 | 640×480 HAL | WebGL2 / Three.js | `CHANGED_FOR_MULTIPLAYER` | Grass, object shadows, dynamic lights optional |
 | **Audio** | Miles | wav + mp3 | Web Audio | `CHANGED_FOR_MULTIPLAYER` | |

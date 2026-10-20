@@ -485,9 +485,9 @@ export function parseStory(data: Uint8Array, dv: DataView, types: ReadonlyMap<nu
     if (!name) continue;
     if (activation & 8) {
       if (useTrigger(o, { brushes: [name] })) useVolumes.add(ptr(o + 4));
-    } else if (activation & 1 && /bridge/i.test(name)) {
-      // Walked into (Ca*b's swinging bridges bBridgePiece4/5, activation 1): the same one-op relay.
-      // Other walk-in movers (wheels, crushers, chandeliers, gears) are left at rest.
+    } else if (activation & 1) {
+      // Walked into (activation 1): the same one-op relay. Ca*b's swinging bridges, Ci*b's wheels,
+      // Gl*b's stalactite crushers (0x201: once), the inns' chandeliers, Bs1a's gears.
       useTrigger(o, { brushes: [name] });
     }
   }

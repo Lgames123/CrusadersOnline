@@ -59,7 +59,7 @@ describe("Ca*b's swinging bridges", () => {
     const t: StoryTrigger = { id: 1, kind: 'relay', activation: 1, targets: [], brushes: ['bBridgePiece4'] };
     expect(worldTrigger(t)).toBe(true);
     expect(worldTrigger({ ...t, sounds: [{ id: 1, positions: [], volume: 1 }] })).toBe(false); // Ws9a's cell door
-    expect(worldTrigger({ ...t, activation: 0x201 })).toBe(false);
+    expect(worldTrigger({ ...t, activation: 0x201 })).toBe(true); // Gl*b's crushers: the once bit changes nothing for a mover-only relay
   });
 
   it('carry whoever stands on them', async () => {

@@ -59,7 +59,7 @@ load run with open targets. M11 runs locally in Docker but has no real domain.
 |---|---|
 | **Ending after Necros's death** | **Done** (2026-10-19, executable-analysis §24). As the original: the death timeline, then Cs5b and Seq24. Not original: everyone who hurt Necros gets it; Drake stays in Cs5b; the completion date is saved (`StoryState.completedAt`); every door opens for him from either side. Still open: the **completion reward** (title, cape or similar; nothing given yet), and **waypoints** to teleport to unlocked areas and maps. |
 | **Intro movies (.bik)** | **Done** (2026-10-19). The converter turns 3DO.bik and CMMIntro.bik into WebM (VP8 + Vorbis): `pnpm convert` with the player's own ffmpeg, the in-browser importer with ffmpeg.wasm fetched from a CDN at import time. The creation dialog offers the introduction (checked by default); it plays 3DO then the intro, skippable as in the original, then enters the world. Options → Introduction plays it again. No converted movie: no offer. |
-| **Walk-in movers still at rest** | Wheels, Gl\*b crushers (they need their damage), chandeliers, Bs1a gears. |
+| **Walk-in movers** | **Done** (2026-10-19, CMP-004). Ci\*b wheels, Gl\*b crushers, the inns' chandeliers and Bs1a's gears start when walked under. Crushers do no damage in the original (decompiled): one landing on a player waits on his head and falls on once he moves. Not original: movers hold instead of pushing; a fallen crusher stays down until the zone restarts. |
 | **Creature against creature** | Guards against hostiles; Ws5a's scripted fight. |
 | **Relay ops not converted** | 0/1 enable/disable, 2/3, the 0x0A–0x0E creature ops. |
 | **Climbing and hanging** | Only the ledge grab is done. |

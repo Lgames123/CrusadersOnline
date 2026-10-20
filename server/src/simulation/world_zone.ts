@@ -41,6 +41,7 @@ import {
   stepDoorMotion,
   useMover,
   stepMover,
+  reverseMover,
   moverPose,
   shutMover,
   MOVER_SHUT,
@@ -1840,13 +1841,16 @@ export class WorldZone {
         const { state, key, progress } = m;
         const from = moverPose(mv.def, m);
         const wasBlocked = !!m.blocked;
-        // A mover does not run into a character: it holds until the way is clear (the original
-        // pushes Drake or stops, flags 0x200 / 0x80).
+        // Reaching a character (0x48E370): flag 0x100 passes through (Bs1a's gears), 0x200 turns
+        // round where it is, 0x80 holds. The rest push him in the original, holding when that
+        // fails (a Gl*b crusher on his head); here they hold until the way is clear, unhurt.
         m.blocked = false;
         const probe = { ...m };
         stepMover(mv.def, probe, TICK_MS);
-        m.blocked = this.moverHits(o, probe) && !this.moverHits(o, m);
-        if (!m.blocked) stepMover(mv.def, m, TICK_MS);
+        const hits = mv.def.contact !== 'none' && this.moverHits(o, probe) && !this.moverHits(o, m);
+        if (hits && mv.def.contact === 'reverse') reverseMover(m);
+        else m.blocked = hits;
+        if (!hits) stepMover(mv.def, m, TICK_MS);
         if (m.progress !== progress || m.key !== key) {
           const pose = moverPose(mv.def, m);
           setBrushPose(this.mw, o.def.id, pose.t, pose.q);

@@ -229,12 +229,15 @@ export const SEQUENCE_ACTOR_BASE = 2;
  * lever and floor rings, Ws1a/9a's gate levers): it fires on every press, as the original; the
  * movers' own state keeps a done ring still. Not a story step, so no per-character flag: one saved
  * would leave the floor shut for that character once the zone restarts. A walk-in one that only
- * moves brushes (Ca*b's swinging bridges) likewise fires on every touch: a moving mover ignores it.
+ * moves brushes (Ca*b's swinging bridges, Ci*b's wheels...) likewise fires on every touch: a
+ * moving mover ignores it. Gl*b's crushers have the once bit (0x201), but the use (0x48EC10) only
+ * starts a shut or parked mover and a crusher never goes back to either (mode 6), so in a shared
+ * world the bit changes nothing and saving a flag per character would only leave stale ones.
  */
 export function worldTrigger(t: StoryTrigger): boolean {
   if (t.kind !== 'relay' || t.delay || t.targets?.length || t.creatureOps?.length) return false;
   if ((t.activation & 0x209) === 8) return !!(t.brushes?.length || t.sounds?.length);
-  return (t.activation & 0x209) === 1 && !!t.brushes?.length && !t.sounds?.length;
+  return (t.activation & 9) === 1 && !!t.brushes?.length && !t.sounds?.length;
 }
 
 /** Whether a point (original units, Z mirrored) is inside a story volume. */

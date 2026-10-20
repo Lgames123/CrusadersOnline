@@ -39,6 +39,9 @@ Changes made for the multiplayer world or on request. Each has a context note in
 - **Respawns:** dead players come back at the start of the area. Pits in the Catacombs catch falls
   and return the player to the respawn spot.
 - **Creatures:** they stop at ledges and die in deep falls.
+- **Movers:** a mover reaching a player holds until he moves instead of pushing him (a Gl\*b
+  crusher does the same in the original). The world is shared, so a crusher falls for good the
+  first time anyone walks under it, until the zone restarts.
 - **Unstuck:** in the options menu, with a 30 s cooldown.
 - **Zone changes:** spell effects, Torch Light and cooldowns carry across them.
 - **Boomer Axe:** thrown on attack (user request).
