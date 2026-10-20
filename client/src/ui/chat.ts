@@ -5,7 +5,12 @@ import { CHAT_MAX_LENGTH, type ChatBroadcastMsg, type ChatNoticeKind } from '@cr
  * map), Global (every map), Server (what the server reports to this player: loot, gold,
  * experience, trades, refusals) and Private (lines to and from one character). Moved by its tab
  * bar, resized from its corner, minimised to the tab bar; its place, size and tab are kept per
- * browser. Enter opens the line, Enter sends, Esc leaves it. Commands: /l, /g, /w <name>, /r.
+ * browser. Enter opens the line, Enter sends, Esc leaves it. Commands: /l, /g, /w <name>, /r,
+ * /ignore <name>, /unignore <name>, /ignored.
+ *
+ * Ignore list (a user decision: client-side only): the names are kept in this browser and their
+ * lines are dropped on arrival, on every tab; the server still delivers them. Right-click a name
+ * to ignore or unignore it. Staff lines are never dropped.
  */
 type Tab = 'local' | 'global' | 'system' | 'private';
 type SendChannel = 'local' | 'global' | 'private';
@@ -20,6 +25,18 @@ const TABS: readonly { tab: Tab; label: string }[] = [
 /** Lines kept per tab. */
 const HISTORY = 200;
 const LAYOUT_KEY = 'crusaders.chat.layout';
+const IGNORE_KEY = 'crusaders.chat.ignored';
+/** Names kept at most (a list, not a database). */
+const IGNORE_MAX = 200;
+
+function loadIgnored(): Set<string> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(IGNORE_KEY) ?? '[]') as unknown;
+    return new Set(Array.isArray(raw) ? raw.filter((n): n is string => typeof n === 'string').map((n) => n.toLowerCase()).slice(0, IGNORE_MAX) : []);
+  } catch {
+    return new Set();
+  }
+}
 const MIN_W = 260;
 const MIN_H = 140;
 
@@ -57,6 +74,8 @@ export class ChatWindow {
   private minimized = false;
   /** The character the latest private line came from (/r). */
   private replyTo = '';
+  /** Ignored characters, lower-cased (this browser's list). */
+  private readonly ignored = loadIgnored();
   /** Lines sent, newest last (Up / Down in the line). */
   private readonly sent: string[] = [];
   private sentIndex = -1;
@@ -94,6 +113,13 @@ export class ChatWindow {
     this.log.addEventListener('click', (e) => {
       const name = (e.target as HTMLElement).closest<HTMLElement>('.chat-name')?.dataset.name;
       if (name) this.whisper(name);
+    });
+    // Right-click a name: ignore it (or no longer).
+    this.log.addEventListener('contextmenu', (e) => {
+      const name = (e.target as HTMLElement).closest<HTMLElement>('.chat-name')?.dataset.name;
+      if (!name) return;
+      e.preventDefault();
+      this.setIgnored(name, !this.isIgnored(name));
     });
 
     this.form = document.createElement('form');
@@ -190,6 +216,7 @@ export class ChatWindow {
       for (const t of TABS) this.push(t.tab, { ...d, at: Date.now() });
       return;
     }
+    if (d.from && !d.sent && this.ignored.has(d.from.toLowerCase())) return;
     const tab: Tab = d.channel;
     if (d.channel === 'private' && d.from && !d.sent) {
       this.replyTo = d.from;
@@ -240,7 +267,7 @@ export class ChatWindow {
       name.className = self ? 'chat-name chat-self' : 'chat-name';
       if (!self) {
         name.dataset.name = other;
-        name.title = `Whisper ${other}`;
+        name.title = `Whisper ${other} (right-click: ignore)`;
       }
       name.textContent = line.channel === 'private' ? (mine ? `To ${other}` : `From ${other}`) : other;
       row.append(name, document.createTextNode(': '));
@@ -294,6 +321,25 @@ export class ChatWindow {
     this.save();
   }
 
+  /** Adds or removes a name from the ignore list (kept in this browser). */
+  setIgnored(name: string, on: boolean): void {
+    const key = name.toLowerCase();
+    if (!/^[a-z0-9_]{1,24}$/i.test(name)) return this.notice(on ? 'Ignore whom? /ignore <name>' : 'Unignore whom? /unignore <name>', 'error');
+    if (on && this.ignored.size >= IGNORE_MAX && !this.ignored.has(key)) return this.notice('Your ignore list is full.', 'error');
+    if (on) this.ignored.add(key);
+    else if (!this.ignored.delete(key)) return this.notice(`You are not ignoring ${name}.`, 'error');
+    try {
+      localStorage.setItem(IGNORE_KEY, JSON.stringify([...this.ignored]));
+    } catch {
+      // Private mode: the list lasts this page only.
+    }
+    this.notice(on ? `You are ignoring ${name}: their lines are hidden here.` : `You are no longer ignoring ${name}.`);
+  }
+
+  isIgnored(name: string): boolean {
+    return this.ignored.has(name.toLowerCase());
+  }
+
   /** Switches to Private, addressed to `name`, and opens the line. */
   private whisper(name: string): void {
     this.toInput.value = name;
@@ -336,8 +382,16 @@ export class ChatWindow {
           text = rest;
           if (!to) return this.notice('Nobody to reply to.', 'error');
           break;
+        case 'ignore': case 'block':
+          return this.setIgnored(rest.trim(), true);
+        case 'unignore': case 'unblock':
+          return this.setIgnored(rest.trim(), false);
+        case 'ignored': case 'ignorelist': {
+          const names = [...this.ignored].sort();
+          return this.notice(names.length ? `Ignored: ${names.join(', ')}` : 'You are ignoring nobody.');
+        }
         default:
-          return this.notice(`Unknown command /${name}. Try /l, /g, /w <name> or /r.`, 'error');
+          return this.notice(`Unknown command /${name}. Try /l, /g, /w <name>, /r, /ignore <name> or /unignore <name>.`, 'error');
       }
     }
     text = text.trim();

@@ -89,7 +89,7 @@ non-original feature (`sideQuests`, off by default).
 | Cooldowns and timers reset on relog | Fine for now; not persisted. |
 | Hotbar layout per browser (localStorage) | By design; stays client-side. |
 | Chat history | Not needed. |
-| Chat ignore list | Worth doing, as a client/browser feature (local list, filtered on display). |
+| Chat ignore list | **Done** (2026-10-20): /ignore, /unignore, /ignored, right-click a name; kept per browser. |
 
 ### 2.5 MMO systems (proposals: `game-design/mmo/`, roadmap in `11-implementation-roadmap.md`)
 

@@ -1,5 +1,6 @@
 # Context notes
 
+- 2026-10-20 [Chat ignore list (client-side)](2026-10-20-chat-ignore-list.md) — localStorage `crusaders.chat.ignored` (≤200, lower-cased); dropped on arrival on every tab, admin lines never; /ignore /unignore /ignored, right-click a name; server still delivers (Claude Code)
 - 2026-10-20 [Every hostile creature fights with the same brain (settled)](2026-10-20-one-brain-for-all.md) — dispatch 0x408C40: 0x409520 melee for every type (modes 1/2), 0x409010 talk, 0x40B540 stroll; types differ by data only; 6 Hand Bow holders carry no Arrow (SHOOT needs it, 0x00474E50): no archers; parity row closed (Claude Code)
 - 2026-10-20 [The Boomer Axe's catch plays the throw clip again](2026-10-20-boomer-catch-clip.md) — t ≥ 3 − 0.15 × pace (0x4E34E0) raises flag 0x200000 = the THROW_ITEM/FIRE_BALL group: player itemAction BOOMER_THROW + `catching` in the axe event for the owner's client; creatures unchanged; seen live at 2.73 s (Claude Code)
 - 2026-10-20 [Footprints, body thuds and bloodstains from clip events](2026-10-20-footprints-and-bloodstains.md) — event table 0x4E0F90: FOOTSTEP 0x0E/0x0F → 0x00457890 L/R_FOOTPRINT at the foot (config bit [0x608B98]&0x1000000, set in the user's cfg); HEAVY/LIGHTTHUD 0xCE/0xCF → 0x004577F0 thud + BLOODSTAIN when dead; client for all avatars with events, foot ±0.12 m; 0x0044DD50 bleeding not traced (Claude Code)
