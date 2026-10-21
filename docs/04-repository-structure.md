@@ -130,5 +130,5 @@ CrusadersOnline/
 ## 5. Next Steps
 
 Proceed to:
-- [technology-decisions.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/technology-decisions.md) — Architectural Decision Records.
-- [project-roadmap.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/project-roadmap.md) — Implementation schedule and critical path.
+- [technology-decisions.md](/docs/technology-decisions.md) — Architectural Decision Records.
+- [project-roadmap.md](/docs/project-roadmap.md) — Implementation schedule and critical path.

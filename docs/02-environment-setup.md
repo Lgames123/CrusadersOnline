@@ -181,5 +181,5 @@ python -c "import json, os; assert os.path.exists('local/inventory.json'); d=jso
 ## 9. Dependencies & Next Steps
 
 Proceed to:
-- [03-dependencies.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/03-dependencies.md) — Detailed runtime package dependencies.
-- [04-repository-structure.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/04-repository-structure.md) — Architectural boundary specification.
+- [03-dependencies.md](/docs/03-dependencies.md) — Detailed runtime package dependencies.
+- [04-repository-structure.md](/docs/04-repository-structure.md) — Architectural boundary specification.

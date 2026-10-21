@@ -83,4 +83,4 @@ Representative non-sensitive file records cataloged in `local/inventory.json`:
 
 ## 5. Next Steps
 
-Proceed to [executable-analysis.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/reverse-engineering/executable-analysis.md) for binary dissection of `crusaders.exe`.
+Proceed to [executable-analysis.md](/docs/reverse-engineering/executable-analysis.md) for binary dissection of `crusaders.exe`.

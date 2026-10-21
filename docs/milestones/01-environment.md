@@ -13,5 +13,5 @@ Scaffold the complete repository structure (`shared/`, `server/`, `client/`, `to
 3. Set up root `tsconfig.json` with strict type checking.
 
 ## 4. Acceptance Criteria
-- [ ] Directory structure matches [04-repository-structure.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/04-repository-structure.md).
+- [ ] Directory structure matches [04-repository-structure.md](/docs/04-repository-structure.md).
 - [x] TypeScript compiles without errors (`pnpm typecheck`).

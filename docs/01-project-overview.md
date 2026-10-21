@@ -117,5 +117,5 @@ Test-Path ".\Crusaders of Might and Magic"
 
 ## 9. Dependencies & Next Steps
 
-- **Downstream Documents:** Proceed to [02-environment-setup.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/02-environment-setup.md) and [03-dependencies.md](file:///c:/Users/Lencina/Desktop/CrusadersOnline/docs/03-dependencies.md).
+- **Downstream Documents:** Proceed to [02-environment-setup.md](/docs/02-environment-setup.md) and [03-dependencies.md](/docs/03-dependencies.md).
 - **Evidence Confidence:** High (Verified on local Windows 10 machine with GOG game files cataloged).
