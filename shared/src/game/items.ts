@@ -91,6 +91,11 @@ export interface ItemDef {
    * axe (0x0043EAE0) that flies back to the wielder's hand (executable-analysis §23).
    */
   boomer?: boolean;
+  /**
+   * `Use SHOOT` (Dasher Hand Bow, 0x004010C0): an attack looses an arrow (server arrows.ts). The
+   * original needs an Arrow in the bag (0x00474E50) and none exists; here none is needed.
+   */
+  shoot?: boolean;
   /** Armour: Drake's body while worn (items.ctx `SetArmorSkin(model, texture)`, models.ctx 121 / 124). */
   armorSkin?: { model: number; texture: number };
   price: number;
@@ -287,8 +292,9 @@ export function catalogFromItemRules(rules: { items: readonly ItemRule[] }): Ite
     const use = String(r.fields['Use'] ?? '');
     let def: ItemDef | null = null;
     // THROWABLE (Boomer Axe) and MISSILE (Dasher Hand Bow, sold in Du9c) swing like the rest in
-    // Drake's hand: he has no ASM_THROW_ITEM clip, so the throw / shot (0x0042C77F / 0x0042C7BE,
-    // on that clip's event) never comes, and no level holds an Arrow.
+    // the original Drake's hand: he has no ASM_THROW_ITEM clip, so the throw / shot (0x0042C77F /
+    // 0x0042C7BE, on that clip's event) never comes, and no level holds an Arrow. Here the bow
+    // shoots (Use SHOOT → `shoot`), without arrows, on the fire ball's clip.
     if (type === 'WEAPON' && ['MELEE', 'THROWABLE', 'MISSILE'].includes(String(r.fields['SubType']))) {
       def = weapon(r.name, r.damage as Partial<Record<DamageType, number>>, Number(r.fields['Speed'] ?? 1) || 1, price);
       if (use === 'DRINK_SOUL') {
@@ -296,6 +302,7 @@ export function catalogFromItemRules(rules: { items: readonly ItemRule[] }): Ite
         def = { ...def, soulDrink: { amount: amount ?? DEFAULT_SOUL_DRINK, giants: (mask & USE_MASK.GIANTS) !== 0 } };
       }
       if (use === 'BOOMER') def = { ...def, boomer: true };
+      if (use === 'SHOOT') def = { ...def, shoot: true };
       def = withEquipBoost(def, r.fields['Equip'], calls);
     } else if (type === 'SHIELD') {
       def = shield(r.name, price);

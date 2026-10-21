@@ -693,7 +693,8 @@ class OriginalAvatar implements Avatar {
     action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
     action.clampWhenFinished = !loop;
     action.timeScale = timeScale;
-    if (this.current && this.current !== action) action.crossFadeFrom(this.current, FADE, false);
+    // A death cuts in almost at once (a short blend only hides the pop).
+    if (this.current && this.current !== action) action.crossFadeFrom(this.current, this.anim === ANIM.DEAD ? 0.05 : FADE, false);
     action.play();
     this.current = action;
     this.lastTime = action.time;

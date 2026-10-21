@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {
+  ANIM,
   INTERP_DELAY_TICKS,
   MOB_ARCHETYPES,
   TICK_DT,
@@ -23,6 +24,11 @@ export interface RemoteEntity {
   /** Swing counter: bumps whenever the replicated swing phase starts over. */
   swingId: number;
   lastPhase: number;
+  /**
+   * Killed by a combat event not yet in the (100 ms late) snapshots: it dies at once, dropping
+   * whatever it was doing, until the snapshots show it dead too.
+   */
+  killed?: boolean;
 }
 
 /** Other players and mobs, rendered 100 ms in the past and interpolated between snapshots. */
@@ -121,6 +127,17 @@ export class RemoteEntities {
     });
   }
 
+  /** A combat event killed this entity: its death plays now, not when the snapshots catch up. */
+  kill(id: number): void {
+    const e = this.byId.get(id);
+    if (!e || this.scripted.has(id)) return;
+    e.killed = true;
+    e.hp = 0;
+    e.avatar.setUpperSwing?.(null, 0);
+    e.avatar.setShield?.(false);
+    e.avatar.setState(ANIM.DEAD, 0, e.swingId);
+  }
+
   despawn(id: number): void {
     const e = this.byId.get(id);
     this.fades.delete(id);
@@ -149,6 +166,12 @@ export class RemoteEntities {
       e.avatar.object.visible = (this.fades.get(e.id)?.left ?? 1) > 0;
       e.avatar.object.position.set(this.sample.x, this.sample.y, this.sample.z);
       e.avatar.object.rotation.y = this.sample.yaw;
+      if (e.killed && this.sample.anim === ANIM.DEAD) e.killed = false;
+      if (e.killed) {
+        e.hp = 0;
+        e.avatar.update(dt * (this.rates.get(e.id) ?? 1));
+        continue;
+      }
       e.hp = this.sample.hp;
       const arch = e.info.archetype ? MOB_ARCHETYPES[e.info.archetype] : undefined;
       const swing = arch ? arch.swing : null;

@@ -63,6 +63,8 @@ import {
   type DecalKind,
   type WorldObjectDef,
   type Difficulty,
+  modsTitle,
+  RARITY_INFO,
 } from '@crusaders/shared';
 import { outfitFor, lookFromInventory, weaponDecal } from './assets/item_models.ts';
 import { createRenderContext } from './engine/renderer.ts';
@@ -112,6 +114,7 @@ import { WaypointMap } from './ui/waypoint_map.ts';
 import { PartyFrame, PartyInvite } from './ui/party_frame.ts';
 import { ArmorGlow, HeldGlow } from './engine/weapon_glow.ts';
 import { WeaponSparkles } from './engine/weapon_sparkles.ts';
+import { Minimap, type MinimapMark } from './ui/minimap.ts';
 import { TradeWindow } from './ui/trade_window.ts';
 import { AuctionWindow } from './ui/auction_window.ts';
 import { Telegraphs } from './engine/telegraphs.ts';
@@ -233,6 +236,7 @@ async function main(): Promise<void> {
   const charSheet = new CharacterSheet(document.getElementById('char-sheet')!, assetManifest?.textures ?? {});
   const waypointMap = new WaypointMap();
   const partyFrame = new PartyFrame();
+  const minimap = new Minimap();
   const partyInvite = new PartyInvite();
   const dungeonUi = new DungeonUi();
   /** This character's name as the party updates give it (the ready check marks its own row). */
@@ -277,6 +281,8 @@ async function main(): Promise<void> {
   charSheet.setStrings(gameStrings);
   // Scripted sequences (cutscenes): played here, the server waits for the end (CS_CUTSCENE_DONE).
   let cutscene: Cutscene | null = null;
+  /** When a combat event last killed the local player (ms, performance.now). */
+  let killedAt = -Infinity;
   /** Necros's death timeline (SC_ENDING): the view until the ending act loads. */
   let ending: NecrosDeath | null = null;
   /** A scripted view is playing: the keys and the game's windows wait. */
@@ -318,6 +324,7 @@ async function main(): Promise<void> {
   const applyHud = (s: Settings) => {
     hud.style = s.hudStyle;
     hud.showStats = s.showStats;
+    minimap.shown = s.minimap;
     classicText.visible = s.hudStyle === 'classic';
   };
   applyHud(settings.current);
@@ -630,7 +637,8 @@ async function main(): Promise<void> {
             myTorch.distance = s.light;
             myTorch.visible = s.light > 0;
             if (!myTorch.visible) dynamicLights.remove(MY_TORCH_KEY);
-            if (player) player.dead = s.dead;
+            // A kill seen in a combat event holds the death until the stats agree.
+            if (player) player.dead = s.dead || performance.now() - killedAt < 1500;
             if (player && s.speed) {
               player.clipRate = s.speed;
               player.avatar.clipRate = s.speed;
@@ -648,6 +656,13 @@ async function main(): Promise<void> {
             headPos.y += isMe ? player!.avatar.headHeight : target!.avatar.headHeight;
             const mine = session !== null && e.attacker === session.entityId;
             combatUi.damage(e, headPos, isMe ? 'taken' : mine ? 'dealt' : 'other');
+            // The killing blow: the death plays at once, whatever was playing (swing, cast, hit).
+            if (e.killed && !e.blocked) {
+              if (isMe && player) {
+                player.dead = true;
+                killedAt = performance.now();
+              } else remotes.kill(e.target);
+            }
             // Hit reaction from the attacker's side (ASM_IMPACT_FRONT/LEFT/RIGHT/BACK).
             const from = mine ? player?.object : remotes.byId.get(e.attacker)?.avatar.object;
             const avatar = isMe ? player?.avatar : target?.avatar;
@@ -1219,6 +1234,11 @@ async function main(): Promise<void> {
       if (local.startItemAction(BOOMER_THROW.anim)) session?.attack('normal');
       return;
     }
+    // A bow shoots on the same clip (the server looses the arrow at its release frame).
+    if (held?.shoot) {
+      if (local.startItemAction(BOOMER_THROW.anim)) session?.attack('normal');
+      return;
+    }
     let kind = attackKindFor(input.heldFlags, local.character.grounded);
     // A plain click with a wall within 5 ft ahead plays the jab instead (combo routine).
     const feet = local.character.position;
@@ -1239,7 +1259,7 @@ async function main(): Promise<void> {
   /** Alt held: the cursor is out for the UI; letting go takes the camera back. */
   let altFree = false;
   let optionsAt = 0;
-  input.wantsLock = () => !(altFree || chat.typing || optionsOpen || inventoryPanel.open || questBook.open || charSheet.open || waypointMap.open || tradeWindow.open || auctionWindow.open || craftWindow.open || partyInvite.modal || inScene());
+  input.wantsLock = () => !(altFree || chat.typing || optionsOpen || inventoryPanel.open || questBook.open || charSheet.open || waypointMap.open || minimap.expanded || tradeWindow.open || auctionWindow.open || craftWindow.open || partyInvite.modal || inScene());
   const play = () => {
     sounds?.unlock();
     music.unlock();
@@ -1287,7 +1307,7 @@ async function main(): Promise<void> {
     if (!isAlt(e) || !altFree) return;
     altFree = false;
     // A page that let go of the lock itself may take it back without a click (Pointer Lock 2.0).
-    if (!optionsOpen && !chat.typing && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !tradeWindow.open && !auctionWindow.open && !craftWindow.open && !inScene()) input.requestLock();
+    if (!optionsOpen && !chat.typing && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !minimap.expanded && !tradeWindow.open && !auctionWindow.open && !craftWindow.open && !inScene()) input.requestLock();
   });
   // The chat line takes the keyboard (Enter): the camera lets go of the pointer, and takes it
   // back without a click when the line closes, unless a window was open before.
@@ -1314,7 +1334,7 @@ async function main(): Promise<void> {
     if (open && input.locked) {
       releasing = true;
       document.exitPointerLock();
-    } else if (!open && !optionsOpen && !dungeonUi.modal && !chat.typing && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !tradeWindow.open && !auctionWindow.open && !craftWindow.open && !inScene() && !input.locked) input.requestLock();
+    } else if (!open && !optionsOpen && !dungeonUi.modal && !chat.typing && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !minimap.expanded && !tradeWindow.open && !auctionWindow.open && !craftWindow.open && !inScene() && !input.locked) input.requestLock();
   };
   const setAuctionOpen = (open: boolean) => {
     if (open === auctionWindow.open) return;
@@ -1360,7 +1380,7 @@ async function main(): Promise<void> {
       document.exitPointerLock();
     } else if (!typing && chatTookLock) {
       chatTookLock = false;
-      if (!optionsOpen && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !tradeWindow.open && !auctionWindow.open && !craftWindow.open && !inScene()) input.requestLock();
+      if (!optionsOpen && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !minimap.expanded && !tradeWindow.open && !auctionWindow.open && !craftWindow.open && !inScene()) input.requestLock();
     }
   };
   window.addEventListener('blur', () => {
@@ -1425,7 +1445,7 @@ async function main(): Promise<void> {
   const DOOR_RANGE = 1.6;
   const nearestInteractable = () => {
     if (!levelView || !session) return null;
-    let best: { id: number; label: string; d: number; key?: boolean; shop?: boolean; waypoint?: boolean; vein?: number } | null = null;
+    let best: { id: number; label: string; d: number; color?: string; key?: boolean; shop?: boolean; waypoint?: boolean; vein?: number } | null = null;
     // In a shop's volume (the merchant's counter): Tab trades.
     const shop = shopHere();
     if (shop) best = { id: shop.id, label: 'Tab — trade', d: 0.5, shop: true };
@@ -1470,10 +1490,45 @@ async function main(): Promise<void> {
       if (v.state !== 'present' || (v.def.kind !== 'item' && v.def.kind !== 'chest')) continue;
       const d = Math.hypot(v.position.x - p.x, v.position.z - p.z);
       if (Math.hypot(d, v.position.y - p.y) > INTERACT_RANGE || (best && best.d < d)) continue;
-      const label = v.def.kind === 'chest' ? 'open chest' : `pick up ${v.def.item?.quantity && v.def.item.quantity > 1 ? `${v.def.item.quantity} ` : ''}${v.def.item?.name ?? v.def.name}`;
-      best = { id, label: `Tab — ${label}`, d };
+      const named = modsTitle(v.def.item?.name ?? v.def.name, v.def.item?.mods);
+      const label = v.def.kind === 'chest' ? 'open chest' : `pick up ${v.def.item?.quantity && v.def.item.quantity > 1 ? `${v.def.item.quantity} ` : ''}${named.title}`;
+      best = { id, label: `Tab — ${label}`, d, ...(v.def.kind === 'item' && named.color ? { color: named.color } : {}) };
     }
     return best;
+  };
+  /** The minimap's level (rebuilt when the area or its collision world changes) and its marks. */
+  let minimapLevel: { arena: unknown; mw: unknown } = { arena: null, mw: null };
+  const updateMinimap = (dt: number) => {
+    const arena = levelView?.arena ?? null;
+    const world = chase?.mw ?? null;
+    if (arena !== minimapLevel.arena || world !== minimapLevel.mw) {
+      minimapLevel = { arena, mw: world };
+      minimap.setLevel(arena, world, arena ? areaName(arena.name) : '');
+    }
+    minimap.visible = inWorld && !!session && !inScene();
+    if (!arena || !session) return;
+    const p = local.object.position;
+    const marks: MinimapMark[] = [];
+    const party = new Set(partyFrame.memberNames.map((n) => n.toLowerCase()));
+    for (const e of remotes.byId.values()) {
+      if (!e.visible || e.hp <= 0 || !e.avatar.object.visible) continue;
+      const q = e.avatar.object.position;
+      const kind = e.info.kind === 'player' ? (party.has(e.info.name.toLowerCase()) ? 'party' : 'player') : e.info.ally ? 'ally' : e.info.archetype?.startsWith('npc_') ? 'npc' : 'hostile';
+      marks.push({ kind, x: q.x, y: q.y, z: q.z });
+    }
+    for (const shop of arena.story?.shops ?? []) {
+      const poly = shop.volume.polygon;
+      if (!poly.length) continue;
+      marks.push({ kind: 'merchant', x: poly.reduce((n, v) => n + v[0], 0) / poly.length, y: shop.volume.yMin, z: poly.reduce((n, v) => n + v[1], 0) / poly.length, label: 'Merchant' });
+    }
+    for (const portal of arena.portals ?? []) marks.push({ kind: 'exit', x: portal.x, y: portal.y, z: portal.z, label: areaName(portal.target) });
+    if (crystalAt && storyComplete) marks.push({ kind: 'crystal', x: crystalAt.x, y: crystalAt.y, z: crystalAt.z, label: 'Waypoint crystal' });
+    for (const v of levelView!.objects.values()) {
+      const rarity = v.def.item?.mods?.rarity;
+      if (v.state !== 'present' || !rarity || rarity === 'worn') continue;
+      marks.push({ kind: 'loot', x: v.position.x, y: v.position.y, z: v.position.z, color: RARITY_INFO[rarity].color });
+    }
+    minimap.update({ player: { x: p.x, y: p.y, z: p.z, yaw: local.bodyHeading }, marks }, dt);
   };
   /** The ground panel is a view of the same level objects used by Tab; pickup stays authoritative. */
   const updateGroundItems = () => {
@@ -1734,7 +1789,7 @@ async function main(): Promise<void> {
       chat.blur();
     }
     // Esc released the pointer: the options (sequences play to their end, as in the original).
-    if (!locked && !ours && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !tradeWindow.open && !auctionWindow.open && !craftWindow.open && !dungeonUi.modal && !partyInvite.modal && !inScene()) setOptionsOpen(true);
+    if (!locked && !ours && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open && !minimap.expanded && !tradeWindow.open && !auctionWindow.open && !craftWindow.open && !dungeonUi.modal && !partyInvite.modal && !inScene()) setOptionsOpen(true);
   };
 
   // Inventory window (online only); the ground window opens beside it (and opens it).
@@ -1827,6 +1882,26 @@ async function main(): Promise<void> {
     }
   }
   waypointMap.onClose = () => setWaypointMapOpen(false);
+  /** M: the whole area's map (the minimap's level layout, north-up, to drag and zoom). */
+  function setAreaMapOpen(open: boolean): void {
+    if (open === minimap.expanded) return;
+    if (!open) {
+      minimap.setExpanded(false);
+      if (!optionsOpen && session && !inventoryPanel.open && !questBook.open && !charSheet.open && !waypointMap.open) input.requestLock();
+      return;
+    }
+    if (inScene() || optionsOpen) return;
+    closeInventoryPanels();
+    setQuestBookOpen(false, true);
+    setCharSheetOpen(false, true);
+    if (waypointMap.open) waypointMap.hide();
+    minimap.setExpanded(true);
+    if (minimap.expanded && input.locked) {
+      releasing = true;
+      document.exitPointerLock();
+    }
+  }
+  minimap.onClose = () => setAreaMapOpen(false);
   waypointMap.onTravel = (act) => {
     session?.waypointTravel(act);
     waypointMap.hide();
@@ -1844,6 +1919,7 @@ async function main(): Promise<void> {
       else if (questBook.open) setQuestBookOpen(false);
       else if (charSheet.open) setCharSheetOpen(false);
       else if (waypointMap.open) setWaypointMapOpen(false);
+      else if (minimap.expanded) setAreaMapOpen(false);
       else if (tradeWindow.open) session?.trade({ action: 'cancel' });
       else if (auctionWindow.open) setAuctionOpen(false);
       else if (craftWindow.open) setCraftOpen(false);
@@ -1863,7 +1939,7 @@ async function main(): Promise<void> {
     } else if (!typing && e.shiftKey && !e.repeat && e.code === 'KeyC') {
       e.preventDefault();
       setInventoryOpen(!inventoryPanel.open);
-    } else if (!typing && !e.defaultPrevented && !e.ctrlKey && !e.altKey && !e.shiftKey && !chat.typing && (inventoryPanel.open || questBook.open || charSheet.open || waypointMap.open) && input.isMoveKey(e.code)) {
+    } else if (!typing && !e.defaultPrevented && !e.ctrlKey && !e.altKey && !e.shiftKey && !chat.typing && (inventoryPanel.open || questBook.open || charSheet.open || waypointMap.open || minimap.expanded) && input.isMoveKey(e.code)) {
       // Walking off with a window open: the windows close, the camera takes the pointer back and
       // the step starts at once (not after the key repeat).
       e.preventDefault();
@@ -1871,11 +1947,15 @@ async function main(): Promise<void> {
       setQuestBookOpen(false);
       setCharSheetOpen(false);
       waypointMap.hide();
+      minimap.setExpanded(false);
       input.pressMove(e.code);
     } else if ((input.isKeyForAction('inventory', e.code) || e.code === 'KeyI') && !e.repeat) setInventoryOpen(!inventoryPanel.open);
     else if ((input.isKeyForAction('questBook', e.code) || e.code === 'F2') && !e.repeat) {
       e.preventDefault();
       setQuestBookOpen(!questBook.open);
+    } else if (!typing && !chat.typing && input.isKeyForAction('map', e.code) && !e.repeat && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      setAreaMapOpen(!minimap.expanded);
     } else if ((input.isKeyForAction('characterSheet', e.code) || e.code === 'F1') && !e.repeat) {
       e.preventDefault();
       setCharSheetOpen(!charSheet.open);
@@ -2046,6 +2126,7 @@ async function main(): Promise<void> {
       const t = nearestInteractable();
       const sign = !t && messagesAt(MESSAGE_USE).length > 0;
       prompt.hidden = !t && !sign;
+      prompt.style.color = t?.color ?? '';
       if (t) prompt.textContent = t.label;
       else if (sign) prompt.textContent = 'Tab — read sign';
       updateWalkInMessages();
@@ -2059,7 +2140,8 @@ async function main(): Promise<void> {
     dynamicLights.update(viewCamera, dt);
     propShadows.update(renderer, scene, viewCamera, dt);
     postFx.render(viewCamera, dt);
-    combatUi.update(dt, viewCamera, remotes, container.clientWidth, container.clientHeight);
+    combatUi.update(dt, viewCamera, remotes, container.clientWidth, container.clientHeight, cutscene ? undefined : chase.mw);
+    updateMinimap(dt);
     hud.update(dt, tick, local.character, session, remotes.count);
   };
   renderer.setAnimationLoop(frameLoop);

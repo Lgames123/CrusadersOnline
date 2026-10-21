@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { CombatEvent } from '@crusaders/shared';
+import { CHARACTER_GROUPS, type CombatEvent, type MovementWorld } from '@crusaders/shared';
 import type { RemoteEntities } from '../entities/remote_entities.ts';
 
 const FLOAT_SECONDS = 1.1;
@@ -28,6 +28,9 @@ export class CombatUi {
   private readonly bars = new Map<number, HTMLDivElement>();
   private floaters: Floater[] = [];
   private readonly v = new THREE.Vector3();
+  private readonly eye = new THREE.Vector3();
+  private readonly dir = new THREE.Vector3();
+  private readonly mid = new THREE.Vector3();
   /** The local player's level, against which creature levels are coloured. */
   playerLevel = 1;
 
@@ -55,7 +58,22 @@ export class CombatUi {
     this.floaters.push({ el, pos: at.clone(), age: 0 });
   }
 
-  update(dt: number, camera: THREE.Camera, remotes: RemoteEntities, width: number, height: number): void {
+  /**
+   * Whether level geometry hides `to` from the camera (a ray from the eye stopping short of it).
+   * Health bars of creatures behind walls and floors are not drawn.
+   */
+  private hidden(mw: MovementWorld | undefined, eye: THREE.Vector3, to: THREE.Vector3): boolean {
+    if (!mw) return false;
+    this.dir.subVectors(to, eye);
+    const len = this.dir.length();
+    if (len < 0.5) return false;
+    this.dir.divideScalar(len);
+    const hit = mw.world.castRay(new mw.rapier.Ray(eye, this.dir), len - 0.3, true, undefined, CHARACTER_GROUPS);
+    return !!hit;
+  }
+
+  update(dt: number, camera: THREE.Camera, remotes: RemoteEntities, width: number, height: number, mw?: MovementWorld): void {
+    camera.getWorldPosition(this.eye);
     // Health bars for visible remote entities.
     for (const e of remotes.byId.values()) {
       let bar = this.bars.get(e.id);
@@ -76,7 +94,11 @@ export class CombatUi {
       }
       this.v.copy(e.avatar.object.position);
       this.v.y += e.avatar.headHeight;
-      const onScreen = e.visible && this.project(this.v, camera, width, height);
+      this.mid.copy(e.avatar.object.position);
+      this.mid.y += e.avatar.headHeight * 0.5;
+      // Seen when the head or the middle of the body is in sight.
+      const inSight = !this.hidden(mw, this.eye, this.v) || !this.hidden(mw, this.eye, this.mid);
+      const onScreen = e.visible && inSight && this.project(this.v, camera, width, height);
       bar.style.display = onScreen ? 'block' : 'none';
       if (!onScreen) continue;
       bar.style.transform = `translate(${this.v.x}px, ${this.v.y}px) translate(-50%, -100%)`;

@@ -306,6 +306,7 @@ import {
 import { InputQueue } from './input_queue.ts';
 import { BODY_MID, SpellRuntime, type ActiveStatus, type SpellHost } from './spell_runtime.ts';
 import { BoomerAxes } from './boomer_axe.ts';
+import { ARROW_RULES, Arrows } from './arrows.ts';
 import { TRADE_RANGE, TradeDesk, settleTrade, untradable, type Trade, type TradeOffer } from './trade.ts';
 
 function sameEntityState(a: EntityState, b: EntityState): boolean {
@@ -780,6 +781,8 @@ interface Player extends ActorBase {
   itemAction: { anim: number; until: number } | null;
   /** A Boomer Axe throw playing: the tick the axe leaves the hand (BOOMER_THROW.release). */
   boomerThrowAt: number;
+  /** A bow shot playing: the tick the arrow leaves (BOOMER_THROW.release); 0 = none. */
+  shotAt: number;
   /** Equipment change requested mid-swing, applied when the swing ends. */
   pendingEquip: { slot: number; equip: boolean; itemId?: string; to?: { x: number; y: number } } | null;
   weapon: ItemDef;
@@ -840,9 +843,15 @@ interface Mob extends ActorBase {
    * (shield up) to its engage distance, an attack sequence, the pause after it, and what follows
    * an attack (shield up, or stepping back without a shield).
    */
-  brain: 'decide' | 'run' | 'walkIn' | 'attack' | 'pause' | 'post' | 'spell';
+  brain: 'decide' | 'run' | 'walkIn' | 'attack' | 'pause' | 'post' | 'spell' | 'shoot';
   /** The decision before the current one (an attack is followed by 'post'). */
-  lastPick: 'run' | 'walkIn' | 'attack' | 'post' | 'spell' | null;
+  lastPick: 'run' | 'walkIn' | 'attack' | 'post' | 'spell' | 'shoot' | null;
+  /**
+   * A bow holder's shot (not original, arrows.ts): the target, the release tick (the clip's
+   * throw frame, 0 once loosed) and the end of the clip; and when it may shoot again.
+   */
+  shot: { target: number; releaseAt: number; end: number } | null;
+  shotReadyAt: number;
   /**
    * A caster's spell phase (0x0040AA20): which choice of 0x004096A0 led to it, the cast playing
    * (its template mask bit, the target, the clip's SPELL event — null when the clip has none —
@@ -952,6 +961,7 @@ const scripted = (p: Player) => !!p.cutscene || !!p.ending;
 /** Tooltip lines for what an item's use behaviour adds (DRINK_SOUL, the shield's mask, REFLECT). */
 function itemEffects(def: ItemDef): string[] {
   const out: string[] = [];
+  if (def.shoot) out.push('Shoots arrows (none needed)');
   if (def.soulDrink) out.push(`Drinks ${def.soulDrink.amount} health ${def.type === 'shield' ? 'from each blow it stops' : 'with each blow'}${def.soulDrink.giants ? ', giants too' : ''}`);
   if (def.type === 'shield') {
     const mask = def.blocks ?? 0;
@@ -1085,6 +1095,8 @@ export class WorldZone {
   private readonly host: SpellHost;
   /** Boomer Axes in flight (executable-analysis §23.1); a creature's thrown weapon until it is caught. */
   private readonly boomer: BoomerAxes;
+  /** Arrows in flight (bows, Use SHOOT). */
+  private readonly arrows: Arrows;
   private readonly thrownWeapons = new Map<number, ItemDef>();
   /** Event rate multipliers set from the admin panel (not original; 1 = the original's). */
   private rates: WorldRates = { ...DEFAULT_RATES };
@@ -1160,6 +1172,26 @@ export class WorldZone {
       emit: (at, d) => this.host.emit(at, d),
       caught: (a) => this.boomerCaught(a as Actor),
       catching: (a) => this.boomerCatching(a as Actor),
+    });
+    this.arrows = new Arrows({
+      mw: this.mw,
+      random: () => this.random(),
+      characters: () => this.actors.values(),
+      alive: (a) => alive(a as Actor),
+      hostile: (a, b) => this.hostile(a as Actor, b as Actor),
+      shieldStops: (a, from) => this.host.shieldStops(a, from, 'PROJECTILE'),
+      hit: (a, t, push) => {
+        const shooter = a as Actor;
+        const target = t as Actor;
+        if (!alive(target) || this.actors.get(shooter.entityId) !== shooter) return;
+        this.applyDamage(shooter, target, this.rollDamage(shooter, 1));
+        if (alive(target)) this.moveBy(target, push.x * push.d, push.z * push.d);
+      },
+      blocked: (a, t) => {
+        const target = t as Actor;
+        this.broadcastNear(target, { op: SC.COMBAT_EVENT, d: { attacker: a.entityId, target: target.entityId, damage: 0, hp: Math.ceil(target.hp), killed: false, blocked: true } });
+      },
+      emit: (at, d) => this.host.emit(at, d),
     });
   }
 
@@ -1338,6 +1370,7 @@ export class WorldZone {
   private removeMob(m: Mob): void {
     if (!this.actors.has(m.entityId)) return;
     this.magic.forget(m);
+    this.arrows.forget(m);
     this.thrownWeapons.delete(m.entityId);
     removeCharacter(this.mw, m.character);
     this.grid.remove(m.entityId);
@@ -1450,6 +1483,8 @@ export class WorldZone {
       spellPick: null,
       mobCast: null,
       spellReadyAt: 0,
+      shot: null,
+      shotReadyAt: 0,
       brainUntil: 0,
       seq: null,
       shieldUntil: 0,
@@ -1580,6 +1615,7 @@ export class WorldZone {
       potionCooldowns: new Map(),
       itemAction: null,
       boomerThrowAt: 0,
+      shotAt: 0,
       pendingEquip: null,
       weapon: eq.weapon,
       armor: eq.armor,
@@ -3025,6 +3061,7 @@ export class WorldZone {
       ...(potionCooldown(def) ? { cooldown: potionCooldown(def)!.seconds } : {}),
       ...(itemEffects(def).length ? { effects: itemEffects(def) } : {}),
       ...(def.boomer ? { boomer: true } : {}),
+      ...(def.shoot ? { shoot: true } : {}),
     };
   }
 
@@ -3765,6 +3802,7 @@ export class WorldZone {
     const record = this.persistRecord(p);
     this.magic.dropOwner(p);
     this.magic.forget(p);
+    this.arrows.forget(p);
     removeCharacter(this.mw, p.character);
     this.grid.remove(p.entityId);
     this.states.delete(p.entityId);
@@ -3803,6 +3841,11 @@ export class WorldZone {
     // The Boomer Axe in hand is thrown, near a foe or not (not original: Drake swings it).
     if (p.weapon.boomer && !p.swing) {
       this.startBoomerThrow(p);
+      return;
+    }
+    // A bow looses an arrow along the view (not original: see arrows.ts).
+    if (p.weapon.shoot && !p.swing) {
+      this.startShot(p);
       return;
     }
     if (p.swing) {
@@ -3892,6 +3935,10 @@ export class WorldZone {
           p.boomerThrowAt = 0;
           if (alive(p) && p.hitUntil <= tick && p.weapon.boomer) this.throwBoomer(p);
         }
+        if (p.shotAt && tick >= p.shotAt) {
+          p.shotAt = 0;
+          if (alive(p) && p.hitUntil <= tick && p.weapon.shoot) this.arrows.shoot(p, this.magic.hand(p), this.aimOf(p));
+        }
         if (p.itemAction) {
           if (tick >= p.itemAction.until || !alive(p)) p.itemAction = null;
           else if (p.anim === ANIM.IDLE && !p.cast) p.anim = p.itemAction.anim;
@@ -3927,6 +3974,7 @@ export class WorldZone {
     // 3b. Spell objects (projectiles, explosions, storms, lightning, drains) and timed effects.
     this.magic.step();
     this.boomer.step();
+    this.arrows.step();
 
     // 4. Deaths and respawns (actors and world objects).
     if (this.objects.size && tick % 20 === 0) {
@@ -4129,6 +4177,8 @@ export class WorldZone {
     this.separate(m);
     m.anim = m.hitUntil > this.tick
       ? (m.character.rollDir === ACTION_KNOCKDOWN ? ANIM.KNOCKDOWN : ANIM.HIT)
+      : m.shot && this.tick < m.shot.end
+        ? BOOMER_THROW.anim
       : m.mobCast
         ? ANIM.SPELL_CAST + SPELLS.indexOf(m.mobCast.bit === FORCE_GLOBE_BIT ? 'torch_light' : creatureSpell(m.archetype.type ?? 0, m.mobCast.bit, this.difficulty)!.spell)
       : m.blockUntil > this.tick
@@ -4658,6 +4708,10 @@ export class WorldZone {
           if (this.postAttack(m, target, dist)) return;
           m.brain = 'decide';
           continue;
+        case 'shoot':
+          if (this.mobShoot(m, target, dist)) return;
+          m.brain = 'decide';
+          continue;
         case 'spell':
           if (this.mobSpell(m, target, dist)) {
             // The elementals' throw is their walk clip: it carries them forward (icewalk's root motion).
@@ -4679,6 +4733,11 @@ export class WorldZone {
     if (spell) {
       m.lastPick = m.brain = 'spell';
       m.spellPick = spell;
+      return;
+    }
+    // A bow holder shoots beyond 8 ft with a clear line (not original: arrows.ts).
+    if (m.weapon.shoot && mobBand(dist) > 0 && dist <= ARROW_RULES.mobRange && this.tick >= m.shotReadyAt && lineOfSight(this.mw, m.character.position, target.character.position, PLAYER_HEIGHT * 0.9)) {
+      m.lastPick = m.brain = 'shoot';
       return;
     }
     const pick = mobBand(dist) > 1 ? 'run'
@@ -4768,6 +4827,40 @@ export class WorldZone {
     m.shieldUntil = 0;
     this.broadcastAt(m.character.position, { op: SC.SPELL_EVENT, d: { cast: { caster: m.entityId, spell: s.spell, level: s.level, phase: 'begin' } } });
     return true;
+  }
+
+  /**
+   * A bow holder's shot: it stands turning to the target until within 45 degrees, plays the throw
+   * clip (BOOMER_THROW: ASM_THROW_ITEM on a model without a fire ball state, as the original's
+   * creatures shoot) and looses at its release frame; then it decides again. False when over.
+   */
+  private mobShoot(m: Mob, target: Actor, dist: number): boolean {
+    const shot = m.shot;
+    if (!shot) {
+      if (mobBand(dist) === 0 || dist > ARROW_RULES.mobRange) return false;
+      const t = target.character.position;
+      const p = m.character.position;
+      if (Math.abs(angleDiff(yawTowards(p.x, p.z, t.x, t.z), dequantizeAngle(m.yaw))) >= CREATURE_CAST.facing) return true;
+      m.shot = { target: target.entityId, releaseAt: this.tick + Math.max(1, Math.round(BOOMER_THROW.release * TICK_RATE)), end: this.tick + Math.max(1, Math.round(BOOMER_THROW.end * TICK_RATE)) };
+      m.shotReadyAt = this.tick + Math.round(ARROW_RULES.mobCooldown * TICK_RATE);
+      m.seq = null;
+      m.shieldUntil = 0;
+      return true;
+    }
+    if (shot.releaseAt && this.tick >= shot.releaseAt) {
+      shot.releaseAt = 0;
+      const t = this.actors.get(shot.target);
+      if (t && alive(t)) {
+        const hand = this.magic.hand(m);
+        const tp = t.character.position;
+        const to = { x: tp.x - hand.x, y: tp.y + BODY_MID - hand.y, z: tp.z - hand.z };
+        const l = Math.hypot(to.x, to.y, to.z) || 1;
+        this.arrows.shoot(m, hand, { x: to.x / l, y: to.y / l, z: to.z / l });
+      }
+    }
+    if (this.tick < shot.end) return true;
+    m.shot = null;
+    return false;
   }
 
   /** The clip's SPELL event (controller flag 0x10000 -> 0x004BD7C0): the spell at the target. */
@@ -5096,6 +5189,15 @@ export class WorldZone {
     if (p.boomerThrowAt || p.itemAction || this.boomer.flying(p) || !p.character.grounded) return;
     const rate = p.moveStats.clipRate ?? 1;
     p.boomerThrowAt = this.tick + Math.max(1, Math.round((BOOMER_THROW.release / rate) * TICK_RATE));
+    p.itemAction = { anim: BOOMER_THROW.anim, until: this.tick + Math.max(1, Math.round((BOOMER_THROW.end / rate) * TICK_RATE)) };
+    p.queuedAttack = false;
+  }
+
+  /** A bow shot: the throw clip (BOOMER_THROW, the fire ball's), the arrow leaving at its release frame. */
+  private startShot(p: Player): void {
+    if (p.shotAt || p.itemAction || !p.character.grounded) return;
+    const rate = p.moveStats.clipRate ?? 1;
+    p.shotAt = this.tick + Math.max(1, Math.round((BOOMER_THROW.release / rate) * TICK_RATE));
     p.itemAction = { anim: BOOMER_THROW.anim, until: this.tick + Math.max(1, Math.round((BOOMER_THROW.end / rate) * TICK_RATE)) };
     p.queuedAttack = false;
   }

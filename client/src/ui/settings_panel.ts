@@ -134,6 +134,17 @@ export class SettingsPanel {
 
             <div class="opt-group opt-toggle-group">
               <label class="opt-toggle-label">
+                <input id="set-minimap" type="checkbox" ${s.minimap ? 'checked' : ''} />
+                <span class="opt-toggle-box"></span>
+                <span class="opt-toggle-text">
+                  <strong>Minimap</strong>
+                  <span class="opt-desc">The area around you in the top right corner, with exits, merchants, party members and enemies in sight. M opens the whole area's map either way.</span>
+                </span>
+              </label>
+            </div>
+
+            <div class="opt-group opt-toggle-group">
+              <label class="opt-toggle-label">
                 <input id="set-stats" type="checkbox" ${s.showStats ? 'checked' : ''} />
                 <span class="opt-toggle-box"></span>
                 <span class="opt-toggle-text">
@@ -552,6 +563,8 @@ export class SettingsPanel {
     classicHud?.addEventListener('change', () => this.store.update({ hudStyle: classicHud.checked ? 'classic' : 'modern' }));
     const stats = this.root.querySelector<HTMLInputElement>('#set-stats');
     stats?.addEventListener('change', () => this.store.update({ showStats: stats.checked }));
+    const minimap = this.root.querySelector<HTMLInputElement>('#set-minimap');
+    minimap?.addEventListener('change', () => this.store.update({ minimap: minimap.checked }));
 
     const propUvs = this.root.querySelector<HTMLInputElement>('#set-prop-uvs');
     if (propUvs) {
@@ -604,13 +617,13 @@ export class SettingsPanel {
           invertMouseY: false,
           musicVolume: 0.5,
           silhouetteShadows: false,
-          objectShadows: false,
+          objectShadows: true,
           objectShadowStrength: 0.6,
-          enhancedLighting: false,
+          enhancedLighting: true,
           itemGlow: true,
           itemGlowIntensity: 1,
           smallEffects: false,
-          foliage: false,
+          foliage: true,
           foliageDistance: 35,
           foliageGrass: 1,
           foliageBushes: 1,
@@ -618,6 +631,7 @@ export class SettingsPanel {
           fixedPropUvs: true,
           hudStyle: 'classic',
           showStats: false,
+          minimap: true,
           keybindings: getDefaultKeybindings(),
         });
         this.render();

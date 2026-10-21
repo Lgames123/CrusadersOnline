@@ -51,11 +51,12 @@ export const ACTION_KEYS = {
   castSpell: ['KeyR'],
   // Original "use item" (Z after the WASD shift): unlocks a door with its key, else a potion.
   useItem: ['KeyZ'],
+  // The area map (the original's map key, unused there).
+  map: ['KeyM'],
   // Reserved (systems not implemented yet): original bindings after the WASD shift.
   nextItem: ['KeyQ'],
   nextWeapon: ['KeyE'],
   quickSelect: ['KeyX'],
-  map: ['KeyM'],
 } as const;
 
 export type Action = keyof typeof ACTION_KEYS;
@@ -115,6 +116,7 @@ export const BINDING_DEFINITIONS: readonly BindingDefinition[] = [
   { id: 'inventory', label: 'Toggle Inventory', category: 'actions', defaultKeys: ['KeyI'], action: 'inventory' },
   { id: 'characterSheet', label: 'Toggle Character Statistics', category: 'actions', defaultKeys: ['F1'], action: 'characterSheet' },
   { id: 'questBook', label: 'Toggle Quest Book', category: 'actions', defaultKeys: ['F2'], action: 'questBook' },
+  { id: 'map', label: 'Toggle Area Map', category: 'actions', defaultKeys: ['KeyM'], action: 'map' },
 
   // Camera / View
   { id: 'turnLeft', label: 'Turn Left', category: 'view', defaultKeys: ['ArrowLeft', 'Numpad4'], view: 'turnLeft' },
@@ -230,4 +232,4 @@ export function actionFor(code: string): Action | null {
 /** Help line shown in the options menu. */
 export const CONTROLS_HELP =
   'WASD move · Mouse look · Wheel camera distance · Space jump · Click attack · Right click block · ' +
-  'R cast spell · T next spell · Tab interact / open · Z use item · H potion · I inventory · 1-9 / Shift+1-9 hotbar · F1 statistics · F2 quest log · Esc options';
+  'R cast spell · T next spell · Tab interact / open · Z use item · H potion · I inventory · 1-9 / Shift+1-9 hotbar · F1 statistics · F2 quest log · M map · Esc options';

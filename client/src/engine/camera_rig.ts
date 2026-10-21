@@ -21,6 +21,10 @@ export class CameraRig {
     this.camera = this.classic.camera.clone();
   }
 
+  get mw(): MovementWorld {
+    return this.classic.mw;
+  }
+
   set mw(mw: MovementWorld) {
     this.classic.mw = mw;
     this.modern.mw = mw;

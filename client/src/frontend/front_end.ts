@@ -1,7 +1,8 @@
 import { CHARACTER_NAME_RE, LEVEL_PREFIX, type CharacterDetails, type RealmInfo, type CharacterLook } from '@crusaders/shared';
 import { outfitFor } from '../assets/item_models.ts';
 import type { MusicPlayer } from '../audio/music.ts';
-import type { GameFilesPanel } from '../ui/game_files_panel.ts';
+import { hasGameFiles } from '../assets/game_files.ts';
+import { GOG_URL, importInstallFolder, type GameFilesPanel } from '../ui/game_files_panel.ts';
 import { introMovies, playIntro } from '../ui/intro_movie.ts';
 import * as api from './api.ts';
 import type { TitleScene } from './title_scene.ts';
@@ -173,6 +174,46 @@ export async function runFrontEnd(ctx: FrontEndContext): Promise<FrontEndChoice>
       setup(back.querySelector('.fe-dialog')!, close);
     });
 
+  // ---- Game files ---------------------------------------------------------------------------------
+  // The world is built from the player's own copy of the game: without it, entering explains how
+  // to import it in two steps instead of failing on the first level.
+  let filesReady = hasGameFiles();
+  const withGameFiles = async (enter: () => void) => {
+    if (dialogOpen) return;
+    if (await filesReady) return enter();
+    await dialog(
+      `<h2>Your game files are needed</h2>
+       <p class="fe-muted">Crusaders Online is built from your own copy of <i>Crusaders of Might and Magic</i>. Two steps and you are in:</p>
+       <ol class="fe-steps">
+         <li><b>Get the game.</b> Buy, download and install <i>Crusaders of Might and Magic</i> from GOG.<br />
+           <a class="fe-secondary fe-gog" href="${GOG_URL}" target="_blank" rel="noopener noreferrer">Open the GOG store page ↗</a></li>
+         <li><b>Import it.</b> Click the button below and choose the folder where the game is installed
+           <span class="fe-muted">(GOG installs it in <code>C:\\GOG Games\\Crusaders of Might and Magic</code> by default)</span>.<br />
+           <label class="fe-primary fe-pick"><input type="file" webkitdirectory multiple hidden />Select the game's folder…</label></li>
+       </ol>
+       <p class="fe-hint">The files are converted here, in your browser, and never uploaded. The page reloads when it is done.</p>
+       <pre class="fe-log" hidden></pre>
+       <div class="fe-actions"><button type="button" class="fe-secondary" data-cancel>Close</button></div>`,
+      (d) => {
+        d.classList.add('fe-dialog-wide');
+        const input = d.querySelector<HTMLInputElement>('input[type="file"]')!;
+        const pick = d.querySelector<HTMLElement>('.fe-pick')!;
+        const log = d.querySelector<HTMLElement>('.fe-log')!;
+        input.addEventListener('change', () => {
+          log.hidden = false;
+          // Back on the character screen after the reload.
+          try {
+            if (activeAccount) sessionStorage.setItem(CHARACTER_SCREEN_FLAG, 'characters');
+          } catch {
+            // No session storage.
+          }
+          void importInstallFolder([...(input.files ?? [])], log, (on) => pick.classList.toggle('fe-busy', on));
+        });
+      },
+    );
+    filesReady = hasGameFiles();
+  };
+
   // ---- Login ----------------------------------------------------------------------------------
   const loginScreen = (serverDown: boolean, notice = '') => {
     const remembered = store.get(ACCOUNT_KEY) ?? activeAccount ?? '';
@@ -193,11 +234,10 @@ export async function runFrontEnd(ctx: FrontEndContext): Promise<FrontEndChoice>
       <div class="fe-status"><span class="fe-dot"></span><span class="fe-status-text">Connecting…</span></div>
       <p class="fe-footer">A fan project. Requires your own copy of <i>Crusaders of Might and Magic</i>.</p>
     </div>`);
-    const menu = utilityMenu(`<button type="button" class="fe-link" data-act="offline">Play offline</button>
-      ${import.meta.env.PROD ? '' : '<button type="button" class="fe-link" data-act="guest">Play as guest <small>dev</small></button>'}`);
+    // "Play offline" is hidden for now: testers took it for the way in and never imported the files.
+    const menu = utilityMenu(import.meta.env.PROD ? '' : '<button type="button" class="fe-link" data-act="guest">Play as guest <small>dev</small></button>');
     el.appendChild(menu);
-    menu.querySelector('[data-act="offline"]')!.addEventListener('click', () => finish({ kind: 'offline' }));
-    menu.querySelector('[data-act="guest"]')?.addEventListener('click', () => finish({ kind: 'guest' }));
+    menu.querySelector('[data-act="guest"]')?.addEventListener('click', () => void withGameFiles(() => finish({ kind: 'guest' })));
 
     const form = el.querySelector('form')!;
     const user = form.elements.namedItem('username') as HTMLInputElement;
@@ -234,7 +274,7 @@ export async function runFrontEnd(ctx: FrontEndContext): Promise<FrontEndChoice>
     const setStatus = (players: number | null) => {
       status.dataset['up'] = players === null ? 'false' : 'true';
       status.querySelector('.fe-status-text')!.textContent =
-        players === null ? 'Server unreachable — you can still play offline' : `Server online · ${players} ${players === 1 ? 'player' : 'players'} in the world`;
+        players === null ? 'Server unreachable' : `Server online · ${players} ${players === 1 ? 'player' : 'players'} in the world`;
       form.querySelectorAll<HTMLElement>('input, button').forEach((b) => ((b as HTMLButtonElement).disabled = players === null));
     };
     if (serverDown) setStatus(null);
@@ -426,8 +466,9 @@ export async function runFrontEnd(ctx: FrontEndContext): Promise<FrontEndChoice>
     };
 
     const play = () => {
-      if (!chosen) return;
-      finish({ kind: 'account', username, characterId: chosen.id, look: chosen.look });
+      const c = chosen;
+      if (!c) return;
+      void withGameFiles(() => finish({ kind: 'account', username, characterId: c.id, look: c.look }));
     };
 
     const create = async () => {

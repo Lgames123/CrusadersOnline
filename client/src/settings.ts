@@ -2,7 +2,8 @@
  * Per-player presentation settings (camera, mouse). They change only how the game is shown
  * and controlled on this machine; gameplay rules are the server's. Defaults are the
  * original game's ("classic"); everything else is an opt-in quality-of-life option, except
- * fixedPropUvs (asset fixes, on unless turned off).
+ * fixedPropUvs (asset fixes) and, at the user's request (2026-10-20), enhanced lighting, object
+ * shadows and grass and bushes: on unless turned off.
  */
 export interface Settings {
   /** Camera distance: 0 = the original's camera (closest), 1 = the modern one (farthest). */
@@ -52,20 +53,28 @@ export interface Settings {
   hudStyle: 'classic' | 'modern';
   /** FPS, tick, position and network line in the top right corner. */
   showStats: boolean;
+  /** The corner minimap (not original; M opens the area map): on by default. */
+  minimap: boolean;
   /** Custom keybindings mapping action ID to array of key codes. */
   keybindings?: Record<string, string[]>;
   /** Settings schema version (see OPTIONS_VERSION). */
   optionsVersion?: number;
 }
 
-export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false, musicVolume: 0.5, silhouetteShadows: false, objectShadows: false, objectShadowStrength: 0.6, enhancedLighting: false, itemGlow: true, itemGlowIntensity: 1, smallEffects: false, foliage: false, foliageDistance: 35, foliageGrass: 1, foliageBushes: 1, foliagePlants: 1, fixedPropUvs: true, hudStyle: 'classic', showStats: false };
+export const CLASSIC_SETTINGS: Readonly<Settings> = { cameraZoom: 0, mouseSensitivity: 1, invertMouseY: false, musicVolume: 0.5, silhouetteShadows: false, objectShadows: true, objectShadowStrength: 0.6, enhancedLighting: true, itemGlow: true, itemGlowIntensity: 1, smallEffects: false, foliage: true, foliageDistance: 35, foliageGrass: 1, foliageBushes: 1, foliagePlants: 1, fixedPropUvs: true, hudStyle: 'classic', showStats: false, minimap: true };
 
 const KEY = 'crusaders.settings';
-/** Bumped when a default moves back to the original, so earlier stored values reset once. */
-const OPTIONS_VERSION = 2;
+/**
+ * Bumped when a default changes, so earlier stored values reset once: 2 silhouette shadows back
+ * off, 3 enhanced lighting, object shadows and foliage on.
+ */
+const OPTIONS_VERSION = 3;
 
 /** A foliage density setting: 0-3, 1 when unset. */
 const amount = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(3, Math.max(0, v)) : 1);
+
+/** An option on by default since version 3: a stored choice counts only when made since then. */
+const onByDefault = (v: unknown, version: unknown) => (typeof version === 'number' && version >= 3 ? v !== false : true);
 
 function sanitize(raw: unknown): Settings {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<keyof Settings | 'camera', unknown>>;
@@ -84,14 +93,14 @@ function sanitize(raw: unknown): Settings {
     invertMouseY: r.invertMouseY === true,
     musicVolume: typeof r.musicVolume === 'number' && Number.isFinite(r.musicVolume) ? Math.min(1, Math.max(0, r.musicVolume)) : CLASSIC_SETTINGS.musicVolume,
     // Stored before it became optional (default on then): back to the original unless chosen again.
-    silhouetteShadows: r.silhouetteShadows === true && r.optionsVersion === OPTIONS_VERSION,
-    objectShadows: r.objectShadows === true,
+    silhouetteShadows: r.silhouetteShadows === true && typeof r.optionsVersion === 'number' && r.optionsVersion >= 2,
+    objectShadows: onByDefault(r.objectShadows, r.optionsVersion),
     objectShadowStrength: typeof r.objectShadowStrength === 'number' && Number.isFinite(r.objectShadowStrength) ? Math.min(1, Math.max(0.1, r.objectShadowStrength)) : CLASSIC_SETTINGS.objectShadowStrength,
-    enhancedLighting: r.enhancedLighting === true,
+    enhancedLighting: onByDefault(r.enhancedLighting, r.optionsVersion),
     itemGlow: r.itemGlow !== false,
     itemGlowIntensity: typeof r.itemGlowIntensity === 'number' && Number.isFinite(r.itemGlowIntensity) ? Math.min(1, Math.max(0, r.itemGlowIntensity)) : CLASSIC_SETTINGS.itemGlowIntensity,
     smallEffects: r.smallEffects === true,
-    foliage: r.foliage === true,
+    foliage: onByDefault(r.foliage, r.optionsVersion),
     foliageGrass: amount(r.foliageGrass),
     foliageBushes: amount(r.foliageBushes),
     foliagePlants: amount(r.foliagePlants),
@@ -99,6 +108,7 @@ function sanitize(raw: unknown): Settings {
     fixedPropUvs: r.fixedPropUvs !== false,
     hudStyle: r.hudStyle === 'modern' ? 'modern' : 'classic',
     showStats: r.showStats === true,
+    minimap: r.minimap !== false,
     keybindings,
     optionsVersion: OPTIONS_VERSION,
   };

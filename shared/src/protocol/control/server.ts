@@ -141,9 +141,9 @@ export interface SpellEventMsg {
     fx?: { name: string; level: number; at: V3; dir?: V3; entity?: number }[];
     /** Sound.ctx sounds; `rate`: playback rate (the bolt's and the explosion's 0.8-1.2, 0x004BF480 / 0x004BE980). */
     sounds?: { id: number; at: V3; rate?: number }[];
-    /** A flying spell (fire ball, slow, snap freeze): its state; `end` when it is gone. */
+    /** A flying spell (fire ball, slow, snap freeze) or a bow's arrow: its state; `end` when it is gone. */
     /** `look`: the effect it carries when not its spell's own (a creature's FIREBALL_PROJ_EVIL). */
-    projectile?: { id: number; spell: SpellId; level: number; pos: V3; vel: V3; look?: string; end?: boolean };
+    projectile?: { id: number; spell: SpellId | 'arrow'; level: number; pos: V3; vel: V3; look?: string; end?: boolean };
     /**
      * The Boomer Axe's thrown axe (type-3 object, 0x0043EAE0): its state (sent at the throw, when it
      * turns back and every few ticks on the curve home); `owner`'s right hand is empty meanwhile.
@@ -203,6 +203,8 @@ export interface InventoryItemView {
   effects?: string[];
   /** A Boomer Axe (Use BOOMER): an attack throws it instead of swinging it. */
   boomer?: boolean;
+  /** Use SHOOT (Dasher Hand Bow): attacks loose an arrow instead of a swing. */
+  shoot?: boolean;
   /** What a merchant pays for it (items.ctx Price × count); absent = it takes no item without a price. */
   value?: number;
 }

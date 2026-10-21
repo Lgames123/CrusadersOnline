@@ -23,7 +23,7 @@ const STYLE = `
 .dg-buttons button.dg-go { border-color: #5e9a4a; background: rgba(30,70,30,.9); }
 .dg-buttons button.dg-stop { border-color: #a04a3a; background: rgba(80,24,18,.9); }
 .dg-buttons button:hover { filter: brightness(1.25); }
-#dg-tracker { position: fixed; right: 12px; top: 140px; z-index: 6; width: 240px; padding: 8px 10px; pointer-events: none;
+#dg-tracker { position: fixed; right: 12px; top: 222px; z-index: 6; width: 240px; padding: 8px 10px; pointer-events: none;
   background: rgba(12,11,9,.72); border: 1px solid #5d4a23; border-radius: 4px; color: #f0e6cc; font: 12px/1.35 Georgia, serif; text-shadow: 0 1px 1px #000; }
 #dg-tracker .dg-head { display: flex; justify-content: space-between; gap: 8px; color: #f1d58e; font-size: 13px; margin-bottom: 4px; }
 #dg-tracker .dg-clock { color: #d8c69a; font-variant-numeric: tabular-nums; }

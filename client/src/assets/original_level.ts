@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LevelLight } from '../engine/level_light.ts';
 import { dynamicLights } from '../engine/dynamic_lights.ts';
 import { propShadows } from '../engine/prop_shadows.ts';
+import { beamRank, lootBeam, updateLootBeams } from '../engine/loot_beams.ts';
 import { LevelSprites } from '../engine/level_sprites.ts';
 import { propFixes } from './prop_fixes.ts';
 import { nodeFrameInverse } from './original_models.ts';
@@ -10,7 +11,7 @@ import { ItemThumbnails } from '../ui/item_thumbnails.ts';
 import type { FoliageGround } from '../engine/foliage.ts';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, isPlaced, type Difficulty, DYNAMIC_OBJECT_BASE, type ArenaDef, type LevelObject, type LevelBrush, type LevelPlacements, type WorldObjectDef, type WorldObjectState, type DoorMotion, type DoorSwing, stepDoorMotion, swingPose, type MoverDef, type MoverMotion, moverPose, shutMover, stepMover, useMover } from '@crusaders/shared';
+import { LEVEL_PREFIX, LEVEL_UNIT_METRES, buildLevelArena, isPlaced, type Difficulty, DYNAMIC_OBJECT_BASE, type ArenaDef, type LevelObject, type LevelBrush, type LevelPlacements, type WorldObjectDef, type WorldObjectState, type ItemMods, type DoorMotion, type DoorSwing, stepDoorMotion, swingPose, type MoverDef, type MoverMotion, moverPose, shutMover, stepMover, useMover } from '@crusaders/shared';
 
 /**
  * An original level converted from the player's own installation (imported in the browser, or
@@ -416,8 +417,22 @@ export async function loadOriginalLevel(arenaName: string, difficulty: Difficult
     position: THREE.Vector3;
     chest: THREE.Object3D;
     itemIds: Set<number>;
+    /** Each item's mods: the pile's shaft shows the best rarity left in it. */
+    mods: Map<number, ItemMods | undefined>;
+    beam: THREE.Object3D | null;
   }
   const droppedClusters: DroppedChestCluster[] = [];
+  const refreshClusterBeam = (c: DroppedChestCluster) => {
+    let best: ItemMods | undefined;
+    for (const m of c.mods.values()) if (beamRank(m) > beamRank(best)) best = m;
+    if (c.beam && c.beam.userData['rank'] === beamRank(best)) return;
+    if (c.beam) c.chest.remove(c.beam);
+    c.beam = lootBeam(best);
+    if (c.beam) {
+      c.beam.userData['rank'] = beamRank(best);
+      c.chest.add(c.beam);
+    }
+  };
   const chestModelPromise = loadModel('models/chest01.glb');
   const torches: THREE.Vector3[] = [];
   const sprites = new LevelSprites();
@@ -589,6 +604,8 @@ export async function loadOriginalLevel(arenaName: string, difficulty: Difficult
           const cluster = droppedClusters.find((c) => c.itemIds.has(id));
           if (cluster) {
             cluster.itemIds.delete(id);
+            cluster.mods.delete(id);
+            refreshClusterBeam(cluster);
             if (cluster.itemIds.size === 0) {
               props.remove(cluster.chest);
               const idx = droppedClusters.indexOf(cluster);
@@ -624,6 +641,8 @@ export async function loadOriginalLevel(arenaName: string, difficulty: Difficult
         group.position.set(def.x / LEVEL_UNIT_METRES, def.y / LEVEL_UNIT_METRES, def.z / LEVEL_UNIT_METRES);
         group.rotation.y = (def.id * 2.4) % (Math.PI * 2);
         props.add(group);
+        const beam = lootBeam(def.item?.mods);
+        if (beam) group.add(beam);
         const model = def.item?.model;
         void (model === undefined ? Promise.resolve(null) : ItemThumbnails.get().loadModel(model, def.item?.texture)).then((src) => {
           let mesh: THREE.Object3D;
@@ -681,11 +700,15 @@ export async function loadOriginalLevel(arenaName: string, difficulty: Difficult
           position: clusterPos,
           chest: chestContainer,
           itemIds: new Set<number>([def.id]),
+          mods: new Map([[def.id, def.item?.mods]]),
+          beam: null,
         };
         droppedClusters.push(cluster);
       } else {
         cluster.itemIds.add(def.id);
+        cluster.mods.set(def.id, def.item?.mods);
       }
+      refreshClusterBeam(cluster);
 
       objects.set(def.id, view(cluster.chest));
     },
@@ -709,6 +732,7 @@ export async function loadOriginalLevel(arenaName: string, difficulty: Difficult
     update(camera, dt) {
       if (sky.children.length) sky.position.copy(camera.position);
       t += dt;
+      updateLootBeams(dt);
       for (const d of doors.values()) {
         if (d.swing) {
           const m = d.swing.motion;

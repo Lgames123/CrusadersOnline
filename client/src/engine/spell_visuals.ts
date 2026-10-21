@@ -6,6 +6,12 @@ import type { SoundBank } from '../audio/sound_bank.ts';
 import { dynamicLights } from './dynamic_lights.ts';
 import type { Avatar } from '../entities/avatar.ts';
 import { BoomerVisuals } from './boomer_visuals.ts';
+import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { ItemThumbnails } from '../ui/item_thumbnails.ts';
+import { nodeFrameInverse } from '../assets/original_models.ts';
+
+/** items.ctx "Arrow": models.ctx 97, arrow01.mdl (feet). */
+const ARROW_MODEL = 97;
 
 /**
  * What the spells look and sound like (SC.SPELL_EVENT): the original's effects.stg effects at
@@ -34,7 +40,9 @@ export interface SpellVisualHost {
 }
 
 interface ProjectileView {
-  spell: SpellId;
+  spell: SpellId | 'arrow';
+  /** An arrow's model, turned along its flight. */
+  model: THREE.Group | null;
   level: number;
   pos: THREE.Vector3;
   vel: THREE.Vector3;
@@ -214,6 +222,7 @@ export class SpellVisuals {
     this.boomer.clear();
     for (const [id, p] of this.projectiles) {
       if (p.sprite) this.scene.remove(p.sprite);
+      if (p.model) this.scene.remove(p.model);
       p.carried?.stop();
       dynamicLights.remove(p.key);
       this.projectiles.delete(id);
@@ -233,7 +242,12 @@ export class SpellVisuals {
       p.pos.addScaledVector(p.vel, dt);
       p.sprite?.position.copy(p.pos);
       p.carried?.pos.copy(p.pos);
-      dynamicLights.set(p.key, p.pos, PROJECTILE_LOOK[p.spell]?.light ?? 0xffffff, 1.6, 5, 0.1);
+      if (p.model) {
+        p.model.position.copy(p.pos);
+        p.model.lookAt(this.ahead.copy(p.pos).add(p.vel));
+        continue;
+      }
+      dynamicLights.set(p.key, p.pos, (p.spell !== 'arrow' ? PROJECTILE_LOOK[p.spell]?.light : undefined) ?? 0xffffff, 1.6, 5, 0.1);
     }
     for (let i = this.windups.length - 1; i >= 0; i--) {
       const w = this.windups[i]!;
@@ -334,6 +348,36 @@ export class SpellVisuals {
 
   // ---- parts ----
 
+  private readonly ahead = new THREE.Vector3();
+
+  /**
+   * An arrow in flight: arrow01 (feet) with its long axis turned to the group's +Z, which
+   * `lookAt` points along the flight; a thin shaft until the model has loaded.
+   */
+  private arrowModel(): THREE.Group {
+    const group = new THREE.Group();
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.75, 5).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x5a4630 }));
+    group.add(shaft);
+    this.scene.add(group);
+    void ItemThumbnails.get().loadModel(ARROW_MODEL).then((src) => {
+      if (!src || !group.parent) return;
+      const mesh = cloneSkinned(src);
+      const undo = nodeFrameInverse(src);
+      if (undo) mesh.applyMatrix4(undo);
+      const size = new THREE.Box3().setFromObject(mesh).getSize(new THREE.Vector3());
+      if (size.y >= size.x && size.y >= size.z) mesh.applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI / 2));
+      else if (size.x >= size.z) mesh.applyMatrix4(new THREE.Matrix4().makeRotationY(-Math.PI / 2));
+      const box = new THREE.Box3().setFromObject(mesh);
+      mesh.position.sub(box.getCenter(new THREE.Vector3()));
+      const holder = new THREE.Group();
+      holder.scale.setScalar(0.3048);
+      holder.add(mesh);
+      group.remove(shaft);
+      group.add(holder);
+    });
+    return group;
+  }
+
   private projectile(p: NonNullable<SpellEventMsg['d']['projectile']>): void {
     let v = this.projectiles.get(p.id);
     if (p.end) {
@@ -343,13 +387,18 @@ export class SpellVisuals {
           v.sprite.material.dispose();
         }
         v.carried?.stop();
+        if (v.model) this.scene.remove(v.model);
         dynamicLights.remove(v.key);
         this.projectiles.delete(p.id);
       }
       return;
     }
+    if (!v && p.spell === 'arrow') {
+      v = { spell: 'arrow', level: 1, pos: new THREE.Vector3(...p.pos), vel: new THREE.Vector3(...p.vel), sprite: null, carried: null, model: this.arrowModel(), key: `arrow:${p.id}` };
+      this.projectiles.set(p.id, v);
+    }
     if (!v) {
-      const look = PROJECTILE_LOOK[p.spell];
+      const look = p.spell === 'arrow' ? undefined : PROJECTILE_LOOK[p.spell];
       let sprite: THREE.Sprite | null = null;
       if (look?.core != null) {
         sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: look.core, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
@@ -359,7 +408,7 @@ export class SpellVisuals {
       const at = new THREE.Vector3(...p.pos);
       const carriedName = p.look ?? look?.carried;
       const carried = carriedName ? this.host.effects()?.attach(carriedName, at, new THREE.Vector3(...p.vel).normalize(), p.level - 1) ?? null : null;
-      v = { spell: p.spell, level: p.level, pos: new THREE.Vector3(), vel: new THREE.Vector3(), sprite, carried, key: `spell-proj:${p.id}` };
+      v = { spell: p.spell, level: p.level, pos: new THREE.Vector3(), vel: new THREE.Vector3(), sprite, carried, model: null, key: `spell-proj:${p.id}` };
       this.projectiles.set(p.id, v);
     }
     v.pos.set(...p.pos);

@@ -337,6 +337,42 @@
         "GAME_SERVER_URL": "http://127.0.0.1:8196"
       },
       "port": 3106
+    },
+    {
+      "name": "bow-server",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/server",
+        "start"
+      ],
+      "env": {
+        "SERVER_PORT": "8197",
+        "ARENA": "level:du1c",
+        "DATABASE_URL": "pglite:local/pgdata-bow",
+        "GAME_FEATURES": "mmoItems",
+        "DEV_GUEST_ITEMS": "dasher_hand_bow:1,greater_healing_potion:5",
+        "DEV_GUEST_XP": "60000",
+        "DEV_GUEST_SPAWN": "780.3,234,-303"
+      },
+      "port": 8197
+    },
+    {
+      "name": "bow-client",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@crusaders/client",
+        "exec",
+        "vite",
+        "--port",
+        "3107",
+        "--strictPort"
+      ],
+      "env": {
+        "GAME_SERVER_URL": "http://127.0.0.1:8197"
+      },
+      "port": 3107
     }
   ]
 }

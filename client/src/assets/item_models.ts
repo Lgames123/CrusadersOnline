@@ -11,7 +11,7 @@ const MODEL_FILES: Readonly<Record<number, string>> = {
   2: 'magicring', 4: 'ring', 8: 'longsword', 11: 'bottle01', 27: 'bottle02', 28: 'metalshield02',
   62: 'potion', 63: 'book1', 65: 'horn', 66: 'dashernecklace', 67: 'amuletoftruesight', 68: 'scepterofregency',
   69: 'manacrystal04', 71: 'standardaxe', 72: 'battleaxe', 73: 'standardmace', 74: 'heavymace',
-  75: 'morningstar', 76: 'hammer', 77: 'broadsword03', 78: 'xucotal', 79: 'handbow001',
+  75: 'morningstar', 76: 'hammer', 77: 'broadsword03', 78: 'xucotal', 79: 'handbow001', 97: 'arrow01',
   80: 'drakearmor_i', 81: 'drakearmor2_i', 82: 'drakearmor3_i', 83: 'drakearmor4_i',
   84: 'icekey', 86: 'woodshield', 91: 'bookshelf01', 98: 'ironclub', 99: 'halberd', 116: 'bluntclub', 117: 'soulsucker',
   105: 'rune', 106: 'scroll', 110: 'stonekey', 118: 'magicring', 127: 'bolgahammer', 128: 'ceremswd', 129: 'cursedsword',

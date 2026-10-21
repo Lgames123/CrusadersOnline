@@ -119,6 +119,11 @@ export class PartyFrame {
     place();
   }
 
+  /** The other members' names (the minimap marks them). */
+  get memberNames(): string[] {
+    return this.members.map((m) => m.name);
+  }
+
   private get leading(): boolean {
     return this.members.find((m) => m.leader)?.name.toLowerCase() === this.self;
   }
