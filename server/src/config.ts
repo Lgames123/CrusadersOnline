@@ -18,6 +18,12 @@ export interface ServerConfig {
   httpRate: number;
   httpBurst: number;
   /**
+   * Request header naming the client's address, set by the proxy in front (CLIENT_IP_HEADER, lower
+   * case): x-forwarded-for behind Caddy, cf-connecting-ip behind a Cloudflare Tunnel. Null: the
+   * socket's address, which behind a proxy is the proxy's and puts every player in one bucket.
+   */
+  clientIpHeader: string | null;
+  /**
    * Non-original gameplay features to switch on (GAME_FEATURES, comma-separated names from
    * shared features.ts). Default: none, the original's rules.
    */
@@ -93,6 +99,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     features: (process.env['GAME_FEATURES'] ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     httpRate: 1,
     httpBurst: 10,
+    clientIpHeader: process.env['CLIENT_IP_HEADER']?.trim().toLowerCase() || null,
     itemRulesPath: resolveItemRules(env),
     arena: process.env['ARENA'] ?? 'synthetic-arena',
     generatedDir: path.resolve(REPO_ROOT, process.env['GENERATED_DIR'] ?? 'local/generated'),

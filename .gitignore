@@ -55,6 +55,8 @@ coverage/
 .env.*.local
 *.pem
 *.key
+*.key.pub
+ssh-key-*
 *.cert
 
 # Operating System & IDE Artifacts
@@ -80,3 +82,5 @@ deployment/rclone/
 # Third-party / LLM-assisted RE notes kept local (may contain extracted data)
 GeminiDecomp/
 GeminiREA/
+# Cloudflare Tunnel credentials (cert.pem, <tunnel-id>.json) from `cloudflared tunnel login/create`
+deployment/cloudflared/

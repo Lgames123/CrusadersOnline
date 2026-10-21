@@ -75,6 +75,28 @@ Saving never depends on clients completing the WebSocket close handshake (covere
   - after the import and the automatic reload, the player is online in Ca_a, with the original models, at 120 FPS and with 0 corrections.
 - **Same-version rule:** client prediction and server collision come from the same converter. The operator should convert with the same game version the players own (the original 1999 release; GOG 2.0.0.7 was used here).
 
+## 6.2 Cloudflare Tunnel (hosting from a home machine, no open ports)
+
+`cloudflared` runs as a compose service next to `web` and forwards Cloudflare's HTTPS (and WebSockets) to Caddy on the internal network. Cloudflare does TLS, so Caddy stays on plain `:80`.
+
+- In `deployment/.env`: `SITE_ADDRESS=:80`, `COOKIE_SECURE=true`, `CLIENT_IP_HEADER=cf-connecting-ip`, `WEB_PORT=127.0.0.1:8088` (local check only; nobody reaches Caddy around the tunnel, so the header cannot be forged).
+- **Quick tunnel** (no account, address changes on every restart): add `--profile quicktunnel` to the `up` command, then read the `https://<random>.trycloudflare.com` address from `docker compose ... logs quicktunnel`.
+- **Named tunnel** (own domain, its DNS on Cloudflare; no Zero Trust sign-up or card needed), from the command line with the same image, mounting `deployment/cloudflared` (git-ignored) as `/home/nonroot/.cloudflared`:
+  1. `cloudflared tunnel login`: open the printed link, pick the zone, Authorize (writes `cert.pem`);
+  2. `cloudflared tunnel create crusaders` (writes `<tunnel-id>.json`), then `cloudflared tunnel route dns crusaders play.<domain>` (adds the CNAME);
+  3. `deployment/cloudflared/config.yml`:
+     ```yaml
+     tunnel: <tunnel-id>
+     credentials-file: /etc/cloudflared/<tunnel-id>.json
+     ingress:
+       - hostname: play.<domain>
+         service: http://web:80
+       - service: http_status:404
+     ```
+  4. `up` with `--profile tunnel` (instead of `quicktunnel`).
+  On Windows Git Bash, prefix `docker run -v C:/...` with `MSYS_NO_PATHCONV=1`.
+- `CLIENT_IP_HEADER` feeds the per-IP limits on login, registration, tickets and characters. Without it every player behind a proxy shares the proxy's address and one bucket (1 request/s, burst 10). Compose defaults to `x-forwarded-for`, which Caddy rewrites for untrusted peers.
+
 ## 7. Going live (checklist)
 
 Everything below runs on the operator's own host and domain. Nothing in the repository creates accounts, DNS records or cloud resources.

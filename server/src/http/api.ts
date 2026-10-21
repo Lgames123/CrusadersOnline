@@ -83,6 +83,13 @@ class Limiter {
   }
 }
 
+/** The client's address: the proxy's header when configured (its first entry), else the socket's. */
+export function clientIp(req: IncomingMessage, header: string | null): string {
+  const raw = header ? req.headers[header] : undefined;
+  const first = (Array.isArray(raw) ? raw[0] : raw)?.split(',')[0]?.trim();
+  return first || (req.socket.remoteAddress ?? 'unknown');
+}
+
 export interface ApiDeps {
   config: ServerConfig;
   accounts: AccountRepository;
@@ -151,7 +158,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
   }
 
   async function credentials(req: IncomingMessage): Promise<{ username: string; password: string }> {
-    const ip = req.socket.remoteAddress ?? 'unknown';
+    const ip = clientIp(req, config.clientIpHeader);
     if (!perIp.take(ip)) throw new HttpError(429, 'rate_limited');
     const parsed = CredentialsSchema.safeParse(await readJson(req));
     if (!parsed.success) throw new HttpError(400, 'invalid_credentials_format', parsed.error.issues[0]?.message);
@@ -235,7 +242,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
           return true;
         }
         case 'POST /api/characters': {
-          if (!perIp.take(req.socket.remoteAddress ?? 'unknown')) throw new HttpError(429, 'rate_limited');
+          if (!perIp.take(clientIp(req, config.clientIpHeader))) throw new HttpError(429, 'rate_limited');
           const { account } = await requireAccount(req);
           const { name } = await body(req, NewCharacterSchema, 'invalid_name');
           let created: Awaited<ReturnType<CharacterRepository['create']>>;
@@ -251,7 +258,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
           return true;
         }
         case 'DELETE /api/characters/:id': {
-          if (!perIp.take(req.socket.remoteAddress ?? 'unknown')) throw new HttpError(429, 'rate_limited');
+          if (!perIp.take(clientIp(req, config.clientIpHeader))) throw new HttpError(429, 'rate_limited');
           const { account } = await requireAccount(req);
           const id = deleting![1]!.toLowerCase();
           const { name } = await body(req, DeleteCharacterSchema, 'invalid_request');
@@ -265,7 +272,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
           return true;
         }
         case 'POST /api/ws-ticket': {
-          if (!perIp.take(req.socket.remoteAddress ?? 'unknown')) throw new HttpError(429, 'rate_limited');
+          if (!perIp.take(clientIp(req, config.clientIpHeader))) throw new HttpError(429, 'rate_limited');
           const { account } = await requireAccount(req);
           let list = await accounts.listCharacters(account.id);
           // The character screen names the character to play; without one, the first.
@@ -280,7 +287,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         }
         case 'POST /api/dev/guest-ticket': {
           if (!config.allowGuests) return false;
-          if (!perIp.take(req.socket.remoteAddress ?? 'unknown')) throw new HttpError(429, 'rate_limited');
+          if (!perIp.take(clientIp(req, config.clientIpHeader))) throw new HttpError(429, 'rate_limited');
           json(res, 200, { ticket: tickets.issue(createGuestAccount()) });
           return true;
         }

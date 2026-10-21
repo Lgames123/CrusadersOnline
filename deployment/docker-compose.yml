@@ -45,6 +45,10 @@ services:
       REALM_NAME: ${REALM_NAME:-}
       # GET /metrics on server:8080 (not proxied by Caddy); a scraper on this network reads it.
       METRICS_TOKEN: ${METRICS_TOKEN:-}
+      # Where the per-IP rate limits read the player's address. Caddy replaces X-Forwarded-For
+      # from untrusted peers, so it is safe by default; behind a Cloudflare Tunnel use
+      # cf-connecting-ip (and keep WEB_PORT on 127.0.0.1 so nobody bypasses the tunnel).
+      CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-x-forwarded-for}
     volumes:
       - ${GENERATED_DIR:-../local/generated}:/app/local/generated:ro
     networks: [internal]
@@ -103,6 +107,29 @@ services:
       - ${BACKUP_DIR:-./backups}:/backups:ro
       - ${RCLONE_CONFIG_DIR:-./rclone}:/config/rclone
     networks: [egress]
+
+  # Cloudflare Tunnel in front of `web` (no open ports, HTTPS by Cloudflare); see deployment.md §6.2.
+  # `--profile quicktunnel`: a temporary https://<random>.trycloudflare.com address, no account.
+  quicktunnel:
+    image: cloudflare/cloudflared:2026.9.3
+    profiles: [quicktunnel]
+    restart: unless-stopped
+    depends_on: [web]
+    command: tunnel --no-autoupdate --url http://web:80
+    networks: [internal, egress]
+
+  # `--profile tunnel`: a named tunnel on your own domain, created from the command line
+  # (`cloudflared tunnel login/create/route dns`, deployment.md §6.2). ${CLOUDFLARED_DIR} holds
+  # config.yml and the tunnel's credentials JSON (git-ignored).
+  tunnel:
+    image: cloudflare/cloudflared:2026.9.3
+    profiles: [tunnel]
+    restart: unless-stopped
+    depends_on: [web]
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      - ${CLOUDFLARED_DIR:-./cloudflared}:/etc/cloudflared:ro
+    networks: [internal, egress]
 
 networks:
   internal:

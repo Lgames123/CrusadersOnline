@@ -13,3 +13,8 @@ coverage/
 tools/
 docs/
 **/__pycache__/
+
+# Off-repo secrets never go to the Docker build context.
+*.key
+*.key.pub
+ssh-key-*
