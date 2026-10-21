@@ -8,8 +8,9 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "dev": "node --watch src/main.ts",
+    "dev": "node src/scripts/dev.ts",
     "start": "node src/main.ts",
+    "stop": "node src/scripts/stop.ts",
     "typecheck": "tsc -p .",
     "db:migrate": "node src/scripts/migrate.ts",
     "admin": "node src/scripts/admin.ts"

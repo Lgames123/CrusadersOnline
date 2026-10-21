@@ -7,6 +7,7 @@ import { createAdminApi } from './admin/admin_api.ts';
 import { AdminService } from './admin/admin_service.ts';
 import { TicketStore } from './auth/tickets.ts';
 import { REPO_ROOT, loadConfig, type ServerConfig } from './config.ts';
+import { CONTROL_PATH, controlRequestAllowed } from './control.ts';
 import { createApiHandler } from './http/api.ts';
 import { TICK_ALARM_MS, metricsAllowed, renderMetrics } from './http/metrics.ts';
 import { AccountRepository } from './persistence/accounts.ts';
@@ -29,8 +30,13 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
+export interface StartOptions {
+  /** POST /control/shutdown with this token (same machine only) calls onShutdown (see control.ts). */
+  control?: { token: string; onShutdown: () => void };
+}
+
 /** Boots database, HTTP API, WebSocket gateway and one zone worker. Used by main.ts and integration tests. */
-export async function startServer(overrides: Partial<ServerConfig> = {}, log?: Logger): Promise<RunningServer> {
+export async function startServer(overrides: Partial<ServerConfig> = {}, log?: Logger, options: StartOptions = {}): Promise<RunningServer> {
   const config = loadConfig(overrides);
   log ??= pino({ level: config.logLevel });
   if (!config.databaseUrl) throw new Error('DATABASE_URL is required in production');
@@ -129,6 +135,12 @@ export async function startServer(overrides: Partial<ServerConfig> = {}, log?: L
       });
       res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8', 'cache-control': 'no-store' });
       res.end(body);
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === CONTROL_PATH && options.control) {
+      if (!controlRequestAllowed(req, options.control.token)) return json(res, 403, { error: 'forbidden' });
+      json(res, 202, { ok: true });
+      options.control.onShutdown();
       return;
     }
     if (url.pathname.startsWith('/api/')) {

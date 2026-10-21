@@ -14,6 +14,7 @@
     "dev:server": "pnpm --filter @crusaders/server dev",
     "dev:client": "pnpm --filter @crusaders/client dev",
     "start:server": "pnpm --filter @crusaders/server start",
+    "stop:server": "pnpm --filter @crusaders/server stop",
     "build": "pnpm --filter @crusaders/client build",
     "test:integration": "pnpm --filter @crusaders/tests test:integration",
     "db:migrate": "pnpm --filter @crusaders/server db:migrate",
